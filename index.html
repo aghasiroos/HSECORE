@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="fa" dir="rtl" class="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>HSECORE</title>
+    <meta name="description" content="هسته مرکزی مدیریت ایمنی، بهداشت و محیط زیست" />
+    <meta property="og:title" content="HSECORE" />
+    <meta property="og:description" content="هسته مرکزی مدیریت ایمنی، بهداشت و محیط زیست" />
+
+    <!-- Neutralize Vite HMR WebSocket in Cloud Sandbox / IFrame environment -->
+    <script>
+      (function() {
+        if (typeof window === 'undefined') return;
+        var RealWebSocket = window.WebSocket;
+        if (!RealWebSocket) return;
+
+        function DummyHmrWebSocket(url) {
+          var target = new EventTarget();
+          target.url = String(url || '');
+          target.readyState = 1; // WebSocket.OPEN
+          target.bufferedAmount = 0;
+          target.extensions = '';
+          target.protocol = 'vite-hmr';
+          target.binaryType = 'blob';
+          target.onopen = null;
+          target.onclose = null;
+          target.onerror = null;
+          target.onmessage = null;
+          target.send = function() {};
+          target.close = function() {
+            target.readyState = 3;
+            var ev = new Event('close');
+            ev.wasClean = true;
+            ev.code = 1000;
+            target.dispatchEvent(ev);
+            if (typeof target.onclose === 'function') target.onclose(ev);
+          };
+
+          setTimeout(function() {
+            var openEv = new Event('open');
+            target.dispatchEvent(openEv);
+            if (typeof target.onopen === 'function') target.onopen(openEv);
+          }, 0);
+
+          return target;
+        }
+
+        function InterceptedWebSocket(url, protocols) {
+          var isViteHmr = 
+            protocols === 'vite-hmr' ||
+            (Array.isArray(protocols) && protocols.indexOf('vite-hmr') !== -1) ||
+            (typeof url === 'string' && (url.indexOf('vite-hmr') !== -1 || (url.indexOf('token=') !== -1 && url.indexOf(':3000') !== -1)));
+
+          if (isViteHmr) {
+            return DummyHmrWebSocket(url);
+          }
+          if (protocols !== undefined) {
+            return new RealWebSocket(url, protocols);
+          }
+          return new RealWebSocket(url);
+        }
+
+        InterceptedWebSocket.prototype = RealWebSocket.prototype;
+        InterceptedWebSocket.CONNECTING = 0;
+        InterceptedWebSocket.OPEN = 1;
+        InterceptedWebSocket.CLOSING = 2;
+        InterceptedWebSocket.CLOSED = 3;
+
+        window.WebSocket = InterceptedWebSocket;
+      })();
+    </script>
+    
+    <!-- Application Brand Icons & PWA Desktop / Mobile Install -->
+    <link rel="icon" type="image/png" href="/assets/aistudio/ChatGPT_Image_Oct_8__2026__12_04_00_PM_42699341.png" />
+    <link rel="alternate icon" type="image/png" href="/assets/aistudio/ChatGPT_Image_Oct_8__2026__12_04_00_PM_42699341.png" />
+    <link rel="apple-touch-icon" href="/assets/aistudio/ChatGPT_Image_Oct_8__2026__12_04_00_PM_42699341.png" />
+    <meta property="og:image" content="/assets/aistudio/ChatGPT_Image_Oct_8__2026__12_04_00_PM_42699341.png" />
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#0284c7" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="HSECORE" />
+
+    <!-- Google Fonts: Vazirmatn & JetBrains Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" crossorigin="anonymous" />
+    <!-- Leaflet CDN for Maps -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="anonymous" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="anonymous"></script>
+    <!-- jsPDF and SheetJS (XLSX) CDNs -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+      vite-error-overlay {
+        display: none !important;
+      }
+    </style>
+    <script>
+      (function() {
+        // Prevent benign third-party library deprecations and sandbox environment messages from polluting the developer console
+        var benignWarnPatterns = [
+          'defaultProps will be removed',
+          'The width(0) and height(0)',
+          'of chart should be greater than 0',
+          'minWidth(0) or minHeight',
+          'SafeStorage',
+          'quota',
+          'AudioContext',
+          'speechSynthesis',
+          'Text-to-speech',
+          'GPS tracking',
+          'Anonymous session auth note',
+          'fallback to local',
+          'fallback:',
+          'ServiceWorker',
+          'IndexedDB'
+        ];
+
+        var benignErrorPatterns = [
+          'WebSocket',
+          'ws:',
+          '[vite] failed to connect',
+          'closed without opened',
+          'net::ERR_CONNECTION_REFUSED',
+          'Missing or insufficient permissions',
+          'permission-denied',
+          'cssRules',
+          'CSSStyleSheet',
+          'Failed to fetch dynamically imported module'
+        ];
+
+        var benignInfoPatterns = [
+          'Download the React DevTools',
+          '[vite]',
+          'socket.io',
+          'engine.io',
+          'HSE Audio Alert Note',
+          'AudioContext',
+          'Storage purge',
+          'The width(0) and height(0)'
+        ];
+
+        var origWarn = console.warn;
+        console.warn = function() {
+          var text = Array.prototype.slice.call(arguments).map(function(item) {
+            return typeof item === 'string' ? item : (item && item.message) || '';
+          }).join(' ');
+          for (var i = 0; i < benignWarnPatterns.length; i++) {
+            if (text.indexOf(benignWarnPatterns[i]) !== -1) return;
+          }
+          origWarn.apply(console, arguments);
+        };
+
+        var origError = console.error;
+        console.error = function() {
+          var text = Array.prototype.slice.call(arguments).map(function(item) {
+            return typeof item === 'string' ? item : (item && item.message) || '';
+          }).join(' ');
+          for (var i = 0; i < benignErrorPatterns.length; i++) {
+            if (text.indexOf(benignErrorPatterns[i]) !== -1) return;
+          }
+          origError.apply(console, arguments);
+        };
+
+        var origInfo = console.info;
+        console.info = function() {
+          var text = Array.prototype.slice.call(arguments).map(function(item) {
+            return typeof item === 'string' ? item : (item && item.message) || '';
+          }).join(' ');
+          for (var i = 0; i < benignInfoPatterns.length; i++) {
+            if (text.indexOf(benignInfoPatterns[i]) !== -1) return;
+          }
+          origInfo.apply(console, arguments);
+        };
+
+        var origDebug = console.debug;
+        console.debug = function() {
+          var text = Array.prototype.slice.call(arguments).map(function(item) {
+            return typeof item === 'string' ? item : (item && item.message) || '';
+          }).join(' ');
+          for (var i = 0; i < benignInfoPatterns.length; i++) {
+            if (text.indexOf(benignInfoPatterns[i]) !== -1) return;
+          }
+          origDebug.apply(console, arguments);
+        };
+
+        var isBenign = function(item) {
+          if (!item) return false;
+          var text = typeof item === 'string' ? item : ((item.message || '') + ' ' + (item.stack || '') + ' ' + String(item));
+          for (var i = 0; i < benignErrorPatterns.length; i++) {
+            if (text.indexOf(benignErrorPatterns[i]) !== -1) return true;
+          }
+          return false;
+        };
+
+        window.addEventListener('unhandledrejection', function(event) {
+          var reason = event && event.reason;
+          if (isBenign(reason)) {
+            if (event.preventDefault) event.preventDefault();
+            if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+            return true;
+          }
+        }, true);
+
+        window.addEventListener('error', function(event) {
+          var msg = event && (event.message || (event.error && (event.error.message || event.error.stack)) || '');
+          if (isBenign(msg)) {
+            if (event.preventDefault) event.preventDefault();
+            if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+            return true;
+          }
+        }, true);
+
+        // Remove any injected Vite error overlay node immediately
+        if (typeof MutationObserver !== 'undefined') {
+          var observer = new MutationObserver(function(mutations) {
+            for (var m = 0; m < mutations.length; m++) {
+              var nodes = mutations[m].addedNodes;
+              for (var n = 0; n < nodes.length; n++) {
+                var node = nodes[n];
+                if (node && node.nodeType === 1) {
+                  if (node.tagName === 'VITE-ERROR-OVERLAY' || (node.id && node.id.indexOf('vite-error') !== -1)) {
+                    node.remove();
+                  }
+                }
+              }
+            }
+          });
+          document.addEventListener('DOMContentLoaded', function() {
+            observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
+          });
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

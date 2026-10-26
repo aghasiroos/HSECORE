@@ -1,0 +1,597 @@
+@import "tailwindcss";
+@source "../index.html";
+@source "../src";
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ==========================================================================
+   Vazirmatn Typography Standard
+   Light (300) -> Body, Content, Table Cells, Descriptions, Placeholders
+   Medium (500) -> Titles, Headers, Navigation, Buttons, Badges, KPIs
+   ========================================================================== */
+
+@font-face {
+  font-family: 'Vazirmatn';
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url('/fonts/Vazirmatn-Light.woff2') format('woff2'),
+       url('./assets/fonts/Vazirmatn-Light.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Vazirmatn';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/Vazirmatn-Medium.woff2') format('woff2'),
+       url('./assets/fonts/Vazirmatn-Medium.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Eras Bold ITC';
+  font-style: normal;
+  font-weight: 700 900;
+  font-display: swap;
+  src: local('Eras Bold ITC'),
+       local('Eras Bold'),
+       local('ErasITC-Bold'),
+       local('Eras ITC Bold'),
+       local('Eras ITC');
+}
+
+.font-eras-bold {
+  font-family: 'Eras Bold ITC', 'Eras ITC', 'Eras Bold', 'Eras', 'Arial Black', sans-serif !important;
+}
+
+@theme {
+  --font-sans: "Vazirmatn", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+/* ==========================================================================
+   Centralized Enterprise Design Tokens & Theme Variables
+   Layered Dark Hierarchy: Level 0 (Canvas) -> Level 1 (Nav/Header) -> 
+   Level 2 (Cards/Panels) -> Level 3 (Nested/Tables) -> Level 4 (Modals/Dialogs)
+   ========================================================================== */
+:root {
+  --bg-canvas: #f8fafc;
+  --bg-sidebar: rgba(255, 255, 255, 0.98);
+  --bg-header: rgba(255, 255, 255, 0.95);
+  --bg-card: #ffffff;
+  --bg-card-elevated: #f1f5f9;
+  --bg-card-subtle: #f8fafc;
+  --bg-input: #ffffff;
+  --bg-modal: #ffffff;
+  --text-primary: #0f172a;
+  --text-secondary: #334155;
+  --text-muted: #64748b;
+  --text-placeholder: #94a3b8;
+  --border-subtle: #e2e8f0;
+  --border-card: #e2e8f0;
+  --border-elevated: #cbd5e1;
+  --border-input: #cbd5e1;
+  --color-primary: #2563eb;
+  --color-primary-hover: #1d4ed8;
+  --color-primary-glow: rgba(37, 99, 235, 0.2);
+}
+
+html.dark {
+  /* Layered Dark Surfaces - NO pure black (#000000) */
+  --bg-canvas: #0b0f19;          /* Layer 0: Executive deep slate canvas */
+  --bg-sidebar: #0d1322;         /* Layer 1: Navigational anchor */
+  --bg-header: #0f172a;          /* Layer 1: Top elevation */
+  --bg-card: #151e2e;            /* Layer 2: Main module cards and content panels */
+  --bg-card-elevated: #1a2438;   /* Layer 3: Nested panels, table headers, sub-tabs */
+  --bg-card-subtle: #121927;     /* Layer 2.5: Contrast container */
+  --bg-input: #0f172a;           /* Form controls: Crisp, deep, readable */
+  --bg-modal: #172033;           /* Layer 4: Floating modals and dialogs */
+  
+  /* High-Contrast WCAG AA Compliant Typography */
+  --text-primary: #f8fafc;       /* Slate 50: 100% crisp on all dark surfaces (>14:1) */
+  --text-secondary: #cbd5e1;     /* Slate 300: High clarity for secondary text (>9:1) */
+  --text-muted: #94a3b8;         /* Slate 400: High clarity for labels/meta (>5:1) */
+  --text-placeholder: #64748b;   /* Slate 500: Legible without distraction */
+  
+  /* Distinctive Surface Borders */
+  --border-subtle: #1e293b;
+  --border-card: #243047;
+  --border-elevated: #2e3c54;
+  --border-input: #334155;
+  --color-primary: #3b82f6;
+  --color-primary-hover: #60a5fa;
+  --color-primary-glow: rgba(59, 130, 246, 0.25);
+}
+
+@layer base {
+  html, body, #root {
+    font-family: var(--font-sans);
+    font-weight: 300;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    background-color: var(--bg-canvas);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-weight: 300;
+    transition-property: background-color, border-color, color, fill, stroke;
+    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+    transition-duration: 250ms;
+  }
+
+  /* 🌙 Theme: Layered Executive Dark */
+  html.dark body {
+    background-color: #0b0f19 !important;
+    color: #f8fafc !important;
+  }
+
+  /* Typography Hierarchy: Titles & Headings -> Vazirmatn Medium (500) */
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-sans);
+    font-weight: 500;
+    letter-spacing: -0.01em;
+  }
+
+  /* Paragraphs and Body Text -> Vazirmatn Light (300) with generous Persian line height */
+  p, span, div, li, a {
+    font-family: var(--font-sans);
+  }
+
+  /* Form Labels & Section Headers -> Vazirmatn Medium (500) */
+  label, legend, .form-label, .section-title, .module-title, .card-title, .page-title {
+    font-family: var(--font-sans);
+    font-weight: 500;
+    letter-spacing: 0;
+  }
+
+  /* Inputs, Placeholders, Helper Text -> Vazirmatn Light (300) & Corporate Blue Focus Theme */
+  input, select, textarea, .form-input, .form-select, .form-textarea {
+    font-family: var(--font-sans);
+    font-weight: 300;
+    accent-color: #2563eb;
+    transition: all 0.2s ease-in-out;
+  }
+
+  input:focus, select:focus, textarea:focus,
+  input:focus-visible, select:focus-visible, textarea:focus-visible {
+    outline: none;
+    border-color: #2563eb !important;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25) !important;
+  }
+
+  input:hover:not(:disabled):not(:focus),
+  select:hover:not(:disabled):not(:focus),
+  textarea:hover:not(:disabled):not(:focus) {
+    border-color: rgba(37, 99, 235, 0.5);
+  }
+
+  input::placeholder, textarea::placeholder {
+    font-family: var(--font-sans);
+    font-weight: 300;
+    opacity: 0.85;
+  }
+
+  /* Buttons & Action Items -> Vazirmatn Medium (500) */
+  button, .btn, .tab-item, .nav-item {
+    font-family: var(--font-sans);
+    font-weight: 500;
+  }
+
+  /* Tables: Headers -> Medium (500), Cell Content -> Light (300) */
+  th {
+    font-family: var(--font-sans);
+    font-weight: 500;
+  }
+
+  td {
+    font-family: var(--font-sans);
+    font-weight: 300;
+  }
+}
+
+/* ==========================================================================
+   Dark Theme Component & Surface Overrides (High Legibility & WCAG AA)
+   ========================================================================== */
+
+/* 1. Canvas and Main Layout Surfaces */
+html.dark #app-layout {
+  background-color: #0b0f19 !important;
+}
+
+html.dark #app-header {
+  background-color: rgba(15, 23, 42, 0.95) !important;
+  border-color: #1e293b !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+}
+
+html.dark #app-main-sidebar {
+  background-color: rgba(13, 19, 34, 0.98) !important;
+  border-color: #1e293b !important;
+}
+
+html.dark .sidebar-active {
+  background: linear-gradient(90deg, rgba(37, 99, 235, 0.28) 0%, rgba(37, 99, 235, 0.1) 100%) !important;
+  border-right: 3px solid #3b82f6 !important;
+  color: #93c5fd !important;
+  box-shadow: 0 0 16px rgba(37, 99, 235, 0.25);
+}
+
+/* 2. Layer 2 Cards & Modules */
+html.dark .bg-white {
+  background-color: #151e2e !important;
+}
+
+html.dark .border-slate-200,
+html.dark .border-slate-100 {
+  border-color: #243047 !important;
+}
+
+html.dark .border-slate-800 {
+  border-color: #243047 !important;
+}
+
+html.dark .bg-slate-50 {
+  background-color: #1a2438 !important;
+}
+
+html.dark .bg-slate-100 {
+  background-color: #1e293b !important;
+}
+
+html.dark .bg-slate-900 {
+  background-color: #151e2e !important;
+}
+
+html.dark .bg-slate-950 {
+  background-color: #0b0f19 !important;
+}
+
+/* 3. High-Contrast Form Inputs & Controls */
+html.dark input:not([type="checkbox"]):not([type="radio"]),
+html.dark select,
+html.dark textarea {
+  background-color: #0f172a !important;
+  border-color: #334155 !important;
+  color: #f8fafc !important;
+}
+
+html.dark input::placeholder,
+html.dark textarea::placeholder {
+  color: #64748b !important;
+  opacity: 1 !important;
+}
+
+html.dark input:hover:not(:disabled):not(:focus),
+html.dark select:hover:not(:disabled):not(:focus),
+html.dark textarea:hover:not(:disabled):not(:focus) {
+  border-color: #3b82f6 !important;
+}
+
+html.dark input:focus,
+html.dark select:focus,
+html.dark textarea:focus {
+  border-color: #3b82f6 !important;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.3) !important;
+}
+
+html.dark select option {
+  background-color: #0f172a !important;
+  color: #f8fafc !important;
+}
+
+html.dark input:disabled,
+html.dark select:disabled,
+html.dark textarea:disabled,
+html.dark button:disabled {
+  background-color: #1e293b !important;
+  color: #64748b !important;
+  border-color: #1e293b !important;
+  cursor: not-allowed !important;
+  opacity: 0.55 !important;
+}
+
+/* 4. Table Separation and Row Contrast */
+html.dark table th {
+  background-color: #1a2438 !important;
+  color: #e2e8f0 !important;
+  border-bottom: 2px solid #2e3c54 !important;
+  font-weight: 500 !important;
+}
+
+html.dark table td {
+  color: #f1f5f9 !important;
+  border-bottom: 1px solid rgba(51, 65, 85, 0.4) !important;
+}
+
+html.dark table tbody tr:hover {
+  background-color: rgba(37, 99, 235, 0.08) !important;
+}
+
+html.dark table tbody tr:nth-child(even) {
+  background-color: rgba(255, 255, 255, 0.015);
+}
+
+/* 5. Modals and Elevated Overlays (Layer 4) */
+html.dark [role="dialog"],
+html.dark .modal-card,
+html.dark .modal-body {
+  background-color: #151e2e;
+  border-color: #243047;
+}
+
+/* 6. Typography Contrast Refinement */
+html.dark .text-slate-800,
+html.dark .text-slate-900 {
+  color: #f8fafc !important;
+}
+
+html.dark .text-slate-700 {
+  color: #e2e8f0 !important;
+}
+
+html.dark .text-slate-600 {
+  color: #cbd5e1 !important;
+}
+
+html.dark .text-slate-500 {
+  color: #94a3b8 !important;
+}
+
+html.dark .text-slate-400 {
+  color: #94a3b8 !important;
+}
+
+/* 7. Recharts Data Visualization Contrast in Dark Mode */
+html.dark .recharts-cartesian-axis-tick text {
+  fill: #cbd5e1 !important;
+}
+
+html.dark .recharts-cartesian-axis-tick-line,
+html.dark .recharts-cartesian-axis-line {
+  stroke: #475569 !important;
+}
+
+html.dark .recharts-legend-item-text {
+  color: #f1f5f9 !important;
+}
+
+html.dark .recharts-cartesian-grid line {
+  stroke: rgba(255, 255, 255, 0.08) !important;
+}
+
+html.dark .recharts-tooltip-wrapper {
+  color: #f8fafc !important;
+}
+
+html.dark .recharts-default-tooltip {
+  background-color: #0f172a !important;
+  border-color: #334155 !important;
+  color: #f8fafc !important;
+}
+
+/* Custom Scrollbar Styles with Dark Adaptation */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+html.dark ::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 9999px;
+}
+html.dark ::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
+/* Forms / Inputs */
+input, select, textarea {
+  transition: all 0.3s ease-in-out;
+}
+
+
+/* Sidebar Active Item Glow */
+.sidebar-active {
+  background: linear-gradient(90deg, rgba(37, 99, 235, 0.15) 0%, rgba(37, 99, 235, 0.05) 100%) !important;
+  border-inline-start: 3px solid #2563eb;
+  color: #2563eb !important;
+}
+.sidebar-item {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.sidebar-item:hover {
+  transform: translateY(-1px);
+}
+
+/* Animations */
+.animate-fade-in {
+  animation: fadeIn 0.4s ease-out forwards;
+}
+.animate-slide-up {
+  animation: slideUp 0.5s ease-out forwards;
+}
+.animate-blob {
+  animation: blob 12s infinite ease-in-out;
+}
+.animate-blob-delayed {
+  animation: blob 14s infinite ease-in-out 3s;
+}
+.animate-blob-reverse {
+  animation: blobReverse 16s infinite ease-in-out 1.5s;
+}
+.animate-spin-slow {
+  animation: spin 25s linear infinite;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes blob {
+  0%, 100% {
+    transform: translate(0px, 0px) scale(1) rotate(0deg);
+  }
+  33% {
+    transform: translate(30px, -50px) scale(1.1) rotate(120deg);
+  }
+  66% {
+    transform: translate(-20px, 20px) scale(0.9) rotate(240deg);
+  }
+}
+@keyframes blobReverse {
+  0%, 100% {
+    transform: translate(0px, 0px) scale(1) rotate(0deg);
+  }
+  33% {
+    transform: translate(-40px, 30px) scale(1.15) rotate(-120deg);
+  }
+  66% {
+    transform: translate(25px, -30px) scale(0.85) rotate(-240deg);
+  }
+}
+
+/* ==========================================================================
+   Print Optimization & Full Background Retention Rules
+   ========================================================================== */
+@media print {
+  *,
+  *::before,
+  *::after {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+  }
+  
+  @page {
+    size: A4 portrait;
+    margin: 6mm 6mm 6mm 6mm;
+  }
+
+  html, body {
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    width: 100% !important;
+    height: auto !important;
+    overflow: visible !important;
+    font-size: 11px;
+    line-height: 1.35;
+  }
+
+  /* Repeat table headers and avoid orphan rows across pages */
+  table {
+    border-collapse: collapse !important;
+    width: 100% !important;
+  }
+
+  thead {
+    display: table-header-group !important;
+  }
+
+  tfoot {
+    display: table-footer-group !important;
+  }
+
+  tr {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  tbody {
+    page-break-inside: auto !important;
+  }
+
+  /* Card and section break protection */
+  .print-break-inside-avoid,
+  .print-card,
+  .print-section {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  .print-page-break {
+    page-break-before: always !important;
+    break-before: page !important;
+  }
+
+  .print-exact {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .grayscale-print-theme {
+    filter: grayscale(100%) !important;
+  }
+
+  /* Prevent text clipping in print */
+  .truncate {
+    overflow: visible !important;
+    text-overflow: clip !important;
+    white-space: normal !important;
+  }
+}
+
+/* ==========================================================================
+   TRIR 12M Rolling Color Coding - Production & VPS Guaranteed Styles
+   ========================================================================== */
+.trir-badge-safe {
+  color: #047857 !important;
+  background-color: #ecfdf5 !important;
+  border: 1px solid #a7f3d0 !important;
+}
+.trir-badge-warning {
+  color: #b45309 !important;
+  background-color: #fffbeb !important;
+  border: 1px solid #fde68a !important;
+}
+.trir-badge-danger {
+  color: #b91c1c !important;
+  background-color: #fef2f2 !important;
+  border: 1px solid #fca5a5 !important;
+}
+
+.dark .trir-badge-safe {
+  color: #6ee7b7 !important;
+  background-color: rgba(6, 78, 59, 0.45) !important;
+  border: 1px solid rgba(16, 185, 129, 0.3) !important;
+}
+.dark .trir-badge-warning {
+  color: #fde68a !important;
+  background-color: rgba(120, 53, 15, 0.45) !important;
+  border: 1px solid rgba(245, 158, 11, 0.3) !important;
+}
+.dark .trir-badge-danger {
+  color: #fca5a5 !important;
+  background-color: rgba(127, 29, 29, 0.45) !important;
+  border: 1px solid rgba(239, 68, 68, 0.3) !important;
+}
+
+.trir-row-safe {
+  border-right: 4px solid #10b981 !important;
+}
+.trir-row-warning {
+  border-right: 4px solid #f59e0b !important;
+}
+.trir-row-danger {
+  border-right: 4px solid #ef4444 !important;
+  background-color: rgba(254, 242, 242, 0.35) !important;
+}
+.dark .trir-row-danger {
+  background-color: rgba(127, 29, 29, 0.2) !important;
+}
+
+

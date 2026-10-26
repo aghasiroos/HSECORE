@@ -1,0 +1,20 @@
+{
+  "name": "HSECORE - هسته مرکزی مدیریت ایمنی، بهداشت و محیط زیست",
+  "short_name": "HSECORE",
+  "description": "هسته مرکزی مدیریت ایمنی، بهداشت و محیط زیست (HSECORE) | The Core of HSE Management",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#059669",
+  "orientation": "any",
+  "dir": "rtl",
+  "lang": "fa",
+  "icons": [
+    {
+      "src": "/assets/aistudio/ChatGPT_Image_Oct_8__2026__12_04_00_PM_42699341.png",
+      "sizes": "192x192 512x512 any",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

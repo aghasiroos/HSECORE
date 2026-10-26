@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" 
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" 
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" 
+                  xmlns:zeebe="http://camunda.org/schema/zeebe/1.0" 
+                  xmlns:di="http://www.omg.org/spec/DD/20100524/DI" 
+                  id="Definitions_1" 
+                  targetNamespace="http://bpmn.io/schema/bpmn" 
+                  exporter="Camunda Modeler" 
+                  exporterVersion="5.20.0">
+  <bpmn:process id="Process_HseWorkPermit" name="HSE Work Permit Approval Process" isExecutable="true">
+    <bpmn:startEvent id="StartEvent_PermitSubmitted" name="Permit Submitted">
+      <bpmn:outgoing>Flow_1</bpmn:outgoing>
+    </bpmn:startEvent>
+    
+    <bpmn:serviceTask id="Task_InitialRiskCheck" name="Automated Hazard &amp; Risk Check">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="hse-risk-evaluation" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_2</bpmn:outgoing>
+    </bpmn:serviceTask>
+    
+    <bpmn:userTask id="Task_SafetyManagerApproval" name="Safety Manager Sign-off">
+      <bpmn:incoming>Flow_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_3</bpmn:outgoing>
+    </bpmn:userTask>
+
+    <bpmn:exclusiveGateway id="Gateway_Approved" name="Is Approved?">
+      <bpmn:incoming>Flow_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_Approved</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Rejected</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <bpmn:serviceTask id="Task_IssuePermit" name="Generate &amp; Upload Permit to MinIO">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="minio-pdf-upload" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_Approved</bpmn:incoming>
+      <bpmn:outgoing>Flow_4</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_NotifyRejection" name="Send WebSocket &amp; Keycloak Rejection Alert">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="websocket-rejection-notify" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_Rejected</bpmn:incoming>
+      <bpmn:outgoing>Flow_5</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:endEvent id="EndEvent_Issued" name="Permit Active &amp; Issued">
+      <bpmn:incoming>Flow_4</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <bpmn:endEvent id="EndEvent_Rejected" name="Permit Rejected">
+      <bpmn:incoming>Flow_5</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <bpmn:sequenceFlow id="Flow_1" sourceRef="StartEvent_PermitSubmitted" targetRef="Task_InitialRiskCheck" />
+    <bpmn:sequenceFlow id="Flow_2" sourceRef="Task_InitialRiskCheck" targetRef="Task_SafetyManagerApproval" />
+    <bpmn:sequenceFlow id="Flow_3" sourceRef="Task_SafetyManagerApproval" targetRef="Gateway_Approved" />
+    <bpmn:sequenceFlow id="Flow_Approved" sourceRef="Gateway_Approved" targetRef="Task_IssuePermit" />
+    <bpmn:sequenceFlow id="Flow_Rejected" sourceRef="Gateway_Approved" targetRef="Task_NotifyRejection" />
+    <bpmn:sequenceFlow id="Flow_4" sourceRef="Task_IssuePermit" targetRef="EndEvent_Issued" />
+    <bpmn:sequenceFlow id="Flow_5" sourceRef="Task_NotifyRejection" targetRef="EndEvent_Rejected" />
+  </bpmn:process>
+</bpmn:definitions>

@@ -1,0 +1,90 @@
+{
+  "realm": "hse-realm",
+  "displayName": "Enterprise HSE Management System Realm",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "roles": {
+    "realm": [
+      {
+        "name": "HSE_ADMIN",
+        "description": "Full administrative access to HSE system, settings and audit logs"
+      },
+      {
+        "name": "SAFETY_MANAGER",
+        "description": "Approval authority for Hot Work Permits and High Risk Assessments"
+      },
+      {
+        "name": "SAFETY_OFFICER",
+        "description": "Field inspector, incident reporter, and warning issuer"
+      },
+      {
+        "name": "WORKER",
+        "description": "Standard operational worker and permit applicant"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "hse-frontend",
+      "name": "HSE React Material UI Frontend Client",
+      "enabled": true,
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": [
+        "http://localhost:3000/*",
+        "http://localhost:5173/*"
+      ],
+      "webOrigins": [
+        "*"
+      ]
+    },
+    {
+      "clientId": "hse-backend",
+      "name": "Spring Boot 3 Resource Server Client",
+      "enabled": true,
+      "bearerOnly": true,
+      "protocol": "openid-connect"
+    }
+  ],
+  "users": [
+    {
+      "username": "admin",
+      "email": "admin@hse.company.local",
+      "firstName": "مدیر",
+      "lastName": "سیستم HSE",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "AdminPass123!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["HSE_ADMIN", "SAFETY_MANAGER"]
+    },
+    {
+      "username": "safety_officer",
+      "email": "officer@hse.company.local",
+      "firstName": "کارشناس",
+      "lastName": "ایمنی صنعتی",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "OfficerPass123!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["SAFETY_OFFICER"]
+    }
+  ]
+}
