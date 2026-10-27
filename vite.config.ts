@@ -1,87 +1,11 @@
 import tailwindcss from '@tailwindcss/vite';
-import react from '@vitejs/plugin-react-swc';
+import react from '@vitejs/plugin-react';
 import path from 'path';
 import { defineConfig } from 'vite';
 
 export default defineConfig(() => {
   return {
     plugins: [
-      {
-        name: 'vite-hmr-suppressor',
-        transformIndexHtml: {
-          order: 'pre',
-          handler() {
-            return [
-              {
-                tag: 'script',
-                attrs: { type: 'text/javascript' },
-                children: `
-                  (function() {
-                    if (typeof window === 'undefined') return;
-                    var RealWebSocket = window.WebSocket;
-                    if (!RealWebSocket) return;
-
-                    function DummyHmrWebSocket(url) {
-                      var target = new EventTarget();
-                      target.url = String(url || '');
-                      target.readyState = 1;
-                      target.bufferedAmount = 0;
-                      target.extensions = '';
-                      target.protocol = 'vite-hmr';
-                      target.binaryType = 'blob';
-                      target.onopen = null;
-                      target.onclose = null;
-                      target.onerror = null;
-                      target.onmessage = null;
-                      target.send = function() {};
-                      target.close = function() {
-                        target.readyState = 3;
-                        var ev = new Event('close');
-                        ev.wasClean = true;
-                        ev.code = 1000;
-                        target.dispatchEvent(ev);
-                        if (typeof target.onclose === 'function') target.onclose(ev);
-                      };
-
-                      setTimeout(function() {
-                        var openEv = new Event('open');
-                        target.dispatchEvent(openEv);
-                        if (typeof target.onopen === 'function') target.onopen(openEv);
-                      }, 0);
-
-                      return target;
-                    }
-
-                    function InterceptedWebSocket(url, protocols) {
-                      var isViteHmr = 
-                        protocols === 'vite-hmr' ||
-                        (Array.isArray(protocols) && protocols.indexOf('vite-hmr') !== -1) ||
-                        (typeof url === 'string' && (url.indexOf('vite-hmr') !== -1 || (url.indexOf('token=') !== -1 && url.indexOf(':3000') !== -1)));
-
-                      if (isViteHmr) {
-                        return DummyHmrWebSocket(url);
-                      }
-                      if (protocols !== undefined) {
-                        return new RealWebSocket(url, protocols);
-                      }
-                      return new RealWebSocket(url);
-                    }
-
-                    InterceptedWebSocket.prototype = RealWebSocket.prototype;
-                    InterceptedWebSocket.CONNECTING = 0;
-                    InterceptedWebSocket.OPEN = 1;
-                    InterceptedWebSocket.CLOSING = 2;
-                    InterceptedWebSocket.CLOSED = 3;
-
-                    window.WebSocket = InterceptedWebSocket;
-                  })();
-                `,
-                injectTo: 'head-prepend',
-              },
-            ];
-          },
-        },
-      },
       react(),
       tailwindcss(),
     ],
@@ -127,7 +51,7 @@ export default defineConfig(() => {
       minify: false,
       cssCodeSplit: true,
       rollupOptions: {
-        maxParallelFileOps: 2,
+        maxParallelFileOps: 24,
         output: {
           manualChunks(id) {
             if (id.includes('node_modules/three') || id.includes('node_modules/@react-three')) {

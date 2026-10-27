@@ -947,7 +947,6 @@ export default function App() {
       localStorage.setItem('hse_trir_target', target.toString());
     } catch (_) {}
     centralSync.persistSetting('trir_target', target, 'Target TRIR Rate');
-    apiDb.saveSetting('trir_target', target, 'Target TRIR Rate').catch(console.error);
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('hse_trir_target_changed', { detail: { target } }));
       window.dispatchEvent(new CustomEvent('hse_data_mutated', { detail: { entityType: 'settings', key: 'trir_target', value: target } }));
@@ -960,7 +959,6 @@ export default function App() {
       setActiveRecord(newLog[0]);
     }
     centralSync.persistSetting('hse_heat_log', newLog, 'Live Heat Stress Log');
-    apiDb.saveSetting('hse_heat_log', newLog, 'Live Heat Stress Log').catch(console.error);
   }, []);
 
   const dashboardSeries: TrirSeriesPoint[] = React.useMemo(() => {

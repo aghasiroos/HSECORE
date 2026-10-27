@@ -1591,8 +1591,10 @@ export default function HeatStressMonitor({
           <GisMapView
             activeRecord={activeRecord}
             isFa={isFa}
+            isVisible={mapViewMode === 'map'}
             mapLayer={mapLayer}
             setMapLayer={setMapLayer}
+            showWeatherLayer={showWeatherLayer}
             showRiskZones={showRiskZones}
             showWindVectors={showWindVectors}
             showWorkers={showWorkers}

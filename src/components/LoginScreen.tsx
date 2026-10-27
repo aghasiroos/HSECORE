@@ -253,26 +253,28 @@ export default function LoginScreen({
         <div className="absolute -bottom-40 -left-40 w-[32rem] h-[32rem] rounded-full bg-emerald-500/10 dark:bg-emerald-500/12 blur-[120px]" />
       </div>
 
-      {/* ── Top Utility Bar ── */}
-      <header className="relative z-20 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4 pb-2 flex items-center justify-between gap-4">
-        <div className="flex items-center min-w-0">
-          <span className="text-xs sm:text-sm font-medium text-slate-600 dark:text-slate-300 truncate">
+      {/* ── Top Utility Bar: Text pinned to Top-Right corner, Icons pinned to Top-Left corner ── */}
+      <header className="relative z-20 w-full px-4 sm:px-6 lg:px-8 pt-3 sm:pt-4 pb-2 flex items-center justify-between gap-3 sm:gap-4">
+        {/* Right Corner: Organization Title Text */}
+        <div className="flex items-center min-w-0 order-1 rtl:order-1 ltr:order-2">
+          <span className="text-xs sm:text-sm font-medium text-slate-600 dark:text-slate-300 truncate" title={isFa ? (branding.organizationNameFa || 'هسته مرکزی مدیریت ایمنی، بهداشت و محیط زیست (HSECORE)') : (branding.organizationNameEn || 'HSECORE — The Core of HSE Management')}>
             {isFa
               ? (branding.organizationNameFa || 'هسته مرکزی مدیریت ایمنی، بهداشت و محیط زیست (HSECORE)')
               : (branding.organizationNameEn || 'HSECORE — The Core of HSE Management')}
           </span>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        {/* Left Corner: Action Icons (Theme toggle & Language switch) */}
+        <div className="flex items-center gap-2 shrink-0 order-2 rtl:order-2 ltr:order-1">
           <button
             type="button"
             onClick={() => setLanguage(language === 'fa' ? 'en' : 'fa')}
             title={language === 'fa' ? 'Switch to English' : 'تغییر زبان به فارسی'}
             aria-label={language === 'fa' ? 'Switch to English' : 'تغییر زبان به فارسی'}
             id="login-language-toggle-btn"
-            className="h-9 px-3 rounded-xl bg-white/90 dark:bg-slate-800/90 border border-slate-200/90 dark:border-slate-700/80 text-slate-700 dark:text-slate-200 hover:border-sky-500/50 hover:text-sky-600 dark:hover:text-sky-400 transition-colors cursor-pointer shadow-2xs flex items-center gap-1.5 text-xs font-medium whitespace-nowrap shrink-0"
+            className="h-8.5 sm:h-9 px-2.5 sm:px-3 rounded-xl bg-white/90 dark:bg-slate-800/90 border border-slate-200/90 dark:border-slate-700/80 text-slate-700 dark:text-slate-200 hover:border-sky-500/50 hover:text-sky-600 dark:hover:text-sky-400 transition-colors cursor-pointer shadow-2xs flex items-center gap-1.5 text-xs font-medium whitespace-nowrap shrink-0"
           >
-            <Languages className="w-4 h-4 text-sky-600 dark:text-sky-400 shrink-0" />
+            <Languages className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-sky-600 dark:text-sky-400 shrink-0" />
             <span>{isFa ? 'EN' : 'فارسی'}</span>
           </button>
 
@@ -283,7 +285,7 @@ export default function LoginScreen({
               title={isLight ? (isFa ? 'حالت تیره' : 'Dark Mode') : (isFa ? 'حالت روشن' : 'Light Mode')}
               aria-label={isLight ? (isFa ? 'حالت تیره' : 'Dark Mode') : (isFa ? 'حالت روشن' : 'Light Mode')}
               id="login-theme-toggle-btn"
-              className="w-9 h-9 rounded-xl bg-white/90 dark:bg-slate-800/90 border border-slate-200/90 dark:border-slate-700/80 text-slate-700 dark:text-slate-200 hover:border-sky-500/50 hover:text-sky-600 dark:hover:text-sky-400 transition-colors cursor-pointer shadow-2xs flex items-center justify-center shrink-0"
+              className="w-8.5 h-8.5 sm:w-9 sm:h-9 rounded-xl bg-white/90 dark:bg-slate-800/90 border border-slate-200/90 dark:border-slate-700/80 text-slate-700 dark:text-slate-200 hover:border-sky-500/50 hover:text-sky-600 dark:hover:text-sky-400 transition-colors cursor-pointer shadow-2xs flex items-center justify-center shrink-0"
             >
               {isLight ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4 text-amber-400" />}
             </button>
@@ -721,7 +723,7 @@ export default function LoginScreen({
       </main>
 
       {/* ── Page Footer ── */}
-      <footer className="relative z-20 w-full max-w-7xl mx-auto px-4 py-3 text-center text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+      <footer className="relative z-20 w-full px-4 sm:px-6 lg:px-8 py-3 text-center text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
         {isFa
           ? 'کلیه حقوق مادی و معنوی سامانه متعلق به آقا مصطفی سیروس، کارشناس ارشد بهداشت، ایمنی و محیط زیست (HSE) می‌باشد.'
           : 'All rights reserved © Agha Mostafa Sirous, Senior Occupational Health, Safety & Environment (HSE) Expert.'}

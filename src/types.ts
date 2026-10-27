@@ -528,6 +528,14 @@ export interface NotificationEntry {
   sender: string;
   readBy: string[]; // User IDs who have read this
   images?: string[];
+  sirenType?: string;
+  metadata?: Record<string, any>;
+  acknowledgedBy?: Array<{
+    userId: string;
+    userName?: string;
+    timestamp: string;
+    note?: string;
+  }>;
 }
 
 // --- Work Permit (پروانه کار) Types ---

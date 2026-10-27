@@ -69,7 +69,7 @@ TUI_LAST_REMEDIATION=""
 STEP_TITLES=(
   ""
   "System Check"
-  "Install Dependencies"
+  "Install Dependencies & Node.js LTS"
   "Install Docker"
   "Install PostgreSQL (Native VPS Host)"
   "Configure Database"
@@ -108,8 +108,8 @@ tui_detect_capabilities() {
     TUI_UTF8="false"
   fi
 
-  if sleep 0.1 2>/dev/null; then
-    TUI_SLEEP_INTERVAL="0.12"
+  if sleep 0.35 2>/dev/null; then
+    TUI_SLEEP_INTERVAL="0.35"
   else
     TUI_SLEEP_INTERVAL="1"
   fi
@@ -184,13 +184,17 @@ chmod 600 "${LOCAL_LOG_FILE}" 2>/dev/null || true
 
 sanitize_log_line() {
   local msg="$1"
-  if [[ -n "${SQL_PASSWORD:-}" ]]; then
+  if [[ -n "${SQL_PASSWORD:-}" && "${msg}" == *"${SQL_PASSWORD}"* ]]; then
     msg="${msg//"${SQL_PASSWORD}"/*******}"
   fi
-  if [[ -n "${SQL_ADMIN_PASSWORD:-}" ]]; then
+  if [[ -n "${SQL_ADMIN_PASSWORD:-}" && "${msg}" == *"${SQL_ADMIN_PASSWORD}"* ]]; then
     msg="${msg//"${SQL_ADMIN_PASSWORD}"/*******}"
   fi
-  printf '%s' "${msg}" | sed -E 's/(PASSWORD|SECRET|TOKEN|ADMIN_PASS)=[^ &"'\'']+/\1=*******/gI' | sed -E 's/([0-9a-fA-F]{32,64})/*******/g'
+  if [[ "${msg}" =~ (PASSWORD|SECRET|TOKEN|ADMIN_PASS)= ]] || [[ "${msg}" =~ [0-9a-fA-F]{32} ]]; then
+    printf '%s' "${msg}" | sed -E -e 's/(PASSWORD|SECRET|TOKEN|ADMIN_PASS)=[^ &"'\'']+/\1=*******/gI' -e 's/([0-9a-fA-F]{32,64})/*******/g'
+  else
+    printf '%s' "${msg}"
+  fi
 }
 
 log_raw() {
@@ -521,10 +525,10 @@ tui_run_task() {
     local sp_idx=$(( tick % ${#spinners[@]} ))
     local sp_char="${spinners[$sp_idx]}"
 
-    # Extract latest non-empty real output line from tmp_out
+    # Extract latest non-empty real output line from the tail of tmp_out (O(1) read instead of full-file scan)
     local raw_last=""
     if [[ -s "${tmp_out}" ]]; then
-      raw_last="$(tr '\r' '\n' < "${tmp_out}" 2>/dev/null | sed -E 's/\x1B\[[0-9;?]*[a-zA-Z]//g' | grep -v '^[[:space:]]*$' | tail -n 1 || true)"
+      raw_last="$(tail -c 4096 "${tmp_out}" 2>/dev/null | tr '\r' '\n' | sed -E 's/\x1B\[[0-9;?]*[a-zA-Z]//g' | grep -v '^[[:space:]]*$' | tail -n 1 || true)"
     fi
     local live_line
     if [[ -n "${raw_last}" ]]; then
@@ -888,6 +892,125 @@ apply_ufw_postgresql_rules() {
 
 # ------------------------------------------------------------------------------
 # Helper: Configure Docker Registry Mirrors & Resolve Base Image (403 Bypass)
+# ------------------------------------------------------------------------------
+# Host Node.js 22 LTS Installation & Upgrade Engine
+# Ensures Node.js >= 22.18.0 is installed on the host VPS (NodeSource + Fallback)
+# ------------------------------------------------------------------------------
+NODE_LTS_MAJOR="22"
+NODE_MIN_MINOR="18"
+NODE_FALLBACK_VERSION="22.18.0"
+
+is_nodejs_lts_ready() {
+  command -v node &>/dev/null && command -v npm &>/dev/null || return 1
+  local ver major minor
+  ver="$(node -v 2>/dev/null | sed 's/^v//')"
+  major="$(echo "${ver}" | cut -d. -f1)"
+  minor="$(echo "${ver}" | cut -d. -f2)"
+  if [[ "${major}" =~ ^[0-9]+$ && "${minor}" =~ ^[0-9]+$ ]]; then
+    if [[ "${major}" -gt "${NODE_LTS_MAJOR}" ]] || ([[ "${major}" -eq "${NODE_LTS_MAJOR}" && "${minor}" -ge "${NODE_MIN_MINOR}" ]]); then
+      return 0
+    fi
+  fi
+  return 1
+}
+
+configure_host_npm_fast_defaults() {
+  if command -v npm &>/dev/null; then
+    npm config set audit false --location=global 2>/dev/null || true
+    npm config set fund false --location=global 2>/dev/null || true
+    npm config set update-notifier false --location=global 2>/dev/null || true
+    npm config set progress false --location=global 2>/dev/null || true
+    npm config set loglevel error --location=global 2>/dev/null || true
+  fi
+}
+
+ensure_nodejs_lts() {
+  export DEBIAN_FRONTEND=noninteractive
+
+  if is_nodejs_lts_ready; then
+    echo "Node.js LTS is already up to date: $(node -v) (npm $(npm -v 2>/dev/null || echo 'ok'))"
+    configure_host_npm_fast_defaults
+    return 0
+  fi
+
+  local current_node="none"
+  if command -v node &>/dev/null; then
+    current_node="$(node -v 2>/dev/null || echo 'unknown')"
+  fi
+  echo "Detected host Node.js (${current_node}); installing/upgrading to Node.js ${NODE_LTS_MAJOR}.x LTS (>= ${NODE_LTS_MAJOR}.${NODE_MIN_MINOR}.0)..."
+
+  # Remove legacy Ubuntu conflicting packages (e.g. libnode-dev / nodejs-doc from Node 12/18)
+  if dpkg -l nodejs 2>/dev/null | grep -q '^ii'; then
+    local pkg_ver
+    pkg_ver="$(dpkg-query -W -f='${Version}' nodejs 2>/dev/null || echo '')"
+    if [[ -n "${pkg_ver}" && ! "${pkg_ver}" =~ ^2[2-9]\. ]]; then
+      apt-get remove -y nodejs npm libnode-dev nodejs-doc 2>/dev/null || true
+      apt-get autoremove -y 2>/dev/null || true
+    fi
+  fi
+
+  # Strategy 1: Official NodeSource APT Repository for Node.js 22.x
+  mkdir -p /etc/apt/keyrings 2>/dev/null || true
+  if curl -fsSL --max-time 15 https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor --yes -o /etc/apt/keyrings/nodesource.gpg 2>/dev/null; then
+    chmod a+r /etc/apt/keyrings/nodesource.gpg 2>/dev/null || true
+    echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${NODE_LTS_MAJOR}.x nodistro main" > /etc/apt/sources.list.d/nodesource.list
+    if apt-get update -y && apt-get install -y nodejs; then
+      hash -r 2>/dev/null || true
+    fi
+  else
+    rm -f /etc/apt/sources.list.d/nodesource.list 2>/dev/null || true
+  fi
+
+  # Strategy 2: Direct Official / Mirror Prebuilt Binary Tarball Fallback (if NodeSource is blocked or older than 22.18.0)
+  if ! is_nodejs_lts_ready; then
+    echo "Applying direct binary installation for Node.js v${NODE_FALLBACK_VERSION}..."
+    local arch_raw node_arch
+    arch_raw="$(uname -m)"
+    case "${arch_raw}" in
+      x86_64|amd64) node_arch="x64" ;;
+      aarch64|arm64) node_arch="arm64" ;;
+      *) node_arch="x64" ;;
+    esac
+
+    local tar_name="node-v${NODE_FALLBACK_VERSION}-linux-${node_arch}.tar.xz"
+    local tmp_tar="/tmp/${tar_name}"
+    local dl_urls=(
+      "https://nodejs.org/dist/v${NODE_FALLBACK_VERSION}/${tar_name}"
+      "https://npmmirror.com/mirrors/node/v${NODE_FALLBACK_VERSION}/${tar_name}"
+    )
+
+    local dl_ok="false"
+    local url
+    for url in "${dl_urls[@]}"; do
+      echo "Downloading Node.js binary from: ${url} ..."
+      if curl -fsSL --max-time 60 "${url}" -o "${tmp_tar}"; then
+        dl_ok="true"
+        break
+      fi
+    done
+
+    if [[ "${dl_ok}" == "true" && -s "${tmp_tar}" ]]; then
+      tar -xJf "${tmp_tar}" -C /usr/local --strip-components=1
+      rm -f "${tmp_tar}"
+      ln -sf /usr/local/bin/node /usr/bin/node 2>/dev/null || true
+      ln -sf /usr/local/bin/npm /usr/bin/npm 2>/dev/null || true
+      ln -sf /usr/local/bin/npx /usr/bin/npx 2>/dev/null || true
+      hash -r 2>/dev/null || true
+    else
+      rm -f "${tmp_tar}" 2>/dev/null || true
+    fi
+  fi
+
+  if ! command -v node &>/dev/null; then
+    echo "ERROR: Failed to install Node.js on host." >&2
+    return 1
+  fi
+
+  configure_host_npm_fast_defaults
+  echo "Successfully configured host Node.js $(node -v) and npm $(npm -v 2>/dev/null || echo 'installed')."
+  return 0
+}
+
 # Automatically handles Docker Hub 403 Forbidden (Geo-blocking / Sanctions)
 # ------------------------------------------------------------------------------
 DOCKER_BASE_IMAGE_STATE="${PROJECT_DIR}/.docker-base-image"
@@ -938,7 +1061,15 @@ EOF
 }
 
 prepare_docker_registry_and_base_image() {
-  local target_base="node:20-alpine"
+  local target_base="node:22-alpine"
+
+  # Fast-path: if node:22-alpine is already cached locally, skip network probes and pulls
+  if docker image inspect "${target_base}" >/dev/null 2>&1; then
+    echo "Found cached local Docker base image: ${target_base} (skipping network pull)"
+    printf '%s\n' "${target_base}" > "${DOCKER_BASE_IMAGE_STATE}"
+    chmod 600 "${DOCKER_BASE_IMAGE_STATE}" 2>/dev/null || true
+    return 0
+  fi
 
   # Check direct Docker Hub reachability (401/200 = accessible, 403/000 = blocked/restricted)
   local hub_status
@@ -950,23 +1081,23 @@ prepare_docker_registry_and_base_image() {
     echo "Detected restricted access to Docker Hub (HTTP ${hub_status}). Configuring mirror registries..."
     configure_docker_registry_mirrors
     candidates=(
-      "docker.arvancloud.ir/node:20-alpine"
-      "focker.ir/node:20-alpine"
-      "docker.iranserver.com/node:20-alpine"
-      "mirror.gcr.io/library/node:20-alpine"
-      "public.ecr.aws/docker/library/node:20-alpine"
-      "docker.m.daocloud.io/library/node:20-alpine"
-      "node:20-alpine"
+      "docker.arvancloud.ir/node:22-alpine"
+      "focker.ir/node:22-alpine"
+      "docker.iranserver.com/node:22-alpine"
+      "mirror.gcr.io/library/node:22-alpine"
+      "public.ecr.aws/docker/library/node:22-alpine"
+      "docker.m.daocloud.io/library/node:22-alpine"
+      "node:22-alpine"
     )
   else
     candidates=(
-      "node:20-alpine"
-      "mirror.gcr.io/library/node:20-alpine"
-      "public.ecr.aws/docker/library/node:20-alpine"
-      "docker.arvancloud.ir/node:20-alpine"
-      "focker.ir/node:20-alpine"
-      "docker.iranserver.com/node:20-alpine"
-      "docker.m.daocloud.io/library/node:20-alpine"
+      "node:22-alpine"
+      "mirror.gcr.io/library/node:22-alpine"
+      "public.ecr.aws/docker/library/node:22-alpine"
+      "docker.arvancloud.ir/node:22-alpine"
+      "focker.ir/node:22-alpine"
+      "docker.iranserver.com/node:22-alpine"
+      "docker.m.daocloud.io/library/node:22-alpine"
     )
   fi
 
@@ -1004,7 +1135,7 @@ nameserver 78.157.42.101
 nameserver 8.8.8.8
 EOF
       configure_docker_registry_mirrors
-      for fallback_cand in "node:20-alpine" "docker.arvancloud.ir/node:20-alpine" "focker.ir/node:20-alpine" "public.ecr.aws/docker/library/node:20-alpine"; do
+      for fallback_cand in "node:22-alpine" "docker.arvancloud.ir/node:22-alpine" "focker.ir/node:22-alpine" "public.ecr.aws/docker/library/node:22-alpine"; do
         echo "Retrying pull with anti-sanction DNS from: ${fallback_cand} ..."
         if docker pull "${fallback_cand}"; then
           resolved_img="${fallback_cand}"
@@ -1022,7 +1153,7 @@ EOF
   fi
 
   if [[ -z "${resolved_img}" ]] && ! docker image inspect "${target_base}" >/dev/null 2>&1; then
-    echo "ERROR: Could not pull node:20-alpine from any mirror or Docker Hub." >&2
+    echo "ERROR: Could not pull node:22-alpine from any mirror or Docker Hub." >&2
     return 1
   fi
 
@@ -1039,12 +1170,12 @@ build_hsecore_production_image() {
     return 1
   fi
 
-  local resolved_base="node:20-alpine"
+  local resolved_base="node:22-alpine"
   if [[ -f "${DOCKER_BASE_IMAGE_STATE}" ]]; then
     resolved_base="$(head -n 1 "${DOCKER_BASE_IMAGE_STATE}" | tr -d '[:space:]')"
   fi
-  if [[ -z "${resolved_base}" ]]; then
-    resolved_base="node:20-alpine"
+  if [[ -z "${resolved_base}" || "${resolved_base}" == *"node:20-alpine"* ]]; then
+    resolved_base="node:22-alpine"
   fi
 
   export NODE_BASE_IMAGE="${resolved_base}"
@@ -1057,13 +1188,14 @@ build_hsecore_production_image() {
     hse-app; then
     echo "Docker Compose build succeeded."
   else
-    echo "Standard BuildKit build encountered an issue; retrying with classic Docker builder (DOCKER_BUILDKIT=0) using local node:20-alpine cache..."
+    echo "Standard BuildKit build encountered an issue; retrying with classic Docker builder (DOCKER_BUILDKIT=0) using local node:22-alpine cache..."
     DOCKER_BUILDKIT=0 COMPOSE_DOCKER_CLI_BUILD=0 docker build \
+      --network=host \
       -f Dockerfile.prod \
       -t hsecore-enterprise:latest \
-      --build-arg NODE_BASE_IMAGE="node:20-alpine" \
+      --build-arg NODE_BASE_IMAGE="node:22-alpine" \
       --build-arg APP_VERSION="${INSTALLER_VERSION}" \
-      .
+      . || return 1
   fi
 
   # Ensure both hsecore-enterprise:latest and legacy project-scoped tags exist
@@ -1074,6 +1206,10 @@ build_hsecore_production_image() {
       docker tag hsecore-enterprise:latest "${proj_name}-hse-app:latest" 2>/dev/null || true
     fi
     docker tag hsecore-enterprise:latest "hsecore-hse-app:latest" 2>/dev/null || true
+    return 0
+  else
+    echo "ERROR: Docker image hsecore-enterprise:latest was not created." >&2
+    return 1
   fi
 }
 
@@ -1131,14 +1267,21 @@ step1_system_check() {
     log_warn "Network: Limited external connectivity detected."
   fi
 
-  # 5. Docker Status
+  # 5. Node.js Runtime Status
+  local node_status="Not Installed"
+  if command -v node &>/dev/null; then
+    node_status="$(node -v 2>/dev/null || echo 'Installed')"
+  fi
+  tui_print_completed_task "Node.js Runtime Status (${node_status})" 0 "78%"
+
+  # 6. Docker Status
   local docker_status="Not Installed"
   if command -v docker &>/dev/null; then
     docker_status="$(docker --version 2>/dev/null || echo 'Installed')"
   fi
-  tui_print_completed_task "Docker Engine Status (${docker_status})" 0 "83%"
+  tui_print_completed_task "Docker Engine Status (${docker_status})" 0 "90%"
 
-  # 6. PostgreSQL Server Package Status
+  # 7. PostgreSQL Server Package Status
   local pg_status="Not Installed"
   if dpkg -l postgresql 2>/dev/null | grep -q '^ii'; then
     pg_status="$(psql --version 2>/dev/null | head -n1 || echo 'Installed (dpkg ii)')"
@@ -1149,10 +1292,10 @@ step1_system_check() {
 }
 
 # ==============================================================================
-# مرحله 2 — Install Dependencies (Including Nginx, Certbot & SSL tools)
+# مرحله 2 — Install Dependencies & Node.js LTS (Including Nginx, Certbot & SSL)
 # ==============================================================================
 step2_install_dependencies() {
-  step_header 2 "Install Dependencies"
+  step_header 2 "Install Dependencies & Node.js LTS"
 
   export DEBIAN_FRONTEND=noninteractive
 
@@ -1178,7 +1321,13 @@ step2_install_dependencies() {
       net-tools \
       procps \
       psmisc \
+      xz-utils \
       postgresql-client
+
+  tui_run_task \
+    "Installing / upgrading Node.js ${NODE_LTS_MAJOR}.x LTS (>= ${NODE_LTS_MAJOR}.${NODE_MIN_MINOR}.0) & npm on host" \
+    "Check internet access to deb.nodesource.com or nodejs.org." \
+    ensure_nodejs_lts
 
   # Preemptively disable conflicting Apache2 if present on VPS
   if systemctl is-active --quiet apache2 2>/dev/null || systemctl is-enabled --quiet apache2 2>/dev/null; then
@@ -2090,9 +2239,31 @@ step10_build_docker_images() {
   step_header 10 "Build HSECORE Docker Images"
 
   cd "${PROJECT_DIR}"
+  load_answers_cache
+
+  # Auto-heal legacy unquoted ':?' error colons in compose YAML files if present
+  local dc_file
+  for dc_file in "${PROJECT_DIR}/docker-compose.server.yml" "${PROJECT_DIR}/docker-compose.yml"; do
+    if [[ -f "${dc_file}" ]] && grep -q ':\?Error:' "${dc_file}" 2>/dev/null; then
+      sed -i -E \
+        -e 's/:\?Error:[[:space:]]*/:?/g' \
+        -e 's/^[[:space:]]*POSTGRES_DB:[[:space:]]*(.*)$/      - "POSTGRES_DB=\1"/' \
+        -e 's/^[[:space:]]*POSTGRES_USER:[[:space:]]*(.*)$/      - "POSTGRES_USER=\1"/' \
+        -e 's/^[[:space:]]*POSTGRES_PASSWORD:[[:space:]]*(.*)$/      - "POSTGRES_PASSWORD=\1"/' \
+        "${dc_file}" 2>/dev/null || true
+    fi
+  done
+
+  # Ensure host Node.js 22 LTS is installed/updated (covers --resume from step 10)
+  if ! is_nodejs_lts_ready; then
+    tui_run_task \
+      "Installing / upgrading host Node.js ${NODE_LTS_MAJOR}.x LTS (>= ${NODE_LTS_MAJOR}.${NODE_MIN_MINOR}.0)" \
+      "Check internet access to deb.nodesource.com or nodejs.org." \
+      ensure_nodejs_lts
+  fi
 
   tui_run_task \
-    "Configuring Docker registry mirrors & resolving base image (node:20-alpine)" \
+    "Configuring Docker registry mirrors & resolving base image (node:22-alpine)" \
     "Check internet/DNS connectivity or configure /etc/docker/daemon.json registry-mirrors." \
     prepare_docker_registry_and_base_image
 
@@ -2119,13 +2290,17 @@ step11_run_database_migration() {
   cd "${PROJECT_DIR}"
   load_answers_cache
 
+  if ! docker image inspect hsecore-enterprise:latest >/dev/null 2>&1; then
+    tui_run_task \
+      "Building missing HSECORE production image before migration" \
+      "Rebuild the container image via: sudo ./install.sh --step 10" \
+      build_hsecore_production_image
+  fi
+
   tui_run_task \
     "Verifying built bundle artifacts (diagnose-db.cjs & server.cjs)" \
     "Rebuild the container image via: sudo ./install.sh --step 10" \
-    bash -c "
-      docker compose -f docker-compose.server.yml run --rm --no-deps hse-app test -f ./dist/diagnose-db.cjs &&
-      docker compose -f docker-compose.server.yml run --rm --no-deps hse-app test -f ./dist/server.cjs
-    "
+    docker compose -f docker-compose.server.yml run --rm --no-deps hse-app sh -c "test -f ./dist/diagnose-db.cjs && test -f ./dist/server.cjs"
 
   tui_run_task \
     "Running end-to-end database diagnostic from inside container" \
@@ -3753,7 +3928,13 @@ run_system_update() {
   if ! systemctl is-active --quiet postgresql 2>/dev/null; then
     systemctl start postgresql 2>/dev/null || true
   fi
-  tui_print_completed_task "[2/7] Verified Docker & PostgreSQL system services" 0 "28%"
+  if ! is_nodejs_lts_ready; then
+    tui_run_task \
+      "[2/7] Installing / upgrading host Node.js ${NODE_LTS_MAJOR}.x LTS (>= ${NODE_LTS_MAJOR}.${NODE_MIN_MINOR}.0)" \
+      "Check internet access to deb.nodesource.com or nodejs.org." \
+      ensure_nodejs_lts
+  fi
+  tui_print_completed_task "[2/7] Verified Docker, PostgreSQL & Node.js ($(node -v 2>/dev/null || echo 'LTS')) services" 0 "28%"
 
   # 3. Git Pull (if git repository is present)
   if [[ -d "${PROJECT_DIR}/.git" ]]; then
@@ -3770,7 +3951,7 @@ run_system_update() {
 
   # 4. Rebuild Docker Image
   tui_run_task \
-    "[4/7] Configuring Docker registry mirrors & resolving base image (node:20-alpine)" \
+    "[4/7] Configuring Docker registry mirrors & resolving base image (node:22-alpine)" \
     "Check internet/DNS connectivity or configure /etc/docker/daemon.json registry-mirrors." \
     prepare_docker_registry_and_base_image
 

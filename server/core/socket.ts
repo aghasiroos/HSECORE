@@ -40,7 +40,7 @@ class SocketService {
     });
 
     this.io.on('connection', (socket: Socket) => {
-      logger.info(`WebSocket connected: ${socket.id}`);
+      logger.debug(`WebSocket connected: ${socket.id}`);
 
       // Optional: Store user ID if sent via auth payload
       const userId = socket.handshake.auth?.userId;
@@ -49,7 +49,7 @@ class SocketService {
       }
 
       socket.on('disconnect', () => {
-        logger.info(`WebSocket disconnected: ${socket.id}`);
+        logger.debug(`WebSocket disconnected: ${socket.id}`);
         this.connectedUsers.delete(socket.id);
       });
 

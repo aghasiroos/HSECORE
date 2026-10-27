@@ -47,6 +47,7 @@ export class NotificationRepository {
           read: isRead,
           requiresAck: !!r.requiresAck,
           acknowledgedBy: ackList,
+          sirenType: (r.metadata as any)?.sirenType || (r.priority === 'critical' || r.category === 'critical_hse' ? 'siren_evacuation' : undefined),
           metadata: (r.metadata as Record<string, any>) || undefined,
           createdAt: r.createdAt ? r.createdAt.toISOString() : new Date().toISOString(),
         };
@@ -93,6 +94,7 @@ export class NotificationRepository {
         read: ((record.readBy as string[]) || []).length > 0,
         requiresAck: !!record.requiresAck,
         acknowledgedBy: (record.acknowledgedBy as any[]) || [],
+        sirenType: (record.metadata as any)?.sirenType || (record.priority === 'critical' || record.category === 'critical_hse' ? 'siren_evacuation' : undefined),
         metadata: (record.metadata as Record<string, any>) || undefined,
         createdAt: record.createdAt.toISOString(),
       };

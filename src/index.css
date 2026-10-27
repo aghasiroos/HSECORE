@@ -594,4 +594,34 @@ input, select, textarea {
   background-color: rgba(127, 29, 29, 0.2) !important;
 }
 
+/* ==========================================================================
+   Leaflet GIS Map Integrity (RTL Isolation & Full Viewport Tile Rendering)
+   ========================================================================== */
+.leaflet-container {
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 100%;
+  direction: ltr !important;
+  text-align: left !important;
+  font-family: var(--font-sans);
+  z-index: 0;
+}
 
+.leaflet-container img.leaflet-tile,
+.leaflet-container .leaflet-tile-pane img,
+.leaflet-container .leaflet-marker-icon,
+.leaflet-container .leaflet-marker-shadow {
+  max-width: none !important;
+  max-height: none !important;
+  width: 256px;
+  height: 256px;
+}
+
+.custom-active-marker,
+.custom-site-marker,
+.custom-worker-marker,
+.custom-incident-marker,
+.custom-wind-marker {
+  background: transparent !important;
+  border: none !important;
+}

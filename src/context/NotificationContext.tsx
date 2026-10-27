@@ -6,6 +6,7 @@ import {
   DEFAULT_PREFERENCES,
 } from '../services/notificationService';
 import { useWebSocket } from '../providers/WebSocketProvider';
+import { stopSirenLoop } from '../utils/notificationAudio';
 import { UserProfile } from '../types';
 
 interface NotificationContextType {
@@ -188,13 +189,54 @@ export const NotificationProvider: React.FC<{
     }
   }, [currentUser?.id, refreshNotifications]);
 
+  // Helper to determine if current user is part of target audience
+  const isTargetUser = useCallback(
+    (notif: AppNotification) => {
+      if (!currentUser) return true;
+      const targetType = notif.targetType || 'all';
+      if (targetType === 'all') return true;
+      const values = notif.targetValues || [];
+      if (values.length === 0) return true;
+
+      if (targetType === 'roles') {
+        const uRole = (currentUser.role || '').toLowerCase();
+        return values.some((v) => v.toLowerCase() === uRole);
+      }
+      if (targetType === 'departments') {
+        const uDeptIds = currentUser.departmentIds || [];
+        const singleDept = (currentUser as any).departmentId || (currentUser as any).department || '';
+        return values.some(
+          (v) =>
+            uDeptIds.some((d) => String(d).toLowerCase() === String(v).toLowerCase()) ||
+            (singleDept && String(singleDept).toLowerCase() === String(v).toLowerCase())
+        );
+      }
+      if (targetType === 'single' || targetType === 'user' || targetType === 'users') {
+        const uid = String(currentUser.id || '');
+        const uname = (currentUser.username || '').toLowerCase();
+        return values.some(
+          (v) => String(v).toLowerCase() === uid.toLowerCase() || String(v).toLowerCase() === uname
+        );
+      }
+      return true;
+    },
+    [currentUser]
+  );
+
   // Listen for real-time WebSocket events and browser custom events
   useEffect(() => {
     if (!socket) return;
 
     const handleSocketAlert = (newNotif: AppNotification) => {
-      // 1. Play sound based on user preferences
-      CentralNotificationService.playAlertSound(newNotif.category, newNotif.priority);
+      // Check if current user is within the target audience of this alert
+      if (!isTargetUser(newNotif)) {
+        return;
+      }
+
+      const siren = newNotif.sirenType || newNotif.metadata?.sirenType;
+
+      // 1. Play sound based on user preferences and selected siren
+      CentralNotificationService.playAlertSound(newNotif.category, newNotif.priority, siren);
 
       // 2. Add to notification list
       setNotifications((prev) => [newNotif, ...prev.filter((n) => n.notifId !== newNotif.notifId)]);
@@ -233,7 +275,7 @@ export const NotificationProvider: React.FC<{
     return () => {
       socket.off('notification_alert', handleSocketAlert);
     };
-  }, [socket, preferences]);
+  }, [socket, preferences, isTargetUser]);
 
   // Listen for local system events
   useEffect(() => {
@@ -276,6 +318,7 @@ export const NotificationProvider: React.FC<{
   }, [activePopupAlert, popupQueue]);
 
   const closePopup = useCallback(() => {
+    stopSirenLoop();
     if (activePopupAlert) {
       // Mark as dismissed for session
       setDismissedPopupIds((prev) => new Set(prev).add(activePopupAlert.notifId));
@@ -285,6 +328,7 @@ export const NotificationProvider: React.FC<{
   }, [activePopupAlert]);
 
   const dismissPopup = useCallback((notifId: string) => {
+    stopSirenLoop();
     setDismissedPopupIds((prev) => new Set(prev).add(notifId));
     setPopupQueue((prev) => prev.filter((p) => p.notifId !== notifId));
     if (activePopupAlert?.notifId === notifId) {

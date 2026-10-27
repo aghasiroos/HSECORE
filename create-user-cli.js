@@ -76,7 +76,7 @@ async function main() {
 
     username = normalizeDigits(username).toLowerCase().trim();
     const cleanPassword = normalizeDigits(password);
-    const hash = bcrypt.hashSync(cleanPassword, 12);
+    const hash = bcrypt.hashSync(cleanPassword, 10);
     const isAdmin = role.toLowerCase().includes('admin') || role.includes('مدیرارشد') || role.includes('مدیرسیستم');
     const perms = isAdmin ? JSON.stringify({ all: true }) : JSON.stringify({
       Dashboard: { view: true },

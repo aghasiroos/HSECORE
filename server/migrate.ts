@@ -43,10 +43,7 @@ export async function runMigrations() {
     // 2. Ensure schema privileges if admin credentials exist
     await ensureSchemaPrivileges();
 
-    // 3. Ensure all table columns and custom tables exist in پایگاه داده
-    await ensureSchemaColumnsAndTables();
-
-    // 4. Check if migrations directory exists
+    // 3. Apply Drizzle SQL migrations first so core tables exist before column/index verification
     const migrationsFolder = path.resolve(process.cwd(), 'drizzle');
     if (fs.existsSync(migrationsFolder)) {
       try {
@@ -63,6 +60,9 @@ export async function runMigrations() {
     } else {
       console.log('[Migration] Database connected successfully.');
     }
+
+    // 4. Ensure all table columns and custom tables exist in پایگاه داده
+    await ensureSchemaColumnsAndTables();
 
     // 5. Ensure high-performance composite and lookup indexes
     await ensurePerformanceIndexes();
@@ -95,31 +95,28 @@ async function ensureSchemaColumnsAndTables() {
     console.warn('[Migration] work_permits table creation notice:', err?.message || err);
   }
 
-  // 2. Ensure missing work_permits columns exist
-  const alterColumns = [
-    `ALTER TABLE work_permits ADD COLUMN IF NOT EXISTS company_id INTEGER;`,
-    `ALTER TABLE work_permits ADD COLUMN IF NOT EXISTS unit_id INTEGER;`,
-    `ALTER TABLE work_permits ADD COLUMN IF NOT EXISTS description TEXT;`,
-    `ALTER TABLE work_permits ADD COLUMN IF NOT EXISTS hazards JSONB;`,
-    `ALTER TABLE work_permits ADD COLUMN IF NOT EXISTS precautions JSONB;`,
-    `ALTER TABLE work_permits ADD COLUMN IF NOT EXISTS issuer_id INTEGER;`,
-    `ALTER TABLE work_permits ADD COLUMN IF NOT EXISTS acceptor_id INTEGER;`,
-    `ALTER TABLE work_permits ADD COLUMN IF NOT EXISTS contractor_name TEXT;`,
-    `ALTER TABLE work_permits ADD COLUMN IF NOT EXISTS worker_count INTEGER DEFAULT 1;`,
-    `ALTER TABLE work_permits ADD COLUMN IF NOT EXISTS equipment_list TEXT;`,
-    `ALTER TABLE work_permits ADD COLUMN IF NOT EXISTS parent_permit_number TEXT;`,
-    `ALTER TABLE work_permits ADD COLUMN IF NOT EXISTS permit_category TEXT;`,
-    `ALTER TABLE work_permits ADD COLUMN IF NOT EXISTS sequence_number INTEGER;`,
-    `ALTER TABLE work_permits ADD COLUMN IF NOT EXISTS jalali_year INTEGER;`,
-    `ALTER TABLE work_permits ADD COLUMN IF NOT EXISTS form_data JSONB;`
-  ];
-
-  for (const colStmt of alterColumns) {
-    try {
-      await db.execute(sql.raw(colStmt));
-    } catch (colErr: any) {
-      console.warn('[Migration] Column alter notice:', colStmt, colErr?.message);
-    }
+  // 2. Ensure missing work_permits columns exist in a single batched round-trip
+  try {
+    await db.execute(sql`
+      ALTER TABLE work_permits
+        ADD COLUMN IF NOT EXISTS company_id INTEGER,
+        ADD COLUMN IF NOT EXISTS unit_id INTEGER,
+        ADD COLUMN IF NOT EXISTS description TEXT,
+        ADD COLUMN IF NOT EXISTS hazards JSONB,
+        ADD COLUMN IF NOT EXISTS precautions JSONB,
+        ADD COLUMN IF NOT EXISTS issuer_id INTEGER,
+        ADD COLUMN IF NOT EXISTS acceptor_id INTEGER,
+        ADD COLUMN IF NOT EXISTS contractor_name TEXT,
+        ADD COLUMN IF NOT EXISTS worker_count INTEGER DEFAULT 1,
+        ADD COLUMN IF NOT EXISTS equipment_list TEXT,
+        ADD COLUMN IF NOT EXISTS parent_permit_number TEXT,
+        ADD COLUMN IF NOT EXISTS permit_category TEXT,
+        ADD COLUMN IF NOT EXISTS sequence_number INTEGER,
+        ADD COLUMN IF NOT EXISTS jalali_year INTEGER,
+        ADD COLUMN IF NOT EXISTS form_data JSONB;
+    `);
+  } catch (colErr: any) {
+    console.warn('[Migration] Column alter notice:', colErr?.message);
   }
 
   // 3. Ensure permit_number_counters table & indexes
@@ -467,7 +464,7 @@ async function seedDefaultAdminIfMissing() {
         (process.env.NODE_ENV === 'production'
           ? crypto.randomBytes(12).toString('base64url')
           : 'admin123');
-      const passwordHash = bcrypt.hashSync(defaultPassword, 12);
+      const passwordHash = bcrypt.hashSync(defaultPassword, 10);
       await db
         .insert(users)
         .values({
@@ -524,11 +521,15 @@ async function ensurePerformanceIndexes() {
     `CREATE INDEX IF NOT EXISTS idx_notifications_is_deleted ON notifications(is_deleted);`
   ];
 
-  for (const statement of indexStatements) {
-    try {
-      await db.execute(sql.raw(statement));
-    } catch {
-      // Ignore if table not yet created or index exists
+  try {
+    await db.execute(sql.raw(indexStatements.join('\n')));
+  } catch {
+    for (const statement of indexStatements) {
+      try {
+        await db.execute(sql.raw(statement));
+      } catch {
+        // Ignore if table not yet created or index exists
+      }
     }
   }
 }

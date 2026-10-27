@@ -11,7 +11,8 @@ import {
   Sparkles, 
   Globe, 
   RotateCcw,
-  CalendarDays
+  CalendarDays,
+  Keyboard
 } from 'lucide-react';
 import {
   parseDateString,
@@ -23,6 +24,7 @@ import {
   formatJalaliFullText,
   formatGregorianFullText,
   jalaliToGregorian,
+  toEnglishDigits,
   JALALI_MONTH_NAMES_FA,
   PERSIAN_WEEK_DAYS_FA,
   getDualDateDisplay
@@ -48,6 +50,8 @@ export interface PersianDatePickerProps {
   showGregorianPreview?: boolean;
   minDate?: string;
   maxDate?: string;
+  minYear?: number;
+  maxYear?: number;
   allowManualInput?: boolean;
   id?: string;
 }
@@ -67,26 +71,33 @@ export default function PersianDatePicker({
   className = '',
   inputClassName = '',
   showGregorianPreview = true,
-  minDate,
-  maxDate,
+  minYear = 1320,
+  maxYear,
   allowManualInput = true,
   id
 }: PersianDatePickerProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('days');
-  
+  const [isInputFocused, setIsInputFocused] = useState(false);
+
   const containerRef = useRef<HTMLDivElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const selectedYearBtnRef = useRef<HTMLButtonElement>(null);
 
   // Parse current value
   const parsedValue = useMemo(() => parseDateString(value), [value]);
   const todayObj = useMemo(() => getTodayJalaliObj(), []);
 
+  const effectiveMinYear = minYear || 1320;
+  const effectiveMaxYear = maxYear ?? todayObj.jy;
+
   // View state (which month/year is currently being viewed)
-  const [viewYear, setViewYear] = useState<number>(parsedValue.jalali?.jy || todayObj.jy);
+  const [viewYear, setViewYear] = useState<number>(() => {
+    const initialY = parsedValue.jalali?.jy || todayObj.jy;
+    return Math.min(Math.max(initialY, effectiveMinYear), Math.max(effectiveMaxYear, todayObj.jy));
+  });
   const [viewMonth, setViewMonth] = useState<number>(parsedValue.jalali?.jm || todayObj.jm); // 1-12
-  const [decadeStart, setDecadeStart] = useState<number>(() => Math.floor((parsedValue.jalali?.jy || todayObj.jy) / 12) * 12);
 
   // Time state (HH:mm)
   const [timeStr, setTimeStr] = useState<string>(() => {
@@ -101,17 +112,30 @@ export default function PersianDatePicker({
   const [inputText, setInputText] = useState<string>(value || '');
   const [isHovered, setIsHovered] = useState(false);
 
-  // Update decadeStart whenever viewYear changes significantly
-  useEffect(() => {
-    if (viewYear < decadeStart || viewYear >= decadeStart + 12) {
-      setDecadeStart(Math.floor(viewYear / 12) * 12);
+  // Full list of selectable years (from effectiveMaxYear down to effectiveMinYear, e.g. current year down to 1320)
+  const allYearsDesc = useMemo(() => {
+    const start = Math.max(effectiveMinYear, effectiveMaxYear);
+    const end = Math.min(effectiveMinYear, effectiveMaxYear);
+    const list: number[] = [];
+    for (let y = start; y >= end; y--) {
+      list.push(y);
     }
-  }, [viewYear]);
+    return list;
+  }, [effectiveMinYear, effectiveMaxYear]);
 
-  // Sync internal view when value prop changes
+  // Auto-scroll to currently active year when opening years grid
+  useEffect(() => {
+    if (isOpen && viewMode === 'years' && selectedYearBtnRef.current) {
+      selectedYearBtnRef.current.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+  }, [isOpen, viewMode]);
+
+  // Sync internal view when value prop changes externally (do NOT overwrite while user is typing)
   useEffect(() => {
     if (value) {
-      setInputText(value);
+      if (!isInputFocused) {
+        setInputText(value);
+      }
       const p = parseDateString(value);
       if (p.jalali) {
         setViewYear(p.jalali.jy);
@@ -120,17 +144,17 @@ export default function PersianDatePicker({
       if (p.time) {
         setTimeStr(p.time);
       }
-    } else {
+    } else if (!isInputFocused) {
       setInputText('');
     }
-  }, [value]);
+  }, [value, isInputFocused]);
 
   // Responsive and smart positioning for popup portal
   const updatePosition = () => {
     if (containerRef.current) {
       const rect = containerRef.current.getBoundingClientRect();
       const popoverWidth = 340;
-      const popoverHeight = includeTime ? 490 : 430;
+      const popoverHeight = includeTime ? 500 : 440;
 
       const spaceBelow = window.innerHeight - rect.bottom;
       const shouldOpenUp = spaceBelow < popoverHeight && rect.top > popoverHeight;
@@ -203,8 +227,9 @@ export default function PersianDatePicker({
   // Navigate months
   const handlePrevMonth = () => {
     if (viewMonth === 1) {
+      const prevY = Math.max(effectiveMinYear, viewYear - 1);
       setViewMonth(12);
-      setViewYear(prev => prev - 1);
+      setViewYear(prevY);
     } else {
       setViewMonth(prev => prev - 1);
     }
@@ -212,8 +237,9 @@ export default function PersianDatePicker({
 
   const handleNextMonth = () => {
     if (viewMonth === 12) {
+      const nextY = Math.min(effectiveMaxYear, viewYear + 1);
       setViewMonth(1);
-      setViewYear(prev => prev + 1);
+      setViewYear(nextY);
     } else {
       setViewMonth(prev => prev + 1);
     }
@@ -221,8 +247,12 @@ export default function PersianDatePicker({
 
   // Select day handler
   const handleSelectDay = (dayNum: number, targetMonth = viewMonth, targetYear = viewYear) => {
-    const jStr = formatJalaliString(targetYear, targetMonth, dayNum);
-    const gObj = jalaliToGregorian(targetYear, targetMonth, dayNum);
+    const clampedYear = Math.min(Math.max(targetYear, effectiveMinYear), effectiveMaxYear);
+    const maxDays = getJalaliMonthDaysCount(clampedYear, targetMonth);
+    const clampedDay = Math.min(Math.max(dayNum, 1), maxDays);
+
+    const jStr = formatJalaliString(clampedYear, targetMonth, clampedDay);
+    const gObj = jalaliToGregorian(clampedYear, targetMonth, clampedDay);
     const gStr = formatGregorianString(gObj.gy, gObj.gm, gObj.gd);
 
     let finalJalali = jStr;
@@ -252,10 +282,11 @@ export default function PersianDatePicker({
 
   // Jump to today
   const handleSelectToday = () => {
-    setViewYear(todayObj.jy);
+    const targetY = Math.min(Math.max(todayObj.jy, effectiveMinYear), effectiveMaxYear);
+    setViewYear(targetY);
     setViewMonth(todayObj.jm);
     setViewMode('days');
-    handleSelectDay(todayObj.jd, todayObj.jm, todayObj.jy);
+    handleSelectDay(todayObj.jd, todayObj.jm, targetY);
   };
 
   // Clear date
@@ -270,19 +301,33 @@ export default function PersianDatePicker({
     });
   };
 
-  // Handle manual typing
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!allowManualInput) return;
-    const txt = e.target.value;
-    setInputText(txt);
+  // Commit / normalize manual date entry
+  const commitManualInput = (rawText: string, normalizeFieldText: boolean) => {
+    const clean = toEnglishDigits(rawText.trim());
+    if (!clean) {
+      onChange?.('', '', {
+        shamsi: '',
+        miladi: '',
+        time: '',
+        rawDate: new Date()
+      });
+      return;
+    }
 
-    const parsed = parseDateString(txt);
+    const parsed = parseDateString(clean);
     if (parsed.jalali && parsed.gregorian) {
-      const jStr = formatJalaliString(parsed.jalali.jy, parsed.jalali.jm, parsed.jalali.jd);
-      const gStr = formatGregorianString(parsed.gregorian.gy, parsed.gregorian.gm, parsed.gregorian.gd);
+      const clampedY = Math.min(Math.max(parsed.jalali.jy, effectiveMinYear), effectiveMaxYear);
+      const jm = Math.min(12, Math.max(1, parsed.jalali.jm));
+      const maxD = getJalaliMonthDaysCount(clampedY, jm);
+      const jd = Math.min(maxD, Math.max(1, parsed.jalali.jd));
+
+      const jStr = formatJalaliString(clampedY, jm, jd);
+      const gObj = jalaliToGregorian(clampedY, jm, jd);
+      const gStr = formatGregorianString(gObj.gy, gObj.gm, gObj.gd);
+
       let finalJalali = jStr;
       let finalGregorian = gStr;
-      const dateObj = new Date(parsed.gregorian.gy, parsed.gregorian.gm - 1, parsed.gregorian.gd);
+      const dateObj = new Date(gObj.gy, gObj.gm - 1, gObj.gd);
 
       if (includeTime && parsed.time) {
         const [h, m] = parsed.time.split(':').map(n => parseInt(n, 10) || 0);
@@ -291,21 +336,62 @@ export default function PersianDatePicker({
         finalGregorian = `${gStr}T${parsed.time}:00`;
       }
 
-      setViewYear(parsed.jalali.jy);
-      setViewMonth(parsed.jalali.jm);
+      setViewYear(clampedY);
+      setViewMonth(jm);
+
+      if (normalizeFieldText) {
+        setInputText(finalJalali);
+      }
+
       onChange?.(finalJalali, finalGregorian, {
         shamsi: finalJalali,
         miladi: finalGregorian,
         time: parsed.time || timeStr,
         rawDate: dateObj
       });
-    } else if (!txt.trim()) {
+    }
+  };
+
+  // Handle manual typing without interrupting incomplete strokes
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!allowManualInput) return;
+    const raw = e.target.value;
+    setInputText(raw);
+
+    const eng = toEnglishDigits(raw.trim());
+    if (!eng) {
       onChange?.('', '', {
         shamsi: '',
         miladi: '',
         time: '',
         rawDate: new Date()
       });
+      return;
+    }
+
+    // Only auto-emit while typing if user completed a full date (e.g. YYYY/MM/DD or 8 digits YYYYMMDD)
+    const isCompletePattern =
+      /^\d{4}[/.-]\d{1,2}[/.-]\d{2}(\s+\d{1,2}:\d{2})?$/.test(eng) ||
+      /^\d{8}$/.test(eng);
+
+    if (isCompletePattern) {
+      commitManualInput(eng, /^\d{8}$/.test(eng));
+    }
+  };
+
+  const handleInputBlur = () => {
+    setIsInputFocused(false);
+    if (allowManualInput && inputText.trim()) {
+      commitManualInput(inputText, true);
+    }
+  };
+
+  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && allowManualInput) {
+      e.preventDefault();
+      commitManualInput(inputText, true);
+      setIsOpen(false);
+      setViewMode('days');
     }
   };
 
@@ -421,15 +507,6 @@ export default function PersianDatePicker({
     return `${formatGregorianFullText(gStart.gy, gStart.gm, gStart.gd)} — ${formatGregorianFullText(gEnd.gy, gEnd.gm, gEnd.gd)}`;
   }, [viewYear, viewMonth]);
 
-  // Decade years array
-  const decadeYears = useMemo(() => {
-    const list: number[] = [];
-    for (let y = decadeStart; y < decadeStart + 12; y++) {
-      list.push(y);
-    }
-    return list;
-  }, [decadeStart]);
-
   return (
     <div 
       ref={containerRef} 
@@ -453,29 +530,34 @@ export default function PersianDatePicker({
         </label>
       )}
 
-      {/* Input Field */}
+      {/* Input Field (supports both direct manual typing and calendar popup) */}
       <div className="relative flex items-center w-full group">
-        <div 
+        <button
+          type="button"
           onClick={() => {
             if (!disabled) {
               setIsOpen(prev => !prev);
               setViewMode('days');
             }
           }}
-          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 group-hover:text-blue-500 transition cursor-pointer p-0.5"
-          title={isFa ? 'باز کردن تقویم شمسی' : 'Open Calendar'}
+          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-blue-600 transition cursor-pointer p-1 rounded-lg hover:bg-blue-50 dark:hover:bg-slate-700"
+          title={isFa ? 'باز کردن تقویم شمسی (انتخاب سال و تاریخ)' : 'Open Calendar'}
         >
           <CalendarIcon className="w-4 h-4" />
-        </div>
+        </button>
 
         <input
           ref={inputRef}
           type="text"
           id={id}
+          dir="ltr"
           value={inputText}
           onChange={handleInputChange}
+          onFocus={() => setIsInputFocused(true)}
+          onBlur={handleInputBlur}
+          onKeyDown={handleInputKeyDown}
           onClick={() => {
-            if (!disabled) {
+            if (!disabled && !isOpen) {
               setIsOpen(true);
               setViewMode('days');
             }
@@ -483,8 +565,8 @@ export default function PersianDatePicker({
           disabled={disabled}
           required={required}
           readOnly={!allowManualInput}
-          placeholder={placeholder || (includeTime ? (isFa ? '۱۴۰۵/۰۶/۰۴ ۰۸:۳۰' : 'YYYY/MM/DD HH:mm') : (isFa ? '۱۴۰۵/۰۶/۰۴' : 'YYYY/MM/DD'))}
-          className={`w-full pr-9 pl-14 py-2 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-mono font-bold text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition disabled:opacity-50 disabled:cursor-not-allowed ${inputClassName}`}
+          placeholder={placeholder || (includeTime ? (isFa ? '1405/06/04 08:30' : 'YYYY/MM/DD HH:mm') : (isFa ? '1365/04/15 (تایپ دستی یا انتخاب از تقویم)' : 'YYYY/MM/DD'))}
+          className={`w-full pr-9 pl-16 py-2 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-mono font-bold text-right text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition disabled:opacity-50 disabled:cursor-not-allowed ${inputClassName}`}
         />
 
         {/* Quick action buttons on input */}
@@ -493,24 +575,25 @@ export default function PersianDatePicker({
             <button
               type="button"
               onClick={handleClear}
-              className="p-1 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-slate-200 dark:hover:bg-slate-700 transition"
+              className="p-1 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-slate-200 dark:hover:bg-slate-700 transition cursor-pointer"
               title={isFa ? 'پاک کردن تاریخ' : 'Clear'}
             >
               <X className="w-3.5 h-3.5" />
             </button>
           )}
 
-          {!inputText && !disabled && (
+          {!disabled && (
             <button
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                handleSelectToday();
+                setIsOpen(true);
+                setViewMode('years');
               }}
-              className="px-1.5 py-0.5 text-[9px] font-black bg-blue-100 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 rounded border border-blue-300 dark:border-blue-700/50 hover:bg-blue-200 transition"
-              title={isFa ? 'ثبت سریع تاریخ امروز' : 'Today'}
+              className="px-1.5 py-0.5 text-[9px] font-black bg-blue-100 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 rounded border border-blue-300 dark:border-blue-700/50 hover:bg-blue-200 transition cursor-pointer"
+              title={isFa ? `انتخاب سریع سال (${effectiveMinYear} تا ${effectiveMaxYear})` : 'Select Year'}
             >
-              {isFa ? 'امروز' : 'Today'}
+              {isFa ? 'انتخاب سال' : 'Year'}
             </button>
           )}
         </div>
@@ -532,12 +615,12 @@ export default function PersianDatePicker({
         </div>
       )}
 
-      {/* REDESIGNED MINIMAL & BEAUTIFUL POPUP CALENDAR */}
+      {/* POPUP CALENDAR */}
       {isOpen && createPortal(
         <div 
           ref={popoverRef}
           onClick={(e) => e.stopPropagation()}
-          className="w-[325px] sm:w-[340px] bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl shadow-2xl shadow-slate-900/15 p-4 space-y-3.5 animate-in fade-in zoom-in-95 backdrop-blur-md select-none text-right"
+          className="w-[330px] sm:w-[350px] bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl shadow-2xl shadow-slate-900/15 p-4 space-y-3 animate-in fade-in zoom-in-95 backdrop-blur-md select-none text-right"
           style={popoverStyle}
           dir="rtl"
         >
@@ -556,7 +639,7 @@ export default function PersianDatePicker({
                 <div className="text-[10px] font-mono text-slate-400 dark:text-slate-500 dir-ltr text-right truncate">
                   {parsedValue.gregorian 
                     ? formatGregorianFullText(parsedValue.gregorian.gy, parsedValue.gregorian.gm, parsedValue.gregorian.gd)
-                    : 'تقویم رسمی هجری شمسی'}
+                    : `بازه سال: ${effectiveMinYear} الی ${effectiveMaxYear}`}
                 </div>
               </div>
             </div>
@@ -572,67 +655,113 @@ export default function PersianDatePicker({
             </button>
           </div>
 
-          {/* Navigation Bar & Interactive Month/Year Selectors */}
-          <div className="flex items-center justify-between px-1">
-            {/* Prev month / decade button */}
+          {/* Direct Year (1320..Current) & Month Dropdowns + View Switchers */}
+          <div className="flex items-center justify-between gap-1.5 px-0.5">
+            {/* Prev month / year button */}
             <button
               type="button"
               onClick={() => {
                 if (viewMode === 'days') handlePrevMonth();
-                else if (viewMode === 'months') setViewYear(y => y - 1);
-                else setDecadeStart(d => d - 12);
+                else setViewYear(y => Math.max(effectiveMinYear, y - 1));
               }}
-              className="p-1.5 rounded-xl text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
-              title={viewMode === 'days' ? 'ماه قبل' : viewMode === 'months' ? 'سال قبل' : 'دوره قبل'}
+              className="p-1.5 rounded-xl text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer shrink-0"
+              title={viewMode === 'days' ? 'ماه قبل' : 'سال قبل'}
             >
               <ChevronRight className="w-4 h-4" />
             </button>
 
-            {/* View Mode Switching Buttons (Month & Year) */}
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={() => setViewMode(viewMode === 'months' ? 'days' : 'months')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer border ${
-                  viewMode === 'months'
-                    ? 'bg-blue-600 text-white border-blue-600 shadow-xs shadow-blue-500/20'
-                    : 'bg-slate-100 dark:bg-slate-800/80 text-slate-800 dark:text-slate-200 border-slate-200/70 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700'
-                }`}
-                title="مشاهده و انتخاب لیست ماه‌ها"
+            {/* Month & Year Direct Selectors */}
+            <div className="flex items-center gap-1.5 flex-1 justify-center">
+              {/* Month Dropdown */}
+              <select
+                value={viewMonth}
+                onChange={(e) => {
+                  const nextM = Number(e.target.value);
+                  setViewMonth(nextM);
+                  setViewMode('days');
+                }}
+                className="px-2 py-1.5 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800/80 text-slate-800 dark:text-slate-200 border border-slate-200/70 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700 cursor-pointer outline-none"
+                title="انتخاب ماه"
               >
-                <span>{JALALI_MONTH_NAMES_FA[viewMonth - 1]}</span>
-                <ChevronDown className={`w-3 h-3 opacity-60 transition-transform duration-200 ${viewMode === 'months' ? 'rotate-180' : ''}`} />
-              </button>
+                {JALALI_MONTH_NAMES_FA.map((mName, idx) => (
+                  <option key={mName} value={idx + 1}>
+                    {mName}
+                  </option>
+                ))}
+              </select>
 
+              {/* Year Dropdown (1320 to Current Year) */}
+              <select
+                value={viewYear}
+                onChange={(e) => {
+                  const nextY = Number(e.target.value);
+                  setViewYear(nextY);
+                  if (parsedValue.jalali) {
+                    handleSelectDay(parsedValue.jalali.jd, viewMonth, nextY);
+                  } else {
+                    setViewMode('days');
+                  }
+                }}
+                className="px-2 py-1.5 rounded-xl text-xs font-mono font-bold bg-slate-100 dark:bg-slate-800/80 text-slate-800 dark:text-slate-200 border border-slate-200/70 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700 cursor-pointer outline-none"
+                title={`انتخاب سال (${effectiveMinYear} الی ${effectiveMaxYear})`}
+              >
+                {allYearsDesc.map((yr) => (
+                  <option key={yr} value={yr}>
+                    سال {yr}
+                  </option>
+                ))}
+              </select>
+
+              {/* Grid Year Picker Toggle */}
               <button
                 type="button"
                 onClick={() => setViewMode(viewMode === 'years' ? 'days' : 'years')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition flex items-center gap-1 cursor-pointer border ${
+                className={`px-2 py-1.5 rounded-xl text-[11px] font-bold transition flex items-center gap-0.5 cursor-pointer border ${
                   viewMode === 'years'
-                    ? 'bg-blue-600 text-white border-blue-600 shadow-xs shadow-blue-500/20'
-                    : 'bg-slate-100 dark:bg-slate-800/80 text-slate-800 dark:text-slate-200 border-slate-200/70 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700'
+                    ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                    : 'bg-slate-100 dark:bg-slate-800/80 text-blue-600 dark:text-blue-400 border-slate-200/70 dark:border-slate-700 hover:bg-slate-200'
                 }`}
-                title="مشاهده و انتخاب سال"
+                title="نمایش جدول کامل سال‌ها (۱۳۲۰ الی سال جاری)"
               >
-                <span>{viewYear}</span>
-                <ChevronDown className={`w-3 h-3 opacity-60 transition-transform duration-200 ${viewMode === 'years' ? 'rotate-180' : ''}`} />
+                <span>جدول سال</span>
+                <ChevronDown className={`w-3 h-3 transition-transform ${viewMode === 'years' ? 'rotate-180' : ''}`} />
               </button>
             </div>
 
-            {/* Next month / decade button */}
+            {/* Next month / year button */}
             <button
               type="button"
               onClick={() => {
                 if (viewMode === 'days') handleNextMonth();
-                else if (viewMode === 'months') setViewYear(y => y + 1);
-                else setDecadeStart(d => d + 12);
+                else setViewYear(y => Math.min(effectiveMaxYear, y + 1));
               }}
-              className="p-1.5 rounded-xl text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
-              title={viewMode === 'days' ? 'ماه بعد' : viewMode === 'months' ? 'سال بعد' : 'دوره بعد'}
+              className="p-1.5 rounded-xl text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer shrink-0"
+              title={viewMode === 'days' ? 'ماه بعد' : 'سال بعد'}
             >
               <ChevronLeft className="w-4 h-4" />
             </button>
           </div>
+
+          {/* Manual Date Input Bar inside Popup */}
+          {allowManualInput && (
+            <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/70 dark:border-slate-800">
+              <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 flex items-center gap-1 shrink-0">
+                <Keyboard className="w-3.5 h-3.5 text-blue-500" />
+                <span>ورود دستی (YYYY/MM/DD):</span>
+              </span>
+              <input
+                type="text"
+                dir="ltr"
+                value={inputText}
+                onChange={handleInputChange}
+                onFocus={() => setIsInputFocused(true)}
+                onBlur={handleInputBlur}
+                onKeyDown={handleInputKeyDown}
+                placeholder="1365/04/15"
+                className="w-28 px-2 py-1 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-mono font-bold text-center text-slate-800 dark:text-slate-100 outline-none focus:border-blue-500"
+              />
+            </div>
+          )}
 
           {/* Gregorian Equivalent Sub-bar */}
           <div className="flex items-center justify-between px-3 py-1 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 text-[11px] text-slate-500 dark:text-slate-400">
@@ -734,36 +863,37 @@ export default function PersianDatePicker({
             </div>
           )}
 
-          {/* VIEW: YEARS PICKER */}
+          {/* VIEW: FULL SCROLLABLE YEARS PICKER (1320 to Current Year) */}
           {viewMode === 'years' && (
-            <div className="space-y-3 py-1 animate-in fade-in">
+            <div className="space-y-2.5 py-1 animate-in fade-in">
               <div className="flex items-center justify-between text-[11px] font-bold text-slate-500 dark:text-slate-400 px-1">
-                <span>انتخاب سال ({decadeStart} — {decadeStart + 11})</span>
+                <span>انتخاب سال ({effectiveMinYear} الی {effectiveMaxYear})</span>
                 <button
                   type="button"
                   onClick={() => {
-                    setViewYear(todayObj.jy);
+                    setViewYear(Math.min(todayObj.jy, effectiveMaxYear));
                     setViewMode('days');
                   }}
-                  className="text-blue-600 dark:text-blue-400 hover:underline"
+                  className="text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
                 >
                   سال جاری ({todayObj.jy})
                 </button>
               </div>
-              <div className="grid grid-cols-3 gap-2">
-                {decadeYears.map((yr) => {
+              <div className="grid grid-cols-4 gap-1.5 max-h-56 overflow-y-auto p-1 border border-slate-100 dark:border-slate-800 rounded-2xl">
+                {allYearsDesc.map((yr) => {
                   const isSelected = viewYear === yr;
                   const isCurrent = todayObj.jy === yr;
 
                   return (
                     <button
                       key={yr}
+                      ref={isSelected ? selectedYearBtnRef : undefined}
                       type="button"
                       onClick={() => {
                         setViewYear(yr);
-                        setViewMode('days');
+                        setViewMode('months');
                       }}
-                      className={`py-2.5 px-2 rounded-xl text-xs font-mono font-extrabold transition cursor-pointer text-center border ${
+                      className={`py-2 px-1.5 rounded-xl text-xs font-mono font-extrabold transition cursor-pointer text-center border ${
                         isSelected
                           ? 'bg-blue-600 text-white border-blue-600 shadow-md shadow-blue-500/20'
                           : isCurrent
@@ -835,6 +965,9 @@ export default function PersianDatePicker({
               <button
                 type="button"
                 onClick={() => {
+                  if (allowManualInput && inputText.trim()) {
+                    commitManualInput(inputText, true);
+                  }
                   setIsOpen(false);
                   setViewMode('days');
                 }}

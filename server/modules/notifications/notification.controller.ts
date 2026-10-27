@@ -51,7 +51,7 @@ export class NotificationController {
   }
 
   async createNotification(req: Request, res: Response) {
-    const { title, body, priority, category, sourceModule, actionUrl, recordId, targetType, targetValues, requiresAck, metadata } = req.body;
+    const { title, body, priority, category, sourceModule, actionUrl, recordId, targetType, targetValues, requiresAck, sirenType, metadata } = req.body;
 
     if (!title || !body) {
       return res.status(400).json({ success: false, error: 'عنوان و متن اعلان الزامی است.' });
@@ -59,6 +59,8 @@ export class NotificationController {
 
     const user = req.user as any;
     const senderName = user?.fullName || user?.username || 'سامانه جامع HSECORE';
+
+    const finalSiren = sirenType || metadata?.sirenType;
 
     const created = await notificationService.send({
       title,
@@ -72,7 +74,11 @@ export class NotificationController {
       targetValues: targetValues || [],
       sender: senderName,
       requiresAck,
-      metadata,
+      sirenType: finalSiren,
+      metadata: {
+        ...(metadata || {}),
+        sirenType: finalSiren,
+      },
     });
 
     return ApiResponse.success(res, created, { message: 'اعلان با موفقیت ایجاد و ارسال شد.' }, 201);

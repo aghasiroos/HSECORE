@@ -2018,7 +2018,25 @@ export function startGlobalAuditTracking(): void {
   initGlobalAuditObserver(getCurrentUser, addAuditLog);
 }
 
-// Log an action to in-memory audit log and persist to database
+const PERSISTED_AUDIT_ACTION_TYPES = new Set<ActionType>([
+  'CREATE',
+  'UPDATE',
+  'DELETE',
+  'LOGIN',
+  'LOGOUT',
+  'PRINT',
+  'EXPORT',
+  'IMPORT',
+  'APPROVE',
+  'REJECT',
+  'PERMISSIONS_CHANGE',
+  'SETTINGS_CHANGE',
+]);
+
+let lastAuditSignature = '';
+let lastAuditTimestamp = 0;
+
+// Log an action to in-memory audit log and persist significant actions to database
 export function addAuditLog(
   username: string, 
   action: string, 
@@ -2027,8 +2045,16 @@ export function addAuditLog(
 ) {
   initGlobalAuditObserver(getCurrentUser, addAuditLog);
 
+  const nowMs = Date.now();
+  const dedupSig = `${username}|${options.actionType || ''}|${action}|${options.endpoint || ''}|${result}`;
+  if (dedupSig === lastAuditSignature && nowMs - lastAuditTimestamp < 1500) {
+    return;
+  }
+  lastAuditSignature = dedupSig;
+  lastAuditTimestamp = nowMs;
+
   const browserInfo = typeof navigator !== 'undefined' ? navigator.userAgent : 'Unknown Browser';
-  const now = new Date();
+  const now = new Date(nowMs);
   const activeUser = memoryCurrentUser;
   const modInfo = resolveCurrentModuleInfo();
   
@@ -2044,7 +2070,7 @@ export function addAuditLog(
        action.includes('چاپ') || action.includes('پرینت') ? 'PRINT' :
        action.includes('خروجی') || action.includes('دانلود') ? 'EXPORT' : 'OTHER');
        
-  const id = 'log-' + Date.now() + '-' + Math.floor(Math.random() * 10000);
+  const id = 'log-' + nowMs + '-' + Math.floor(Math.random() * 10000);
   const ts = now.toISOString();
   const changes = options.changes || [];
   const { category, severity } = classifyAuditEvent(actionType, action, success, changes.length);
@@ -2088,7 +2114,7 @@ export function addAuditLog(
     success,
     result,
     errorMessage: options.errorMessage,
-    transactionId: options.transactionId || `TX-${Date.now().toString(36).toUpperCase()}`,
+    transactionId: options.transactionId || `TX-${nowMs.toString(36).toUpperCase()}`,
   };
   
   const hash = generateLogHash(JSON.stringify(baseLog));
@@ -2107,7 +2133,11 @@ export function addAuditLog(
     window.dispatchEvent(new CustomEvent('hse_audit_log_added', { detail: newLog }));
   }
 
-  // Persist to central database
+  // Only persist actual mutations, security events, or failed actions to PostgreSQL to prevent HTTP flood on passive UI clicks
+  if (!PERSISTED_AUDIT_ACTION_TYPES.has(actionType) && success) {
+    return;
+  }
+
   apiDb.logAudit({
     userUid: newLog.userId || newLog.username,
     personnelCode: newLog.userCode,

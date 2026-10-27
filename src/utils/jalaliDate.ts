@@ -205,7 +205,16 @@ export function parseDateString(val: string | null | undefined): {
 
   // Remove time and extra chars to extract date parts
   const datePartOnly = clean.replace(/T.*$/, '').replace(/\s+\d{1,2}:\d{2}.*$/, '').trim();
-  const parts = datePartOnly.split(/[/.-]/).map(p => parseInt(p, 10)).filter(p => !isNaN(p));
+  let parts = datePartOnly.split(/[/.-]/).map(p => parseInt(p, 10)).filter(p => !isNaN(p));
+
+  // Support compact 8-digit manual entry (e.g. 13650415 -> 1365/04/15)
+  if (parts.length === 1 && /^\d{8}$/.test(datePartOnly)) {
+    parts = [
+      parseInt(datePartOnly.slice(0, 4), 10),
+      parseInt(datePartOnly.slice(4, 6), 10),
+      parseInt(datePartOnly.slice(6, 8), 10),
+    ];
+  }
 
   if (parts.length >= 3) {
     let y = parts[0];

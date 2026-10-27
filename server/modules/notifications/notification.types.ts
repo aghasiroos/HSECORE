@@ -48,6 +48,7 @@ export interface NotificationRecord {
   entityType?: string;
   entityId?: string;
   link?: string;
+  sirenType?: string;
   metadata?: Record<string, any>;
   createdAt: string;
 }

@@ -334,15 +334,17 @@ export class WeatherService {
         if (result) {
           this.cache.set(query, result);
           return result;
-        } else {
+        } else if (process.env.DEBUG_LOGS === 'true') {
           const nextPId = providerOrder[i + 1];
           if (nextPId) {
-            console.log(`[WeatherService] Provider "${pId}" produced no data. Cascading to next priority: "${nextPId}"`);
+            console.debug(`[WeatherService] Provider "${pId}" produced no data. Cascading to next priority: "${nextPId}"`);
           }
         }
       } catch (err: any) {
-        const nextPId = providerOrder[i + 1];
-        console.log(`[WeatherService] Provider "${pId}" unavailable (${err.message || err}). Cascading to next priority: "${nextPId || 'end'}"`);
+        if (process.env.DEBUG_LOGS === 'true') {
+          const nextPId = providerOrder[i + 1];
+          console.debug(`[WeatherService] Provider "${pId}" unavailable (${err.message || err}). Cascading to next priority: "${nextPId || 'end'}"`);
+        }
       }
     }
 

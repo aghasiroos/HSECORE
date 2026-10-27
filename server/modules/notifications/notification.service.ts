@@ -48,6 +48,7 @@ export class NotificationService {
     entityId?: string;
     link?: string;
     requiresAck?: boolean;
+    sirenType?: string;
     metadata?: Record<string, any>;
   }): Promise<NotificationRecord> {
     // Determine priority and category intelligently if omitted
@@ -64,6 +65,8 @@ export class NotificationService {
       category === 'warning' ? 'high' :
       category === 'error' ? 'high' : 'medium'
     );
+
+    const siren = data.sirenType || data.metadata?.sirenType || (priority === 'critical' || category === 'critical_hse' ? 'siren_evacuation' : undefined);
 
     const record: NotificationRecord = {
       notifId: `notif-${Date.now()}-${uuidv4().slice(0, 4)}`,
@@ -83,7 +86,11 @@ export class NotificationService {
       link: data.link || data.actionUrl,
       requiresAck: data.requiresAck !== undefined ? data.requiresAck : (priority === 'critical' || category === 'critical_hse'),
       acknowledgedBy: [],
-      metadata: data.metadata,
+      sirenType: siren,
+      metadata: {
+        ...(data.metadata || {}),
+        sirenType: siren,
+      },
       read: false,
       readBy: [],
       createdAt: new Date().toISOString(),

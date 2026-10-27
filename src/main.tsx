@@ -18,7 +18,6 @@ axios.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      console.warn('Axios 401: Request unauthenticated or session expired on', error.config?.url);
       // For GET read requests, return an empty payload instead of bubbling an uncaught rejection
       if (error.config?.method?.toLowerCase() === 'get') {
         return Promise.resolve({
@@ -41,18 +40,6 @@ if (typeof window !== 'undefined') {
       event.preventDefault(); // Prevent noisy uncaught error overlay for 401 auth rejections
     }
   });
-
-  // Filter out benign transient Recharts initial layout calculation warnings
-  const origWarn = console.warn;
-  console.warn = (...args: any[]) => {
-    if (
-      typeof args[0] === 'string' &&
-      args[0].includes('The width(0) and height(0) of chart should be greater than 0')
-    ) {
-      return;
-    }
-    origWarn.apply(console, args);
-  };
 }
 
 import App from './App.tsx';

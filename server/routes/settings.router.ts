@@ -206,9 +206,8 @@ settingsRouter.post('/:key', requireAuth, async (req, res) => {
       }));
     memorySettingsCache[key] = value;
     broadcastDataMutation('settings', 'update', { key, value });
-    broadcastDataMutation(key, 'update', value);
-    if (key === 'system_branding') {
-      broadcastDataMutation('system_branding', 'update', value);
+    if (key !== 'settings') {
+      broadcastDataMutation(key, 'update', value);
     }
     res.json({ success: true, message: 'Setting saved successfully', key, value });
   } catch (err) {

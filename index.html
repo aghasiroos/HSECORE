@@ -71,11 +71,13 @@
       })();
     </script>
     
-    <!-- Application Brand Icons & PWA Desktop / Mobile Install -->
-    <link rel="icon" type="image/png" href="/assets/aistudio/ChatGPT_Image_Oct_8__2026__12_04_00_PM_42699341.png" />
-    <link rel="alternate icon" type="image/png" href="/assets/aistudio/ChatGPT_Image_Oct_8__2026__12_04_00_PM_42699341.png" />
-    <link rel="apple-touch-icon" href="/assets/aistudio/ChatGPT_Image_Oct_8__2026__12_04_00_PM_42699341.png" />
-    <meta property="og:image" content="/assets/aistudio/ChatGPT_Image_Oct_8__2026__12_04_00_PM_42699341.png" />
+    <!-- Application Brand Icons & Windows / Desktop / PWA Install -->
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+    <link rel="shortcut icon" href="/favicon.ico" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/assets/hsecore-icon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/assets/hsecore-icon-16.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/assets/hsecore-icon-192.png" />
+    <meta property="og:image" content="/assets/hsecore-app-icon.png" />
     <link rel="manifest" href="/manifest.json" />
     <meta name="theme-color" content="#0284c7" />
     <meta name="mobile-web-app-capable" content="yes" />
@@ -143,49 +145,24 @@
           'The width(0) and height(0)'
         ];
 
-        var origWarn = console.warn;
-        console.warn = function() {
-          var text = Array.prototype.slice.call(arguments).map(function(item) {
-            return typeof item === 'string' ? item : (item && item.message) || '';
-          }).join(' ');
-          for (var i = 0; i < benignWarnPatterns.length; i++) {
-            if (text.indexOf(benignWarnPatterns[i]) !== -1) return;
-          }
-          origWarn.apply(console, arguments);
-        };
+        function wrapConsoleMethod(origFn, patterns) {
+          if (typeof origFn !== 'function') return origFn;
+          return function() {
+            var text = Array.prototype.slice.call(arguments).map(function(item) {
+              return typeof item === 'string' ? item : (item && item.message) || '';
+            }).join(' ');
+            for (var i = 0; i < patterns.length; i++) {
+              if (text.indexOf(patterns[i]) !== -1) return;
+            }
+            origFn.apply(console, arguments);
+          };
+        }
 
-        var origError = console.error;
-        console.error = function() {
-          var text = Array.prototype.slice.call(arguments).map(function(item) {
-            return typeof item === 'string' ? item : (item && item.message) || '';
-          }).join(' ');
-          for (var i = 0; i < benignErrorPatterns.length; i++) {
-            if (text.indexOf(benignErrorPatterns[i]) !== -1) return;
-          }
-          origError.apply(console, arguments);
-        };
-
-        var origInfo = console.info;
-        console.info = function() {
-          var text = Array.prototype.slice.call(arguments).map(function(item) {
-            return typeof item === 'string' ? item : (item && item.message) || '';
-          }).join(' ');
-          for (var i = 0; i < benignInfoPatterns.length; i++) {
-            if (text.indexOf(benignInfoPatterns[i]) !== -1) return;
-          }
-          origInfo.apply(console, arguments);
-        };
-
-        var origDebug = console.debug;
-        console.debug = function() {
-          var text = Array.prototype.slice.call(arguments).map(function(item) {
-            return typeof item === 'string' ? item : (item && item.message) || '';
-          }).join(' ');
-          for (var i = 0; i < benignInfoPatterns.length; i++) {
-            if (text.indexOf(benignInfoPatterns[i]) !== -1) return;
-          }
-          origDebug.apply(console, arguments);
-        };
+        console.warn = wrapConsoleMethod(console.warn, benignWarnPatterns);
+        console.error = wrapConsoleMethod(console.error, benignErrorPatterns);
+        console.info = wrapConsoleMethod(console.info, benignInfoPatterns);
+        console.debug = wrapConsoleMethod(console.debug, benignInfoPatterns);
+        console.log = wrapConsoleMethod(console.log, benignInfoPatterns);
 
         var isBenign = function(item) {
           if (!item) return false;

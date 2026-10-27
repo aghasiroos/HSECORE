@@ -27,7 +27,10 @@ import {
   Info,
   Clock,
   Sparkles,
-  Archive
+  Archive,
+  Play,
+  Square,
+  Check
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import moment from 'moment-jalaali';
@@ -41,6 +44,12 @@ import {
   NotificationCategory, 
   NotificationPriority 
 } from '../../services/notificationService';
+import {
+  HSE_SIREN_CATALOG,
+  HseSirenType,
+  previewSiren,
+  stopSirenPreview,
+} from '../../utils/notificationAudio';
 
 interface SystemNotificationsTabProps {
   isFa?: boolean;
@@ -90,7 +99,30 @@ export const SystemNotificationsTab: React.FC<SystemNotificationsTabProps> = ({
   const [playSoundAlert, setPlaySoundAlert] = useState(true);
   const [triggerPopup, setTriggerPopup] = useState(true);
   const [requiresAck, setRequiresAck] = useState(true);
+  const [notifSirenType, setNotifSirenType] = useState<HseSirenType>('siren_evacuation');
+  const [previewingSirenId, setPreviewingSirenId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Stop siren preview on unmount
+  useEffect(() => {
+    return () => {
+      stopSirenPreview();
+    };
+  }, []);
+
+  const handleTogglePreviewSiren = (sirenId: HseSirenType) => {
+    if (previewingSirenId === sirenId) {
+      stopSirenPreview();
+      setPreviewingSirenId(null);
+    } else {
+      stopSirenPreview();
+      setPreviewingSirenId(sirenId);
+      previewSiren(sirenId, 4, 0.85);
+      setTimeout(() => {
+        setPreviewingSirenId((curr) => (curr === sirenId ? null : curr));
+      }, 4000);
+    }
+  };
 
   // Confirmation Modal
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
@@ -159,7 +191,10 @@ export const SystemNotificationsTab: React.FC<SystemNotificationsTabProps> = ({
           targetValues: notifTargetValues,
           sender: `${currentUser.fullName || currentUser.username} (${currentUser.jobTitle || currentUser.role})`,
           readBy: [],
-          images: notifImages
+          images: notifImages,
+          metadata: {
+            sirenType: playSoundAlert ? notifSirenType : undefined,
+          } as any,
         };
         await apiDb.saveNotification(updatedNotif);
         addAuditLog(currentUser.username, `ویرایش اعلان سیستم: ${notifTitle}`, 'موفقیت‌آمیز');
@@ -180,11 +215,15 @@ export const SystemNotificationsTab: React.FC<SystemNotificationsTabProps> = ({
           triggerPopup: notifType === 'popup' || triggerPopup || notifCategory === 'critical_hse' || notifPriority === 'critical',
           playSound: playSoundAlert,
           requiresAck: requiresAck || notifCategory === 'critical_hse',
-          metadata: notifImages.length > 0 ? { images: notifImages } : undefined
+          sirenType: playSoundAlert ? notifSirenType : undefined,
+          metadata: {
+            ...(notifImages.length > 0 ? { images: notifImages } : {}),
+            sirenType: playSoundAlert ? notifSirenType : undefined,
+          }
         });
 
-        addAuditLog(currentUser.username, `ارسال و مخابره هشدار فوری HSE: ${notifTitle} (${notifCategory}/${notifPriority})`, 'با موفقیت ارسال شد');
-        toast.success(isFa ? 'هشدار فوری HSE با موفقیت ارسال و مخابره شد.' : 'Instant HSE alert broadcasted.');
+        addAuditLog(currentUser.username, `ارسال و مخابره هشدار فوری HSE: ${notifTitle} (${notifCategory}/${notifPriority}) با آژیر ${notifSirenType}`, 'با موفقیت ارسال شد');
+        toast.success(isFa ? 'هشدار فوری HSE با موفقیت مخابره شد.' : 'Instant HSE alert broadcasted.');
       }
 
       window.dispatchEvent(new Event('hse_notifications_updated'));
@@ -482,11 +521,12 @@ export const SystemNotificationsTab: React.FC<SystemNotificationsTabProps> = ({
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   {[
-                    { label: '🚨 نشت گاز کلر / تخلیه فوری', title: 'هشدار تخلیه فوری - نشت گاز سمی کلر', body: 'به دلیل افزایش غلظت گاز کلر در زون عملیاتی، کلیه پرسنل ملزم به استفاده از سیستم تنفسی و تخلیه فوری محل به سمت نقاط تجمع ایمن (Muster Points) در عمود بر جهت وزش باد میباشند.', cat: 'critical_hse', prio: 'critical', src: 'safety-unit' },
-                    { label: '🚨 نشت گاز H2S / تخلیه فوری', title: 'هشدار تخلیه فوری - نشت گاز سمی H2S', body: 'به دلیل افزایش غلظت گاز H2S در زون عملیاتی، کلیه پرسنل ملزم به استفاده از سیستم تنفسی و تخلیه فوری محل به سمت نقاط تجمع ایمن (Muster Points) در جهت خلاف باد می‌باشند.', cat: 'critical_hse', prio: 'critical', src: 'safety-unit' },
-                    { label: '☀️ هشدار استرس شدید گرمایی', title: 'هشدار سطح قرمز استرس گرمایی (WBGT)', body: 'شاخص دمای تر و استرس گرمایی از حد مجاز فراتر رفته است. کلیه فعالیت‌های سنگین در فضای باز متوقف شده و پروتکل استراحت و آب‌رسانی اجباری اجرایی گردد.', cat: 'warning', prio: 'high', src: 'heat' },
-                    { label: '🦺 الزام بازرسی PPE در سایت', title: 'دستورالعمل الزامی استفاده از تجهیزات حفاظت فردی', body: 'نظارت شدید بر استفاده از کلاه، کفش ایمنی، عینک حفاظتی و مهار سقوط در سایت آغاز شده و از ادامه کار پرسنل فاقد تجهیزات استاندارد ممانعت خواهد شد.', cat: 'directive', prio: 'medium', src: 'safety-unit' },
-                    { label: '🚒 مانور اضطراری آتش‌نشانی', title: 'اطلاعیه برگزاری مانور واکنش در شرایط اضطراری', body: 'مانور اطفاء حریق و امداد نجات ایستگاه آتش‌نشانی رأس ساعت مقرر برگزار می‌گردد. رعایت سکوت رادیویی در کانال عملیات الزامی است.', cat: 'info', prio: 'medium', src: 'fire-dept' },
+                    { label: '🚨 نشت گاز کلر / تخلیه فوری', title: 'هشدار تخلیه فوری - نشت گاز سمی کلر', body: 'به دلیل افزایش غلظت گاز کلر در زون عملیاتی، کلیه پرسنل ملزم به استفاده از سیستم تنفسی و تخلیه فوری محل به سمت نقاط تجمع ایمن (Muster Points) در عمود بر جهت وزش باد میباشند.', cat: 'critical_hse', prio: 'critical', src: 'safety-unit', siren: 'siren_gas_leak' },
+                    { label: '🚨 نشت گاز H2S / تخلیه فوری', title: 'هشدار تخلیه فوری - نشت گاز سمی H2S', body: 'به دلیل افزایش غلظت گاز H2S در زون عملیاتی، کلیه پرسنل ملزم به استفاده از سیستم تنفسی و تخلیه فوری محل به سمت نقاط تجمع ایمن (Muster Points) در جهت خلاف باد می‌باشند.', cat: 'critical_hse', prio: 'critical', src: 'safety-unit', siren: 'siren_gas_leak' },
+                    { label: '🏃 آژیر تخلیه سراسری سایت', title: 'دستور تخلیه اضطراری و فوری مجتمع', body: 'وضعیت اضطراری سطح ۱ اعلام گردید. کلیه پرسنل و پیمانکاران بدون فوت وقت دستگاه‌ها را متوقف و به Muster Point شماره ۱ و ۲ مراجعه نمایند.', cat: 'critical_hse', prio: 'critical', src: 'safety-unit', siren: 'siren_evacuation' },
+                    { label: '☀️ هشدار استرس شدید گرمایی', title: 'هشدار سطح قرمز استرس گرمایی (WBGT)', body: 'شاخص دمای تر و استرس گرمایی از حد مجاز فراتر رفته است. کلیه فعالیت‌های سنگین در فضای باز متوقف شده و پروتکل استراحت و آب‌رسانی اجباری اجرایی گردد.', cat: 'warning', prio: 'high', src: 'heat', siren: 'siren_pulsed_hazard' },
+                    { label: '🦺 الزام بازرسی PPE در سایت', title: 'دستورالعمل الزامی استفاده از تجهیزات حفاظت فردی', body: 'نظارت شدید بر استفاده از کلاه، کفش ایمنی، عینک حفاظتی و مهار سقوط در سایت آغاز شده و از ادامه کار پرسنل فاقد تجهیزات استاندارد ممانعت خواهد شد.', cat: 'directive', prio: 'medium', src: 'safety-unit', siren: 'siren_standard_hse' },
+                    { label: '🚒 مانور اضطراری آتش‌نشانی', title: 'اطلاعیه برگزاری مانور واکنش در شرایط اضطراری', body: 'مانور اطفاء حریق و امداد نجات ایستگاه آتش‌نشانی رأس ساعت مقرر برگزار می‌گردد. رعایت سکوت رادیویی در کانال عملیات الزامی است.', cat: 'info', prio: 'medium', src: 'fire-dept', siren: 'siren_fire_horn' },
                   ].map((preset, pIdx) => (
                     <button
                       key={pIdx}
@@ -497,6 +537,9 @@ export const SystemNotificationsTab: React.FC<SystemNotificationsTabProps> = ({
                         setNotifCategory(preset.cat as any);
                         setNotifPriority(preset.prio as any);
                         setNotifSourceModule(preset.src);
+                        if ((preset as any).siren) {
+                          setNotifSirenType((preset as any).siren);
+                        }
                       }}
                       className="text-[10px] font-bold px-2.5 py-1 rounded-xl bg-white dark:bg-slate-900 hover:bg-amber-50 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:text-amber-700 dark:hover:text-amber-400 transition cursor-pointer"
                     >
@@ -739,10 +782,107 @@ export const SystemNotificationsTab: React.FC<SystemNotificationsTabProps> = ({
                         onChange={(e) => setRequiresAck(e.target.checked)}
                         className="rounded text-rose-600 focus:ring-rose-500 w-4 h-4"
                       />
-                      <span>{isFa ? '✍️ الزام کاربر به تأیید دریافت و آگاهی (عدم بسته‌شدن تا زمان کلیک تایید)' : 'Require Acknowledgment & Signature'}</span>
+                      <span>{isFa ? '✍️ الزام کاربر به تأیید دریافت و قطع آژیر (عدم بسته‌شدن تا زمان کلیک تایید)' : 'Require Acknowledgment & Siren Silence'}</span>
                     </label>
                   </div>
                 </div>
+
+                {/* Siren Sound Selector (Visible when playSoundAlert is enabled) */}
+                {playSoundAlert && (
+                  <div className="p-4 bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 rounded-2xl space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <Volume2 className="w-4 h-4 text-rose-600 animate-pulse" />
+                        <span className="text-xs font-black text-slate-800 dark:text-slate-100">
+                          {isFa ? 'انتخاب نوع آژیر اضطراری هنگام انتشار هشدار:' : 'Emergency Siren Selection:'}
+                        </span>
+                      </div>
+                      <span className="text-[10px] font-bold text-slate-500 bg-white dark:bg-slate-900 px-2.5 py-0.5 rounded-full border border-slate-200 dark:border-slate-700">
+                        {isFa ? 'پخش پیوسته تا زمان تأیید' : 'Continuous loop until ACK'}
+                      </span>
+                    </div>
+
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium leading-relaxed">
+                      {isFa 
+                        ? 'آژیر صوتی انتخابی به‌صورت بلادرنگ در دستگاه کاربران هدف پخش شده و در پنجره پاپ‌آپ تا زمان تأیید هشدار توسط هر کاربر ادامه خواهد داشت و بلافاصله پس از تأیید مستقل همان کاربر متوقف می‌شود.'
+                        : 'Selected siren will play in real-time for targeted users and loop continuously until confirmed independently by each user.'}
+                    </p>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                      {HSE_SIREN_CATALOG.map((siren) => {
+                        const isSelected = notifSirenType === siren.id;
+                        const isPreviewing = previewingSirenId === siren.id;
+
+                        return (
+                          <div
+                            key={siren.id}
+                            onClick={() => setNotifSirenType(siren.id)}
+                            className={`p-3 rounded-2xl border transition-all cursor-pointer relative text-right flex flex-col justify-between ${
+                              isSelected
+                                ? 'bg-rose-50/80 dark:bg-rose-950/30 border-rose-500 ring-2 ring-rose-500/20 shadow-xs'
+                                : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
+                            }`}
+                          >
+                            <div>
+                              <div className="flex items-center justify-between mb-1.5">
+                                <div className="flex items-center gap-1.5">
+                                  <input
+                                    type="radio"
+                                    name="siren_selection"
+                                    checked={isSelected}
+                                    onChange={() => setNotifSirenType(siren.id)}
+                                    className="text-rose-600 focus:ring-rose-500 w-3.5 h-3.5"
+                                  />
+                                  <span className="text-xs font-black text-slate-800 dark:text-slate-100">
+                                    {siren.titleFa}
+                                  </span>
+                                </div>
+                                <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                                  {siren.badge}
+                                </span>
+                              </div>
+
+                              <p className="text-[10px] text-slate-500 dark:text-slate-400 line-clamp-2 leading-relaxed">
+                                {siren.descFa}
+                              </p>
+                            </div>
+
+                            <div className="pt-2.5 mt-2 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between">
+                              <span className="text-[9px] font-mono font-bold text-slate-400">
+                                {siren.frequencyPattern}
+                              </span>
+
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleTogglePreviewSiren(siren.id);
+                                }}
+                                className={`px-2.5 py-1 rounded-xl text-[10px] font-bold transition flex items-center gap-1 cursor-pointer shadow-xs ${
+                                  isPreviewing
+                                    ? 'bg-rose-600 text-white animate-pulse'
+                                    : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300'
+                                }`}
+                              >
+                                {isPreviewing ? (
+                                  <>
+                                    <Square className="w-3 h-3 fill-current" />
+                                    <span>توقف تست</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Play className="w-3 h-3 fill-current" />
+                                    <span>پیش‌شنوایی</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
                 {/* Image Attachments */}
                 <div className="space-y-1.5">
@@ -862,9 +1002,9 @@ export const SystemNotificationsTab: React.FC<SystemNotificationsTabProps> = ({
                     </span>
                   </div>
                   {playSoundAlert && (
-                    <div className="flex items-center gap-1 text-[10px] font-bold text-rose-600 bg-rose-100 dark:bg-rose-900/60 px-2 py-0.5 rounded-full">
+                    <div className="flex items-center gap-1.5 text-[10px] font-bold text-rose-700 dark:text-rose-300 bg-rose-100 dark:bg-rose-900/60 px-2.5 py-0.5 rounded-full border border-rose-300 dark:border-rose-800">
                       <Volume2 className="w-3 h-3 animate-bounce" />
-                      <span>{isFa ? 'آژیر فعال' : 'Siren On'}</span>
+                      <span>{HSE_SIREN_CATALOG.find(s => s.id === notifSirenType)?.titleFa || (isFa ? 'آژیر فعال' : 'Siren Active')}</span>
                     </div>
                   )}
                 </div>
@@ -1062,9 +1202,17 @@ export const SystemNotificationsTab: React.FC<SystemNotificationsTabProps> = ({
                               {isFa ? `مشاهده‌شده: ${notif.readBy.length} نفر` : `Read: ${notif.readBy.length}`}
                             </span>
                           )}
+                          {((notif as any).sirenType || (notif as any).metadata?.sirenType) && (
+                            <span className="px-2 py-0.5 rounded-md bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 font-bold text-[10px] flex items-center gap-1 border border-rose-200/60 dark:border-rose-900/40">
+                              <Volume2 className="w-3 h-3 text-rose-600" />
+                              <span>
+                                {HSE_SIREN_CATALOG.find(s => s.id === ((notif as any).sirenType || (notif as any).metadata?.sirenType))?.titleFa || 'آژیر اختصاصی'}
+                              </span>
+                            </span>
+                          )}
                           {Array.isArray((notif as any).acknowledgedBy) && (notif as any).acknowledgedBy.length > 0 && (
                             <span className="px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 font-bold text-[10px]">
-                              {isFa ? `تأیید دریافت: ${(notif as any).acknowledgedBy.length} نفر` : `Ack: ${(notif as any).acknowledgedBy.length}`}
+                              {isFa ? `تأیید مستقل: ${(notif as any).acknowledgedBy.length} نفر` : `Ack: ${(notif as any).acknowledgedBy.length}`}
                             </span>
                           )}
                         </div>

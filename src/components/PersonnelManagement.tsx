@@ -53,7 +53,7 @@ import {
   getOrgSites,
   findUnitDetail
 } from '../utils/orgHelper';
-import { calculateExactAge } from '../utils/jalaliDate';
+import { calculateExactAge, getCurrentShamsiYear } from '../utils/jalaliDate';
 import { OrgNode } from '../utils/authHelper';
 import {
   getStoredOrgNodes,
@@ -157,17 +157,20 @@ export default function PersonnelManagement({ isFa, currentUser }: { isFa: boole
         }
       }
     };
+
+    const handleLocalPersonnelUpdated = () => {
+      fetchRemote(false);
+    };
     
-    window.addEventListener('app_data_mutated', handleRemoteUpdate);
     window.addEventListener('hse_data_mutated', handleRemoteUpdate);
     window.addEventListener('hse_central_data_synced', handleRemoteUpdate);
-    window.addEventListener('hse_personnel_updated', () => fetchRemote(false));
+    window.addEventListener('hse_personnel_updated', handleLocalPersonnelUpdated);
 
     return () => {
       isMounted = false;
-      window.removeEventListener('app_data_mutated', handleRemoteUpdate);
       window.removeEventListener('hse_data_mutated', handleRemoteUpdate);
       window.removeEventListener('hse_central_data_synced', handleRemoteUpdate);
+      window.removeEventListener('hse_personnel_updated', handleLocalPersonnelUpdated);
     };
   }, []);
 
@@ -222,12 +225,19 @@ export default function PersonnelManagement({ isFa, currentUser }: { isFa: boole
       }
     };
 
-    window.addEventListener('hse_org_nodes_updated', () => loadOrgData(false));
-    window.addEventListener('hse_unit_structure_updated', () => loadOrgData(false));
-    window.addEventListener('hse_org_jobs_updated', () => loadOrgData(false));
+    const handleLocalOrgUpdated = () => {
+      loadOrgData(false);
+    };
+
+    window.addEventListener('hse_org_nodes_updated', handleLocalOrgUpdated);
+    window.addEventListener('hse_unit_structure_updated', handleLocalOrgUpdated);
+    window.addEventListener('hse_org_jobs_updated', handleLocalOrgUpdated);
     window.addEventListener('hse_data_mutated', handleOrgRemoteUpdate);
     window.addEventListener('hse_central_data_synced', handleOrgRemoteUpdate);
     return () => {
+      window.removeEventListener('hse_org_nodes_updated', handleLocalOrgUpdated);
+      window.removeEventListener('hse_unit_structure_updated', handleLocalOrgUpdated);
+      window.removeEventListener('hse_org_jobs_updated', handleLocalOrgUpdated);
       window.removeEventListener('hse_data_mutated', handleOrgRemoteUpdate);
       window.removeEventListener('hse_central_data_synced', handleOrgRemoteUpdate);
     };
@@ -1874,12 +1884,24 @@ export default function PersonnelManagement({ isFa, currentUser }: { isFa: boole
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-600 dark:text-slate-400 block">{isFa ? 'تاريخ تولد (شمسی)' : 'Birth Date'}</label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-slate-600 dark:text-slate-400 block">
+                      {isFa ? `تاريخ تولد (شمسی — سال ۱۳۲۰ الی ${getCurrentShamsiYear()})` : 'Birth Date'}
+                    </label>
+                    {form.birthDate && calculateAge(form.birthDate) > 0 && (
+                      <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-lg bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                        {isFa ? `سن: ${calculateAge(form.birthDate)} سال` : `Age: ${calculateAge(form.birthDate)}`}
+                      </span>
+                    )}
+                  </div>
                   <PersianDatePicker
                     value={form.birthDate}
                     onChange={(jStr) => setForm({...form, birthDate: jStr})}
                     isFa={isFa}
-                    placeholder={isFa ? 'انتخاب تاریخ تولد (مثال: ۱۳۶۵/۰۴/۱۵)' : 'YYYY/MM/DD'}
+                    minYear={1320}
+                    maxYear={getCurrentShamsiYear()}
+                    allowManualInput={true}
+                    placeholder={isFa ? 'تایپ دستی (مثلاً 1365/04/15) یا انتخاب از تقویم (۱۳۲۰ تا سال جاری)' : 'YYYY/MM/DD'}
                   />
                 </div>
               </div>

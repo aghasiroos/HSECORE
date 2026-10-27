@@ -11,10 +11,22 @@
   "lang": "fa",
   "icons": [
     {
-      "src": "/assets/aistudio/ChatGPT_Image_Oct_8__2026__12_04_00_PM_42699341.png",
-      "sizes": "192x192 512x512 any",
+      "src": "/assets/hsecore-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/assets/hsecore-icon-512.png",
+      "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
+    },
+    {
+      "src": "/assets/hsecore-app-icon.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any"
     }
   ]
 }

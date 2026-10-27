@@ -933,7 +933,7 @@ export function initGlobalAuditObserver(
     true
   );
 
-  // 7. Track Print & Clipboard Events & Tab Visibility
+  // 7. Track Print & Clipboard Events
   window.addEventListener('beforeprint', () => {
     dispatchUserEvent('PRINT', 'باز شدن پنجره چاپ مرورگر (System Print)', {});
   });
@@ -951,14 +951,6 @@ export function initGlobalAuditObserver(
     }
   });
 
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') {
-      dispatchUserEvent('SESSION', 'خروج موقت کاربر از تب مرورگر (Tab Hidden)', {});
-    } else if (document.visibilityState === 'visible') {
-      dispatchUserEvent('SESSION', 'بازگشت کاربر به تب سامانه (Tab Focused)', {});
-    }
-  });
-
   // 8. Global API Data Mutation Interceptor (POST / PUT / DELETE / PATCH)
   window.addEventListener('hse_api_mutation_completed', (e: any) => {
     const detail = e?.detail;
@@ -969,7 +961,9 @@ export function initGlobalAuditObserver(
       cleanUrl.includes('/audit-logs') ||
       cleanUrl.includes('/audit') ||
       cleanUrl.includes('/auth/me') ||
-      cleanUrl.includes('/sync/health')
+      cleanUrl.includes('/sync/health') ||
+      cleanUrl.includes('/settings/hse_heat_log') ||
+      cleanUrl.includes('/weather/cache')
     ) {
       return;
     }

@@ -7,38 +7,38 @@ services:
       context: .
       dockerfile: Dockerfile.prod
       args:
-        - NODE_BASE_IMAGE=${NODE_BASE_IMAGE:-node:20-alpine}
-        - APP_VERSION=${APP_VERSION:-2.6.0}
-        - BUILD_ID=${BUILD_ID:-local-build}
-        - RELEASE_ID=${RELEASE_ID:-local-release}
+        - "NODE_BASE_IMAGE=${NODE_BASE_IMAGE:-node:22-alpine}"
+        - "APP_VERSION=${APP_VERSION:-3.2.0}"
+        - "BUILD_ID=${BUILD_ID:-local-build}"
+        - "RELEASE_ID=${RELEASE_ID:-local-release}"
     container_name: hse-enterprise-app
     restart: unless-stopped
     env_file:
       - .env
     environment:
-      - NODE_ENV=production
-      - PORT=3000
-      - APP_PORT=3000
-      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      - SQL_HOST=${SQL_HOST:-host.docker.internal}
-      - SQL_PORT=${SQL_PORT:-${POSTGRES_PORT:-5432}}
-      - SQL_USER=${SQL_USER:?Error: SQL_USER must be set in .env}
-      - SQL_PASSWORD=${SQL_PASSWORD:?Error: SQL_PASSWORD must be set in .env (default passwords are not permitted)}
-      - SQL_DB_NAME=${SQL_DB_NAME:-hsedb}
-      - SQL_ADMIN_USER=${SQL_ADMIN_USER:-postgres}
-      - SQL_ADMIN_PASSWORD=${SQL_ADMIN_PASSWORD:-}
-      - SQL_SSL=${SQL_SSL:-false}
-      - SQL_SSL_CA=${SQL_SSL_CA:-}
-      - SQL_SSL_REJECT_UNAUTHORIZED=${SQL_SSL_REJECT_UNAUTHORIZED:-true}
-      - PG_MAX_POOL=${PG_MAX_POOL:-15}
-      - PG_MIN_POOL=${PG_MIN_POOL:-2}
-      - PG_IDLE_TIMEOUT_MS=${PG_IDLE_TIMEOUT_MS:-60000}
-      - PG_CONN_TIMEOUT_MS=${PG_CONN_TIMEOUT_MS:-15000}
-      - STRICT_DB_STARTUP=${STRICT_DB_STARTUP:-true}
-      - JWT_SECRET=${JWT_SECRET:?Error: JWT_SECRET must be set in .env}
-      - FORECA_API_KEY=${FORECA_API_KEY:-}
-      - FORECA_API_TOKEN=${FORECA_API_TOKEN:-}
-      - UPLOAD_DIR=/app/uploads
+      - "NODE_ENV=production"
+      - "PORT=3000"
+      - "APP_PORT=3000"
+      - "GEMINI_API_KEY=${GEMINI_API_KEY:-}"
+      - "SQL_HOST=${SQL_HOST:-host.docker.internal}"
+      - "SQL_PORT=${SQL_PORT:-5432}"
+      - "SQL_USER=${SQL_USER:?SQL_USER must be set in .env}"
+      - "SQL_PASSWORD=${SQL_PASSWORD:?SQL_PASSWORD must be set in .env}"
+      - "SQL_DB_NAME=${SQL_DB_NAME:-hsedb}"
+      - "SQL_ADMIN_USER=${SQL_ADMIN_USER:-postgres}"
+      - "SQL_ADMIN_PASSWORD=${SQL_ADMIN_PASSWORD:-}"
+      - "SQL_SSL=${SQL_SSL:-false}"
+      - "SQL_SSL_CA=${SQL_SSL_CA:-}"
+      - "SQL_SSL_REJECT_UNAUTHORIZED=${SQL_SSL_REJECT_UNAUTHORIZED:-true}"
+      - "PG_MAX_POOL=${PG_MAX_POOL:-15}"
+      - "PG_MIN_POOL=${PG_MIN_POOL:-2}"
+      - "PG_IDLE_TIMEOUT_MS=${PG_IDLE_TIMEOUT_MS:-60000}"
+      - "PG_CONN_TIMEOUT_MS=${PG_CONN_TIMEOUT_MS:-15000}"
+      - "STRICT_DB_STARTUP=${STRICT_DB_STARTUP:-true}"
+      - "JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env}"
+      - "FORECA_API_KEY=${FORECA_API_KEY:-}"
+      - "FORECA_API_TOKEN=${FORECA_API_TOKEN:-}"
+      - "UPLOAD_DIR=/app/uploads"
     volumes:
       - ./data/uploads:/app/uploads
     extra_hosts:
@@ -96,9 +96,9 @@ services:
       - "-c"
       - "synchronous_commit=on"
     environment:
-      POSTGRES_DB: ${SQL_DB_NAME:-hsedb}
-      POSTGRES_USER: ${SQL_USER:?Error: SQL_USER must be set in .env}
-      POSTGRES_PASSWORD: ${SQL_PASSWORD:?Error: SQL_PASSWORD must be set in .env}
+      - "POSTGRES_DB=${SQL_DB_NAME:-hsedb}"
+      - "POSTGRES_USER=${SQL_USER:?SQL_USER must be set in .env}"
+      - "POSTGRES_PASSWORD=${SQL_PASSWORD:?SQL_PASSWORD must be set in .env}"
     volumes:
       - hse_postgres_data:/var/lib/postgresql/data
     healthcheck:

@@ -1,5 +1,5 @@
 import { apiDb } from './apiDatabaseClient';
-import { playNotificationSound, SoundType } from '../utils/notificationAudio';
+import { playNotificationSound, SoundType, HseSirenType } from '../utils/notificationAudio';
 
 export type NotificationCategory = 'info' | 'success' | 'warning' | 'error' | 'critical_hse';
 export type NotificationPriority = 'low' | 'medium' | 'high' | 'critical';
@@ -27,6 +27,7 @@ export interface AppNotification {
     timestamp: string;
     note?: string;
   }>;
+  sirenType?: HseSirenType | string;
   metadata?: Record<string, any>;
   createdAt: string;
 }
@@ -78,6 +79,7 @@ export interface SendNotificationOptions {
   targetType?: 'all' | 'roles' | 'departments' | 'user' | 'users' | 'single';
   targetValues?: string[];
   sender?: string;
+  sirenType?: HseSirenType | string;
   metadata?: Record<string, any>;
   playSound?: boolean;
   triggerPopup?: boolean;
@@ -215,6 +217,7 @@ export const CentralNotificationService = {
       readBy: item.readBy || [],
       requiresAck: !!item.requiresAck,
       acknowledgedBy: item.acknowledgedBy || [],
+      sirenType: item.sirenType || item.metadata?.sirenType,
       metadata: item.metadata,
       createdAt: item.createdAt || new Date().toISOString(),
     }));
@@ -254,6 +257,7 @@ export const CentralNotificationService = {
       (popupPref === 'critical_only' && isCritical);
 
     const notifType = options.type || (shouldPopup ? 'popup' : 'in-app');
+    const sirenType = options.sirenType || (isCritical ? 'siren_evacuation' : undefined);
 
     const payload = {
       title: options.title,
@@ -268,7 +272,11 @@ export const CentralNotificationService = {
       targetType: options.targetType || 'all',
       targetValues: options.targetValues,
       sender: options.sender,
-      metadata: options.metadata,
+      sirenType,
+      metadata: {
+        ...(options.metadata || {}),
+        sirenType,
+      },
     };
 
     try {
@@ -277,7 +285,7 @@ export const CentralNotificationService = {
       // Play local sound immediately
       const shouldPlaySound = options.playSound ?? true;
       if (shouldPlaySound) {
-        this.playAlertSound(category, priority);
+        this.playAlertSound(category, priority, sirenType);
       }
 
       // Trigger instant UI events
@@ -354,7 +362,11 @@ export const CentralNotificationService = {
     return success;
   },
 
-  playAlertSound(category: NotificationCategory, priority: NotificationPriority) {
+  playAlertSound(
+    category: NotificationCategory,
+    priority: NotificationPriority,
+    sirenType?: HseSirenType | string
+  ) {
     const prefs = cachedPreferences;
     const isCategoryEnabled = prefs.enabledCategories?.[category] ?? true;
     if (!isCategoryEnabled) return;
@@ -371,6 +383,7 @@ export const CentralNotificationService = {
       muted: !prefs.soundEnabled,
       forcePlay,
       customAudioUrl,
+      sirenType,
     });
   },
 };

@@ -92,13 +92,19 @@ async function startServer() {
         correlationId: (req as any).correlationId,
         ip: req.ip,
       };
-      // Filter out noisy routine background polling, socket.io transports, and dev module requests
+      // Filter out noisy routine background polling, telemetry/audit writes, socket.io transports, and dev module requests
       const isRoutineRead = (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') && res.statusCode < 400;
       const isRoutinePollingOrAsset = 
         req.originalUrl.startsWith('/socket.io') ||
         req.originalUrl.startsWith('/api/system/version') || 
+        req.originalUrl.startsWith('/api/system/status') ||
         req.originalUrl.startsWith('/health') || 
         req.originalUrl.startsWith('/api/health') ||
+        req.originalUrl.startsWith('/api/audit-logs') ||
+        req.originalUrl.startsWith('/api/v1/audit-logs') ||
+        req.originalUrl.startsWith('/api/weather') ||
+        req.originalUrl.startsWith('/api/reverse-geocode') ||
+        req.originalUrl.startsWith('/api/ip-location') ||
         req.originalUrl.startsWith('/api/v1/automation/outbox') ||
         req.originalUrl.startsWith('/api/v1/automation/logs') ||
         req.originalUrl.startsWith('/@vite') ||
@@ -109,11 +115,13 @@ async function startServer() {
       if (res.statusCode >= 500) {
         logger.error('HTTP 5xx Server Error', logData, logData.correlationId);
       } else if (res.statusCode >= 400) {
-        if (!isRoutinePollingOrAsset) {
+        if (!isRoutinePollingOrAsset && res.statusCode !== 401 && res.statusCode !== 404) {
           logger.warn('HTTP 4xx Client Warning', logData, logData.correlationId);
         }
-      } else if ((!isRoutineRead && !isRoutinePollingOrAsset) || (durationMs > 3000 && !isRoutinePollingOrAsset) || process.env.DEBUG_LOGS === 'true') {
-        logger.info('HTTP Request Completed', logData, logData.correlationId);
+      } else if (durationMs > 4000 && !isRoutinePollingOrAsset) {
+        logger.warn('Slow HTTP Request Detected', logData, logData.correlationId);
+      } else if ((!isRoutineRead && !isRoutinePollingOrAsset) || process.env.DEBUG_LOGS === 'true') {
+        logger.debug('HTTP Request Completed', logData, logData.correlationId);
       }
     });
     next();
