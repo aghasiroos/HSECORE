@@ -23,7 +23,7 @@ set -eo pipefail
 # ------------------------------------------------------------------------------
 # Global Constants & Paths
 # ------------------------------------------------------------------------------
-INSTALLER_VERSION="3.2.0"
+INSTALLER_VERSION="0.2.8"
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATE_FILE="${PROJECT_DIR}/.installer-state"
 CACHE_FILE="${PROJECT_DIR}/.installer-answers"

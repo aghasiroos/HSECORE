@@ -771,12 +771,12 @@ export function getPersonnelOrgDetails(person?: ComplexPersonnel | null): Person
 export function getStoredOrgNodes(): OrgNode[] {
   if (!hasSyncedOrgNodes && !isSyncingOrgNodes && typeof window !== 'undefined') {
     isSyncingOrgNodes = true;
-    hasSyncedOrgNodes = true;
     apiDb
       .getOrgNodes()
       .then(nodes => {
-        if (Array.isArray(nodes) && nodes.length > 0) {
+        if (Array.isArray(nodes)) {
           inMemoryOrgNodesCache = nodes;
+          hasSyncedOrgNodes = true;
         }
       })
       .catch(() => {})
@@ -784,10 +784,10 @@ export function getStoredOrgNodes(): OrgNode[] {
         isSyncingOrgNodes = false;
       });
   }
-  if (inMemoryOrgNodesCache.length > 0) {
+  if (hasSyncedOrgNodes || inMemoryOrgNodesCache.length > 0) {
     return inMemoryOrgNodesCache;
   }
-  return Array.isArray(SEED_ORG_NODES) ? SEED_ORG_NODES : [];
+  return [];
 }
 
 /**
@@ -800,8 +800,9 @@ export async function fetchStoredOrgNodes(forceRefresh = false): Promise<OrgNode
       apiDb.invalidateCache('organization:nodes', 'settings');
     }
     const remote = await apiDb.getOrgNodes();
-    if (Array.isArray(remote) && remote.length > 0) {
+    if (Array.isArray(remote)) {
       inMemoryOrgNodesCache = remote;
+      hasSyncedOrgNodes = true;
       return remote;
     }
   } catch (e) {
@@ -814,16 +815,19 @@ export async function fetchStoredOrgNodes(forceRefresh = false): Promise<OrgNode
  * Saves Organizational Nodes directly to the central database and updates in-memory cache.
  * Zero browser storage (no localStorage).
  */
-export function saveStoredOrgNodes(nodes: OrgNode[]): void {
+export async function saveStoredOrgNodes(nodes: OrgNode[]): Promise<boolean> {
   try {
     purgeLegacyBrowserCache();
     inMemoryOrgNodesCache = Array.isArray(nodes) ? [...nodes] : [];
-    apiDb.saveOrgNodes(inMemoryOrgNodesCache).catch(console.error);
+    hasSyncedOrgNodes = true;
+    const success = await apiDb.saveOrgNodes(inMemoryOrgNodesCache);
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('hse_org_nodes_updated', { detail: inMemoryOrgNodesCache }));
     }
+    return success;
   } catch (e) {
     console.error('Failed to save org nodes:', e);
+    return false;
   }
 }
 
@@ -883,23 +887,12 @@ export function syncAndGetExtractedDepartments(): Department[] {
   // 3. Aggregate live personnel counts, positions, and manager candidates from Personnel List
   personnelList.forEach(p => {
     const rawUnit = (p.unit || p.department || '').trim();
-    if (!rawUnit || rawUnit === 'نامشخص') return;
+    if (!rawUnit || rawUnit === 'نامشخص' || rawUnit === 'تعیین نشده') return;
 
-    if (!unitMap.has(rawUnit)) {
-      const matchedNode = orgNodes.find(
-        n => n.name.trim() === rawUnit || rawUnit.includes(n.name.trim()) || n.name.trim().includes(rawUnit)
-      );
-      unitMap.set(rawUnit, {
-        name: rawUnit,
-        headcount: 0,
-        managerCandidate: matchedNode?.manager || '',
-        positions: new Set<string>(),
-        workplaces: new Set<string>(),
-        orgNodeMatch: matchedNode
-      });
-    }
+    // Only count towards valid existing units (do not revive deleted units)
+    const entry = unitMap.get(rawUnit);
+    if (!entry) return;
 
-    const entry = unitMap.get(rawUnit)!;
     entry.headcount += 1;
 
     const job = (p.jobTitle || p.position || '').trim();

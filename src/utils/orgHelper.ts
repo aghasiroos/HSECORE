@@ -184,12 +184,16 @@ export function getOrgUnitsStructure(): OrgUnitsDataMap {
 /**
  * Saves the full Unit -> { jobs, subUnits } structure directly to the central database.
  */
-export function saveOrgUnitsStructure(data: OrgUnitsDataMap): void {
+export async function saveOrgUnitsStructure(data: OrgUnitsDataMap): Promise<boolean> {
   clearLegacyOrgBrowserStorage();
   inMemoryOrgStructureCache = normalizeStructureMap(data);
-  apiDb
-    .saveSetting('hse_unit_structure_v1', inMemoryOrgStructureCache, 'Organizational Units & Sub-Units Structure')
-    .catch(console.error);
+  try {
+    const success = await apiDb.saveSetting('hse_unit_structure_v1', inMemoryOrgStructureCache, 'Organizational Units & Sub-Units Structure');
+    return success;
+  } catch (err) {
+    console.error('Failed to save org units structure to central DB:', err);
+    return false;
+  }
 }
 
 /**
@@ -206,7 +210,9 @@ export function findUnitDetail(unitName?: string, struct?: OrgUnitsDataMap): Uni
 }
 
 /**
- * Returns the list of main organizational units (merging Units Structure + Org Hierarchy Chart + Personnel Units)
+ * Returns the list of main organizational units.
+ * Authoritative source is the Units & Jobs Structure, supplemented by active Org Hierarchy Nodes.
+ * Never revives units that were deleted by administrator.
  */
 export function getUnits(): string[] {
   const struct = getOrgUnitsStructure();
@@ -219,14 +225,6 @@ export function getUnits(): string[] {
       if (n.status !== 'inactive' && (n.type === 'Plant' || n.type === 'Department' || n.type === 'Area' || n.type === 'Unit')) {
         if (n.name && n.name.trim()) combined.add(n.name.trim());
       }
-    });
-  } catch {}
-
-  try {
-    const personnel = getComplexPersonnelList();
-    personnel.forEach(p => {
-      const u = (p.unit || p.department || '').trim();
-      if (u && u !== 'تعیین نشده') combined.add(u);
     });
   } catch {}
 
@@ -284,16 +282,6 @@ export function getSubUnitsForUnit(unitName?: string): string[] {
     }
   } catch {}
 
-  try {
-    const personnel = getComplexPersonnelList();
-    personnel.forEach(p => {
-      const u = (p.unit || p.department || '').trim();
-      if (u.toLowerCase() === cleanUnit.toLowerCase() && p.subUnit && p.subUnit.trim()) {
-        subSet.add(p.subUnit.trim());
-      }
-    });
-  } catch {}
-
   return Array.from(subSet);
 }
 
@@ -332,7 +320,8 @@ export function getJobsForUnitAndSubUnit(unitName?: string, subUnitName?: string
 }
 
 /**
- * Returns the list of global + unit-assigned + personnel job titles from in-memory database cache
+ * Returns the list of global + unit-assigned job titles from in-memory database cache.
+ * Excludes resurrected deleted jobs.
  */
 export function getJobTitles(): string[] {
   clearLegacyOrgBrowserStorage();
@@ -360,25 +349,22 @@ export function getJobTitles(): string[] {
     });
   } catch {}
 
-  try {
-    const personnel = getComplexPersonnelList();
-    personnel.forEach(p => {
-      if (p.jobTitle && p.jobTitle.trim() && p.jobTitle.trim() !== 'کارمند') {
-        set.add(p.jobTitle.trim());
-      }
-    });
-  } catch {}
-
   return Array.from(set);
 }
 
 /**
  * Saves job titles directly to the central database and updates in-memory cache.
  */
-export function saveJobTitlesToDb(jobs: string[]): void {
+export async function saveJobTitlesToDb(jobs: string[]): Promise<boolean> {
   clearLegacyOrgBrowserStorage();
   inMemoryJobTitlesCache = Array.isArray(jobs) ? [...jobs] : [];
-  apiDb.saveSetting('hse_org_jobs', inMemoryJobTitlesCache, 'Organizational Job Titles').catch(console.error);
+  try {
+    const success = await apiDb.saveSetting('hse_org_jobs', inMemoryJobTitlesCache, 'Organizational Job Titles');
+    return success;
+  } catch (err) {
+    console.error('Failed to save job titles to central DB:', err);
+    return false;
+  }
 }
 
 /**

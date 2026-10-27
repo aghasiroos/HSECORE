@@ -486,7 +486,7 @@ export default function BackupRestoreTab({ isFa, currentUser }: BackupRestoreTab
         const masterSnapshot = {
           schemaManifest: {
             system: 'HSE Enterprise Management System',
-            architectureVersion: '2.5.0',
+            architectureVersion: '0.2.8',
             databaseEngine: 'Relational Database Engine',
             exportType: isSelective ? 'Selective Modular JSON' : 'Full Enterprise System Snapshot',
             timestampIso: now.toISOString(),
@@ -657,7 +657,7 @@ export default function BackupRestoreTab({ isFa, currentUser }: BackupRestoreTab
             detectedTables: detected,
             totalRecords: total,
             metadata: {
-              systemVersion: manifest.architectureVersion || '2.x',
+              systemVersion: manifest.architectureVersion || '0.2.8',
               generatedAt: manifest.persianDate || manifest.timestampIso,
               exportedBy: manifest.exportedBy?.fullName || manifest.exportedBy?.username
             },

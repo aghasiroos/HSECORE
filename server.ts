@@ -24,7 +24,7 @@ import { socketService } from './server/core/socket.ts';
 dotenv.config();
 
 // Global System Version Details - Injected via environment or CI/CD
-const APP_VERSION = process.env.APP_VERSION || '2.6.0';
+const APP_VERSION = process.env.APP_VERSION || '0.2.8';
 const BUILD_ID = process.env.BUILD_ID || '20260913-001';
 const RELEASE_ID = process.env.RELEASE_ID || 'dev-release';
 
@@ -150,7 +150,7 @@ async function startServer() {
       buildId: BUILD_ID,
       releaseId: RELEASE_ID,
       updatedAt: new Date().toISOString(),
-      minClientVersion: '2.5.0',
+      minClientVersion: '0.2.0',
     });
   });
 

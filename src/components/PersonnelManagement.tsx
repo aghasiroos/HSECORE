@@ -501,7 +501,7 @@ export default function PersonnelManagement({ isFa, currentUser }: { isFa: boole
   };
 
   // Add new job directly into the Org Structure for current unit / sub-unit
-  const handleAddNewJobToCurrentOrgLevel = (titleToAdd?: string) => {
+  const handleAddNewJobToCurrentOrgLevel = async (titleToAdd?: string) => {
     const title = (titleToAdd || quickNewJobTitle).trim();
     if (!title || !form.unit) return;
 
@@ -523,18 +523,18 @@ export default function PersonnelManagement({ isFa, currentUser }: { isFa: boole
       }
     }
 
-    saveOrgUnitsStructure(updated);
     setOrgStructure(updated);
+    await saveOrgUnitsStructure(updated);
     const updatedGlobalJobs = getJobTitles();
     if (!updatedGlobalJobs.includes(title)) {
-      saveJobTitlesToDb([...updatedGlobalJobs, title]);
+      await saveJobTitlesToDb([...updatedGlobalJobs, title]);
     }
     setAllJobTitles(getJobTitles());
     setForm(prev => ({ ...prev, jobTitle: title }));
     setQuickNewJobTitle('');
     setShowQuickAddJob(false);
-    window.dispatchEvent(new Event('hse_unit_structure_updated'));
-    window.dispatchEvent(new Event('app_data_mutated'));
+    window.dispatchEvent(new CustomEvent('hse_unit_structure_updated', { detail: { origin: 'PersonnelManagement' } }));
+    window.dispatchEvent(new CustomEvent('app_data_mutated', { detail: { origin: 'PersonnelManagement', entity: 'unit_structure' } }));
   };
 
   // Direct selection from Org Chart Picker Modal

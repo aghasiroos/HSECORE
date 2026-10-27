@@ -16,7 +16,7 @@ export class MonitoringService {
       status: isHealthy ? 'healthy' : 'unhealthy',
       timestamp: new Date().toISOString(),
       uptimeSeconds: uptimeSec,
-      version: '2.5.0-enterprise',
+      version: `${process.env.APP_VERSION || '0.2.8'}-enterprise`,
       system: {
         nodeVersion: process.version,
         platform: process.platform,

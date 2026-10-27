@@ -2,7 +2,7 @@ export const openApiSpec = {
   openapi: '3.0.3',
   info: {
     title: 'HSE Enterprise Management Platform API',
-    version: '2.5.0',
+    version: '0.2.8',
     description: 'سامانه یکپارچه و جامع مدیریت بهداشت، ایمنی و محیط زیست (HSE) سازمانی با موتور گردش کار عمومی و امضای دیجیتال',
     contact: {
       name: 'HSE Engineering Team',

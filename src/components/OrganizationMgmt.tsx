@@ -197,9 +197,10 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
     refreshAllOrgSettings(true);
 
     const handleRemoteUpdate = (e?: any) => {
+      // Ignore updates initiated by this component to avoid self-overwrite race conditions
+      if (e?.detail?.origin === 'OrganizationMgmt') return;
       const entity = String(e?.detail?.entityType || e?.detail?.entity || e?.detail?.key || '').toLowerCase();
       if (
-        !entity ||
         entity.includes('org') ||
         entity.includes('node') ||
         entity.includes('department') ||
@@ -208,7 +209,7 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
         entity.includes('ppe') ||
         entity.includes('incident')
       ) {
-        refreshAllOrgSettings(true);
+        refreshAllOrgSettings(false);
       }
     };
 
@@ -287,24 +288,32 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
   const [editingJobIdx, setEditingJobIdx] = useState<number | null>(null);
   const [editJobVal, setEditJobVal] = useState('');
 
-  // Synchronize changes directly to central database
-  useEffect(() => {
-    if (!isRemoteHydrated) return;
-    saveOrgUnitsStructure(orgStructure);
-    syncAndGetExtractedDepartments();
-    window.dispatchEvent(new Event('hse_unit_structure_updated'));
-    window.dispatchEvent(new Event('hse_departments_updated'));
-    window.dispatchEvent(new Event('app_data_mutated'));
-  }, [orgStructure, isRemoteHydrated]);
+  // Explicit, atomic database persistence handlers with error handling & feedback
+  const persistOrgStructure = async (nextStruct: OrgUnitsDataMap, successMsg?: string): Promise<boolean> => {
+    setOrgStructure(nextStruct);
+    const ok = await saveOrgUnitsStructure(nextStruct);
+    if (ok) {
+      syncAndGetExtractedDepartments();
+      window.dispatchEvent(new CustomEvent('hse_unit_structure_updated', { detail: { origin: 'OrganizationMgmt' } }));
+      window.dispatchEvent(new CustomEvent('hse_departments_updated', { detail: { origin: 'OrganizationMgmt' } }));
+      window.dispatchEvent(new CustomEvent('app_data_mutated', { detail: { origin: 'OrganizationMgmt', entity: 'unit_structure' } }));
+      if (successMsg) showToast(successMsg, 'success');
+    } else {
+      showToast(isFa ? 'خطا در ذخیره‌سازی اطلاعات در پایگاه داده اصلی.' : 'Error saving to database.', 'info');
+    }
+    return ok;
+  };
 
-  useEffect(() => {
-    if (!isRemoteHydrated) return;
-    saveJobTitlesToDb(jobTitles);
-    syncAndGetExtractedDepartments();
-    window.dispatchEvent(new Event('hse_org_jobs_updated'));
-    window.dispatchEvent(new Event('hse_departments_updated'));
-    window.dispatchEvent(new Event('app_data_mutated'));
-  }, [jobTitles, isRemoteHydrated]);
+  const persistJobTitles = async (nextJobs: string[], successMsg?: string): Promise<boolean> => {
+    setJobTitles(nextJobs);
+    const ok = await saveJobTitlesToDb(nextJobs);
+    if (ok) {
+      window.dispatchEvent(new CustomEvent('hse_org_jobs_updated', { detail: { origin: 'OrganizationMgmt' } }));
+      window.dispatchEvent(new CustomEvent('app_data_mutated', { detail: { origin: 'OrganizationMgmt', entity: 'job_titles' } }));
+      if (successMsg) showToast(successMsg, 'success');
+    }
+    return ok;
+  };
 
   useEffect(() => {
     if (!isRemoteHydrated) return;
@@ -377,9 +386,11 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
     setExpandedUnits({});
   };
 
-  const handleAddUnit = (e: React.FormEvent) => {
+  const canManageOrg = !currentUser || isUserAdmin(currentUser) || currentUser?.role === 'Administrator' || currentUser?.role === 'admin' || hasPermission(currentUser, 'system.org_structure', 'edit');
+
+  const handleAddUnit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (currentUser?.role !== 'Administrator') {
+    if (!canManageOrg) {
       alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی ثبت واحد سازمانی جدید را دارد.' : 'Only the main Administrator is authorized to add units.');
       return;
     }
@@ -405,20 +416,30 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
       .map(s => s.trim())
       .filter(Boolean);
 
-    setOrgStructure(prev => ({
-      ...prev,
+    const nextStruct: OrgUnitsDataMap = {
+      ...orgStructure,
       [name]: {
         jobs: initialDirectJobs,
         subUnits: subRecords
       }
-    }));
+    };
+
+    await persistOrgStructure(nextStruct, isFa ? `واحد «${name}» با موفقیت در پایگاه داده ثبت شد.` : `Unit "${name}" registered.`);
 
     // Auto add jobs to global list
     if (initialDirectJobs.length > 0) {
-      setJobTitles(prev => {
-        const set = new Set([...prev, ...initialDirectJobs]);
-        return Array.from(set);
+      const nextJobs = Array.from(new Set([...jobTitles, ...initialDirectJobs]));
+      await persistJobTitles(nextJobs);
+    }
+
+    // Sync sub-units to org chart nodes if present
+    if (initialSubs.length > 0) {
+      let currentNodes = orgNodes;
+      initialSubs.forEach(sub => {
+        currentNodes = syncSubUnitToOrgNodes(name, sub, currentNodes);
       });
+      await saveStoredOrgNodes(currentNodes);
+      setOrgNodes(currentNodes);
     }
 
     setExpandedUnits(prev => ({ ...prev, [name]: true }));
@@ -426,7 +447,6 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
     setNewUnitSubUnitsStr('');
     setNewUnitJobsStr('');
     setShowAddUnitModal(false);
-    showToast(isFa ? `واحد «${name}» با موفقیت افزوده شد.` : `Unit "${name}" added.`);
   };
 
   // Select Org Node from Org Chart for configuring sub-units
@@ -443,11 +463,11 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
   };
 
   // Confirm import and configuration of unit and sub-units from Org Chart
-  const handleConfirmOrgNodeImport = (e?: React.FormEvent) => {
+  const handleConfirmOrgNodeImport = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!selectedOrgNodeForConfig) return;
 
-    if (currentUser?.role !== 'Administrator') {
+    if (!canManageOrg) {
       alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی ثبت یا ویرایش واحد سازمانی را دارد.' : 'Only Administrator is authorized.');
       return;
     }
@@ -458,7 +478,7 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
     // Collect child nodes that were checked
     const children = getOrgNodeChildren(selectedOrgNodeForConfig.id, orgNodes);
     const chosenChildNames = children
-      .filter(c => selectedChildNodesToImport[c.name.trim()])
+      .filter(c => selectedChildNodesToImport[c.name.trim()] || selectedChildNodesToImport[c.name])
       .map(c => c.name.trim());
 
     // Additional custom sub-units
@@ -475,33 +495,49 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
       .map(s => s.trim())
       .filter(Boolean);
 
-    setOrgStructure(prev => {
-      const existing = prev[unitName] || { jobs: [], subUnits: {} };
-      const mergedSubs = { ...(existing.subUnits || {}) };
-      allSubs.forEach(sub => {
-        if (!mergedSubs[sub]) {
-          mergedSubs[sub] = [];
-        }
-      });
-      const mergedJobs = Array.from(new Set([...(existing.jobs || []), ...directJobs]));
-
-      return {
-        ...prev,
-        [unitName]: {
-          jobs: mergedJobs,
-          subUnits: mergedSubs
-        }
-      };
+    const existing = orgStructure[unitName] || { jobs: [], subUnits: {} };
+    const mergedSubs = { ...(existing.subUnits || {}) };
+    allSubs.forEach(sub => {
+      if (!mergedSubs[sub]) {
+        mergedSubs[sub] = [];
+      }
     });
+    const mergedJobs = Array.from(new Set([...(existing.jobs || []), ...directJobs]));
 
+    const nextStruct: OrgUnitsDataMap = {
+      ...orgStructure,
+      [unitName]: {
+        jobs: mergedJobs,
+        subUnits: mergedSubs
+      }
+    };
+
+    const nextJobs = directJobs.length > 0 ? Array.from(new Set([...jobTitles, ...directJobs])) : jobTitles;
+
+    const ok = await persistOrgStructure(nextStruct);
     if (directJobs.length > 0) {
-      setJobTitles(prev => Array.from(new Set([...prev, ...directJobs])));
+      await persistJobTitles(nextJobs);
+    }
+
+    // Sync additional custom sub-units into orgNodes in central database
+    if (additionalSubs.length > 0) {
+      let currentNodes = orgNodes;
+      additionalSubs.forEach(sub => {
+        currentNodes = syncSubUnitToOrgNodes(unitName, sub, currentNodes);
+      });
+      await saveStoredOrgNodes(currentNodes);
+      setOrgNodes(currentNodes);
     }
 
     setExpandedUnits(prev => ({ ...prev, [unitName]: true }));
     setShowOrgChartPickerModal(false);
     setSelectedOrgNodeForConfig(null);
-    showToast(isFa ? `واحد «${unitName}» همراه با ${allSubs.length} زیرمجموعه از چارت سازمانی فراخوانی و ذخیره شد.` : `Unit "${unitName}" configured with ${allSubs.length} sub-units.`);
+    showToast(
+      isFa 
+        ? `واحد «${unitName}» همراه با ${allSubs.length} زیرمجموعه از چارت سازمانی با موفقیت در دیتابیس ثبت و ذخیره شد.` 
+        : `Unit "${unitName}" configured with ${allSubs.length} sub-units and saved.`,
+      'success'
+    );
 
     // Scroll to the unit card
     setTimeout(() => {
@@ -516,11 +552,11 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
   const [deleteConfirm, setDeleteConfirm] = useState<{
     title: string;
     description?: string;
-    onConfirm: () => void;
+    onConfirm: () => void | Promise<void>;
   } | null>(null);
 
   const handleDeleteUnit = (unitName: string) => {
-    if (currentUser?.role !== 'Administrator') {
+    if (!canManageOrg) {
       alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
       return;
     }
@@ -533,19 +569,28 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
       description: (subCount > 0 || totalJobsCount > 0)
         ? (isFa ? `توجه: این واحد شامل ${subCount} زیرمجموعه و ${totalJobsCount} سمت/شغل تعریف‌شده است که همگی حذف خواهند شد.` : `Note: This unit contains ${subCount} sub-units and ${totalJobsCount} positions which will also be deleted.`)
         : undefined,
-      onConfirm: () => {
-        setOrgStructure(prev => {
-          const next = { ...prev };
-          delete next[unitName];
-          return next;
-        });
+      onConfirm: async () => {
+        const next = { ...orgStructure };
+        delete next[unitName];
+
+        // Also remove or deactivate matching OrgNode in orgNodes so it never reappears
+        const matchingNode = findOrgNodeByName(unitName, orgNodes);
+        if (matchingNode) {
+          const children = getOrgNodeChildren(matchingNode.id, orgNodes);
+          const idsToRemove = [matchingNode.id, ...children.map(c => c.id)];
+          const updatedNodes = orgNodes.filter(n => !idsToRemove.includes(n.id));
+          await saveStoredOrgNodes(updatedNodes);
+          setOrgNodes(updatedNodes);
+        }
+
+        await persistOrgStructure(next, isFa ? `واحد «${unitName}» با موفقیت حذف گردید.` : `Unit "${unitName}" deleted.`);
         setDeleteConfirm(null);
       }
     });
   };
 
-  const handleSaveUnitRename = (oldName: string) => {
-    if (currentUser?.role !== 'Administrator') {
+  const handleSaveUnitRename = async (oldName: string) => {
+    if (!canManageOrg) {
       alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
       return;
     }
@@ -560,25 +605,24 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
       return;
     }
 
-    setOrgStructure(prev => {
-      const next: OrgUnitsDataMap = {};
-      Object.keys(prev).forEach(key => {
-        if (key === oldName) {
-          next[newName] = prev[oldName] || { jobs: [], subUnits: {} };
-        } else {
-          next[key] = prev[key];
-        }
-      });
-      return next;
+    const next: OrgUnitsDataMap = {};
+    Object.keys(orgStructure).forEach(key => {
+      if (key === oldName) {
+        next[newName] = orgStructure[oldName] || { jobs: [], subUnits: {} };
+      } else {
+        next[key] = orgStructure[key];
+      }
     });
 
+    await persistOrgStructure(next, isFa ? `نام واحد به «${newName}» تغییر یافت.` : `Renamed to "${newName}".`);
+
     setExpandedUnits(prev => {
-      const next = { ...prev };
-      if (next[oldName]) {
-        delete next[oldName];
-        next[newName] = true;
+      const nextExp = { ...prev };
+      if (nextExp[oldName]) {
+        delete nextExp[oldName];
+        nextExp[newName] = true;
       }
-      return next;
+      return nextExp;
     });
 
     setEditingUnitName(null);
@@ -586,8 +630,8 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
   };
 
   // --- Sub-Units Handlers ---
-  const handleAddSubUnit = (unitName: string, subUnitNamesOverride?: string[]) => {
-    if (currentUser?.role !== 'Administrator') {
+  const handleAddSubUnit = async (unitName: string, subUnitNamesOverride?: string[]) => {
+    if (!canManageOrg) {
       alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی تعریف زیرمجموعه را دارد.' : 'Only the main Administrator is authorized to add sub-units.');
       return;
     }
@@ -597,37 +641,39 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
     const itemsToAdd = inputVal.split(/[,،\n]+/).map(s => s.trim()).filter(Boolean);
     if (itemsToAdd.length === 0) return;
 
-    setOrgStructure(prev => {
-      const currentUnit = prev[unitName] || { jobs: [], subUnits: {} };
-      const currentSubs = { ...(currentUnit.subUnits || {}) };
-      itemsToAdd.forEach(item => {
-        if (!currentSubs[item]) {
-          currentSubs[item] = [];
-        }
-      });
-      return {
-        ...prev,
-        [unitName]: {
-          ...currentUnit,
-          subUnits: currentSubs
-        }
-      };
+    const currentUnit = orgStructure[unitName] || { jobs: [], subUnits: {} };
+    const currentSubs = { ...(currentUnit.subUnits || {}) };
+    itemsToAdd.forEach(item => {
+      if (!currentSubs[item]) {
+        currentSubs[item] = [];
+      }
     });
+
+    const nextStruct: OrgUnitsDataMap = {
+      ...orgStructure,
+      [unitName]: {
+        ...currentUnit,
+        subUnits: currentSubs
+      }
+    };
+
+    await persistOrgStructure(nextStruct, isFa ? `زیرمجموعه(ها) با موفقیت به واحد «${unitName}» افزوده شدند.` : `Sub-units added to "${unitName}".`);
 
     // Check if user requested syncing to Org Chart
     const shouldSyncToOrgChart = syncSubUnitToOrgChart[unitName] ?? true;
     if (shouldSyncToOrgChart) {
+      let currentNodes = orgNodes;
       itemsToAdd.forEach(item => {
-        syncSubUnitToOrgNodes(unitName, item, orgNodes);
+        currentNodes = syncSubUnitToOrgNodes(unitName, item, currentNodes);
       });
-      refreshOrgNodes();
+      await saveStoredOrgNodes(currentNodes);
+      setOrgNodes(currentNodes);
     }
 
     if (!subUnitNamesOverride) {
       setNewSubUnitInputs(prev => ({ ...prev, [unitName]: '' }));
     }
     setExpandedUnits(prev => ({ ...prev, [unitName]: true }));
-    showToast(isFa ? `زیرمجموعه(ها) با موفقیت به واحد «${unitName}» افزوده شدند.` : `Sub-units added to "${unitName}".`);
   };
 
   const handleAddAllOrgChildrenAsSubUnits = (unitName: string, childNodes: OrgNode[]) => {
@@ -641,7 +687,7 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
   };
 
   const handleDeleteSubUnit = (unitName: string, subName: string) => {
-    if (currentUser?.role !== 'Administrator') {
+    if (!canManageOrg) {
       alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
       return;
     }
@@ -649,27 +695,40 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
     setDeleteConfirm({
       title: isFa ? `حذف زیرمجموعه «${subName}» از واحد «${unitName}»؟` : `Remove sub-unit "${subName}" from "${unitName}"?`,
       description: jobCount > 0 ? (isFa ? `این زیرمجموعه دارای ${jobCount} شغل/سمت تعریف‌شده است که همراه آن حذف خواهند شد.` : `This sub-unit has ${jobCount} positions that will also be removed.`) : undefined,
-      onConfirm: () => {
-        setOrgStructure(prev => {
-          const currentUnit = prev[unitName];
-          if (!currentUnit) return prev;
-          const updatedSubs = { ...(currentUnit.subUnits || {}) };
-          delete updatedSubs[subName];
-          return {
-            ...prev,
-            [unitName]: {
-              ...currentUnit,
-              subUnits: updatedSubs
-            }
-          };
-        });
+      onConfirm: async () => {
+        const currentUnit = orgStructure[unitName];
+        if (!currentUnit) return;
+        const updatedSubs = { ...(currentUnit.subUnits || {}) };
+        delete updatedSubs[subName];
+        const next = {
+          ...orgStructure,
+          [unitName]: {
+            ...currentUnit,
+            subUnits: updatedSubs
+          }
+        };
+
+        // Also clean corresponding child section in orgNodes if present
+        const parentNode = findOrgNodeByName(unitName, orgNodes);
+        if (parentNode) {
+          const matchingChild = orgNodes.find(
+            n => n.parentId === parentNode.id && n.name.trim().toLowerCase() === subName.trim().toLowerCase()
+          );
+          if (matchingChild) {
+            const updatedNodes = orgNodes.filter(n => n.id !== matchingChild.id);
+            await saveStoredOrgNodes(updatedNodes);
+            setOrgNodes(updatedNodes);
+          }
+        }
+
+        await persistOrgStructure(next, isFa ? `زیرمجموعه «${subName}» با موفقیت حذف گردید.` : `Sub-unit "${subName}" deleted.`);
         setDeleteConfirm(null);
       }
     });
   };
 
-  const handleSaveSubUnitRename = () => {
-    if (currentUser?.role !== 'Administrator') {
+  const handleSaveSubUnitRename = async () => {
+    if (!canManageOrg) {
       alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی ویرایش زیرمجموعه‌ها را دارد.' : 'Only the main Administrator is authorized to edit sub-units.');
       return;
     }
@@ -681,33 +740,33 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
       return;
     }
 
-    setOrgStructure(prev => {
-      const currentUnit = prev[unitName];
-      if (!currentUnit) return prev;
-      const subs = currentUnit.subUnits || {};
-      const newSubs: Record<string, string[]> = {};
-      Object.keys(subs).forEach(k => {
-        if (k === oldSubName) {
-          newSubs[newName] = subs[oldSubName] || [];
-        } else {
-          newSubs[k] = subs[k];
-        }
-      });
-      return {
-        ...prev,
-        [unitName]: {
-          ...currentUnit,
-          subUnits: newSubs
-        }
-      };
+    const currentUnit = orgStructure[unitName];
+    if (!currentUnit) return;
+    const subs = currentUnit.subUnits || {};
+    const newSubs: Record<string, string[]> = {};
+    Object.keys(subs).forEach(k => {
+      if (k === oldSubName) {
+        newSubs[newName] = subs[oldSubName] || [];
+      } else {
+        newSubs[k] = subs[k];
+      }
     });
 
+    const next: OrgUnitsDataMap = {
+      ...orgStructure,
+      [unitName]: {
+        ...currentUnit,
+        subUnits: newSubs
+      }
+    };
+
+    await persistOrgStructure(next, isFa ? `زیرمجموعه به «${newName}» تغییر یافت.` : `Renamed to "${newName}".`);
     setEditingSubUnit(null);
   };
 
   // --- Direct Unit Jobs Handlers ---
-  const handleAddUnitDirectJob = (unitName: string) => {
-    if (currentUser?.role !== 'Administrator') {
+  const handleAddUnitDirectJob = async (unitName: string) => {
+    if (!canManageOrg) {
       alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی ثبت شغل و سمت شغلی را دارد.' : 'Only the main Administrator is authorized to add jobs/positions.');
       return;
     }
@@ -717,66 +776,63 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
     const itemsToAdd = inputVal.split(/[,،\n]+/).map(s => s.trim()).filter(Boolean);
     if (itemsToAdd.length === 0) return;
 
-    setOrgStructure(prev => {
-      const currentUnit = prev[unitName] || { jobs: [], subUnits: {} };
-      const currentJobs = [...(currentUnit.jobs || [])];
-      itemsToAdd.forEach(item => {
-        if (!currentJobs.includes(item)) {
-          currentJobs.push(item);
-        }
-      });
-      return {
-        ...prev,
-        [unitName]: {
-          ...currentUnit,
-          jobs: currentJobs
-        }
-      };
+    const currentUnit = orgStructure[unitName] || { jobs: [], subUnits: {} };
+    const currentJobs = [...(currentUnit.jobs || [])];
+    itemsToAdd.forEach(item => {
+      if (!currentJobs.includes(item)) {
+        currentJobs.push(item);
+      }
     });
 
-    // Also auto-add to global jobTitles if missing
-    setJobTitles(prev => {
-      const updated = [...prev];
-      itemsToAdd.forEach(item => {
-        if (!updated.includes(item)) {
-          updated.push(item);
-        }
-      });
-      return updated;
+    const nextStruct: OrgUnitsDataMap = {
+      ...orgStructure,
+      [unitName]: {
+        ...currentUnit,
+        jobs: currentJobs
+      }
+    };
+
+    await persistOrgStructure(nextStruct, isFa ? `سمت‌های شغلی با موفقیت ثبت شدند.` : `Positions saved.`);
+
+    const nextJobs = [...jobTitles];
+    itemsToAdd.forEach(item => {
+      if (!nextJobs.includes(item)) {
+        nextJobs.push(item);
+      }
     });
+    await persistJobTitles(nextJobs);
 
     setNewUnitDirectJobInputs(prev => ({ ...prev, [unitName]: '' }));
   };
 
   const handleDeleteUnitDirectJob = (unitName: string, jobIdx: number) => {
-    if (currentUser?.role !== 'Administrator') {
+    if (!canManageOrg) {
       alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
       return;
     }
     const jobName = orgStructure[unitName]?.jobs?.[jobIdx];
     setDeleteConfirm({
       title: isFa ? `حذف سمت شغلی «${jobName}» از واحد «${unitName}»؟` : `Remove position "${jobName}" from "${unitName}"?`,
-      onConfirm: () => {
-        setOrgStructure(prev => {
-          const currentUnit = prev[unitName];
-          if (!currentUnit) return prev;
-          const currentJobs = (currentUnit.jobs || []).filter((_, idx) => idx !== jobIdx);
-          return {
-            ...prev,
-            [unitName]: {
-              ...currentUnit,
-              jobs: currentJobs
-            }
-          };
-        });
+      onConfirm: async () => {
+        const currentUnit = orgStructure[unitName];
+        if (!currentUnit) return;
+        const currentJobs = (currentUnit.jobs || []).filter((_, idx) => idx !== jobIdx);
+        const next = {
+          ...orgStructure,
+          [unitName]: {
+            ...currentUnit,
+            jobs: currentJobs
+          }
+        };
+        await persistOrgStructure(next, isFa ? `سمت شغلی «${jobName}» حذف شد.` : `Position "${jobName}" deleted.`);
         setDeleteConfirm(null);
       }
     });
   };
 
   // --- Sub-Unit Specific Jobs Handlers ---
-  const handleAddSubUnitJob = (unitName: string, subName: string) => {
-    if (currentUser?.role !== 'Administrator') {
+  const handleAddSubUnitJob = async (unitName: string, subName: string) => {
+    if (!canManageOrg) {
       alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی ثبت شغل و سمت شغلی را دارد.' : 'Only the main Administrator is authorized to add jobs/positions.');
       return;
     }
@@ -787,69 +843,66 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
     const itemsToAdd = inputVal.split(/[,،\n]+/).map(s => s.trim()).filter(Boolean);
     if (itemsToAdd.length === 0) return;
 
-    setOrgStructure(prev => {
-      const currentUnit = prev[unitName] || { jobs: [], subUnits: {} };
-      const currentSubs = { ...(currentUnit.subUnits || {}) };
-      const currentJobs = [...(currentSubs[subName] || [])];
-      itemsToAdd.forEach(item => {
-        if (!currentJobs.includes(item)) {
-          currentJobs.push(item);
-        }
-      });
-      currentSubs[subName] = currentJobs;
-      return {
-        ...prev,
-        [unitName]: {
-          ...currentUnit,
-          subUnits: currentSubs
-        }
-      };
+    const currentUnit = orgStructure[unitName] || { jobs: [], subUnits: {} };
+    const currentSubs = { ...(currentUnit.subUnits || {}) };
+    const currentJobs = [...(currentSubs[subName] || [])];
+    itemsToAdd.forEach(item => {
+      if (!currentJobs.includes(item)) {
+        currentJobs.push(item);
+      }
     });
+    currentSubs[subName] = currentJobs;
 
-    // Also auto-add to global jobTitles if missing
-    setJobTitles(prev => {
-      const updated = [...prev];
-      itemsToAdd.forEach(item => {
-        if (!updated.includes(item)) {
-          updated.push(item);
-        }
-      });
-      return updated;
+    const nextStruct: OrgUnitsDataMap = {
+      ...orgStructure,
+      [unitName]: {
+        ...currentUnit,
+        subUnits: currentSubs
+      }
+    };
+
+    await persistOrgStructure(nextStruct, isFa ? `شغل‌های انتسابی با موفقیت ثبت شدند.` : `Positions saved.`);
+
+    const nextJobs = [...jobTitles];
+    itemsToAdd.forEach(item => {
+      if (!nextJobs.includes(item)) {
+        nextJobs.push(item);
+      }
     });
+    await persistJobTitles(nextJobs);
 
     setNewSubUnitJobInputs(prev => ({ ...prev, [key]: '' }));
   };
 
   const handleDeleteSubUnitJob = (unitName: string, subName: string, jobIdx: number) => {
-    if (currentUser?.role !== 'Administrator') {
+    if (!canManageOrg) {
       alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
       return;
     }
     const jobName = orgStructure[unitName]?.subUnits?.[subName]?.[jobIdx];
     setDeleteConfirm({
       title: isFa ? `حذف سمت شغلی «${jobName}» از زیرمجموعه «${subName}»؟` : `Remove position "${jobName}" from "${subName}"?`,
-      onConfirm: () => {
-        setOrgStructure(prev => {
-          const currentUnit = prev[unitName];
-          if (!currentUnit) return prev;
-          const currentSubs = { ...(currentUnit.subUnits || {}) };
-          const currentJobs = (currentSubs[subName] || []).filter((_, idx) => idx !== jobIdx);
-          currentSubs[subName] = currentJobs;
-          return {
-            ...prev,
-            [unitName]: {
-              ...currentUnit,
-              subUnits: currentSubs
-            }
-          };
-        });
+      onConfirm: async () => {
+        const currentUnit = orgStructure[unitName];
+        if (!currentUnit) return;
+        const currentSubs = { ...(currentUnit.subUnits || {}) };
+        const currentJobs = (currentSubs[subName] || []).filter((_, idx) => idx !== jobIdx);
+        currentSubs[subName] = currentJobs;
+        const next = {
+          ...orgStructure,
+          [unitName]: {
+            ...currentUnit,
+            subUnits: currentSubs
+          }
+        };
+        await persistOrgStructure(next, isFa ? `سمت شغلی «${jobName}» حذف شد.` : `Position "${jobName}" deleted.`);
         setDeleteConfirm(null);
       }
     });
   };
 
-  const handleSaveJobItemEdit = () => {
-    if (currentUser?.role !== 'Administrator') {
+  const handleSaveJobItemEdit = async () => {
+    if (!canManageOrg) {
       alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی ویرایش را دارد.' : 'Only the main Administrator is authorized to edit.');
       return;
     }
@@ -861,37 +914,29 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
       return;
     }
 
+    let nextStruct = { ...orgStructure };
     if (type === 'unit_direct' && unitName) {
-      setOrgStructure(prev => {
-        const unit = prev[unitName];
-        if (!unit) return prev;
-        const jobs = [...(unit.jobs || [])];
-        jobs[idx] = newVal;
-        return {
-          ...prev,
-          [unitName]: { ...unit, jobs }
-        };
-      });
+      const unit = nextStruct[unitName];
+      if (!unit) return;
+      const jobs = [...(unit.jobs || [])];
+      jobs[idx] = newVal;
+      nextStruct[unitName] = { ...unit, jobs };
     } else if (type === 'subunit' && unitName && subUnitName) {
-      setOrgStructure(prev => {
-        const unit = prev[unitName];
-        if (!unit) return prev;
-        const subs = { ...(unit.subUnits || {}) };
-        const jobs = [...(subs[subUnitName] || [])];
-        jobs[idx] = newVal;
-        subs[subUnitName] = jobs;
-        return {
-          ...prev,
-          [unitName]: { ...unit, subUnits: subs }
-        };
-      });
+      const unit = nextStruct[unitName];
+      if (!unit) return;
+      const subs = { ...(unit.subUnits || {}) };
+      const jobs = [...(subs[subUnitName] || [])];
+      jobs[idx] = newVal;
+      subs[subUnitName] = jobs;
+      nextStruct[unitName] = { ...unit, subUnits: subs };
     }
 
+    await persistOrgStructure(nextStruct, isFa ? `سمت شغلی به «${newVal}» ویرایش شد.` : `Position updated to "${newVal}".`);
     setEditingJobItem(null);
   };
 
   const handleResetToDefaults = () => {
-    if (currentUser?.role !== 'Administrator') {
+    if (!canManageOrg) {
       alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی بازیابی پیش‌فرض را دارد.' : 'Only the main Administrator is authorized to reset defaults.');
       return;
     }
@@ -900,58 +945,61 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
       description: isFa 
         ? 'این عملیات تمام واحدهای استاندارد را با زیرمجموعه و سمت‌های خالی تنظیم می‌کند تا توسط مدیر سیستم به صورت سفارشی وارد شوند.' 
         : 'This will restore standard units with empty sub-units and positions, ready to be populated by the Administrator.',
-      onConfirm: () => {
+      onConfirm: async () => {
         const defaultStruct: OrgUnitsDataMap = {};
         defaultUnits.forEach(u => {
           defaultStruct[u] = { jobs: [], subUnits: {} };
         });
-        setOrgStructure(defaultStruct);
+        await persistOrgStructure(defaultStruct, isFa ? 'ساختار واحدها به حالت اولیه بازنشانی شد.' : 'Reset to defaults.');
         setDeleteConfirm(null);
       }
     });
   };
 
-  const addJob = (e: React.FormEvent) => {
+  const addJob = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (currentUser?.role !== 'Administrator') {
+    if (!canManageOrg) {
       alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی ثبت عنوان شغلی جدید را دارد.' : 'Only the main Administrator is authorized to add job titles.');
       return;
     }
-    if (!newJob.trim()) return;
-    if (jobTitles.includes(newJob.trim())) {
+    const clean = newJob.trim();
+    if (!clean) return;
+    if (jobTitles.includes(clean)) {
       alert(isFa ? 'این عنوان شغلی قبلا ثبت شده است.' : 'Job title already exists.');
       return;
     }
-    setJobTitles([...jobTitles, newJob.trim()]);
+    const next = [...jobTitles, clean];
+    await persistJobTitles(next, isFa ? `عنوان شغلی «${clean}» افزوده شد.` : `Job "${clean}" added.`);
     setNewJob('');
   };
 
   const deleteJob = (idx: number) => {
-    if (currentUser?.role !== 'Administrator') {
+    if (!canManageOrg) {
       alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
       return;
     }
     const name = jobTitles[idx];
     setDeleteConfirm({
       title: isFa ? `آیا از حذف عنوان شغلی "${name}" اطمینان دارید؟` : `Delete job title "${name}"?`,
-      onConfirm: () => {
+      onConfirm: async () => {
         const newArr = [...jobTitles];
         newArr.splice(idx, 1);
-        setJobTitles(newArr);
+        await persistJobTitles(newArr, isFa ? `عنوان شغلی "${name}" حذف شد.` : `Job "${name}" deleted.`);
         setDeleteConfirm(null);
       }
     });
   };
 
-  const saveJobEdit = (idx: number) => {
-    if (currentUser?.role !== 'Administrator') {
+  const saveJobEdit = async (idx: number) => {
+    if (!canManageOrg) {
       alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
       return;
     }
-    if (!editJobVal.trim()) return;
+    const clean = editJobVal.trim();
+    if (!clean) return;
     const newArr = [...jobTitles];
-    newArr[idx] = editJobVal.trim();
-    setJobTitles(newArr);
+    newArr[idx] = clean;
+    await persistJobTitles(newArr, isFa ? `عنوان شغلی به «${clean}» ویرایش شد.` : `Job updated to "${clean}".`);
     setEditingJobIdx(null);
   };
 
@@ -997,7 +1045,7 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
   };
 
   const handleEditIncType = (item: HseIncidentCategoryItem) => {
-    if (currentUser?.role !== 'Administrator') {
+    if (!canManageOrg) {
       alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
       return;
     }
@@ -1023,7 +1071,7 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
   };
 
   const handleDeleteIncType = (id: string, name: string) => {
-    if (currentUser?.role !== 'Administrator') {
+    if (!canManageOrg) {
       alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
       return;
     }
@@ -1038,7 +1086,7 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
   };
 
   const handleResetIncTypesToDefault = () => {
-    if (currentUser?.role !== 'Administrator') {
+    if (!canManageOrg) {
       alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
       return;
     }
@@ -2161,7 +2209,7 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
                                 type="button"
                                 onClick={() => {
                                   const all: Record<string, boolean> = {};
-                                  childNodes.forEach(c => { all[c.name] = true; });
+                                  childNodes.forEach(c => { all[c.name.trim()] = true; });
                                   setSelectedChildNodesToImport(all);
                                 }}
                                 className="text-indigo-600 dark:text-indigo-400 hover:underline font-bold cursor-pointer"
@@ -2191,8 +2239,9 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
                         ) : (
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto p-1">
                             {childNodes.map(child => {
-                              const isChecked = !!selectedChildNodesToImport[child.name];
-                              const isAlreadyInUnit = !!orgStructure[selectedOrgNodeForConfig.name]?.subUnits?.[child.name];
+                              const cName = child.name.trim();
+                              const isChecked = !!selectedChildNodesToImport[cName] || !!selectedChildNodesToImport[child.name];
+                              const isAlreadyInUnit = !!orgStructure[selectedOrgNodeForConfig.name.trim()]?.subUnits?.[cName];
 
                               return (
                                 <label
@@ -2209,7 +2258,7 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
                                     onChange={e => {
                                       setSelectedChildNodesToImport({
                                         ...selectedChildNodesToImport,
-                                        [child.name]: e.target.checked
+                                        [cName]: e.target.checked
                                       });
                                     }}
                                     className="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer"

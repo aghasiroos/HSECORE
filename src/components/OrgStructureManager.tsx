@@ -30,6 +30,7 @@ import {
 import { OrgNode, SEED_ORG_NODES, addAuditLog } from '../utils/authHelper';
 import { syncAndGetExtractedDepartments } from '../utils/personnelHelper';
 import { Department } from '../types';
+import { getOrgUnitsStructure, saveOrgUnitsStructure, OrgUnitsDataMap } from '../utils/orgHelper';
 
 interface OrgStructureManagerProps {
   isFa: boolean;
@@ -135,18 +136,20 @@ export default function OrgStructureManager({ isFa, currentUser, onUpdate }: Org
     status: 'active'
   });
 
-  // Save to localStorage whenever orgNodes changes
-  const saveNodes = (updated: OrgNode[]) => {
+  // Save to database whenever orgNodes changes
+  const saveNodes = async (updated: OrgNode[]): Promise<boolean> => {
     setOrgNodes(updated);
     try {
-      saveStoredOrgNodes(updated); window.dispatchEvent(new Event("app_data_mutated"));
-      
-      // Automatically synchronize with Personnel Subordinate Departments tab
+      const ok = await saveStoredOrgNodes(updated);
       syncAndGetExtractedDepartments();
+      window.dispatchEvent(new CustomEvent('hse_org_nodes_updated', { detail: { origin: 'OrgStructureManager', nodes: updated } }));
+      window.dispatchEvent(new CustomEvent('app_data_mutated', { detail: { origin: 'OrgStructureManager', entity: 'org_nodes' } }));
 
       if (onUpdate) onUpdate();
+      return ok;
     } catch (e) {
       console.error('Failed to save org nodes', e);
+      return false;
     }
   };
 
@@ -269,23 +272,54 @@ export default function OrgStructureManager({ isFa, currentUser, onUpdate }: Org
     setDeleteConfirm({ node, childCount });
   };
 
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (!deleteConfirm) return;
     const { node } = deleteConfirm;
 
-    // Collect all descendant ids
-    const getDescendantIds = (parentId: string): string[] => {
+    // Collect all descendant nodes and ids
+    const getDescendantNodes = (parentId: string): OrgNode[] => {
       const children = orgNodes.filter(n => n.parentId === parentId);
-      let ids = children.map(c => c.id);
+      let list = [...children];
       children.forEach(c => {
-        ids = ids.concat(getDescendantIds(c.id));
+        list = list.concat(getDescendantNodes(c.id));
       });
-      return ids;
+      return list;
     };
-    const idsToRemove = [node.id, ...getDescendantIds(node.id)];
+    const nodesToRemove = [node, ...getDescendantNodes(node.id)];
+    const idsToRemove = nodesToRemove.map(n => n.id);
+    const namesToRemove = new Set(nodesToRemove.map(n => n.name.trim().toLowerCase()));
+
     const updated = orgNodes.filter(n => !idsToRemove.includes(n.id));
 
-    saveNodes(updated);
+    // Also remove from orgStructure (Units & Jobs) if present, so it doesn't linger or reappear
+    const currentStruct = getOrgUnitsStructure();
+    let structChanged = false;
+    const nextStruct: OrgUnitsDataMap = { ...currentStruct };
+    for (const key of Object.keys(nextStruct)) {
+      if (namesToRemove.has(key.trim().toLowerCase())) {
+        delete nextStruct[key];
+        structChanged = true;
+      } else {
+        const subs = nextStruct[key].subUnits || {};
+        let subsChanged = false;
+        const newSubs = { ...subs };
+        for (const subKey of Object.keys(newSubs)) {
+          if (namesToRemove.has(subKey.trim().toLowerCase())) {
+            delete newSubs[subKey];
+            subsChanged = true;
+          }
+        }
+        if (subsChanged) {
+          nextStruct[key] = { ...nextStruct[key], subUnits: newSubs };
+          structChanged = true;
+        }
+      }
+    }
+    if (structChanged) {
+      await saveOrgUnitsStructure(nextStruct);
+    }
+
+    await saveNodes(updated);
     if (currentUser?.username) {
       addAuditLog(currentUser.username, `حذف ساختار سازمانی: ${node.name} و ${idsToRemove.length - 1} زیرمجموعه`, 'موفقیت‌آمیز');
     }
