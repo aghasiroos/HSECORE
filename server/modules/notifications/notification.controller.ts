@@ -233,6 +233,28 @@ export class NotificationController {
     }
     return res.json({ success: true, message: 'Custom siren reset to default.' });
   }
+
+  async getPublicActiveEmergencies(req: Request, res: Response) {
+    const list = await notificationService.getPublicActiveEmergencies();
+    return res.json({
+      success: true,
+      data: list,
+      count: list.length,
+    });
+  }
+
+  async acknowledgePublic(req: Request, res: Response) {
+    const { notifId, clientSessionId, note } = req.body;
+    if (!notifId) {
+      return res.status(400).json({ success: false, error: 'شناسه هشدار الزامی است.' });
+    }
+    const ip = req.ip || (req.socket as any)?.remoteAddress || 'unknown';
+    const success = await notificationService.acknowledgePublic(notifId, clientSessionId, note, ip);
+    return res.json({
+      success,
+      message: 'تأییدیه دریافت هشدار فوری HSE با موفقیت در پایگاه داده ثبت گردید.',
+    });
+  }
 }
 
 export const notificationController = new NotificationController();

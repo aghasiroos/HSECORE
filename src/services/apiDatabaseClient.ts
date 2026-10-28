@@ -1070,6 +1070,34 @@ export const apiDb = {
     }
   },
 
+  async getPublicActiveEmergencyAlerts(): Promise<any[]> {
+    try {
+      const res = await fetch('/api/v1/notifications/public/active');
+      if (!res.ok) return [];
+      const json: ApiResponse = await res.json();
+      return json.data || [];
+    } catch (e) {
+      console.warn('Failed to fetch public emergency alerts:', e);
+      return [];
+    }
+  },
+
+  async acknowledgePublicEmergency(notifId: string, clientSessionId?: string, note?: string): Promise<boolean> {
+    try {
+      invalidateCacheKeys('notifications', 'sync:full');
+      const res = await fetch('/api/v1/notifications/public/acknowledge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notifId, clientSessionId, note }),
+      });
+      invalidateCacheKeys('notifications', 'sync:full');
+      return res.ok;
+    } catch (e) {
+      console.error('Failed to acknowledge public emergency:', e);
+      return false;
+    }
+  },
+
   async triggerTestAlert(payload?: any): Promise<any> {
     try {
       invalidateCacheKeys('notifications', 'sync:full');

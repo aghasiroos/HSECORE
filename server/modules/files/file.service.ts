@@ -377,7 +377,7 @@ export class FileService {
     const { promisify } = await import('util');
     const execFileAsync = promisify(execFile);
 
-    // Get total pages via pdfinfo
+    // Get total pages via pdfinfo or Ghostscript
     let totalPages = 1;
     try {
       const { stdout } = await execFileAsync('pdfinfo', [file.filePath]);
@@ -386,41 +386,109 @@ export class FileService {
         totalPages = parseInt(match[1], 10);
       }
     } catch {
-      // Fallback
+      // Fallback 1: Ghostscript page count query
+      try {
+        const { stdout } = await execFileAsync('gs', [
+          '-q',
+          '-dNOSAFER',
+          '-dNODISPLAY',
+          '-c',
+          `(${file.filePath.replace(/\\/g, '/')}) (r) file runpdfbegin pdfpagecount = quit`,
+        ]);
+        const count = parseInt(stdout.trim(), 10);
+        if (!isNaN(count) && count > 0) {
+          totalPages = count;
+        }
+      } catch {
+        // Fallback 2: Regex scanning of PDF structure
+        try {
+          const content = fs.readFileSync(file.filePath, 'latin1');
+          const pageMatches = content.match(/\/Type\s*\/Page[^s]/g);
+          if (pageMatches && pageMatches.length > 0) {
+            totalPages = pageMatches.length;
+          }
+        } catch {}
+      }
     }
 
     const safePage = Math.max(1, Math.min(pageNumber, totalPages));
     const tmpPrefix = path.join('/tmp', `pdf_render_${fileId}_${Date.now()}`);
 
     try {
-      // High-resolution (150 DPI) rendering with native Poppler engine & embedded font rasterization
-      await execFileAsync('pdftoppm', [
-        '-png',
-        '-r', '150',
-        '-f', String(safePage),
-        '-l', String(safePage),
-        file.filePath,
-        tmpPrefix,
-      ]);
+      let generatedPath = `${tmpPrefix}.png`;
+      let rendered = false;
 
-      const expectedFile1 = `${tmpPrefix}-${safePage}.png`;
-      const expectedFile2 = `${tmpPrefix}-${String(safePage).padStart(2, '0')}.png`;
-      const expectedFile3 = `${tmpPrefix}-${String(safePage).padStart(3, '0')}.png`;
+      // Strategy 1: Ghostscript (native on Linux, fast, high fidelity 150 DPI)
+      try {
+        await execFileAsync('gs', [
+          '-dQUIET',
+          '-dBATCH',
+          '-dNOPAUSE',
+          '-dNOSAFER',
+          '-sDEVICE=png16m',
+          `-dFirstPage=${safePage}`,
+          `-dLastPage=${safePage}`,
+          '-r150',
+          `-sOutputFile=${generatedPath}`,
+          file.filePath,
+        ]);
+        if (fs.existsSync(generatedPath) && fs.statSync(generatedPath).size > 0) {
+          rendered = true;
+        }
+      } catch (gsErr: any) {
+        logger.warn('Ghostscript rendering attempt failed, trying fallback', { error: gsErr?.message });
+      }
 
-      let generatedPath = '';
-      if (fs.existsSync(expectedFile1)) generatedPath = expectedFile1;
-      else if (fs.existsSync(expectedFile2)) generatedPath = expectedFile2;
-      else if (fs.existsSync(expectedFile3)) generatedPath = expectedFile3;
-      else {
-        // Fallback: search directory for generated file
-        const tmpDir = '/tmp';
-        const files = fs.readdirSync(tmpDir).filter(f => f.startsWith(path.basename(tmpPrefix)) && f.endsWith('.png'));
-        if (files.length > 0) {
-          generatedPath = path.join(tmpDir, files[0]);
+      // Strategy 2: pdftoppm (if available in environment)
+      if (!rendered) {
+        try {
+          await execFileAsync('pdftoppm', [
+            '-png',
+            '-r', '150',
+            '-f', String(safePage),
+            '-l', String(safePage),
+            file.filePath,
+            tmpPrefix,
+          ]);
+
+          const expectedFile1 = `${tmpPrefix}-${safePage}.png`;
+          const expectedFile2 = `${tmpPrefix}-${String(safePage).padStart(2, '0')}.png`;
+          const expectedFile3 = `${tmpPrefix}-${String(safePage).padStart(3, '0')}.png`;
+
+          if (fs.existsSync(expectedFile1)) { generatedPath = expectedFile1; rendered = true; }
+          else if (fs.existsSync(expectedFile2)) { generatedPath = expectedFile2; rendered = true; }
+          else if (fs.existsSync(expectedFile3)) { generatedPath = expectedFile3; rendered = true; }
+          else {
+            const tmpDir = '/tmp';
+            const files = fs.readdirSync(tmpDir).filter(f => f.startsWith(path.basename(tmpPrefix)) && f.endsWith('.png'));
+            if (files.length > 0) {
+              generatedPath = path.join(tmpDir, files[0]);
+              rendered = true;
+            }
+          }
+        } catch (ppmErr: any) {
+          logger.warn('pdftoppm rendering attempt failed, trying ImageMagick', { error: ppmErr?.message });
         }
       }
 
-      if (!generatedPath || !fs.existsSync(generatedPath)) {
+      // Strategy 3: ImageMagick convert
+      if (!rendered) {
+        try {
+          await execFileAsync('convert', [
+            '-density', '150',
+            `${file.filePath}[${safePage - 1}]`,
+            '-quality', '90',
+            generatedPath,
+          ]);
+          if (fs.existsSync(generatedPath) && fs.statSync(generatedPath).size > 0) {
+            rendered = true;
+          }
+        } catch (convErr: any) {
+          logger.warn('ImageMagick convert rendering attempt failed', { error: convErr?.message });
+        }
+      }
+
+      if (!rendered || !fs.existsSync(generatedPath)) {
         throw new Error('فایل تصویری رندر شده PDF تولید نشد.');
       }
 
@@ -431,7 +499,7 @@ export class FileService {
 
       return { buffer: pngBuffer, totalPages };
     } catch (err: any) {
-      logger.error('Error rendering PDF with pdftoppm', { fileId, error: err?.message });
+      logger.error('Error rendering PDF page', { fileId, error: err?.message });
       throw new Error(`خطا در پردازش تصویر صفحه PDF: ${err?.message || 'نامشخص'}`);
     }
   }

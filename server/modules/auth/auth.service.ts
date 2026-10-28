@@ -184,6 +184,26 @@ export function normalizeAndValidateRole(roleInput?: string): string {
   return sanitized || 'User';
 }
 
+export function validatePasswordStrength(password: string): { valid: boolean; message?: string } {
+  if (!password || typeof password !== 'string' || password.length < 8) {
+    return { valid: false, message: 'کلمه عبور باید حداقل ۸ کاراکتر باشد.' };
+  }
+  const hasLetter = /[a-zA-Z\u0600-\u06FF]/.test(password);
+  const hasDigit = /[0-9\u06F0-\u06F9]/.test(password);
+  if (!hasLetter || !hasDigit) {
+    return { valid: false, message: 'کلمه عبور باید شامل ترکیب حروف و ارقام باشد.' };
+  }
+  return { valid: true };
+}
+
+interface FailedLoginState {
+  attempts: number;
+  lockedUntil: number | null;
+}
+const failedLoginMap = new Map<string, FailedLoginState>();
+const MAX_CONSECUTIVE_FAILED_LOGINS = 5;
+const ACCOUNT_LOCKOUT_MS = 15 * 60 * 1000; // 15 minutes
+
 export interface ClientContext {
   ip: string;
   userAgent: string;
@@ -205,6 +225,13 @@ export class AuthService {
 
     if (!rawUsername || !rawPassword) {
       throw new ValidationError('نام کاربری و کلمه عبور الزامی است.');
+    }
+
+    const trackerKey = (normUsername || rawUsername).toLowerCase().trim();
+    const failedState = failedLoginMap.get(trackerKey);
+    if (failedState && failedState.lockedUntil && failedState.lockedUntil > Date.now()) {
+      const remainingMins = Math.ceil((failedState.lockedUntil - Date.now()) / 60000);
+      throw new ForbiddenError(`حساب کاربری به دلیل ${MAX_CONSECUTIVE_FAILED_LOGINS} بار ورود ناموفق موقتاً مسدود شده است. لطفاً پس از ${remainingMins} دقیقه مجدداً تلاش نمایید.`);
     }
 
     // 1. Query user from پایگاه داده by username, email, personnelNumber, OR nationalId
@@ -240,6 +267,19 @@ export class AuthService {
       .limit(1);
 
     if (usersFound.length === 0) {
+      const currentAttempts = (failedState?.attempts || 0) + 1;
+      if (currentAttempts >= MAX_CONSECUTIVE_FAILED_LOGINS) {
+        failedLoginMap.set(trackerKey, {
+          attempts: currentAttempts,
+          lockedUntil: Date.now() + ACCOUNT_LOCKOUT_MS,
+        });
+      } else {
+        failedLoginMap.set(trackerKey, {
+          attempts: currentAttempts,
+          lockedUntil: null,
+        });
+      }
+
       try {
         await auditService.log({
           action: 'LOGIN',
@@ -326,6 +366,32 @@ export class AuthService {
       (faPassword !== rawPassword && verifyPassword(faPassword, user.passwordHash));
 
     if (!passwordMatches) {
+      const currentAttempts = (failedState?.attempts || 0) + 1;
+      if (currentAttempts >= MAX_CONSECUTIVE_FAILED_LOGINS) {
+        failedLoginMap.set(trackerKey, {
+          attempts: currentAttempts,
+          lockedUntil: Date.now() + ACCOUNT_LOCKOUT_MS,
+        });
+        await auditService.log({
+          userId: user.id,
+          userUid: user.uid,
+          action: 'ACCOUNT_LOCKOUT',
+          module: 'AUTH',
+          entityType: 'USER',
+          entityId: user.uid,
+          result: 'FAILED',
+          ipAddress: clientInfo.ip,
+          userAgent: clientInfo.userAgent,
+          details: { reason: 'CONSECUTIVE_FAILED_LOGINS', attempts: currentAttempts, lockedForMinutes: 15 },
+        });
+        throw new ForbiddenError(`حساب کاربری به دلیل ${MAX_CONSECUTIVE_FAILED_LOGINS} بار ورود ناموفق به مدت ۱۵ دقیقه مسدود شد.`);
+      } else {
+        failedLoginMap.set(trackerKey, {
+          attempts: currentAttempts,
+          lockedUntil: null,
+        });
+      }
+
       await auditService.log({
         userId: user.id,
         userUid: user.uid,
@@ -336,10 +402,13 @@ export class AuthService {
         result: 'FAILED',
         ipAddress: clientInfo.ip,
         userAgent: clientInfo.userAgent,
-        details: { reason: 'INVALID_PASSWORD', username: user.username },
+        details: { reason: 'INVALID_PASSWORD', username: user.username, attempt: currentAttempts },
       });
       throw new UnauthorizedError('نام کاربری یا کلمه عبور وارد شده نادرست است.');
     }
+
+    // Reset failed login attempts on successful authentication
+    failedLoginMap.delete(trackerKey);
 
     // 4. Safe hash cost upgrade if stored hash is older bcrypt format
     if (!user.passwordHash?.startsWith('$2b$12$') && user.passwordHash?.startsWith('$2')) {
@@ -521,8 +590,9 @@ export class AuthService {
   }
 
   async changePassword(uid: string, currentPass: string, newPass: string, clientInfo: ClientContext) {
-    if (!newPass || typeof newPass !== 'string' || newPass.length < 6) {
-      throw new ValidationError('رمز عبور جدید باید حداقل ۶ کاراکتر باشد.');
+    const strengthCheck = validatePasswordStrength(newPass);
+    if (!strengthCheck.valid) {
+      throw new ValidationError(strengthCheck.message || 'رمز عبور جدید معتبر نیست.');
     }
 
     if (currentPass === newPass) {
@@ -605,8 +675,9 @@ export class AuthService {
       throw new ForbiddenError('فقط مدیر ارشد سیستم مجاز به بازنشانی کلمه عبور کاربران است.');
     }
 
-    if (!newPass || typeof newPass !== 'string' || newPass.length < 6) {
-      throw new ValidationError('رمز عبور جدید باید حداقل ۶ کاراکتر باشد.');
+    const strengthCheck = validatePasswordStrength(newPass);
+    if (!strengthCheck.valid) {
+      throw new ValidationError(strengthCheck.message || 'رمز عبور جدید معتبر نیست.');
     }
 
     const list = await db
@@ -849,6 +920,10 @@ export class AuthService {
     let autoGeneratedPassword = false;
     if (data.password && typeof data.password === 'string' && data.password.trim() !== '') {
       const normPassword = normalizeDigits(data.password.trim());
+      const strengthCheck = validatePasswordStrength(normPassword);
+      if (!strengthCheck.valid) {
+        throw new ValidationError(strengthCheck.message || 'کلمه عبور باید حداقل ۸ کاراکتر و ترکیبی از حروف و ارقام باشد.');
+      }
       finalPasswordHash = hashPassword(normPassword);
     } else if ((data as any).passwordHash && typeof (data as any).passwordHash === 'string' && (data as any).passwordHash.trim() !== '') {
       finalPasswordHash = (data as any).passwordHash.trim();

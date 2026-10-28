@@ -219,6 +219,7 @@ export const SystemNotificationsTab: React.FC<SystemNotificationsTabProps> = ({
           metadata: {
             ...(notifImages.length > 0 ? { images: notifImages } : {}),
             sirenType: playSoundAlert ? notifSirenType : undefined,
+            actionGuidelines: notifBody.trim(),
           }
         });
 

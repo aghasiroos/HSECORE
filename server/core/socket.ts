@@ -1,7 +1,7 @@
 import { Server as SocketServer, Socket } from 'socket.io';
 import type { Server as HttpServer } from 'http';
 import type { Response } from 'express';
-import { logger } from './logger';
+import { logger } from './logger.ts';
 
 // SSE (Server-Sent Events) clients registry
 const sseClients = new Set<Response>();
@@ -41,6 +41,9 @@ class SocketService {
 
     this.io.on('connection', (socket: Socket) => {
       logger.debug(`WebSocket connected: ${socket.id}`);
+
+      // Every connected client automatically joins public_emergency room for HSE critical alerts
+      socket.join('public_emergency');
 
       // Optional: Store user ID if sent via auth payload
       const userId = socket.handshake.auth?.userId;

@@ -496,27 +496,14 @@ export async function authenticateToken(req: Request): Promise<UserContext | nul
     token = req.query.token;
   }
 
-  const headerUser = extractHeaderUserContext(req);
-
   if (!token) {
-    if (!config.isProd && headerUser) {
-      return headerUser;
-    }
     return null;
   }
 
-  // 1. First priority: Verify application server-signed JWT
+  // Strictly verify application server-signed JWT
   try {
     const decoded = jwt.verify(token, config.security.jwtSecret) as any;
     if (decoded && decoded.uid) {
-      if (
-        headerUser &&
-        headerUser.username &&
-        decoded.username &&
-        headerUser.username.toLowerCase() !== String(decoded.username).toLowerCase()
-      ) {
-        return headerUser;
-      }
       const rawRole = (decoded.role || 'USER').toUpperCase();
       const perms = decoded.permissions || ROLE_PERMISSIONS[rawRole] || ['user:read'];
       return {
@@ -524,52 +511,19 @@ export async function authenticateToken(req: Request): Promise<UserContext | nul
         id: decoded.id,
         username: decoded.username,
         email: decoded.email,
-        name: decoded.name || decoded.fullName || headerUser?.name || decoded.username || decoded.email,
+        name: decoded.name || decoded.fullName || decoded.username || decoded.email,
         role: decoded.role || 'USER',
-        personnelCode: decoded.personnelCode || decoded.personnelNumber || headerUser?.personnelCode,
+        personnelCode: decoded.personnelCode || decoded.personnelNumber,
         department: decoded.department,
         permissions: perms,
       };
     }
   } catch (jwtErr: any) {
-    // In development mode, if server restarted with a different dev secret,
-    // gracefully accept valid, unexpired tokens to prevent interrupting the user session
-    if (!config.isProd && jwtErr.name === 'JsonWebTokenError') {
-      try {
-        const decoded = jwt.decode(token) as any;
-        if (decoded && decoded.uid && (!decoded.exp || decoded.exp * 1000 > Date.now())) {
-          if (
-            headerUser &&
-            headerUser.username &&
-            decoded.username &&
-            headerUser.username.toLowerCase() !== String(decoded.username).toLowerCase()
-          ) {
-            return headerUser;
-          }
-          const rawRole = (decoded.role || 'USER').toUpperCase();
-          const perms = decoded.permissions || ROLE_PERMISSIONS[rawRole] || ['user:read'];
-          return {
-            uid: decoded.uid,
-            id: decoded.id,
-            username: decoded.username,
-            email: decoded.email,
-            name: decoded.name || decoded.fullName || headerUser?.name || decoded.username || decoded.email,
-            role: decoded.role || 'USER',
-            personnelCode: decoded.personnelCode || decoded.personnelNumber || headerUser?.personnelCode,
-            department: decoded.department,
-            permissions: perms,
-          };
-        }
-      } catch {}
-    }
-
     if (jwtErr.name === 'TokenExpiredError') {
       logger.debug('JWT token expired', { tokenSnippet: token.substring(0, 10) });
+    } else {
+      logger.debug('JWT verification failed', { error: jwtErr.message });
     }
-  }
-
-  if (!config.isProd && headerUser) {
-    return headerUser;
   }
 
   // Strictly return null if signature is invalid - NO spoofable header fallback
@@ -581,11 +535,6 @@ export async function optionalAuth(req: Request, res: Response, next: NextFuncti
     const user = await authenticateToken(req);
     if (user) {
       req.user = user;
-    } else if (!config.isProd) {
-      const headerUser = extractHeaderUserContext(req);
-      if (headerUser) {
-        req.user = headerUser;
-      }
     }
     next();
   } catch (error) {
@@ -598,43 +547,11 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
   try {
     const user = await authenticateToken(req);
     if (!user) {
-      if (!config.isProd) {
-        const headerUser = extractHeaderUserContext(req);
-        if (headerUser) {
-          req.user = headerUser;
-          return next();
-        }
-        req.user = {
-          uid: 'dev-admin-user',
-          id: 1,
-          username: 'admin',
-          name: 'مدیر ارشد سامانه',
-          role: 'ADMINISTRATOR',
-          permissions: ['*'],
-        };
-        return next();
-      }
       return next(new UnauthorizedError('برای دسترسی به این بخش لطفاً ابتدا وارد سامانه شوید (توکن نامعتبر یا منقضی است).'));
     }
     req.user = user;
     next();
   } catch (error) {
-    if (!config.isProd) {
-      const headerUser = extractHeaderUserContext(req);
-      if (headerUser) {
-        req.user = headerUser;
-        return next();
-      }
-      req.user = {
-        uid: 'dev-admin-user',
-        id: 1,
-        username: 'admin',
-        name: 'مدیر ارشد سامانه',
-        role: 'ADMINISTRATOR',
-        permissions: ['*'],
-      };
-      return next();
-    }
     next(new UnauthorizedError('توکن دسترسی نامعتبر است یا منقضی شده است.'));
   }
 }

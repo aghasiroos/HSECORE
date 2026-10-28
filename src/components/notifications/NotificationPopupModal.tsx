@@ -28,7 +28,7 @@ import {
   Users,
 } from 'lucide-react';
 import { useNotification } from '../../context/NotificationContext';
-import { AppNotification } from '../../services/notificationService';
+import { AppNotification, getPublicAcknowledgedAlertIds } from '../../services/notificationService';
 import {
   startSirenLoop,
   stopSirenLoop,
@@ -64,14 +64,15 @@ export const NotificationPopupModal: React.FC = () => {
 
   // Check if current user has already acknowledged this notification
   const isAcknowledgedByCurrentUser = Boolean(
-    currentUser &&
-    notif?.acknowledgedBy?.some(
-      (a) =>
-        a.userId === currentUser.id ||
-        a.userId === currentUser.username ||
-        a.userName === currentUser.username ||
-        a.userName === currentUser.fullName
-    )
+    currentUser
+      ? notif?.acknowledgedBy?.some(
+          (a) =>
+            a.userId === currentUser.id ||
+            a.userId === currentUser.username ||
+            a.userName === currentUser.username ||
+            a.userName === currentUser.fullName
+        )
+      : (notif?.notifId && getPublicAcknowledgedAlertIds().has(notif.notifId))
   );
 
   // Siren configuration
@@ -253,7 +254,7 @@ export const NotificationPopupModal: React.FC = () => {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 overflow-y-auto"
+      className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6 overflow-y-auto"
       style={{ direction: 'rtl' }}
       role="dialog"
       aria-modal="true"
@@ -427,6 +428,19 @@ export const NotificationPopupModal: React.FC = () => {
             <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-100 dark:border-slate-800/80 leading-relaxed text-sm text-slate-700 dark:text-slate-200">
               <p className="whitespace-pre-line font-medium leading-relaxed">{notif.body}</p>
             </div>
+
+            {/* Action Guidelines / Protective Instructions */}
+            {(notif.actionGuidelines || notif.metadata?.actionGuidelines) && (
+              <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl space-y-1.5 animate-in fade-in">
+                <div className="flex items-center gap-2 text-xs font-black text-amber-800 dark:text-amber-300">
+                  <ShieldAlert className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                  <span>دستورالعمل اقدام و الزامات ایمنی:</span>
+                </div>
+                <p className="text-xs text-amber-950 dark:text-amber-100 leading-relaxed font-semibold whitespace-pre-line">
+                  {notif.actionGuidelines || notif.metadata?.actionGuidelines}
+                </p>
+              </div>
+            )}
 
             {/* Optional Metadata Images / Details */}
             {notif.metadata?.images && Array.isArray(notif.metadata.images) && notif.metadata.images.length > 0 && (

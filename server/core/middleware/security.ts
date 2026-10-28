@@ -9,6 +9,14 @@ export function securityHeadersMiddleware(req: Request, res: Response, next: Nex
   res.setHeader('X-XSS-Protection', '1; mode=block');
   // Referrer Policy
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  // Permissions Policy: restrict unused hardware APIs
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
+  // Cross-Origin Opener Policy
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
+  // Strict Transport Security (HSTS) when on HTTPS
+  if (req.secure || req.headers['x-forwarded-proto'] === 'https') {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
   // Remove Express signature
   res.removeHeader('X-Powered-By');
   next();

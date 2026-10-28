@@ -84,3 +84,51 @@ self.addEventListener('fetch', (event) => {
   );
 });
 
+// 5. Web Push & Background Emergency Alert Notification Handlers
+self.addEventListener('push', (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch {
+    data = {
+      title: 'هشدار فوری HSECORE',
+      body: event.data ? event.data.text() : 'هشدار فوری اضطراری در سامانه ثبت گردید.',
+    };
+  }
+
+  const title = data.title || 'هشدار فوری سامانه HSE';
+  const options = {
+    body: data.body || 'دستورالعمل‌های ایمنی و تخلیه را فوراً بررسی فرمایید.',
+    icon: '/assets/aistudio/ChatGPT_Image_Oct_8__2026__12_04_00_PM_42699341.png',
+    badge: '/assets/aistudio/ChatGPT_Image_Oct_8__2026__12_04_00_PM_42699341.png',
+    tag: data.notifId || 'hse-emergency-alert',
+    renotify: true,
+    requireInteraction: true,
+    vibrate: [300, 100, 300, 100, 300],
+    data: {
+      url: data.actionUrl || '/',
+      notifId: data.notifId,
+    },
+  };
+
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const urlToOpen = event.notification.data?.url || '/';
+
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
+      for (const client of windowClients) {
+        if (client.url && 'focus' in client) {
+          return client.focus();
+        }
+      }
+      if (self.clients.openWindow) {
+        return self.clients.openWindow(urlToOpen);
+      }
+    })
+  );
+});
+

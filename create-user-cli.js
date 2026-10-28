@@ -35,8 +35,8 @@ async function main() {
 
     if (!password) {
       password = await ask('Enter Password: ');
-      if (!password || password.length < 4) {
-        console.error('Error: Password must be at least 4 characters!');
+      if (!password || password.length < 8) {
+        console.error('Error: Password must be at least 8 characters!');
         process.exit(1);
       }
     }
@@ -51,6 +51,10 @@ async function main() {
       role = (await ask('Enter Role (Administrator/User) [Administrator]: ')).trim() || 'Administrator';
     }
   } else {
+    if (password.length < 8) {
+      console.error('Error: ADMIN_PASS must be at least 8 characters!');
+      process.exit(1);
+    }
     if (!email) email = `${username}@hsecore.local`;
     if (!fullName) fullName = 'مدیر ارشد سامانه';
   }
@@ -62,12 +66,18 @@ async function main() {
       .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 1632));
   }
 
+  const sqlPassword = process.env.SQL_PASSWORD || process.env.POSTGRES_PASSWORD;
+  if (!sqlPassword) {
+    console.error('Error: SQL_PASSWORD or POSTGRES_PASSWORD environment variable is required to connect to the database.');
+    process.exit(1);
+  }
+
   // Inside the container, environment variables are loaded
   const client = new Client({
     host: process.env.SQL_HOST || 'host.docker.internal',
     port: parseInt(process.env.SQL_PORT || process.env.POSTGRES_PORT || '5432', 10),
     user: process.env.SQL_USER || 'hse_user',
-    password: process.env.SQL_PASSWORD || 'hse_secure_password_2026',
+    password: sqlPassword,
     database: process.env.SQL_DB_NAME || 'hsedb'
   });
 
@@ -76,7 +86,7 @@ async function main() {
 
     username = normalizeDigits(username).toLowerCase().trim();
     const cleanPassword = normalizeDigits(password);
-    const hash = bcrypt.hashSync(cleanPassword, 10);
+    const hash = bcrypt.hashSync(cleanPassword, 12);
     const isAdmin = role.toLowerCase().includes('admin') || role.includes('مدیرارشد') || role.includes('مدیرسیستم');
     const perms = isAdmin ? JSON.stringify({ all: true }) : JSON.stringify({
       Dashboard: { view: true },

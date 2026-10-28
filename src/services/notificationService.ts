@@ -28,6 +28,7 @@ export interface AppNotification {
     note?: string;
   }>;
   sirenType?: HseSirenType | string;
+  actionGuidelines?: string;
   metadata?: Record<string, any>;
   createdAt: string;
 }
@@ -119,6 +120,44 @@ function saveCachedPrefsToStorage(prefs: NotificationPreferences): void {
       toSave.criticalHseCustomAudioUrl = '/api/v1/notifications/custom-siren';
     }
     localStorage.setItem(PREFS_STORAGE_KEY, JSON.stringify(toSave));
+  } catch {}
+}
+
+const GUEST_ACK_KEY = 'hse_public_acknowledged_alerts';
+const GUEST_SESSION_KEY = 'hse_guest_session_id';
+
+export function getOrInitGuestSessionId(): string {
+  if (typeof window === 'undefined') return 'guest_session';
+  try {
+    let sid = sessionStorage.getItem(GUEST_SESSION_KEY);
+    if (!sid) {
+      sid = 'sid_' + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
+      sessionStorage.setItem(GUEST_SESSION_KEY, sid);
+    }
+    return sid;
+  } catch {
+    return 'guest_session';
+  }
+}
+
+export function getPublicAcknowledgedAlertIds(): Set<string> {
+  if (typeof window === 'undefined') return new Set();
+  try {
+    const raw = localStorage.getItem(GUEST_ACK_KEY);
+    if (raw) {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) return new Set(arr);
+    }
+  } catch {}
+  return new Set();
+}
+
+export function markPublicAlertAcknowledgedLocally(notifId: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const set = getPublicAcknowledgedAlertIds();
+    set.add(String(notifId));
+    localStorage.setItem(GUEST_ACK_KEY, JSON.stringify(Array.from(set)));
   } catch {}
 }
 
@@ -290,6 +329,7 @@ export const CentralNotificationService = {
 
       // Trigger instant UI events
       window.dispatchEvent(new CustomEvent('hse_notifications_updated'));
+      window.dispatchEvent(new CustomEvent('hse_new_notification_received', { detail: saved || payload }));
 
       if (shouldPopup && popupPref !== 'none') {
         window.dispatchEvent(new CustomEvent('hse_popup_alert_requested', { detail: saved || payload }));
@@ -346,6 +386,38 @@ export const CentralNotificationService = {
 
   async acknowledge(id: string | number, note?: string): Promise<boolean> {
     const success = await apiDb.acknowledgeNotification(String(id), note);
+    window.dispatchEvent(new CustomEvent('hse_notifications_updated'));
+    return success;
+  },
+
+  async getPublicActiveEmergencyAlerts(): Promise<AppNotification[]> {
+    const list = await apiDb.getPublicActiveEmergencyAlerts();
+    return (list || []).map((item: any) => ({
+      id: item.id,
+      notifId: item.notifId || item.id || `notif-${Date.now()}`,
+      title: item.title,
+      body: item.body,
+      type: 'popup',
+      category: item.category || 'critical_hse',
+      priority: item.priority || 'critical',
+      sourceModule: item.sourceModule || 'emergency',
+      requiresAck: true,
+      acknowledgedBy: [],
+      sirenType: item.sirenType || 'siren_evacuation',
+      actionGuidelines: item.actionGuidelines || item.body,
+      metadata: {
+        actionGuidelines: item.actionGuidelines,
+        sirenType: item.sirenType || 'siren_evacuation',
+      },
+      createdAt: item.createdAt || new Date().toISOString(),
+    }));
+  },
+
+  async acknowledgePublic(id: string | number, note?: string): Promise<boolean> {
+    const notifIdStr = String(id);
+    const sessionId = getOrInitGuestSessionId();
+    const success = await apiDb.acknowledgePublicEmergency(notifIdStr, sessionId, note);
+    markPublicAlertAcknowledgedLocally(notifIdStr);
     window.dispatchEvent(new CustomEvent('hse_notifications_updated'));
     return success;
   },

@@ -4,6 +4,15 @@ import { requireAuth, requireRole } from '../../core/middleware/auth.ts';
 
 const router = Router();
 
+// 0. Public Active Emergency Alerts & Acknowledgment (Login Screen / Guest Access)
+router.get('/public/active', (req, res, next) => {
+  notificationController.getPublicActiveEmergencies(req, res).catch(next);
+});
+
+router.post('/public/acknowledge', (req, res, next) => {
+  notificationController.acknowledgePublic(req, res).catch(next);
+});
+
 // 1. Get notifications with query parameters
 router.get('/', requireAuth, (req, res, next) => {
   notificationController.getNotifications(req, res).catch(next);

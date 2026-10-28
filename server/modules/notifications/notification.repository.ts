@@ -58,6 +58,77 @@ export class NotificationRepository {
     }
   }
 
+  async getPublicActiveEmergencies(): Promise<Array<{
+    notifId: string;
+    id: number;
+    title: string;
+    body: string;
+    priority: string;
+    category: string;
+    sourceModule: string;
+    sirenType?: string;
+    actionGuidelines?: string;
+    requiresAck: boolean;
+    createdAt: string;
+  }>> {
+    try {
+      const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const records = await db
+        .select()
+        .from(schema.notifications)
+        .where(
+          and(
+            eq(schema.notifications.isDeleted, false),
+            or(
+              eq(schema.notifications.category, 'critical_hse'),
+              eq(schema.notifications.priority, 'critical')
+            ),
+            sql`${schema.notifications.createdAt} >= ${oneDayAgo}`
+          )
+        )
+        .orderBy(desc(schema.notifications.createdAt))
+        .limit(10);
+
+      return records
+        .filter((r) => r.targetType === 'all' || !r.targetType)
+        .map((r) => ({
+          id: r.id,
+          notifId: r.notifId,
+          title: r.title,
+          body: r.body,
+          priority: r.priority,
+          category: r.category,
+          sourceModule: r.sourceModule || 'emergency',
+          sirenType: (r.metadata as any)?.sirenType || (r.priority === 'critical' ? 'siren_evacuation' : undefined),
+          actionGuidelines: (r.metadata as any)?.actionGuidelines || r.body,
+          requiresAck: true,
+          createdAt: r.createdAt ? r.createdAt.toISOString() : new Date().toISOString(),
+        }));
+    } catch (err) {
+      logger.error('Error fetching public active emergencies:', err);
+      return inMemoryNotifications
+        .filter(
+          (n) =>
+            (n.category === 'critical_hse' || n.priority === 'critical') &&
+            (n.targetType === 'all' || !n.targetType)
+        )
+        .slice(0, 5)
+        .map((n) => ({
+          id: n.id || 0,
+          notifId: n.notifId,
+          title: n.title,
+          body: n.body,
+          priority: n.priority,
+          category: n.category,
+          sourceModule: n.sourceModule,
+          sirenType: n.sirenType || 'siren_evacuation',
+          actionGuidelines: n.metadata?.actionGuidelines || n.body,
+          requiresAck: true,
+          createdAt: n.createdAt,
+        }));
+    }
+  }
+
   async getById(idOrNotifId: string | number): Promise<NotificationRecord | null> {
     const numId = Number(idOrNotifId);
     const idStr = String(idOrNotifId);

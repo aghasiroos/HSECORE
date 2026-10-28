@@ -4,6 +4,7 @@ import {
   AppNotification,
   NotificationPreferences,
   DEFAULT_PREFERENCES,
+  getPublicAcknowledgedAlertIds,
 } from '../services/notificationService';
 import { useWebSocket } from '../providers/WebSocketProvider';
 import { stopSirenLoop } from '../utils/notificationAudio';
@@ -120,79 +121,107 @@ export const NotificationProvider: React.FC<{
     };
   }, [currentUser?.id]);
 
-  // Fetch notifications from database
+  // Fetch notifications from database (supports authenticated user and login page guest mode)
   const refreshNotifications = useCallback(async () => {
-    if (!currentUser?.id) return;
     try {
-      const data = await CentralNotificationService.getNotifications();
-      setNotifications(data);
+      if (currentUser?.id) {
+        const data = await CentralNotificationService.getNotifications();
+        setNotifications(data);
 
-      // Check for unacknowledged critical alerts, referrals, signatures, and popup notifications
-      const isCriticalAlert = (n: AppNotification) => n.category === 'critical_hse' || n.priority === 'critical';
-      const isWorkflowOrReferral = (n: AppNotification) =>
-        n.priority === 'high' ||
-        n.category === 'warning' ||
-        n.sourceModule === 'workflow' ||
-        n.sourceModule === 'referral' ||
-        n.sourceModule === 'signature' ||
-        n.sourceModule === 'ptw' ||
-        n.sourceModule === 'inspection' ||
-        n.sourceModule === 'warnings' ||
-        n.sourceModule === 'incidents';
+        // Check for unacknowledged critical alerts, referrals, signatures, and popup notifications
+        const isCriticalAlert = (n: AppNotification) => n.category === 'critical_hse' || n.priority === 'critical';
+        const isWorkflowOrReferral = (n: AppNotification) =>
+          n.priority === 'high' ||
+          n.category === 'warning' ||
+          n.sourceModule === 'workflow' ||
+          n.sourceModule === 'referral' ||
+          n.sourceModule === 'signature' ||
+          n.sourceModule === 'ptw' ||
+          n.sourceModule === 'inspection' ||
+          n.sourceModule === 'warnings' ||
+          n.sourceModule === 'incidents';
 
-      const popupPref = preferences.showCenterPopup || 'important_and_critical';
-      
-      const unackPopups = data.filter((n) => {
-        if (n.read) return false;
-        if (dismissedPopupIdsRef.current.has(n.notifId)) return false;
+        const popupPref = preferences.showCenterPopup || 'important_and_critical';
+        
+        const unackPopups = data.filter((n) => {
+          if (n.read) return false;
+          if (dismissedPopupIdsRef.current.has(n.notifId)) return false;
 
-        // If explicitly acknowledged already by this user
-        if (n.requiresAck && n.acknowledgedBy && n.acknowledgedBy.some(a => a.userId === currentUser.id || a.userName === currentUser.username)) {
+          // If explicitly acknowledged already by this user
+          if (n.requiresAck && n.acknowledgedBy && n.acknowledgedBy.some(a => a.userId === currentUser.id || a.userName === currentUser.username)) {
+            return false;
+          }
+
+          if (popupPref === 'none') return false;
+
+          // Direct popup type or requires explicit ack
+          if (n.type === 'popup' || n.requiresAck) return true;
+
+          // Preferences evaluation
+          if (popupPref === 'all') return true;
+          if (popupPref === 'important_and_critical' && (isCriticalAlert(n) || isWorkflowOrReferral(n))) return true;
+          if (popupPref === 'critical_only' && isCriticalAlert(n)) return true;
+
           return false;
-        }
-
-        if (popupPref === 'none') return false;
-
-        // Direct popup type or requires explicit ack
-        if (n.type === 'popup' || n.requiresAck) return true;
-
-        // Preferences evaluation
-        if (popupPref === 'all') return true;
-        if (popupPref === 'important_and_critical' && (isCriticalAlert(n) || isWorkflowOrReferral(n))) return true;
-        if (popupPref === 'critical_only' && isCriticalAlert(n)) return true;
-
-        return false;
-      });
-
-      // Automatically queue alerts for popup display
-      if (unackPopups.length > 0) {
-        setPopupQueue((prev) => {
-          const existingIds = new Set(prev.map((p) => p.notifId));
-          const newItems = unackPopups.filter((u) => !existingIds.has(u.notifId));
-          return newItems.length > 0 ? [...prev, ...newItems] : prev;
         });
+
+        // Automatically queue alerts for popup display
+        if (unackPopups.length > 0) {
+          setPopupQueue((prev) => {
+            const existingIds = new Set(prev.map((p) => p.notifId));
+            const newItems = unackPopups.filter((u) => !existingIds.has(u.notifId));
+            return newItems.length > 0 ? [...prev, ...newItems] : prev;
+          });
+        }
+      } else {
+        // Unauthenticated guest user on Login Screen: fetch only public active emergency alerts
+        const activePublicAlerts = await CentralNotificationService.getPublicActiveEmergencyAlerts();
+        const ackedSet = getPublicAcknowledgedAlertIds();
+
+        const pendingEmergencies = activePublicAlerts.filter((n) => {
+          if (ackedSet.has(n.notifId)) return false;
+          if (dismissedPopupIdsRef.current.has(n.notifId)) return false;
+          return true;
+        });
+
+        setNotifications(pendingEmergencies);
+
+        if (pendingEmergencies.length > 0) {
+          setPopupQueue((prev) => {
+            const existingIds = new Set(prev.map((p) => p.notifId));
+            const newItems = pendingEmergencies.filter((u) => !existingIds.has(u.notifId));
+            return newItems.length > 0 ? [...prev, ...newItems] : prev;
+          });
+        }
       }
     } catch (err) {
       console.error('Error fetching notifications:', err);
     }
   }, [currentUser?.id, currentUser?.username, preferences.showCenterPopup]);
 
-  // Initial load
+  // Initial load and network online reconnect listener
   useEffect(() => {
-    if (currentUser?.id) {
-      setIsLoading(true);
-      refreshNotifications().finally(() => setIsLoading(false));
-    } else {
-      setNotifications([]);
-      setActivePopupAlert(null);
-      setPopupQueue([]);
-    }
+    setIsLoading(true);
+    refreshNotifications().finally(() => setIsLoading(false));
+
+    const handleOnline = () => {
+      // Auto-reconnection sync: fetch any emergency alerts published while disconnected
+      refreshNotifications();
+    };
+
+    window.addEventListener('online', handleOnline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+    };
   }, [currentUser?.id, refreshNotifications]);
 
   // Helper to determine if current user is part of target audience
   const isTargetUser = useCallback(
     (notif: AppNotification) => {
-      if (!currentUser) return true;
+      if (!currentUser) {
+        // On login screen: only accept public emergencies (critical HSE or target all)
+        return notif.category === 'critical_hse' || notif.priority === 'critical' || notif.targetType === 'all';
+      }
       const targetType = notif.targetType || 'all';
       if (targetType === 'all') return true;
       const values = notif.targetValues || [];
@@ -227,8 +256,14 @@ export const NotificationProvider: React.FC<{
   useEffect(() => {
     if (!socket) return;
 
-    const handleSocketAlert = (newNotif: AppNotification) => {
-      // Check if current user is within the target audience of this alert
+    const processIncomingAlert = (newNotif: AppNotification) => {
+      // Check deduplication: skip if already acknowledged or dismissed on this client
+      const ackedSet = getPublicAcknowledgedAlertIds();
+      if (ackedSet.has(newNotif.notifId) || dismissedPopupIdsRef.current.has(newNotif.notifId)) {
+        return;
+      }
+
+      // Check audience targeting
       if (!isTargetUser(newNotif)) {
         return;
       }
@@ -241,7 +276,31 @@ export const NotificationProvider: React.FC<{
       // 2. Add to notification list
       setNotifications((prev) => [newNotif, ...prev.filter((n) => n.notifId !== newNotif.notifId)]);
 
-      // 3. Determine if popup should appear
+      // 3. Dispatch event for real-time bell ringing animation
+      window.dispatchEvent(new CustomEvent('hse_new_notification_received', { detail: newNotif }));
+
+      // 4. Background Web Notification / Service Worker Notification if window is in background
+      if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted' && document.hidden) {
+        try {
+          if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+            navigator.serviceWorker.ready.then((reg) => {
+              reg.showNotification(newNotif.title, {
+                body: newNotif.body,
+                icon: '/assets/aistudio/ChatGPT_Image_Oct_8__2026__12_04_00_PM_42699341.png',
+                tag: newNotif.notifId,
+                requireInteraction: true,
+              });
+            }).catch(() => {});
+          } else {
+            new Notification(newNotif.title, {
+              body: newNotif.body,
+              icon: '/assets/aistudio/ChatGPT_Image_Oct_8__2026__12_04_00_PM_42699341.png',
+            });
+          }
+        } catch {}
+      }
+
+      // 5. Determine if popup should appear
       const isCritical = newNotif.category === 'critical_hse' || newNotif.priority === 'critical';
       const isImportantOrWorkflow =
         newNotif.priority === 'high' ||
@@ -258,6 +317,8 @@ export const NotificationProvider: React.FC<{
       const shouldShowPopup =
         newNotif.type === 'popup' ||
         newNotif.requiresAck ||
+        isCritical ||
+        (!currentUser && isCritical) ||
         (popupPref === 'all') ||
         (popupPref === 'important_and_critical' && (isCritical || isImportantOrWorkflow)) ||
         (popupPref === 'critical_only' && isCritical);
@@ -270,12 +331,24 @@ export const NotificationProvider: React.FC<{
       }
     };
 
-    socket.on('notification_alert', handleSocketAlert);
+    // Standard notification alert handler
+    socket.on('notification_alert', processIncomingAlert);
+
+    // Dedicated public emergency alert handler (login page & unauthenticated clients)
+    socket.on('public_emergency_alert', processIncomingAlert);
+
+    // Auto-reconnect handler: sync latest alerts when socket reconnects
+    const handleSocketReconnect = () => {
+      refreshNotifications();
+    };
+    socket.on('connect', handleSocketReconnect);
 
     return () => {
-      socket.off('notification_alert', handleSocketAlert);
+      socket.off('notification_alert', processIncomingAlert);
+      socket.off('public_emergency_alert', processIncomingAlert);
+      socket.off('connect', handleSocketReconnect);
     };
-  }, [socket, preferences, isTargetUser]);
+  }, [socket, preferences, isTargetUser, currentUser, refreshNotifications]);
 
   // Listen for local system events
   useEffect(() => {
@@ -356,19 +429,28 @@ export const NotificationProvider: React.FC<{
 
   const acknowledgeAlert = useCallback(
     async (id: string | number, note?: string) => {
-      const success = await CentralNotificationService.acknowledge(id, note);
+      const idStr = String(id);
+      let success = false;
+
+      if (currentUser?.id) {
+        success = await CentralNotificationService.acknowledge(id, note);
+      } else {
+        // Public guest user acknowledgment on Login Screen
+        success = await CentralNotificationService.acknowledgePublic(id, note);
+      }
+
       if (success) {
         setNotifications((prev) =>
           prev.map((n) =>
-            n.notifId === String(id) || n.id === Number(id)
+            n.notifId === idStr || n.id === Number(id)
               ? {
                   ...n,
                   read: true,
                   acknowledgedBy: [
                     ...(n.acknowledgedBy || []),
                     {
-                      userId: currentUser?.id || currentUser?.username || 'user',
-                      userName: currentUser?.fullName || currentUser?.username || 'کاربر',
+                      userId: currentUser?.id || currentUser?.username || 'guest_user',
+                      userName: currentUser?.fullName || currentUser?.username || 'کاربر (صفحه ورود)',
                       timestamp: new Date().toISOString(),
                       note,
                     },
@@ -424,6 +506,11 @@ export const NotificationProvider: React.FC<{
       const { apiDb } = await import('../services/apiDatabaseClient');
       await apiDb.triggerTestAlert({ category, priority });
       await refreshNotifications();
+      window.dispatchEvent(
+        new CustomEvent('hse_new_notification_received', {
+          detail: { notifId: `test-${Date.now()}`, category, priority, read: false },
+        })
+      );
     } catch (e) {
       console.error(e);
     }

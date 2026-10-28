@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
   Bell,
   CheckCheck,
@@ -41,9 +41,103 @@ export const NotificationBellDropdown: React.FC<NotificationBellDropdownProps> =
   const [isOpen, setIsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'all' | 'unread' | 'critical' | 'workflow'>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [isRinging, setIsRinging] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
+  // References for tracking new notifications vs initial load
+  const isInitializedRef = useRef(false);
+  const knownNotificationIdsRef = useRef<Set<string>>(new Set());
+  const ringTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const isFa = language === 'fa';
+
+  // Function to stop ringing cleanly
+  const stopRinging = useCallback(() => {
+    setIsRinging(false);
+    if (ringTimerRef.current) {
+      clearTimeout(ringTimerRef.current);
+      ringTimerRef.current = null;
+    }
+  }, []);
+
+  // Function to trigger ringing for a controlled natural duration (~3.5s)
+  const triggerRinging = useCallback(() => {
+    // Respect prefers-reduced-motion
+    if (
+      typeof window !== 'undefined' &&
+      window.matchMedia &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    ) {
+      return;
+    }
+
+    setIsRinging(true);
+    if (ringTimerRef.current) {
+      clearTimeout(ringTimerRef.current);
+    }
+    // Ring for ~3.5 seconds (~3 natural oscillations), then stop cleanly
+    ringTimerRef.current = setTimeout(() => {
+      setIsRinging(false);
+      ringTimerRef.current = null;
+    }, 3500);
+  }, []);
+
+  // When dropdown is opened or all notifications are read, stop animation immediately
+  useEffect(() => {
+    if (isOpen || unreadCount === 0) {
+      stopRinging();
+    }
+  }, [isOpen, unreadCount, stopRinging]);
+
+  // Clean up timer on unmount
+  useEffect(() => {
+    return () => {
+      if (ringTimerRef.current) {
+        clearTimeout(ringTimerRef.current);
+      }
+    };
+  }, []);
+
+  // Track notifications to trigger ringing ONLY on new incoming unread notifications
+  useEffect(() => {
+    if (!isInitializedRef.current) {
+      if (notifications.length > 0) {
+        knownNotificationIdsRef.current = new Set(notifications.map((n) => n.notifId));
+        isInitializedRef.current = true;
+      }
+      return;
+    }
+
+    // Check if new unread items appeared since last known snapshot
+    const newUnread = notifications.filter(
+      (n) => !n.read && !knownNotificationIdsRef.current.has(n.notifId)
+    );
+
+    // Update known IDs
+    notifications.forEach((n) => knownNotificationIdsRef.current.add(n.notifId));
+
+    if (newUnread.length > 0 && !isOpen) {
+      triggerRinging();
+    }
+  }, [notifications, isOpen, triggerRinging]);
+
+  // Listen to real-time events dispatched from WebSocket / notificationService
+  useEffect(() => {
+    const handleNewNotification = (e: any) => {
+      const notif = e.detail as AppNotification;
+      if (notif && !notif.read) {
+        knownNotificationIdsRef.current.add(notif.notifId);
+        if (!isOpen) {
+          triggerRinging();
+        }
+      }
+    };
+
+    window.addEventListener('hse_new_notification_received', handleNewNotification);
+    return () => {
+      window.removeEventListener('hse_new_notification_received', handleNewNotification);
+    };
+  }, [isOpen, triggerRinging]);
 
   // Click outside listener
   useOnClickOutside(dropdownRef, () => setIsOpen(false), isOpen);
@@ -156,7 +250,15 @@ export const NotificationBellDropdown: React.FC<NotificationBellDropdownProps> =
         id="header-notif-bell"
         aria-label="اعلان‌ها و هشدارها"
       >
-        <Bell className="w-5 h-5" />
+        <Bell
+          className={`w-5 h-5 transition-transform duration-200 ${
+            isRinging
+              ? 'animate-bell-ring text-amber-500 dark:text-amber-400'
+              : unreadCount > 0
+              ? 'text-slate-700 dark:text-slate-200'
+              : 'text-slate-600 dark:text-slate-400'
+          }`}
+        />
 
         {/* Badge & Ping */}
         {unreadCount > 0 && (

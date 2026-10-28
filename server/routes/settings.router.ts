@@ -55,6 +55,7 @@ export const ADMIN_ONLY_SETTING_KEYS = [
   'org_nodes',
   'hse_org_units',
   'hse_org_jobs',
+  'hse_unit_structure_v1',
   'hse_incident_types',
   'hse_ppe_categories',
   'hse_global_sound_preferences_v1',
@@ -66,6 +67,8 @@ export const SENSITIVE_ADMIN_READ_KEYS = [
   'hse_system_api_tokens',
   'smtp_config',
   'ldap_config',
+  'security_policy',
+  'hse_backup_schedule_config',
 ];
 
 export function checkIsAdminRequest(req: any): boolean {

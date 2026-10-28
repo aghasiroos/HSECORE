@@ -1059,17 +1059,22 @@ export default function App() {
 
   if (!currentUser) {
     return (
-      <LoginScreen 
-        onLoginSuccess={(user) => {
-          setCurrentUser(user);
-          setCurrentUserInAuth(user);
-          setActiveTab('dashboard');
-        }}
-        language={language}
-        setLanguage={setLanguage}
-        themeMode={themeMode}
-        setThemeMode={setThemeMode}
-      />
+      <SyncProvider>
+        <NotificationProvider currentUser={null}>
+          <LoginScreen 
+            onLoginSuccess={(user) => {
+              setCurrentUser(user);
+              setCurrentUserInAuth(user);
+              setActiveTab('dashboard');
+            }}
+            language={language}
+            setLanguage={setLanguage}
+            themeMode={themeMode}
+            setThemeMode={setThemeMode}
+          />
+          <NotificationPopupModal />
+        </NotificationProvider>
+      </SyncProvider>
     );
   }
 

@@ -105,6 +105,33 @@ export class NotificationService {
       logger.warn('Socket notification broadcast warning:', { error: err?.message });
     }
 
+    // 1.1 Dedicated Public Emergency Alert Broadcast (for login screen and unauthenticated clients)
+    const isPublicEmergency =
+      (saved.category === 'critical_hse' || saved.priority === 'critical') &&
+      (saved.targetType === 'all' || !saved.targetType);
+
+    if (isPublicEmergency) {
+      const publicPayload = {
+        notifId: saved.notifId,
+        id: saved.id,
+        title: saved.title,
+        body: saved.body,
+        priority: saved.priority,
+        category: saved.category,
+        sourceModule: saved.sourceModule,
+        sirenType: saved.sirenType,
+        actionGuidelines: (saved.metadata as any)?.actionGuidelines || saved.body,
+        requiresAck: true,
+        type: 'popup',
+        createdAt: saved.createdAt,
+      };
+      try {
+        socketService.broadcast('public_emergency_alert', publicPayload);
+      } catch (err: any) {
+        logger.warn('Socket public emergency broadcast warning:', { error: err?.message });
+      }
+    }
+
     // 2. Global Universal Data Mutation event (ensures all tabs and components refresh)
     broadcastDataMutation('notifications', 'create', saved);
 
@@ -112,6 +139,27 @@ export class NotificationService {
     this.broadcastSSE('notification', saved);
 
     return saved;
+  }
+
+  async getPublicActiveEmergencies() {
+    return notificationRepository.getPublicActiveEmergencies();
+  }
+
+  async acknowledgePublic(notifId: string, clientSessionId?: string, note?: string, ip?: string): Promise<boolean> {
+    const guestId = clientSessionId ? `guest_${clientSessionId.slice(0, 12)}` : `guest_${Date.now().toString(36)}`;
+    const guestName = 'کاربر مهمان (صفحه ورود)';
+    const guestNote = note ? String(note).slice(0, 300) : 'تأیید دریافت هشدار در صفحه ورود سیستم';
+
+    const success = await notificationRepository.acknowledge(
+      notifId,
+      guestId,
+      `${guestName} [IP: ${ip || 'N/A'}]`,
+      guestNote
+    );
+
+    broadcastDataMutation('notifications', 'public_acknowledge', { notifId, guestId });
+    this.broadcastSSE('public_emergency_acknowledged', { notifId, guestId });
+    return success;
   }
 
   async markRead(idOrNotifId: string | number, userId?: string): Promise<boolean> {
