@@ -8,6 +8,8 @@ import { desc, eq, and, inArray } from 'drizzle-orm';
 import { textChunker } from './ai.chunker.ts';
 import { localAIProvider } from './ai.local-provider.ts';
 import { logger } from '../../core/logger.ts';
+import { type UserContext } from '../../core/middleware/auth.ts';
+import { canAccessKnowledgeDocument, type KnowledgeDocumentAccessControl } from './ai.acl.ts';
 
 export interface RelevantChunkResult {
   docId: number;
@@ -76,8 +78,9 @@ export class AIRagService {
     category?: string;
     uploadedBy?: string;
     summary?: string;
+    accessControl?: KnowledgeDocumentAccessControl;
   }): Promise<{ docId: number; id: number; chunkCount: number }> {
-    const { title, content, docType = 'REGULATION', category = 'GENERAL', uploadedBy, summary } = params;
+    const { title, content, docType = 'REGULATION', category = 'GENERAL', uploadedBy, summary, accessControl } = params;
 
     // 1. Create Document Header in DB
     const [doc] = await db
@@ -88,6 +91,7 @@ export class AIRagService {
         category,
         content,
         summary,
+        metadata: accessControl ? { accessControl } : {},
         fileSize: Buffer.byteLength(content, 'utf8'),
         chunkCount: 0,
         status: 'PENDING',
@@ -148,7 +152,7 @@ export class AIRagService {
    */
   async queryRelevantChunks(
     query: string,
-    options?: { topK?: number; minScore?: number; category?: string; allowedCategories?: string[] }
+    options?: { topK?: number; minScore?: number; category?: string; allowedCategories?: string[]; userContext?: UserContext }
   ): Promise<RelevantChunkResult[]> {
     const topK = options?.topK || 4;
     const minScore = options?.minScore ?? 0.45;
@@ -167,6 +171,7 @@ export class AIRagService {
         metadata: schema.aiKnowledgeChunks.metadata,
         docTitle: schema.aiKnowledgeDocs.title,
         category: schema.aiKnowledgeDocs.category,
+        docMetadata: schema.aiKnowledgeDocs.metadata,
       })
       .from(schema.aiKnowledgeChunks)
       .innerJoin(schema.aiKnowledgeDocs, eq(schema.aiKnowledgeChunks.docId, schema.aiKnowledgeDocs.id))
@@ -176,6 +181,13 @@ export class AIRagService {
     if (options?.category && options.category !== 'ALL') {
       chunkRows = chunkRows.filter(c => c.category === options.category);
     }
+
+    const user = options?.userContext;
+    if (!user || chunkRows.length === 0) return [];
+    const scope = await this.resolveUserOrgScope(user);
+    chunkRows = chunkRows.filter(row =>
+      canAccessKnowledgeDocument(row.docMetadata, user, scope)
+    );
 
     if (chunkRows.length === 0) {
       return [];
@@ -225,9 +237,40 @@ export class AIRagService {
   /**
    * List all documents in the Knowledge Base
    */
-  async listDocuments(allowedCategories: string[] = []) {
-    if (allowedCategories.length === 0) return [];
-    return await db
+  private async resolveUserOrgScope(user: UserContext): Promise<{ departmentIds: number[]; unitIds: number[] }> {
+    if (isGlobalAdminUser(user)) return { departmentIds: [], unitIds: [] };
+
+    const personnelRows = user.personnelCode
+      ? await db.select({
+          id: schema.personnel.id,
+          departmentId: schema.personnel.departmentId,
+          unitId: schema.personnel.unitId,
+        }).from(schema.personnel).where(eq(schema.personnel.personnelCode, user.personnelCode))
+      : [];
+
+    const resolvedRows = personnelRows.length > 0
+      ? personnelRows
+      : user.uid
+        ? await db.select({
+            id: schema.personnel.id,
+            departmentId: schema.personnel.departmentId,
+            unitId: schema.personnel.unitId,
+          })
+          .from(schema.personnel)
+          .innerJoin(schema.userPersonnelAssignments,
+            eq(schema.userPersonnelAssignments.personnelId, schema.personnel.id))
+          .where(eq(schema.userPersonnelAssignments.userUid, user.uid))
+        : [];
+
+    return {
+      departmentIds: [...new Set(resolvedRows.map(row => row.departmentId).filter((id): id is number => id !== null))],
+      unitIds: [...new Set(resolvedRows.map(row => row.unitId).filter((id): id is number => id !== null))],
+    };
+  }
+
+  async listDocuments(allowedCategories: string[] = [], userContext?: UserContext) {
+    if (allowedCategories.length === 0 || !userContext) return [];
+    const docs = await db
       .select({
         id: schema.aiKnowledgeDocs.id,
         title: schema.aiKnowledgeDocs.title,
@@ -236,11 +279,17 @@ export class AIRagService {
         fileSize: schema.aiKnowledgeDocs.fileSize,
         chunkCount: schema.aiKnowledgeDocs.chunkCount,
         status: schema.aiKnowledgeDocs.status,
+        metadata: schema.aiKnowledgeDocs.metadata,
         createdAt: schema.aiKnowledgeDocs.createdAt,
       })
       .from(schema.aiKnowledgeDocs)
       .where(inArray(schema.aiKnowledgeDocs.category, allowedCategories))
       .orderBy(desc(schema.aiKnowledgeDocs.createdAt));
+
+    const scope = await this.resolveUserOrgScope(userContext);
+    return docs
+      .filter(doc => canAccessKnowledgeDocument(doc.metadata, userContext, scope))
+      .map(({ metadata, ...doc }) => doc);
   }
 
   /**
