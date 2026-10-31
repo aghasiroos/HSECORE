@@ -2436,6 +2436,11 @@ step12_start_hsecore() {
 
   cd "${PROJECT_DIR}"
 
+  tui_run_task \
+    "Ensuring shared Docker network for HSECORE and optional AI runtime" \
+    "Verify Docker network permissions and DOCKER_NETWORK_NAME in .env." \
+    bash "${PROJECT_DIR}/scripts/ensure-ai-network.sh"
+
   local up_t0
   up_t0="$(date +%s)"
   prepare_uploads_storage || {
@@ -2775,7 +2780,7 @@ EOF
     tui_run_task \
       "Ensuring HSECORE container is active on internal port ${internal_port}" \
       "Check Docker container logs: docker compose -f docker-compose.server.yml logs hse-app" \
-      bash -c "docker compose -f '${PROJECT_DIR}/docker-compose.server.yml' up -d hse-app 2>/dev/null || true; sleep 2"
+      bash -c "bash '${PROJECT_DIR}/scripts/ensure-ai-network.sh' && docker compose -f '${PROJECT_DIR}/docker-compose.server.yml' up -d hse-app 2>/dev/null || true; sleep 2"
   fi
 
   # 5. UFW Firewall Configuration
@@ -2833,7 +2838,7 @@ step14_final_health_check() {
     tui_run_task \
       "Recovering HSECORE application container on port ${internal_port}" \
       "Inspect container logs with: docker compose -f docker-compose.server.yml logs hse-app" \
-      bash -c "docker compose -f '${PROJECT_DIR}/docker-compose.server.yml' up -d hse-app && sleep 3" || true
+      bash -c "bash '${PROJECT_DIR}/scripts/ensure-ai-network.sh' && docker compose -f '${PROJECT_DIR}/docker-compose.server.yml' up -d hse-app && sleep 3" || true
     cid="$(docker compose -f "${PROJECT_DIR}/docker-compose.server.yml" ps -q hse-app 2>/dev/null || true)"
     if [[ -n "${cid}" ]]; then
       container_stat="$(docker inspect --format='{{.State.Status}}' "${cid}" 2>/dev/null || echo 'not_found')"
@@ -4004,6 +4009,7 @@ run_system_update() {
     "[6/7] Restarting application container & reloading Nginx proxy" \
     "Check docker compose status and nginx configuration (nginx -t)." \
     bash -c "
+      bash "${PROJECT_DIR}/scripts/ensure-ai-network.sh" &&
       docker compose -f docker-compose.server.yml up -d --remove-orphans hse-app &&
       if systemctl list-unit-files 2>/dev/null | grep -q 'hsecore.service'; then
         systemctl restart hsecore 2>/dev/null || true
