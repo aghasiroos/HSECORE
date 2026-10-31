@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
-      AI_OLLAMA_VERSION: '0.40.13'
+      AI_OLLAMA_VERSION: '0.34.0'
       AI_CPU_LIMIT: '4.0'
       AI_MEMORY_LIMIT: '4096M'
       AI_CPU_THREADS: '4'
@@ -42,6 +42,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate shell scripts
+        run: |
+          bash -n install.sh
+          bash -n scripts/ensure-ai-network.sh
+          bash -n scripts/setup-local-ai.sh
+          bash -n scripts/manage-ai.sh
+          bash -n scripts/test-ai-runtime.sh
+
       - name: Prepare Compose environment
         run: |
           cat > .env <<'EOF'
@@ -50,7 +58,7 @@ jobs:
           SQL_DB_NAME=hsecore_ci
           JWT_SECRET=ci-only-runtime-secret-with-at-least-32-characters
           DOCKER_NETWORK_NAME=hse-network
-          AI_OLLAMA_VERSION=0.40.13
+          AI_OLLAMA_VERSION=0.34.0
           AI_CPU_LIMIT=4.0
           AI_MEMORY_LIMIT=4096M
           AI_CPU_THREADS=4
