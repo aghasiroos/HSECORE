@@ -30,7 +30,7 @@ export default function AiManagementTab({ language = 'fa', currentUser }: AiMana
   const [engineStatus, setEngineStatus] = useState<any>(null);
   const [installedModels, setInstalledModels] = useState<any[]>([]);
   const [auditData, setAuditData] = useState<any>(null);
-  const [pullModelName, setPullModelName] = useState<string>('qwen2.5:1.7b');
+  const [pullModelName, setPullModelName] = useState<string>('qwen3:1.7b');
   const [isPulling, setIsPulling] = useState<boolean>(false);
   const [actionMessage, setActionMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
