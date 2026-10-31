@@ -423,7 +423,7 @@ export class LocalAIProvider {
       const startTime = Date.now();
       const model = modelName || config.aiEngine.defaultEmbedModel;
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 4000);
+      const timeout = setTimeout(() => controller.abort(), 30000);
 
       try {
         const resp = await fetch(`${this.baseUrl}/api/embeddings`, {
