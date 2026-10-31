@@ -22,6 +22,8 @@ export interface AppConfig {
     timeoutMs: number;
     contextTokens: number;
     maxQueueLength: number;
+    allowedModels: string[];
+    modelPullTimeoutMs: number;
     allowCloudFallback: boolean;
   };
   database: {
@@ -178,6 +180,13 @@ export const config: AppConfig = {
     timeoutMs: Math.min(Math.max(Number(process.env.AI_REQUEST_TIMEOUT_MS) || 180000, 30000), 600000),
     contextTokens: Math.min(Math.max(Number(process.env.AI_CONTEXT_TOKENS) || 4096, 1024), 16384),
     maxQueueLength: Math.min(Math.max(Number(process.env.AI_MAX_QUEUE_LENGTH) || 10, 1), 50),
+    // Model pulls are restricted to explicitly configured references plus the active defaults.
+    allowedModels: [...new Set([
+      (process.env.AI_DEFAULT_CHAT_MODEL || 'qwen2.5:1.7b').trim(),
+      (process.env.AI_DEFAULT_EMBED_MODEL || 'bge-m3').trim(),
+      ...(process.env.AI_ALLOWED_MODELS || '').split(',').map(model => model.trim()).filter(Boolean),
+    ])],
+    modelPullTimeoutMs: Math.min(Math.max(Number(process.env.AI_MODEL_PULL_TIMEOUT_MS) || 30 * 60 * 1000, 60 * 1000), 60 * 60 * 1000),
     // Cloud processing is opt-in; organization data remains local by default.
     allowCloudFallback: process.env.AI_CLOUD_FALLBACK_ENABLED === 'true',
   },
