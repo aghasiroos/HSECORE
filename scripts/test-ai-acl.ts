@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { canAccessKnowledgeDocument } from '../server/modules/ai/ai.acl.ts';
 import { checkUserHasPermission, type UserContext } from '../server/core/middleware/auth.ts';
 import { buildAIConversationMessages } from '../server/modules/ai/ai.prompt-security.ts';
+import { normalizeAILogLimit } from '../server/modules/ai/ai.audit.ts';
 
 const user: UserContext = {
   uid: 'user-42',
@@ -157,4 +158,15 @@ test('AI management routes can rely on explicit document and audit permissions',
   assert.equal(checkUserHasPermission(auditor, 'documents:delete'), false);
 });
 
-console.log('AI ACL and prompt-security tests: ' + passed + '/18 passed');
+test('AI audit log pagination rejects negative values and caps large requests', () => {
+  assert.equal(normalizeAILogLimit(undefined), 50);
+  assert.equal(normalizeAILogLimit('invalid'), 50);
+  assert.equal(normalizeAILogLimit(-1), 50);
+  assert.equal(normalizeAILogLimit(0), 50);
+  assert.equal(normalizeAILogLimit(1), 1);
+  assert.equal(normalizeAILogLimit(199.9), 199);
+  assert.equal(normalizeAILogLimit(200), 200);
+  assert.equal(normalizeAILogLimit(5000), 200);
+});
+
+console.log('AI ACL and prompt-security tests: ' + passed + '/19 passed');
