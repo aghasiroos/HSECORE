@@ -20,40 +20,62 @@ export async function migrateLegacyAIKnowledgeMetadata(): Promise<LegacyAIMetada
           WHERE table_schema = current_schema()
             AND table_name = 'ai_knowledge_docs'
         ) AS table_exists,
-        EXISTS (
-          SELECT 1
+        (
+          SELECT is_nullable
           FROM information_schema.columns
           WHERE table_schema = current_schema()
             AND table_name = 'ai_knowledge_docs'
             AND column_name = 'metadata'
-        ) AS metadata_column_exists
+          LIMIT 1
+        ) AS is_nullable,
+        (
+          SELECT column_default
+          FROM information_schema.columns
+          WHERE table_schema = current_schema()
+            AND table_name = 'ai_knowledge_docs'
+            AND column_name = 'metadata'
+          LIMIT 1
+        ) AS column_default
     `);
 
     const state = (tableState as any).rows?.[0];
-    if (!state?.table_exists || !state?.metadata_column_exists) {
+    if (!state?.table_exists || !state?.is_nullable) {
       return { skipped: true, migratedCount: 0 };
     }
 
-    const updateResult = await tx.execute(sql`
-      UPDATE ai_knowledge_docs
-      SET metadata = '{}'::jsonb
-      WHERE metadata IS NULL
-      RETURNING id
-    `);
+    // Avoid scanning/locking the knowledge table again on every application start
+    // once the NOT NULL constraint and '{}' default have already been installed.
+    const hasEmptyObjectDefault =
+      typeof state.column_default === 'string' && state.column_default.includes('{}');
+    if (state.is_nullable === 'NO' && hasEmptyObjectDefault) {
+      return { skipped: false, migratedCount: 0 };
+    }
+
+    let migratedCount = 0;
+    if (state.is_nullable === 'YES') {
+      const updateResult = await tx.execute(sql`
+        UPDATE ai_knowledge_docs
+        SET metadata = '{}'::jsonb
+        WHERE metadata IS NULL
+        RETURNING id
+      `);
+      migratedCount = ((updateResult as any).rows || []).length;
+    }
 
     // Enforce the migrated invariant for future writes as well.
-    await tx.execute(sql`
-      ALTER TABLE ai_knowledge_docs
-      ALTER COLUMN metadata SET DEFAULT '{}'::jsonb
-    `);
-    await tx.execute(sql`
-      ALTER TABLE ai_knowledge_docs
-      ALTER COLUMN metadata SET NOT NULL
-    `);
+    if (!hasEmptyObjectDefault) {
+      await tx.execute(sql`
+        ALTER TABLE ai_knowledge_docs
+        ALTER COLUMN metadata SET DEFAULT '{}'::jsonb
+      `);
+    }
+    if (state.is_nullable === 'YES') {
+      await tx.execute(sql`
+        ALTER TABLE ai_knowledge_docs
+        ALTER COLUMN metadata SET NOT NULL
+      `);
+    }
 
-    return {
-      skipped: false,
-      migratedCount: ((updateResult as any).rows || []).length,
-    };
+    return { skipped: false, migratedCount };
   });
 }
