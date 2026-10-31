@@ -30,13 +30,17 @@ export function canAccessKnowledgeDocument(
 ): boolean {
   if (!user) return false;
 
-  const rawMetadata = metadata && typeof metadata === 'object'
+  const rawMetadata = metadata && typeof metadata === 'object' && !Array.isArray(metadata)
     ? metadata as Record<string, unknown>
     : {};
-  const acl = rawMetadata.accessControl as KnowledgeDocumentAccessControl | undefined;
+  const hasAccessControl = Object.prototype.hasOwnProperty.call(rawMetadata, 'accessControl');
+  const aclValue = rawMetadata.accessControl;
 
-  // Backward compatibility: documents indexed before document ACL existed.
-  if (!acl || typeof acl !== 'object') return true;
+  // Backward compatibility applies only when ACL metadata is truly absent.
+  // A present but malformed ACL must never silently become unrestricted.
+  if (!hasAccessControl) return true;
+  if (!aclValue || typeof aclValue !== 'object' || Array.isArray(aclValue)) return false;
+  const acl = aclValue as KnowledgeDocumentAccessControl;
   const validStringList = (value: unknown) => value === undefined || (Array.isArray(value) && value.every(item => typeof item === 'string' && item.trim().length > 0));
   const validIdList = (value: unknown) => value === undefined || (Array.isArray(value) && value.every(item => Number.isInteger(item) && item > 0));
   if (!validStringList(acl.allowedRoles) || !validStringList(acl.requiredPermissions) ||
