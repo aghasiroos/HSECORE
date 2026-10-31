@@ -163,6 +163,13 @@ export class AIController {
       return res.status(400).json({ success: false, message: 'عنوان و متن سند الزامی هستند.' });
     }
 
+    let accessControl: ReturnType<AIController['validateKnowledgeAccessControl']>;
+    try {
+      accessControl = this.validateKnowledgeAccessControl(req.body.accessControl);
+    } catch (err: any) {
+      return res.status(400).json({ success: false, message: err.message || 'ساختار سطح دسترسی سند نامعتبر است.' });
+    }
+
     try {
       const result = await aiRagService.indexDocument({
         title,
@@ -170,8 +177,8 @@ export class AIController {
         docType,
         category,
         summary,
-        accessControl: this.validateKnowledgeAccessControl(req.body.accessControl),
-        uploadedBy: (req as any).user?.username || (req as any).user?.name || 'system',
+        accessControl,
+        uploadedBy: req.user?.username || req.user?.name || 'system',
       });
       return res.json({ success: true, data: result, message: 'سند با موفقیت نمایه و ذخیره شد.' });
     } catch (err: any) {
@@ -186,6 +193,15 @@ export class AIController {
     }
 
     try {
+      const canAccessDocument = await aiRagService.canAccessDocument(
+        id,
+        this.getAllowedKnowledgeCategories(req.user),
+        req.user,
+      );
+      if (!canAccessDocument) {
+        return res.status(404).json({ success: false, message: 'سند یافت نشد یا دسترسی حذف آن مجاز نیست.' });
+      }
+
       await aiRagService.deleteDocument(id);
       return res.json({ success: true, message: 'سند با موفقیت حذف گردید.' });
     } catch (err: any) {
