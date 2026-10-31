@@ -4,6 +4,7 @@ import { aiOrchestrator } from './ai.orchestrator.ts';
 import { aiRequestQueue } from './ai.queue.ts';
 import { aiAuditService } from './ai.audit.ts';
 import { aiRagService } from './ai.rag.service.ts';
+import { checkUserHasPermission, type UserContext } from '../../core/middleware/auth.ts';
 
 export class AIController {
   async getStatus(_req: Request, res: Response) {
@@ -21,9 +22,9 @@ export class AIController {
     }
   }
 
-  async listAssistants(_req: Request, res: Response) {
+  async listAssistants(req: Request, res: Response) {
     try {
-      const assistants = aiOrchestrator.listAssistants();
+      const assistants = aiOrchestrator.listAssistants(req.user);
       return res.json({ success: true, data: assistants });
     } catch (err: any) {
       return res.status(500).json({ success: false, message: err.message || 'خطا در دریافت فهرست دستیاران' });
@@ -80,6 +81,9 @@ export class AIController {
             uid: req.user.uid,
             name: req.user.name || req.user.username,
             role: req.user.role,
+            permissions: req.user.permissions,
+            personnelCode: req.user.personnelCode,
+            department: req.user.department,
           }
         : undefined;
 
@@ -111,9 +115,19 @@ export class AIController {
     }
   }
 
-  async listKnowledgeDocs(_req: Request, res: Response) {
+  private getAllowedKnowledgeCategories(user?: UserContext): string[] {
+    if (!user) return [];
+    const categories = ['GENERAL'];
+    if (checkUserHasPermission(user, 'ptw:read')) categories.push('PTW');
+    if (checkUserHasPermission(user, 'health:read')) categories.push('HEALTH');
+    if (checkUserHasPermission(user, 'safety:read')) categories.push('SAFETY');
+    if (checkUserHasPermission(user, 'environment:read')) categories.push('ENVIRONMENT');
+    return categories;
+  }
+
+  async listKnowledgeDocs(req: Request, res: Response) {
     try {
-      const docs = await aiRagService.listDocuments();
+      const docs = await aiRagService.listDocuments(this.getAllowedKnowledgeCategories(req.user));
       return res.json({ success: true, data: docs });
     } catch (err: any) {
       return res.status(500).json({ success: false, message: err.message || 'خطا در دریافت فهرست اسناد پایگاه دانش' });
@@ -162,7 +176,15 @@ export class AIController {
     }
 
     try {
-      const results = await aiRagService.queryRelevantChunks(query, { category, topK: topK ? Number(topK) : 4 });
+      const allowedCategories = this.getAllowedKnowledgeCategories(req.user);
+      if (category && category !== 'ALL' && !allowedCategories.includes(String(category))) {
+        return res.status(403).json({ success: false, message: 'دسترسی به این دسته از اسناد مجاز نیست.' });
+      }
+      const requestedTopK = topK ? Number(topK) : 4;
+      const results = await aiRagService.queryRelevantChunks(query, {
+        category, topK: Number.isFinite(requestedTopK) ? Math.min(Math.max(requestedTopK, 1), 10) : 4,
+        allowedCategories,
+      });
       return res.json({ success: true, data: results });
     } catch (err: any) {
       return res.status(500).json({ success: false, message: err.message || 'خطا در جستجوی معنایی' });
