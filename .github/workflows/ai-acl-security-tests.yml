@@ -14,6 +14,7 @@ on:
       - 'scripts/test-ai-auth.ts'
       - 'scripts/test-ai-rag-db.ts'
       - 'scripts/test-ai-routes.ts'
+      - 'scripts/test-ai-queue.ts'
       - 'package.json'
       - 'package-lock.json'
       - '.github/workflows/ai-acl-security-tests.yml'
@@ -69,6 +70,8 @@ jobs:
         run: npm run test:ai-rag-db
       - name: Run AI knowledge HTTP authorization tests
         run: npm run test:ai-routes
+      - name: AI request queue regression tests
+        run: npm run test:ai-queue
       - name: TypeScript validation
         run: npm run lint
       - name: Production build validation
