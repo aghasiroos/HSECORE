@@ -48,7 +48,7 @@ async function runPhase3Tests() {
 
   // Test 3: Orchestrator & 10 Assistants
   console.log('[Test 3] Testing 10 Specialized Assistants:');
-  const assistantsList = aiOrchestrator.listAssistants();
+  const assistantsList = aiOrchestrator.listAssistants({ uid: 'test-admin', role: 'ADMIN', permissions: ['*'] });
   console.log(`  - Total Assistants Configured: ${assistantsList.length}`);
   if (assistantsList.length !== 10) throw new Error(`Expected 10 assistants, got ${assistantsList.length}`);
   for (const a of assistantsList) {
@@ -64,7 +64,7 @@ async function runPhase3Tests() {
       assistantId: 'MANAGEMENT_ANALYTICS',
       allowTools: true,
     },
-    { id: 1, name: 'مدیر ارشد HSE', role: 'ADMIN' }
+    { uid: 'test-admin-uid', id: 1, name: 'مدیر ارشد HSE', role: 'ADMIN', permissions: ['*'] }
   );
 
   console.log(`  - Response Success : ${chatResponse.success}`);

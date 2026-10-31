@@ -8,7 +8,7 @@ import { logger } from '../../core/logger.ts';
 const MAX_PROMPT_LENGTH = 3500;
 const MIN_PROMPT_LENGTH = 2;
 
-// Suspicious prompt injection and adversarial patterns
+// Suspicious prompt injection and adversarial patterns (English & Persian)
 const INJECTION_PATTERNS = [
   /ignore\s+(all\s+)?(previous|prior)\s+instructions/i,
   /system\s+override/i,
@@ -23,6 +23,15 @@ const INJECTION_PATTERNS = [
   /truncate\s+table\b/i,
   /update\s+users\s+set\s+password/i,
   /delete\s+from\s+users/i,
+  // Persian adversarial patterns
+  /تمام\s+دستورات\s+(قبلی|پیشین)\s+(را\s+)?(نادیده|فراموش)/i,
+  /نادیده\s+بگیر\s+تمام\s+دستورات/i,
+  /دستورات\s+سیستم\s+را\s+افشا\s+کن/i,
+  /پرامپت\s+سیستم\s+را\s+(نمایش|چاپ|بگو)/i,
+  /حالت\s+(توسعه‌دهنده|دان|هک|جیل‌بریک)/i,
+  /رمز\s+(عبور|های)\s+کاربران/i,
+  /اطلاعات\s+محرمانه\s+پزشکی\s+پرسنل/i,
+  /دیتابیس\s+را\s+(حذف|پاک)\s+کن/i,
 ];
 
 // Sensitive secret patterns to redact from responses
