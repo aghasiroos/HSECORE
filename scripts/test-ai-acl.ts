@@ -50,12 +50,12 @@ test('required permissions are enforced', () => {
 
 test('department restriction is enforced', () => {
   assert.equal(canAccessKnowledgeDocument({ accessControl: { departmentIds: [10] } }, user, scope), true);
-  assert.equal(canAccessKnowledgeDocument({ accessControl: { departmentIds: [20] } }, user, scope), false);
+  assert.equal(canAccessKnowledgeDocument({ accessControl: { departmentIds: [30] } }, user, scope), false);
 });
 
 test('unit restriction is enforced', () => {
   assert.equal(canAccessKnowledgeDocument({ accessControl: { unitIds: [101] } }, user, scope), true);
-  assert.equal(canAccessKnowledgeDocument({ accessControl: { unitIds: [202] } }, user, scope), false);
+  assert.equal(canAccessKnowledgeDocument({ accessControl: { unitIds: [303] } }, user, scope), false);
 });
 
 test('user UID restriction is enforced', () => {
