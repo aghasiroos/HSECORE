@@ -139,7 +139,7 @@ async function runPhase5Tests() {
         assistantId: 'GENERAL_HSE',
         allowTools: true,
       },
-      { name: 'test_admin', role: 'ADMIN' }
+      { uid: 'test-admin-phase5', name: 'test_admin', role: 'ADMIN' }
     );
 
     console.log(`   - Response received from assistant: ${chatResponse.assistantId}`);
