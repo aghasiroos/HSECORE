@@ -91,6 +91,10 @@ export class LocalAIProvider {
       }
     }
 
+    if (this.queue.length >= config.aiEngine.maxQueueLength) {
+      throw new Error('ظرفیت صف موتور محلی هوش مصنوعی تکمیل است. لطفاً پس از آزاد شدن ظرفیت دوباره تلاش کنید.');
+    }
+
     return new Promise<T>((resolve, reject) => {
       this.queue.push({
         run: async () => {
@@ -277,7 +281,7 @@ export class LocalAIProvider {
 
       const startTime = Date.now();
       const model = options?.model || config.aiEngine.defaultChatModel;
-      const timeoutMs = Math.min(config.aiEngine.timeoutMs || 60000, 8000);
+      const timeoutMs = config.aiEngine.timeoutMs || 180000;
 
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -291,6 +295,7 @@ export class LocalAIProvider {
             temperature: options?.temperature ?? 0.3,
             top_p: options?.top_p ?? 0.85,
             num_predict: options?.max_tokens ?? 1024,
+            num_ctx: config.aiEngine.contextTokens,
           },
         };
 
@@ -346,7 +351,7 @@ export class LocalAIProvider {
 
       const startTime = Date.now();
       const model = options?.model || config.aiEngine.defaultChatModel;
-      const timeoutMs = Math.min(config.aiEngine.timeoutMs || 60000, 8000);
+      const timeoutMs = config.aiEngine.timeoutMs || 180000;
 
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -361,6 +366,7 @@ export class LocalAIProvider {
             temperature: options?.temperature ?? 0.3,
             top_p: options?.top_p ?? 0.85,
             num_predict: options?.max_tokens ?? 1024,
+            num_ctx: config.aiEngine.contextTokens,
           },
         };
 
