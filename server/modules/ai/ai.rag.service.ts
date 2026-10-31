@@ -237,37 +237,33 @@ export class AIRagService {
   /**
    * List all documents in the Knowledge Base
    */
-  private async resolveUserOrgScope(user: UserContext): Promise<{ departmentIds: number[]; unitIds: number[] }> {
-    if (isGlobalAdminUser(user)) return { departmentIds: [], unitIds: [] };
+  private async resolveUserOrgScope(user: UserContext): Promise<{ departmentIds: number[]; unitIds: number[]; assignments: Array<{ departmentId: number | null; unitId: number | null }> }> {
+    if (isGlobalAdminUser(user)) return { departmentIds: [], unitIds: [], assignments: [] };
 
-    const personnelRows = user.personnelCode
+    const byPersonnelCode = user.personnelCode
       ? await db.select({
           id: schema.personnel.id,
           departmentId: schema.personnel.departmentId,
           unitId: schema.personnel.unitId,
         }).from(schema.personnel).where(eq(schema.personnel.personnelCode, user.personnelCode))
       : [];
-
-    const resolvedRows = personnelRows.length > 0
-      ? personnelRows
-      : user.uid
-        ? await db.select({
-            id: schema.personnel.id,
-            departmentId: schema.personnel.departmentId,
-            unitId: schema.personnel.unitId,
-          })
-          .from(schema.personnel)
-          .innerJoin(schema.userPersonnelAssignments,
-            eq(schema.userPersonnelAssignments.personnelId, schema.personnel.id))
-          .where(eq(schema.userPersonnelAssignments.userUid, user.uid))
-        : [];
+    const byAssignment = user.uid
+      ? await db.select({
+          id: schema.personnel.id,
+          departmentId: schema.personnel.departmentId,
+          unitId: schema.personnel.unitId,
+        }).from(schema.personnel)
+        .innerJoin(schema.userPersonnelAssignments, eq(schema.userPersonnelAssignments.personnelId, schema.personnel.id))
+        .where(eq(schema.userPersonnelAssignments.userUid, user.uid))
+      : [];
+    const resolvedRows = [...new Map([...byPersonnelCode, ...byAssignment].map(row => [row.id, row])).values()];
 
     return {
       departmentIds: [...new Set(resolvedRows.map(row => row.departmentId).filter((id): id is number => id !== null))],
       unitIds: [...new Set(resolvedRows.map(row => row.unitId).filter((id): id is number => id !== null))],
+      assignments: resolvedRows.map(row => ({ departmentId: row.departmentId, unitId: row.unitId })),
     };
   }
-
   async listDocuments(allowedCategories: string[] = [], userContext?: UserContext) {
     if (allowedCategories.length === 0 || !userContext) return [];
     const docs = await db
