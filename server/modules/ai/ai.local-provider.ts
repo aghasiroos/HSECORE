@@ -100,6 +100,7 @@ export class LocalAIProvider {
    * Enforces maxConcurrency limit (1 on 8GB RAM VPS) to prevent OOM
    */
   private async enqueue<T>(task: QueueTask<T>, timeoutMs = config.aiEngine.timeoutMs || 180000): Promise<T> {
+    if (this.pullInProgress) throw new Error('موتور محلی در حال عملیات نگهداری مدل است؛ لطفاً کمی بعد تلاش کنید.');
     const queuedAt = Date.now();
     const max = config.aiEngine.maxConcurrency || 1;
     if (this.activeCount < max) {
@@ -344,6 +345,11 @@ export class LocalAIProvider {
       [model.name, model.model].some(name => typeof name === 'string' && name.toLowerCase() === normalized.toLowerCase())
     );
     if (!exists) return { success: false, message: 'مدل موردنظر در موتور محلی نصب نشده است.' };
+    // Re-check after the inventory request, then lock inference during deletion.
+    if (this.pullInProgress || this.activeCount > 0 || this.queue.length > 0) {
+      return { success: false, message: 'حذف مدل در زمان اجرای درخواست AI مجاز نیست.' };
+    }
+    this.pullInProgress = true;
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10000);
@@ -361,6 +367,7 @@ export class LocalAIProvider {
       return { success: false, message: err?.name === 'AbortError' ? 'مهلت حذف مدل به پایان رسید.' : 'خطا در حذف مدل.' };
     } finally {
       clearTimeout(timeout);
+      this.pullInProgress = false;
     }
   }
 
