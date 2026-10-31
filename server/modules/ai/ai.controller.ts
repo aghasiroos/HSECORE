@@ -127,11 +127,33 @@ export class AIController {
 
   async listKnowledgeDocs(req: Request, res: Response) {
     try {
-      const docs = await aiRagService.listDocuments(this.getAllowedKnowledgeCategories(req.user));
+      const docs = await aiRagService.listDocuments(this.getAllowedKnowledgeCategories(req.user), req.user);
       return res.json({ success: true, data: docs });
     } catch (err: any) {
       return res.status(500).json({ success: false, message: err.message || 'خطا در دریافت فهرست اسناد پایگاه دانش' });
     }
+  }
+
+  private validateKnowledgeAccessControl(input: any) {
+    if (input === undefined || input === null) return undefined;
+    if (typeof input !== 'object' || Array.isArray(input)) throw new Error('ساختار سطح دسترسی سند نامعتبر است.');
+    const strings = (value: any, field: string): string[] | undefined => {
+      if (value === undefined) return undefined;
+      if (!Array.isArray(value) || value.length > 100 || value.some(item => typeof item !== 'string' || !item.trim())) throw new Error('مقدار نامعتبر برای ' + field);
+      return [...new Set(value.map((item: string) => item.trim()))];
+    };
+    const ids = (value: any, field: string): number[] | undefined => {
+      if (value === undefined) return undefined;
+      if (!Array.isArray(value) || value.length > 500 || value.some(item => !Number.isInteger(Number(item)) || Number(item) <= 0)) throw new Error('مقدار نامعتبر برای ' + field);
+      return [...new Set(value.map(Number))];
+    };
+    return {
+      allowedRoles: strings(input.allowedRoles, 'allowedRoles'),
+      requiredPermissions: strings(input.requiredPermissions, 'requiredPermissions'),
+      userUids: strings(input.userUids, 'userUids'),
+      departmentIds: ids(input.departmentIds, 'departmentIds'),
+      unitIds: ids(input.unitIds, 'unitIds'),
+    };
   }
 
   async createKnowledgeDoc(req: Request, res: Response) {
@@ -147,6 +169,7 @@ export class AIController {
         docType,
         category,
         summary,
+        accessControl: this.validateKnowledgeAccessControl(req.body.accessControl),
         uploadedBy: (req as any).user?.username || (req as any).user?.name || 'system',
       });
       return res.json({ success: true, data: result, message: 'سند با موفقیت نمایه و ذخیره شد.' });
@@ -183,7 +206,7 @@ export class AIController {
       const requestedTopK = topK ? Number(topK) : 4;
       const results = await aiRagService.queryRelevantChunks(query, {
         category, topK: Number.isFinite(requestedTopK) ? Math.min(Math.max(requestedTopK, 1), 10) : 4,
-        allowedCategories,
+        allowedCategories, userContext: req.user,
       });
       return res.json({ success: true, data: results });
     } catch (err: any) {
