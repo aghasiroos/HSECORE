@@ -4095,7 +4095,7 @@ manage_ai_infrastructure() {
         echo -e "${BOLD}${CYAN}==================================================================${NC}"
         echo " 1) نصب زیرساخت هوش مصنوعی (Install / Deploy AI Infrastructure)"
         echo " 2) راه‌اندازی موتور Local LLM (Start AI Engine Container)"
-        echo " 3) دانلود و افزودن مدل جدید (Pull/Download Model - e.g. qwen2.5:1.7b)"
+        echo " 3) دانلود و افزودن مدل جدید (Pull/Download Model - e.g. qwen3:1.7b)"
         echo " 4) مشاهده مدل‌های نصب‌شده (List Installed Models in Volume)"
         echo " 5) تغییر مدل پیش‌فرض سامانه (Change Default Model in .env)"
         echo " 6) فعال‌سازی یا غیرفعال‌سازی هوش مصنوعی (Toggle AI Engine Enabled/Disabled)"
@@ -4114,13 +4114,13 @@ manage_ai_infrastructure() {
           1) bash "${setup_script}" ;;
           2) bash "${manage_script}" start ;;
           3)
-            read -r -p "Enter model tag [default: qwen2.5:1.7b]: " target_m
-            target_m="${target_m:-qwen2.5:1.7b}"
+            read -r -p "Enter model tag [default: qwen3:1.7b]: " target_m
+            target_m="${target_m:-qwen3:1.7b}"
             bash "${manage_script}" pull "${target_m}"
             ;;
           4) bash "${manage_script}" list ;;
           5)
-            read -r -p "Enter new default model name [e.g. qwen2.5:1.7b]: " def_m
+            read -r -p "Enter new default model name [e.g. qwen3:1.7b]: " def_m
             if [ -n "${def_m}" ]; then
               bash "${manage_script}" set-default "${def_m}"
             fi
