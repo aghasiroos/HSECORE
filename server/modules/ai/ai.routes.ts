@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { aiController } from './ai.controller.ts';
-import { requireAuth, requireRole } from '../../core/middleware/auth.ts';
+import { requireAuth, requirePermission, requireRole } from '../../core/middleware/auth.ts';
 
 const router = Router();
 
@@ -25,7 +25,7 @@ router.post('/chat', requireAuth, (req, res, next) => {
 });
 
 // AI Audit logs & telemetry (Admins and HSE Managers)
-router.get('/audit', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR', 'HSE_MANAGER'), (req, res, next) => {
+router.get('/audit', requireAuth, requirePermission('audit:read'), (req, res, next) => {
   aiController.getAuditLogs(req, res).catch(next);
 });
 
@@ -43,11 +43,11 @@ router.get('/knowledge', requireAuth, (req, res, next) => {
   aiController.listKnowledgeDocs(req, res).catch(next);
 });
 
-router.post('/knowledge', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR', 'HSE_MANAGER'), (req, res, next) => {
+router.post('/knowledge', requireAuth, requirePermission('documents:create'), (req, res, next) => {
   aiController.createKnowledgeDoc(req, res).catch(next);
 });
 
-router.delete('/knowledge/:id', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR', 'HSE_MANAGER'), (req, res, next) => {
+router.delete('/knowledge/:id', requireAuth, requirePermission('documents:delete'), (req, res, next) => {
   aiController.deleteKnowledgeDoc(req, res).catch(next);
 });
 
