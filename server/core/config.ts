@@ -75,7 +75,9 @@ function getDevJwtSecret(): string {
     } catch {}
     return newSecret;
   } catch {
-    return 'dev-persistent-hse-system-secure-jwt-key-2026-fixed';
+    // Never fall back to a repository-wide fixed signing key, even in development.
+    // A fresh process-local secret is safer than a predictable shared fallback.
+    return crypto.randomBytes(32).toString('hex');
   }
 }
 

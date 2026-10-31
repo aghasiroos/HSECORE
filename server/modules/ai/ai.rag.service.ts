@@ -8,6 +8,8 @@ import { desc, eq, and, inArray } from 'drizzle-orm';
 import { textChunker } from './ai.chunker.ts';
 import { localAIProvider } from './ai.local-provider.ts';
 import { logger } from '../../core/logger.ts';
+import { isGlobalAdminUser, type UserContext } from '../../core/middleware/auth.ts';
+import { canAccessKnowledgeDocument, type KnowledgeDocumentAccessControl } from './ai.acl.ts';
 
 export interface RelevantChunkResult {
   docId: number;
@@ -76,8 +78,9 @@ export class AIRagService {
     category?: string;
     uploadedBy?: string;
     summary?: string;
+    accessControl?: KnowledgeDocumentAccessControl;
   }): Promise<{ docId: number; id: number; chunkCount: number }> {
-    const { title, content, docType = 'REGULATION', category = 'GENERAL', uploadedBy, summary } = params;
+    const { title, content, docType = 'REGULATION', category = 'GENERAL', uploadedBy, summary, accessControl } = params;
 
     // 1. Create Document Header in DB
     const [doc] = await db
@@ -88,6 +91,7 @@ export class AIRagService {
         category,
         content,
         summary,
+        metadata: accessControl ? { accessControl } : {},
         fileSize: Buffer.byteLength(content, 'utf8'),
         chunkCount: 0,
         status: 'PENDING',
@@ -148,7 +152,7 @@ export class AIRagService {
    */
   async queryRelevantChunks(
     query: string,
-    options?: { topK?: number; minScore?: number; category?: string; allowedCategories?: string[] }
+    options?: { topK?: number; minScore?: number; category?: string; allowedCategories?: string[]; userContext?: UserContext }
   ): Promise<RelevantChunkResult[]> {
     const topK = options?.topK || 4;
     const minScore = options?.minScore ?? 0.45;
@@ -156,8 +160,37 @@ export class AIRagService {
     if (allowedCategories.length === 0) return [];
     if (options?.category && options.category !== 'ALL' && !allowedCategories.includes(options.category)) return [];
 
-    // 1. Fetch chunks with document info
-    let chunkRows = await db
+    const user = options?.userContext;
+    if (!user) return [];
+
+    // Resolve authorized document IDs before fetching chunks. Applying the 200-row
+    // chunk limit before ACL filtering can let inaccessible documents crowd out
+    // authorized results (false negatives) and makes the retrieval boundary unclear.
+    const scope = await this.resolveUserOrgScope(user);
+    const documentConditions = [
+      eq(schema.aiKnowledgeDocs.status, 'INDEXED'),
+      inArray(schema.aiKnowledgeDocs.category, allowedCategories),
+    ];
+    if (options?.category && options.category !== 'ALL') {
+      documentConditions.push(eq(schema.aiKnowledgeDocs.category, options.category));
+    }
+
+    const candidateDocs = await db
+      .select({
+        id: schema.aiKnowledgeDocs.id,
+        metadata: schema.aiKnowledgeDocs.metadata,
+      })
+      .from(schema.aiKnowledgeDocs)
+      .where(and(...documentConditions));
+
+    const authorizedDocIds = candidateDocs
+      .filter(doc => canAccessKnowledgeDocument(doc.metadata, user, scope))
+      .map(doc => doc.id);
+
+    if (authorizedDocIds.length === 0) return [];
+
+    // The retrieval limit now applies only to chunks belonging to authorized docs.
+    const chunkRows = await db
       .select({
         chunkId: schema.aiKnowledgeChunks.id,
         docId: schema.aiKnowledgeChunks.docId,
@@ -170,16 +203,12 @@ export class AIRagService {
       })
       .from(schema.aiKnowledgeChunks)
       .innerJoin(schema.aiKnowledgeDocs, eq(schema.aiKnowledgeChunks.docId, schema.aiKnowledgeDocs.id))
-      .where(and(eq(schema.aiKnowledgeDocs.status, 'INDEXED'), inArray(schema.aiKnowledgeDocs.category, allowedCategories)))
+      .where(and(
+        eq(schema.aiKnowledgeDocs.status, 'INDEXED'),
+        inArray(schema.aiKnowledgeDocs.category, allowedCategories),
+        inArray(schema.aiKnowledgeChunks.docId, authorizedDocIds),
+      ))
       .limit(200);
-
-    if (options?.category && options.category !== 'ALL') {
-      chunkRows = chunkRows.filter(c => c.category === options.category);
-    }
-
-    if (chunkRows.length === 0) {
-      return [];
-    }
 
     // 2. Try generating query embedding vector
     let queryEmbedding: number[] | null = null;
@@ -225,9 +254,57 @@ export class AIRagService {
   /**
    * List all documents in the Knowledge Base
    */
-  async listDocuments(allowedCategories: string[] = []) {
-    if (allowedCategories.length === 0) return [];
-    return await db
+  private async resolveUserOrgScope(user: UserContext): Promise<{ departmentIds: number[]; unitIds: number[]; assignments: Array<{ departmentId: number | null; unitId: number | null }> }> {
+    if (isGlobalAdminUser(user)) return { departmentIds: [], unitIds: [], assignments: [] };
+
+    const byPersonnelCode = user.personnelCode
+      ? await db.select({
+          id: schema.personnel.id,
+          departmentId: schema.personnel.departmentId,
+          unitId: schema.personnel.unitId,
+        }).from(schema.personnel).where(eq(schema.personnel.personnelCode, user.personnelCode))
+      : [];
+    const byAssignment = user.uid
+      ? await db.select({
+          id: schema.personnel.id,
+          departmentId: schema.personnel.departmentId,
+          unitId: schema.personnel.unitId,
+        }).from(schema.personnel)
+        .innerJoin(schema.userPersonnelAssignments, eq(schema.userPersonnelAssignments.personnelId, schema.personnel.id))
+        .where(eq(schema.userPersonnelAssignments.userUid, user.uid))
+      : [];
+    const resolvedRows = [...new Map([...byPersonnelCode, ...byAssignment].map(row => [row.id, row])).values()];
+
+    return {
+      departmentIds: [...new Set(resolvedRows.map(row => row.departmentId).filter((id): id is number => id !== null))],
+      unitIds: [...new Set(resolvedRows.map(row => row.unitId).filter((id): id is number => id !== null))],
+      assignments: resolvedRows.map(row => ({ departmentId: row.departmentId, unitId: row.unitId })),
+    };
+  }
+  async canAccessDocument(docId: number, allowedCategories: string[] = [], userContext?: UserContext): Promise<boolean> {
+    if (!userContext || allowedCategories.length === 0) return false;
+
+    const [doc] = await db
+      .select({
+        id: schema.aiKnowledgeDocs.id,
+        metadata: schema.aiKnowledgeDocs.metadata,
+      })
+      .from(schema.aiKnowledgeDocs)
+      .where(and(
+        eq(schema.aiKnowledgeDocs.id, docId),
+        inArray(schema.aiKnowledgeDocs.category, allowedCategories),
+      ))
+      .limit(1);
+
+    if (!doc) return false;
+
+    const scope = await this.resolveUserOrgScope(userContext);
+    return canAccessKnowledgeDocument(doc.metadata, userContext, scope);
+  }
+
+  async listDocuments(allowedCategories: string[] = [], userContext?: UserContext) {
+    if (allowedCategories.length === 0 || !userContext) return [];
+    const docs = await db
       .select({
         id: schema.aiKnowledgeDocs.id,
         title: schema.aiKnowledgeDocs.title,
@@ -236,11 +313,17 @@ export class AIRagService {
         fileSize: schema.aiKnowledgeDocs.fileSize,
         chunkCount: schema.aiKnowledgeDocs.chunkCount,
         status: schema.aiKnowledgeDocs.status,
+        metadata: schema.aiKnowledgeDocs.metadata,
         createdAt: schema.aiKnowledgeDocs.createdAt,
       })
       .from(schema.aiKnowledgeDocs)
       .where(inArray(schema.aiKnowledgeDocs.category, allowedCategories))
       .orderBy(desc(schema.aiKnowledgeDocs.createdAt));
+
+    const scope = await this.resolveUserOrgScope(userContext);
+    return docs
+      .filter(doc => canAccessKnowledgeDocument(doc.metadata, userContext, scope))
+      .map(({ metadata, ...doc }) => doc);
   }
 
   /**

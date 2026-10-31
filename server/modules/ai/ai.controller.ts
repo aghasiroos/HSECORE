@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { aiService } from './ai.service.ts';
 import { aiOrchestrator } from './ai.orchestrator.ts';
 import { aiRequestQueue } from './ai.queue.ts';
-import { aiAuditService } from './ai.audit.ts';
+import { aiAuditService, normalizeAILogLimit } from './ai.audit.ts';
 import { aiRagService } from './ai.rag.service.ts';
 import { checkUserHasPermission, type UserContext } from '../../core/middleware/auth.ts';
 
@@ -106,7 +106,7 @@ export class AIController {
 
   async getAuditLogs(req: Request, res: Response) {
     try {
-      const limit = Number(req.query.limit) || 50;
+      const limit = normalizeAILogLimit(req.query.limit);
       const logs = aiAuditService.getRecentLogs(limit);
       const analytics = aiAuditService.getAnalyticsSummary();
       return res.json({ success: true, data: { logs, analytics } });
@@ -127,11 +127,34 @@ export class AIController {
 
   async listKnowledgeDocs(req: Request, res: Response) {
     try {
-      const docs = await aiRagService.listDocuments(this.getAllowedKnowledgeCategories(req.user));
+      const docs = await aiRagService.listDocuments(this.getAllowedKnowledgeCategories(req.user), req.user);
       return res.json({ success: true, data: docs });
     } catch (err: any) {
       return res.status(500).json({ success: false, message: err.message || 'خطا در دریافت فهرست اسناد پایگاه دانش' });
     }
+  }
+
+  private validateKnowledgeAccessControl(input: any) {
+    if (input === undefined) return undefined;
+    if (input === null) throw new Error('ساختار سطح دسترسی سند نامعتبر است.');
+    if (typeof input !== 'object' || Array.isArray(input)) throw new Error('ساختار سطح دسترسی سند نامعتبر است.');
+    const strings = (value: any, field: string): string[] | undefined => {
+      if (value === undefined) return undefined;
+      if (!Array.isArray(value) || value.length > 100 || value.some(item => typeof item !== 'string' || !item.trim())) throw new Error('مقدار نامعتبر برای ' + field);
+      return [...new Set(value.map((item: string) => item.trim()))];
+    };
+    const ids = (value: any, field: string): number[] | undefined => {
+      if (value === undefined) return undefined;
+      if (!Array.isArray(value) || value.length > 500 || value.some(item => !Number.isInteger(Number(item)) || Number(item) <= 0)) throw new Error('مقدار نامعتبر برای ' + field);
+      return [...new Set(value.map(Number))];
+    };
+    return {
+      allowedRoles: strings(input.allowedRoles, 'allowedRoles'),
+      requiredPermissions: strings(input.requiredPermissions, 'requiredPermissions'),
+      userUids: strings(input.userUids, 'userUids'),
+      departmentIds: ids(input.departmentIds, 'departmentIds'),
+      unitIds: ids(input.unitIds, 'unitIds'),
+    };
   }
 
   async createKnowledgeDoc(req: Request, res: Response) {
@@ -140,14 +163,29 @@ export class AIController {
       return res.status(400).json({ success: false, message: 'عنوان و متن سند الزامی هستند.' });
     }
 
+    const normalizedCategory = typeof category === 'string' && category.trim()
+      ? category.trim().toUpperCase()
+      : 'GENERAL';
+    if (!this.getAllowedKnowledgeCategories(req.user).includes(normalizedCategory)) {
+      return res.status(403).json({ success: false, message: 'مجوز ایجاد سند در این دسته‌بندی را ندارید.' });
+    }
+
+    let accessControl: ReturnType<AIController['validateKnowledgeAccessControl']>;
+    try {
+      accessControl = this.validateKnowledgeAccessControl(req.body.accessControl);
+    } catch (err: any) {
+      return res.status(400).json({ success: false, message: err.message || 'ساختار سطح دسترسی سند نامعتبر است.' });
+    }
+
     try {
       const result = await aiRagService.indexDocument({
         title,
         content,
         docType,
-        category,
+        category: normalizedCategory,
         summary,
-        uploadedBy: (req as any).user?.username || (req as any).user?.name || 'system',
+        accessControl,
+        uploadedBy: req.user?.username || req.user?.name || 'system',
       });
       return res.json({ success: true, data: result, message: 'سند با موفقیت نمایه و ذخیره شد.' });
     } catch (err: any) {
@@ -162,6 +200,15 @@ export class AIController {
     }
 
     try {
+      const canAccessDocument = await aiRagService.canAccessDocument(
+        id,
+        this.getAllowedKnowledgeCategories(req.user),
+        req.user,
+      );
+      if (!canAccessDocument) {
+        return res.status(404).json({ success: false, message: 'سند یافت نشد یا دسترسی حذف آن مجاز نیست.' });
+      }
+
       await aiRagService.deleteDocument(id);
       return res.json({ success: true, message: 'سند با موفقیت حذف گردید.' });
     } catch (err: any) {
@@ -183,7 +230,7 @@ export class AIController {
       const requestedTopK = topK ? Number(topK) : 4;
       const results = await aiRagService.queryRelevantChunks(query, {
         category, topK: Number.isFinite(requestedTopK) ? Math.min(Math.max(requestedTopK, 1), 10) : 4,
-        allowedCategories,
+        allowedCategories, userContext: req.user,
       });
       return res.json({ success: true, data: results });
     } catch (err: any) {

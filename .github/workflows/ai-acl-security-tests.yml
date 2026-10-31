@@ -1,0 +1,68 @@
+name: AI ACL Security Tests
+
+on:
+  push:
+    branches:
+      - security/p0-ai-acl-org-tests
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'server/modules/ai/**'
+      - 'server/core/middleware/auth.ts'
+      - 'scripts/test-ai-acl.ts'
+      - 'scripts/test-ai-auth.ts'
+      - 'scripts/test-ai-rag-db.ts'
+      - 'scripts/test-ai-routes.ts'
+      - 'package.json'
+      - 'package-lock.json'
+
+jobs:
+  ai-acl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: hsecore_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: hsecore_test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d hsecore_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      NODE_ENV: test
+      SQL_HOST: 127.0.0.1
+      SQL_PORT: 5432
+      SQL_USER: postgres
+      SQL_PASSWORD: hsecore_test_password
+      SQL_DB_NAME: hsecore_test
+      SQL_SSL: 'false'
+      JWT_SECRET: ci-only-hsecore-ai-acl-jwt-secret-at-least-32-characters
+      AI_ENGINE_URL: http://127.0.0.1:1
+      AI_ACL_DB_TEST: 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Run document ACL and prompt-security regression tests
+        run: npm run test:ai-acl
+      - name: Run JWT authentication regression tests
+        run: npm run test:ai-auth
+      - name: Run PostgreSQL RAG integration tests
+        run: npm run test:ai-rag-db
+      - name: Run AI knowledge HTTP authorization tests
+        run: npm run test:ai-routes
+      - name: TypeScript validation
+        run: npm run lint

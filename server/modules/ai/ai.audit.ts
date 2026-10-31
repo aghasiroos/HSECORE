@@ -10,6 +10,14 @@ import { logger } from '../../core/logger.ts';
 const MAX_IN_MEMORY_LOGS = 500;
 const inMemoryAILogs: AIAuditRecord[] = [];
 
+/** Normalize caller-controlled audit pagination to a bounded, predictable range. */
+export function normalizeAILogLimit(value: unknown): number {
+  const requested = Number(value);
+  return Number.isFinite(requested) && requested > 0
+    ? Math.min(Math.trunc(requested), 200)
+    : 50;
+}
+
 export class AIAuditService {
   log(record: AIAuditRecord): void {
     // 1. Maintain in-memory ring buffer

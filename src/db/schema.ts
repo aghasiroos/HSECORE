@@ -1013,7 +1013,7 @@ export const aiKnowledgeDocs = pgTable(
     chunkCount: integer('chunk_count').default(0).notNull(),
     status: text('status').default('INDEXED').notNull(), // 'PENDING' | 'INDEXED' | 'FAILED'
     uploadedBy: text('uploaded_by'),
-    metadata: jsonb('metadata'),
+    metadata: jsonb('metadata').default({}).notNull(),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
   },
