@@ -124,6 +124,7 @@ test('client-supplied system and malformed history messages are discarded', () =
   });
 
   assert.deepEqual(messages.map(message => message.role), ['system', 'user', 'assistant', 'user']);
+  assert.ok(messages[0].content.includes('تاریخچه گفتگو'));
   assert.equal(messages[1].content, 'Earlier question');
   assert.equal(messages[2].content, 'Earlier answer');
 });
@@ -136,7 +137,8 @@ test('retrieval security instruction is omitted when there is no retrieved conte
   });
 
   assert.equal(messages.length, 2);
-  assert.equal(messages[0].content, 'Trusted instructions.');
+  assert.ok(messages[0].content.includes('تاریخچه گفتگو'));
+  assert.equal(messages[0].content.includes('تمام محتوای بازیابی‌شده'), false);
 });
 
 console.log('AI ACL and prompt-security tests: ' + passed + '/17 passed');
