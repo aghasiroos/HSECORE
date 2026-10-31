@@ -323,7 +323,7 @@ export default function AiManagementTab({ language = 'fa', currentUser }: AiMana
               type="text"
               value={pullModelName}
               onChange={e => setPullModelName(e.target.value)}
-              placeholder="مثال: qwen2.5:1.7b"
+              placeholder="مثال: qwen3:1.7b"
               className="px-3 py-1.5 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-mono bg-slate-50 dark:bg-slate-800 w-44"
             />
             <button
