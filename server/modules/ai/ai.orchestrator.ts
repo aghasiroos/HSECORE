@@ -454,7 +454,7 @@ export class AIOrchestrator {
       userMessage: sanitized,
     });
 
-    // 5. Execute via Local Engine -> Cloud Gemini Fallback -> Built-in Legal & System Expert Engine
+    // 5. Execute locally by default. Cloud fallback is explicitly opt-in to protect organizational data.
     let replyText = '';
     let queueWaitMs = 0;
     let modelName = config.aiEngine.defaultChatModel;
@@ -485,7 +485,9 @@ export class AIOrchestrator {
       const cloudPrompt = retrievedReferenceContext
         ? `${assistant.systemPrompt}\n\n${retrievedReferenceContext}`
         : assistant.systemPrompt;
-      const cloudRes = await aiService.generateGroundedChatResponse(cloudPrompt, sanitized, request.history);
+      const cloudRes = config.aiEngine.allowCloudFallback
+        ? await aiService.generateGroundedChatResponse(cloudPrompt, sanitized, request.history)
+        : null;
 
       if (cloudRes?.text) {
         replyText = aiSecurityService.sanitizeOutput(cloudRes.text);
