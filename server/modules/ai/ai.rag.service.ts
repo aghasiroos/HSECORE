@@ -282,6 +282,27 @@ export class AIRagService {
       assignments: resolvedRows.map(row => ({ departmentId: row.departmentId, unitId: row.unitId })),
     };
   }
+  async canAccessDocument(docId: number, allowedCategories: string[] = [], userContext?: UserContext): Promise<boolean> {
+    if (!userContext || allowedCategories.length === 0) return false;
+
+    const [doc] = await db
+      .select({
+        id: schema.aiKnowledgeDocs.id,
+        metadata: schema.aiKnowledgeDocs.metadata,
+      })
+      .from(schema.aiKnowledgeDocs)
+      .where(and(
+        eq(schema.aiKnowledgeDocs.id, docId),
+        inArray(schema.aiKnowledgeDocs.category, allowedCategories),
+      ))
+      .limit(1);
+
+    if (!doc) return false;
+
+    const scope = await this.resolveUserOrgScope(userContext);
+    return canAccessKnowledgeDocument(doc.metadata, userContext, scope);
+  }
+
   async listDocuments(allowedCategories: string[] = [], userContext?: UserContext) {
     if (allowedCategories.length === 0 || !userContext) return [];
     const docs = await db
