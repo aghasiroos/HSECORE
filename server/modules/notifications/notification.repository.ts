@@ -8,11 +8,18 @@ import {
   NotificationPriority,
   UserNotificationPreferences,
   DEFAULT_NOTIFICATION_PREFERENCES,
+  WebPushSubscriptionRecord,
+  VapidKeySet,
 } from './notification.types.ts';
 import { logger } from '../../core/logger.ts';
 
+const VAPID_SETTING_KEY = 'hse_web_push_vapid_keys_v1';
+const PUSH_SUBS_SETTING_KEY = 'hse_web_push_subscriptions_v1';
+
 // In-memory notification fallback buffer (clean and empty by default)
 const inMemoryNotifications: NotificationRecord[] = [];
+let inMemoryVapidKeys: VapidKeySet | null = null;
+let inMemoryPushSubscriptions: WebPushSubscriptionRecord[] = [];
 
 export class NotificationRepository {
   async getAll(currentUserId?: string): Promise<NotificationRecord[]> {
@@ -58,21 +65,31 @@ export class NotificationRepository {
     }
   }
 
-  async getPublicActiveEmergencies(): Promise<Array<{
+  /**
+   * Public active emergency alerts strictly sanitized for unauthenticated / Login Screen / Lock Screen display.
+   * Contains NO confidential personnel records, NO internal IDs, and NO private comments.
+   */
+  async getPublicActiveEmergencies(sinceIso?: string): Promise<Array<{
     notifId: string;
     id: number;
     title: string;
     body: string;
     priority: string;
+    riskLevelFa: string;
     category: string;
     sourceModule: string;
     sirenType?: string;
     actionGuidelines?: string;
     requiresAck: boolean;
+    acknowledgedCount: number;
     createdAt: string;
   }>> {
     try {
       const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const minDate = sinceIso && !isNaN(Date.parse(sinceIso))
+        ? new Date(Math.max(oneDayAgo.getTime(), Date.parse(sinceIso)))
+        : oneDayAgo;
+
       const records = await db
         .select()
         .from(schema.notifications)
@@ -83,27 +100,34 @@ export class NotificationRepository {
               eq(schema.notifications.category, 'critical_hse'),
               eq(schema.notifications.priority, 'critical')
             ),
-            sql`${schema.notifications.createdAt} >= ${oneDayAgo}`
+            sql`${schema.notifications.createdAt} >= ${minDate}`
           )
         )
         .orderBy(desc(schema.notifications.createdAt))
-        .limit(10);
+        .limit(15);
 
       return records
         .filter((r) => r.targetType === 'all' || !r.targetType)
-        .map((r) => ({
-          id: r.id,
-          notifId: r.notifId,
-          title: r.title,
-          body: r.body,
-          priority: r.priority,
-          category: r.category,
-          sourceModule: r.sourceModule || 'emergency',
-          sirenType: (r.metadata as any)?.sirenType || (r.priority === 'critical' ? 'siren_evacuation' : undefined),
-          actionGuidelines: (r.metadata as any)?.actionGuidelines || r.body,
-          requiresAck: true,
-          createdAt: r.createdAt ? r.createdAt.toISOString() : new Date().toISOString(),
-        }));
+        .map((r) => {
+          const ackList = Array.isArray(r.acknowledgedBy) ? r.acknowledgedBy : [];
+          return {
+            id: r.id,
+            notifId: r.notifId,
+            title: String(r.title || 'هشدار فوری اضطراری HSE').slice(0, 200),
+            body: String(r.body || '').slice(0, 1000),
+            priority: r.priority || 'critical',
+            riskLevelFa: r.priority === 'critical' || r.category === 'critical_hse'
+              ? 'بحرانی (سطح ۱ اضطراری)'
+              : 'فوری (سطح ۲)',
+            category: r.category || 'critical_hse',
+            sourceModule: r.sourceModule || 'emergency',
+            sirenType: (r.metadata as any)?.sirenType || 'siren_evacuation',
+            actionGuidelines: String((r.metadata as any)?.actionGuidelines || r.body || 'دستورالعمل‌های ایمنی و تخلیه فوری را رعایت فرمایید.').slice(0, 600),
+            requiresAck: true,
+            acknowledgedCount: ackList.length,
+            createdAt: r.createdAt ? r.createdAt.toISOString() : new Date().toISOString(),
+          };
+        });
     } catch (err) {
       logger.error('Error fetching public active emergencies:', err);
       return inMemoryNotifications
@@ -119,11 +143,13 @@ export class NotificationRepository {
           title: n.title,
           body: n.body,
           priority: n.priority,
+          riskLevelFa: 'بحرانی (سطح ۱ اضطراری)',
           category: n.category,
           sourceModule: n.sourceModule,
           sirenType: n.sirenType || 'siren_evacuation',
           actionGuidelines: n.metadata?.actionGuidelines || n.body,
           requiresAck: true,
+          acknowledgedCount: (n.acknowledgedBy || []).length,
           createdAt: n.createdAt,
         }));
     }
@@ -263,22 +289,37 @@ export class NotificationRepository {
     idOrNotifId: string | number,
     userId: string,
     userName?: string,
-    note?: string
+    note?: string,
+    extra?: {
+      acknowledgmentSource?: string;
+      clientIp?: string;
+    }
   ): Promise<boolean> {
     const idStr = String(idOrNotifId);
     const numId = Number(idOrNotifId);
+    const nowIso = new Date().toISOString();
     const ackEntry = {
       userId,
       userName: userName || userId,
-      timestamp: new Date().toISOString(),
+      timestamp: nowIso,
       note: note || undefined,
+      acknowledgmentSource: extra?.acknowledgmentSource || 'in_app_modal',
+      clientIp: extra?.clientIp || undefined,
+      status: 'acknowledged' as const,
     };
 
-    // Update in-memory fallback
+    // Update in-memory fallback (idempotent per userId)
     for (const item of inMemoryNotifications) {
       if (item.notifId === idStr || String(item.id) === idStr) {
         item.read = true;
-        item.acknowledgedBy = [...(item.acknowledgedBy || []), ackEntry];
+        const currentAcks = item.acknowledgedBy || [];
+        const existingIdx = currentAcks.findIndex((a) => a.userId === userId);
+        if (existingIdx >= 0) {
+          currentAcks[existingIdx] = { ...currentAcks[existingIdx], ...ackEntry };
+          item.acknowledgedBy = [...currentAcks];
+        } else {
+          item.acknowledgedBy = [...currentAcks, ackEntry];
+        }
         if (!item.readBy?.includes(userId)) {
           item.readBy = [...(item.readBy || []), userId];
         }
@@ -294,10 +335,15 @@ export class NotificationRepository {
       const [existing] = await db.select().from(schema.notifications).where(condition!).limit(1);
 
       if (existing) {
-        const ackList = (existing.acknowledgedBy as any[]) || [];
-        ackList.push(ackEntry);
+        const ackList = Array.isArray(existing.acknowledgedBy) ? [...(existing.acknowledgedBy as any[])] : [];
+        const existingIdx = ackList.findIndex((a: any) => a && a.userId === userId);
+        if (existingIdx >= 0) {
+          ackList[existingIdx] = { ...ackList[existingIdx], ...ackEntry };
+        } else {
+          ackList.push(ackEntry);
+        }
 
-        const readList = (existing.readBy as string[]) || [];
+        const readList = Array.isArray(existing.readBy) ? [...(existing.readBy as string[])] : [];
         if (!readList.includes(userId)) {
           readList.push(userId);
         }
@@ -309,6 +355,29 @@ export class NotificationRepository {
             readBy: readList,
           })
           .where(eq(schema.notifications.id, existing.id));
+
+        // Record in central audit_logs table for full traceability
+        try {
+          await db.insert(schema.auditLogs).values({
+            userUid: userId,
+            action: `تأیید دریافت هشدار فوری HSE و توقف آژیر (${existing.notifId}: ${existing.title})`,
+            module: 'Notifications',
+            entityType: 'NOTIFICATION',
+            entityId: existing.notifId,
+            details: {
+              notifId: existing.notifId,
+              title: existing.title,
+              userName: userName || userId,
+              acknowledgmentSource: ackEntry.acknowledgmentSource,
+              note: ackEntry.note,
+              timestamp: nowIso,
+            },
+            ipAddress: extra?.clientIp || 'local',
+            result: 'SUCCESS',
+          });
+        } catch (auditErr) {
+          logger.debug('Audit log entry for alert acknowledgment skipped:', auditErr);
+        }
       }
       return true;
     } catch (error) {
@@ -392,15 +461,156 @@ export class NotificationRepository {
     }
   }
 
+  // --- Web Push VAPID Keys & Device Subscriptions Persisted in PostgreSQL ---
+  async getVapidKeys(): Promise<VapidKeySet | null> {
+    if (inMemoryVapidKeys) return inMemoryVapidKeys;
+    try {
+      const [row] = await db
+        .select()
+        .from(schema.systemSettings)
+        .where(eq(schema.systemSettings.key, VAPID_SETTING_KEY))
+        .limit(1);
+      if (row && row.value && typeof row.value === 'object') {
+        const val = row.value as any;
+        if (val.publicKey && val.privateKey) {
+          inMemoryVapidKeys = val as VapidKeySet;
+          return inMemoryVapidKeys;
+        }
+      }
+    } catch (err) {
+      logger.debug('Error reading VAPID keys from DB:', err);
+    }
+    return null;
+  }
+
+  async saveVapidKeys(keys: VapidKeySet): Promise<VapidKeySet> {
+    inMemoryVapidKeys = keys;
+    try {
+      await db
+        .insert(schema.systemSettings)
+        .values({
+          key: VAPID_SETTING_KEY,
+          value: keys,
+          description: 'کلیدهای رمزنگاری VAPID جهت اعلان‌های بومی Web Push و صفحه قفل (RFC 8292)',
+          updatedAt: new Date(),
+        })
+        .onConflictDoUpdate({
+          target: schema.systemSettings.key,
+          set: {
+            value: keys,
+            updatedAt: new Date(),
+          },
+        });
+    } catch (err) {
+      logger.debug('Error saving VAPID keys to DB:', err);
+    }
+    return keys;
+  }
+
+  async getAllPushSubscriptions(): Promise<WebPushSubscriptionRecord[]> {
+    try {
+      const [row] = await db
+        .select()
+        .from(schema.systemSettings)
+        .where(eq(schema.systemSettings.key, PUSH_SUBS_SETTING_KEY))
+        .limit(1);
+      if (row && Array.isArray(row.value)) {
+        inMemoryPushSubscriptions = row.value as WebPushSubscriptionRecord[];
+        return inMemoryPushSubscriptions;
+      }
+    } catch (err) {
+      logger.debug('Error loading Web Push subscriptions from DB:', err);
+    }
+    return inMemoryPushSubscriptions;
+  }
+
+  async upsertPushSubscription(sub: Omit<WebPushSubscriptionRecord, 'id' | 'createdAt' | 'updatedAt'>): Promise<WebPushSubscriptionRecord> {
+    const existingList = await this.getAllPushSubscriptions();
+    const nowIso = new Date().toISOString();
+    const existingIdx = existingList.findIndex((item) => item.endpoint === sub.endpoint);
+
+    let savedRecord: WebPushSubscriptionRecord;
+    if (existingIdx >= 0) {
+      savedRecord = {
+        ...existingList[existingIdx],
+        ...sub,
+        updatedAt: nowIso,
+      };
+      existingList[existingIdx] = savedRecord;
+    } else {
+      savedRecord = {
+        id: `pushsub_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        ...sub,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+      existingList.unshift(savedRecord);
+    }
+
+    // Keep max 500 active device subscriptions
+    const trimmed = existingList.slice(0, 500);
+    inMemoryPushSubscriptions = trimmed;
+
+    try {
+      await db
+        .insert(schema.systemSettings)
+        .values({
+          key: PUSH_SUBS_SETTING_KEY,
+          value: trimmed,
+          description: 'فهرست اشتراک‌های فعال Web Push دستگاه‌ها (موبایل و دسکتاپ)',
+          updatedAt: new Date(),
+        })
+        .onConflictDoUpdate({
+          target: schema.systemSettings.key,
+          set: {
+            value: trimmed,
+            updatedAt: new Date(),
+          },
+        });
+    } catch (err) {
+      logger.debug('Error persisting Web Push subscription to DB:', err);
+    }
+
+    return savedRecord;
+  }
+
+  async removePushSubscription(endpoint: string): Promise<boolean> {
+    const existingList = await this.getAllPushSubscriptions();
+    const filtered = existingList.filter((item) => item.endpoint !== endpoint);
+    inMemoryPushSubscriptions = filtered;
+
+    try {
+      await db
+        .insert(schema.systemSettings)
+        .values({
+          key: PUSH_SUBS_SETTING_KEY,
+          value: filtered,
+          description: 'فهرست اشتراک‌های فعال Web Push دستگاه‌ها (موبایل و دسکتاپ)',
+          updatedAt: new Date(),
+        })
+        .onConflictDoUpdate({
+          target: schema.systemSettings.key,
+          set: {
+            value: filtered,
+            updatedAt: new Date(),
+          },
+        });
+    } catch (err) {
+      logger.debug('Error removing Web Push subscription from DB:', err);
+    }
+    return true;
+  }
+
   // --- User & System Preferences Persisted in Database ---
-  private inMemoryPreferences: UserNotificationPreferences = { ...DEFAULT_NOTIFICATION_PREFERENCES };
+  private inMemoryPreferencesByUser = new Map<string, UserNotificationPreferences>();
 
   async getUserPreferences(userId: string): Promise<UserNotificationPreferences> {
+    const key = String(userId || 'anonymous');
     try {
       const [user] = await db
         .select({ profileData: schema.users.profileData })
         .from(schema.users)
-        .where(or(eq(schema.users.uid, userId), eq(schema.users.username, userId)))
+        .where(or(eq(schema.users.uid, key), eq(schema.users.username, key)))
         .limit(1);
 
       if (user && user.profileData && typeof user.profileData === 'object') {
@@ -420,30 +630,36 @@ export class NotificationRepository {
             }
             ns.criticalHseCustomAudioUrl = '/api/v1/notifications/custom-siren';
           }
-          this.inMemoryPreferences = {
+          const resolved: UserNotificationPreferences = {
             ...DEFAULT_NOTIFICATION_PREFERENCES,
-            ...this.inMemoryPreferences,
             ...ns,
+            enabledCategories: {
+              ...DEFAULT_NOTIFICATION_PREFERENCES.enabledCategories,
+              ...(ns.enabledCategories || {}),
+            },
           };
-          return this.inMemoryPreferences;
+          this.inMemoryPreferencesByUser.set(key, resolved);
+          return resolved;
         }
       }
     } catch (err) {
       logger.debug('Failed to load user notification preferences from DB:', err);
     }
 
-    return this.inMemoryPreferences;
+    return this.inMemoryPreferencesByUser.get(key) || { ...DEFAULT_NOTIFICATION_PREFERENCES };
   }
 
   async saveUserPreferences(
     userId: string,
     prefs: Partial<UserNotificationPreferences>
   ): Promise<UserNotificationPreferences> {
+    const key = String(userId || 'anonymous');
+    const existing = await this.getUserPreferences(key);
     const mergedSettings: UserNotificationPreferences = {
-      ...this.inMemoryPreferences,
+      ...existing,
       ...prefs,
       enabledCategories: {
-        ...this.inMemoryPreferences.enabledCategories,
+        ...existing.enabledCategories,
         ...(prefs.enabledCategories || {}),
       },
     };
@@ -465,13 +681,13 @@ export class NotificationRepository {
       mergedSettings.criticalHseCustomAudioUrl = '/api/v1/notifications/custom-siren';
     }
 
-    this.inMemoryPreferences = mergedSettings;
+    this.inMemoryPreferencesByUser.set(key, mergedSettings);
 
     try {
       const [user] = await db
         .select({ id: schema.users.id, profileData: schema.users.profileData })
         .from(schema.users)
-        .where(or(eq(schema.users.uid, userId), eq(schema.users.username, userId)))
+        .where(or(eq(schema.users.uid, key), eq(schema.users.username, key)))
         .limit(1);
 
       if (user) {
@@ -496,3 +712,4 @@ export class NotificationRepository {
 }
 
 export const notificationRepository = new NotificationRepository();
+

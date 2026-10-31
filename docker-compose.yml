@@ -39,8 +39,10 @@ services:
       - "FORECA_API_KEY=${FORECA_API_KEY:-}"
       - "FORECA_API_TOKEN=${FORECA_API_TOKEN:-}"
       - "UPLOAD_DIR=/app/uploads"
+      - "BACKUP_DIR=/app/backups"
     volumes:
       - ./data/uploads:/app/uploads
+      - ./data/backups:/app/backups
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:

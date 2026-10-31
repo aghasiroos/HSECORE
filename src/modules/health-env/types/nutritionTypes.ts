@@ -147,3 +147,115 @@ export interface NutritionFilterState {
   dateFrom: string;
   dateTo: string;
 }
+
+export type HighRiskCategoryType = 
+  | 'all'
+  | 'bmi_overweight'  // اضافه‌وزن (BMI 25 - 29.9)
+  | 'bmi_obese_1'     // چاقی درجه ۱ (BMI 30 - 34.9)
+  | 'bmi_obese_2'     // چاقی درجه ۲ (BMI 35 - 39.9)
+  | 'bmi_obese_3'     // چاقی درجه ۳ / مفرط (BMI >= 40)
+  | 'bmi_obese'       // چاقی عمومی (BMI >= 30)
+  | 'hypertension'    // فشار خون بالا (سیستولیک/دیاستولیک غیرطبیعی)
+  | 'hyperglycemia'   // قند خون بالا (ناشتا FBS، تصادفی BS، و HbA1c)
+  | 'fatty_liver'     // کبد چرب گرید ۲ و ۳
+  | 'clinical_urgent' // سطح اولویت بالینی فوری / پرخطر
+  | 'followup_due'    // موعد پیگیری فرارسیده یا معوق
+  | 'needs_review';   // نتایج فاقد اطلاعات معتبر یا واحد نامشخص (نیازمند بررسی)
+
+export interface HighRiskCategoryMatch {
+  category: 
+    | 'bmi_overweight'
+    | 'bmi_obese_1'
+    | 'bmi_obese_2'
+    | 'bmi_obese_3'
+    | 'bmi_obese'
+    | 'hypertension'
+    | 'hyperglycemia'
+    | 'fatty_liver'
+    | 'clinical_urgent'
+    | 'followup_due'
+    | 'needs_review';
+  categoryLabelFa: string;
+  severity: 'critical' | 'high' | 'moderate';
+  detailsFa: string;
+  valueBadge?: string;
+  subType?: string;
+}
+
+export interface HighRiskPersonnelProfile {
+  id: string; // Unique key e.g. `hr-${personnelCode}`
+  personnelCode: string;
+  nationalCode: string;
+  fullName: string;
+  unit: string;
+  department?: string;
+  jobTitle: string;
+  phone?: string;
+  gender?: string;
+  age?: number;
+
+  // Matched Risk Categories from exact criteria
+  riskCategories: HighRiskCategoryMatch[];
+  primaryRiskCategory: HighRiskCategoryType;
+  overallPriority: 'urgent' | 'high_risk' | 'routine';
+
+  // Latest Anthropometric Data (from Periodic Exams or Nutrition Dossier)
+  height?: number;
+  weight?: number;
+  bmi: number;
+  bmiCategory: NutritionBmiCategory;
+  waistCircumference?: number;
+  whr?: number;
+
+  // Latest Clinical & Metabolic Data (from Periodic Exams, Lab, or Nutrition Dossier)
+  fattyLiverGrade: FattyLiverGrade;
+  fattyLiverDetails?: string;
+  systolicBp?: number;
+  diastolicBp?: number;
+  bpMeasurementDate?: string;
+  bloodPressureStage?: 'normal' | 'prehypertension' | 'stage_1' | 'stage_2' | 'crisis';
+  fbs?: number;
+  randomBs?: number;
+  hba1c?: number;
+  bloodSugarTestType?: 'FBS' | 'BS' | 'HbA1c';
+  bloodSugarValue?: number;
+  bloodSugarUnit?: string;
+  bloodSugarMeasurementDate?: string;
+  bloodSugarStage?: 'normal' | 'prediabetes' | 'diabetes';
+  cholesterol?: number;
+  triglycerides?: number;
+  underlyingConditions: string[];
+  hasIndeterminateLabResults?: boolean;
+  indeterminateLabDetails?: string;
+
+  // Periodic Exam Reference & Full History
+  lastExamDate?: string;
+  lastExamYear?: number;
+  bmiMeasurementDate?: string;
+  examFitnessStatus?: string;
+  examDoctorVerdict?: string;
+  examRecommendations?: string;
+  hasPeriodicExamRecord: boolean;
+  allExamsHistory?: any[]; // All historical periodic exams for this personnel
+
+  // Nutrition Consultation Reference
+  nutritionRecordId?: string;
+  hasNutritionRecord: boolean;
+  dietGoal?: DietGoal;
+  dailyCalorieTarget?: number;
+  dietPlanSummary?: string;
+  recommendations: string[];
+  supplements?: string;
+  consultationType?: ConsultationType;
+  consultantName?: string;
+  consultationNotes?: string;
+  lastFollowUpDate?: string;
+  lastFollowUpNotes?: string;
+  followUpStatus: FollowUpStatus;
+  nextFollowUpDate?: string;
+  isFollowUpOverdue: boolean;
+  daysUntilFollowUp?: number;
+
+  updatedAt: string;
+}
+

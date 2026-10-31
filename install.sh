@@ -1322,7 +1322,18 @@ step2_install_dependencies() {
       procps \
       psmisc \
       xz-utils \
-      postgresql-client
+      postgresql-client \
+      poppler-utils \
+      poppler-data \
+      ghostscript \
+      fontconfig \
+      fonts-dejavu-core \
+      fonts-freefont-ttf \
+      fonts-noto-core
+
+  # Ensure Persian/Arabic fonts & CMap font cache are fully refreshed for PDF rendering
+  apt-get install -y fonts-sil-scheherazade fonts-farsiweb 2>/dev/null || true
+  fc-cache -f 2>/dev/null || true
 
   tui_run_task \
     "Installing / upgrading Node.js ${NODE_LTS_MAJOR}.x LTS (>= ${NODE_LTS_MAJOR}.${NODE_MIN_MINOR}.0) & npm on host" \

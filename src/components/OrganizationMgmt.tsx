@@ -46,6 +46,7 @@ import { PpeItem, OshaPpeCategory } from '../types';
 import { syncAndGetExtractedDepartments, getStoredOrgNodes, fetchStoredOrgNodes, saveStoredOrgNodes } from '../utils/personnelHelper';
 import { OrgNode, hasPermission, isUserAdmin } from '../utils/authHelper';
 import OrgStructureManager, { ORG_TYPE_LABELS } from './OrgStructureManager';
+import OrgBackupRestorePanel from './OrgBackupRestorePanel';
 
 export interface PpeCategoryItem {
   id: string;
@@ -156,7 +157,7 @@ const syncSubUnitToOrgNodes = (parentUnitName: string, subUnitName: string, allN
 };
 
 export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean; currentUser?: any }) {
-  const [activeTab, setActiveTab] = useState<'org_hierarchy' | 'units_jobs' | 'incident_types' | 'ppe_equipment'>('org_hierarchy');
+  const [activeTab, setActiveTab] = useState<'org_hierarchy' | 'units_jobs' | 'incident_types' | 'ppe_equipment' | 'backup_restore'>('org_hierarchy');
 
   // Master Org Nodes (Synchronized strictly with central database)
   const [orgNodes, setOrgNodes] = useState<OrgNode[]>(() => getStoredOrgNodes());
@@ -315,16 +316,11 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
     return ok;
   };
 
-  useEffect(() => {
-    if (!isRemoteHydrated) return;
-    saveIncidentTypesToDb(incidentTypes);
-    window.dispatchEvent(new Event('app_data_mutated'));
-  }, [incidentTypes, isRemoteHydrated]);
-
-  useEffect(() => {
-    if (!isRemoteHydrated) return;
-    savePpeCategoriesToDb(ppeCategories);
-  }, [ppeCategories, isRemoteHydrated]);
+  const persistIncidentTypes = (nextTypes: HseIncidentCategoryItem[]) => {
+    setIncidentTypes(nextTypes);
+    saveIncidentTypesToDb(nextTypes);
+    window.dispatchEvent(new CustomEvent('app_data_mutated', { detail: { origin: 'OrganizationMgmt', entity: 'incident_types' } }));
+  };
 
   const [incTypeFilter, setIncTypeFilter] = useState<'all' | 'high_severity' | 'recordable' | 'proactive'>('all');
   const [incTypeSearch, setIncTypeSearch] = useState('');
@@ -1009,7 +1005,7 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
     if (!incForm.titleFa.trim()) return;
 
     if (editingIncTypeId) {
-      setIncidentTypes(prev => prev.map(item => {
+      const next = incidentTypes.map(item => {
         if (item.id === editingIncTypeId) {
           return {
             ...item,
@@ -1021,7 +1017,8 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
           };
         }
         return item;
-      }));
+      });
+      persistIncidentTypes(next);
       setEditingIncTypeId(null);
     } else {
       const newItem: HseIncidentCategoryItem = {
@@ -1032,7 +1029,7 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
         code: incForm.code.trim().toUpperCase() || 'INC',
         descriptionFa: incForm.descriptionFa.trim()
       };
-      setIncidentTypes(prev => [...prev, newItem]);
+      persistIncidentTypes([...incidentTypes, newItem]);
     }
 
     setIncForm({
@@ -1079,7 +1076,7 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
       title: isFa ? `آیا از حذف دسته‌بندی حادثه "${name}" اطمینان دارید؟` : `Delete incident type "${name}"?`,
       description: isFa ? 'این عنوان از لیست تعاریف حوادث سازمان حذف می‌شود.' : 'This incident category definition will be deleted.',
       onConfirm: () => {
-        setIncidentTypes(prev => prev.filter(i => i.id !== id));
+        persistIncidentTypes(incidentTypes.filter(i => i.id !== id));
         setDeleteConfirm(null);
       }
     });
@@ -1094,7 +1091,7 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
       title: isFa ? 'بازنشانی دسته‌بندی‌های حوادث به استانداردهای پیش‌فرض HSE' : 'Reset incident types to defaults',
       description: isFa ? 'تمامی عناوین دسته‌بندی حوادث به ۳ سطح اصلی (شدت بالا، قابل ثبت، پیشگیرانه) بازمی‌گردند.' : 'All incident categories will be restored to default HSE severity tiers.',
       onConfirm: () => {
-        setIncidentTypes(DEFAULT_INCIDENT_TYPES);
+        persistIncidentTypes(DEFAULT_INCIDENT_TYPES);
         setDeleteConfirm(null);
       }
     });
@@ -1282,8 +1279,32 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
             <span>{isFa ? 'نام تجهیزات PPE' : 'PPE Equipment Names'}</span>
           </button>
+
+          <button
+            onClick={() => setActiveTab('backup_restore')}
+            className={`px-3.5 py-2 text-xs font-black rounded-xl transition cursor-pointer flex items-center gap-1.5 ${
+              activeTab === 'backup_restore' ? 'bg-indigo-600 text-white shadow-md scale-[1.02]' : 'text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/40'
+            }`}
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>{isFa ? 'پشتیبان‌گیری و بازیابی یکپارچه' : 'Backup & Restore'}</span>
+          </button>
         </div>
       </div>
+
+      {/* --- TAB 4: INTEGRATED ORG BACKUP & RESTORE --- */}
+      {activeTab === 'backup_restore' && (
+        <OrgBackupRestorePanel
+          isFa={isFa}
+          canManageOrg={canManageOrg}
+          onDataRestored={async () => {
+            await refreshAllOrgSettings(true);
+            window.dispatchEvent(new Event('hse_org_nodes_updated'));
+            window.dispatchEvent(new Event('hse_unit_structure_updated'));
+            window.dispatchEvent(new Event('hse_org_jobs_updated'));
+          }}
+        />
+      )}
 
       {/* --- TAB 0: HIERARCHICAL ORG STRUCTURE & CHART --- */}
       {activeTab === 'org_hierarchy' && (
@@ -1291,8 +1312,9 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
           isFa={isFa} 
           currentUser={currentUser} 
           onUpdate={() => {
-            // Refresh local state if needed
-          }} 
+            refreshAllOrgSettings(true);
+          }}
+          onOpenBackupRestore={() => setActiveTab('backup_restore')}
         />
       )}
 

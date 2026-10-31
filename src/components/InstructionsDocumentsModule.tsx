@@ -280,7 +280,9 @@ function InstructionsDocumentsModuleComponent({
     versionItem: DocumentVersionItem;
     blobUrl: string | null;
     loading: boolean;
+    error?: string | null;
   } | null>(null);
+  const previewReqIdRef = useRef<number>(0);
   const [imageZoom, setImageZoom] = useState<number>(1);
   const [imageRotation, setImageRotation] = useState<number>(0);
 
@@ -698,22 +700,19 @@ function InstructionsDocumentsModuleComponent({
 
   // Online Preview Handler
   const handleOpenPreview = async (doc: HseDocumentItem, versionItem?: DocumentVersionItem) => {
+    const reqId = ++previewReqIdRef.current;
     const targetVer: DocumentVersionItem = versionItem ||
       doc.versions?.[0] || {
         fileId: doc.fileId,
         version: doc.version,
         originalName: doc.originalName,
-        mimeType: doc.mimeType,
+        mimeType: doc.mimeType || 'application/pdf',
         fileSize: doc.fileSize,
         uploadedBy: doc.uploadedBy,
         createdAt: doc.updatedAt,
         downloadUrl: doc.downloadUrl,
         previewUrl: doc.previewUrl,
       };
-
-    if (previewDoc?.blobUrl) {
-      URL.revokeObjectURL(previewDoc.blobUrl);
-    }
 
     setImageZoom(1);
     setImageRotation(0);
@@ -722,14 +721,25 @@ function InstructionsDocumentsModuleComponent({
       versionItem: targetVer,
       blobUrl: null,
       loading: true,
+      error: null,
     });
 
     const blobUrl = await apiDb.fetchFileBlobUrl(targetVer.fileId, targetVer.mimeType);
+    if (reqId !== previewReqIdRef.current) {
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+      return;
+    }
+
     if (!blobUrl) {
-      toast.error(
-        isFa ? 'خطا در بارگذاری پیش‌نمایش آنلاین فایل از سرور.' : 'Failed to load file preview.'
-      );
-      setPreviewDoc(null);
+      setPreviewDoc({
+        doc,
+        versionItem: targetVer,
+        blobUrl: null,
+        loading: false,
+        error: isFa
+          ? 'فایل فیزیکی این نسخه در سرور یافت نشد (احتمالاً پیش از بروزرسانی کانتینر بارگذاری شده است). می‌توانید از طریق دکمه «جایگزینی فایل» نسخه مدرک را مجدداً بارگذاری نمایید.'
+          : 'Document binary file could not be loaded from server. Please re-upload or replace the file.',
+      });
       return;
     }
 
@@ -738,6 +748,7 @@ function InstructionsDocumentsModuleComponent({
       versionItem: targetVer,
       blobUrl,
       loading: false,
+      error: null,
     });
   };
 
@@ -1116,7 +1127,10 @@ function InstructionsDocumentsModuleComponent({
                           <div className="min-w-0">
                             <div className="font-black text-slate-800 dark:text-slate-100 flex items-center gap-1.5 flex-wrap">
                               <span
-                                onClick={() => handleOpenPreview(doc)}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenPreview(doc);
+                                }}
                                 className="hover:text-sky-600 dark:hover:text-sky-400 cursor-pointer transition-colors"
                               >
                                 {doc.title}
@@ -1228,7 +1242,10 @@ function InstructionsDocumentsModuleComponent({
                           {/* Online Preview */}
                           <button
                             type="button"
-                            onClick={() => handleOpenPreview(doc)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenPreview(doc);
+                            }}
                             className="p-1.5 rounded-lg bg-sky-50 dark:bg-sky-950/50 hover:bg-sky-100 dark:hover:bg-sky-900/70 text-sky-600 dark:text-sky-400 transition cursor-pointer"
                             title={isFa ? 'مشاهده آنلاین مدرک' : 'Preview Document'}
                           >
@@ -1769,7 +1786,8 @@ function InstructionsDocumentsModuleComponent({
                   <div className="flex items-center gap-1.5 shrink-0">
                     <button
                       type="button"
-                      onClick={() => {
+                      onClick={(e) => {
+                        e.stopPropagation();
                         const targetDoc = historyModalDoc;
                         setHistoryModalDoc(null);
                         handleOpenPreview(targetDoc, ver);
@@ -1892,7 +1910,7 @@ function InstructionsDocumentsModuleComponent({
                 <button
                   type="button"
                   onClick={() => {
-                    if (previewDoc?.blobUrl) URL.revokeObjectURL(previewDoc.blobUrl);
+                    previewReqIdRef.current++;
                     setPreviewDoc(null);
                   }}
                   className="p-1.5 rounded-xl bg-slate-200/80 dark:bg-slate-800 hover:bg-rose-500 hover:text-white text-slate-600 dark:text-slate-300 transition cursor-pointer"
@@ -1912,7 +1930,8 @@ function InstructionsDocumentsModuleComponent({
                   </div>
                 </div>
               ) : previewDoc.blobUrl ? (
-                previewDoc.versionItem.mimeType === 'application/pdf' ? (
+                previewDoc.versionItem.mimeType === 'application/pdf' ||
+                previewDoc.versionItem.originalName?.toLowerCase().endsWith('.pdf') ? (
                   <div className="w-full h-full flex flex-col">
                     <PdfDocumentViewer
                       fileId={previewDoc.versionItem.fileId}
@@ -1941,7 +1960,47 @@ function InstructionsDocumentsModuleComponent({
                     />
                   </div>
                 )
-              ) : null}
+              ) : (
+                <div className="max-w-md mx-auto p-6 text-center space-y-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-lg m-4">
+                  <div className="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center mx-auto">
+                    <AlertTriangle className="w-6 h-6" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <h4 className="text-sm font-black text-slate-800 dark:text-slate-100">
+                      {isFa ? 'عدم دسترسی به فایل فیزیکی مستند' : 'Document File Unavailable'}
+                    </h4>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed font-bold">
+                      {previewDoc.error ||
+                        (isFa
+                          ? 'فایل این مستند در سرور قابل بارگذاری نمی‌باشد.'
+                          : 'Unable to load document file.')}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => handleOpenPreview(previewDoc.doc, previewDoc.versionItem)}
+                      className="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold cursor-pointer"
+                    >
+                      {isFa ? 'تلاش مجدد' : 'Retry'}
+                    </button>
+                    {canEdit && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const targetDoc = previewDoc.doc;
+                          setPreviewDoc(null);
+                          handleOpenReplaceModal(targetDoc);
+                        }}
+                        className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>{isFa ? 'بارگذاری مجدد / جایگزینی فایل' : 'Replace File'}</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>

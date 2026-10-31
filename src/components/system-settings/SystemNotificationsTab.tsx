@@ -102,6 +102,10 @@ export const SystemNotificationsTab: React.FC<SystemNotificationsTabProps> = ({
   const [notifSirenType, setNotifSirenType] = useState<HseSirenType>('siren_evacuation');
   const [previewingSirenId, setPreviewingSirenId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [pushSubscribed, setPushSubscribed] = useState<boolean>(
+    typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted'
+  );
+  const [lockScreenTestCountdown, setLockScreenTestCountdown] = useState<number | null>(null);
 
   // Stop siren preview on unmount
   useEffect(() => {
@@ -122,6 +126,45 @@ export const SystemNotificationsTab: React.FC<SystemNotificationsTabProps> = ({
         setPreviewingSirenId((curr) => (curr === sirenId ? null : curr));
       }, 4000);
     }
+  };
+
+  const handleEnableLockScreenPush = async () => {
+    const res = await CentralNotificationService.subscribeToWebPush(currentUser?.id, currentUser?.username);
+    if (res.subscribed) {
+      setPushSubscribed(true);
+      toast.success('اعلان سیستمی صفحه قفل (Web Push + Service Worker) با موفقیت فعال شد.');
+    } else if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+      setPushSubscribed(true);
+      toast.success('مجوز اعلان سیستم‌عامل و Service Worker فعال است.');
+    } else {
+      toast.error(res.reason || 'لطفاً مجوز اعلان (Notification Permission) را در مرورگر تأیید نمایید.');
+    }
+  };
+
+  const handleDelayedLockScreenTest = async () => {
+    if (lockScreenTestCountdown !== null) return;
+    await CentralNotificationService.subscribeToWebPush(currentUser?.id, currentUser?.username);
+    setLockScreenTestCountdown(5);
+    toast('۵ ثانیه فرصت دارید صفحه موبایل/رایانه را قفل کنید یا مرورگر را کوچک (Minimize) نمایید...', {
+      icon: '🔒',
+      duration: 4800,
+    });
+
+    let remaining = 5;
+    const timer = setInterval(async () => {
+      remaining -= 1;
+      if (remaining > 0) {
+        setLockScreenTestCountdown(remaining);
+      } else {
+        clearInterval(timer);
+        setLockScreenTestCountdown(null);
+        try {
+          await CentralNotificationService.triggerTestNotification('critical_hse', notifSirenType);
+        } catch (err) {
+          console.error('Delayed lock screen test error:', err);
+        }
+      }
+    }, 1000);
   };
 
   // Confirmation Modal
@@ -177,6 +220,8 @@ export const SystemNotificationsTab: React.FC<SystemNotificationsTabProps> = ({
     }
     if (!notifTitle.trim() || !notifBody.trim()) return;
 
+    stopSirenPreview();
+    setPreviewingSirenId(null);
     setIsSubmitting(true);
 
     try {
@@ -1045,6 +1090,85 @@ export const SystemNotificationsTab: React.FC<SystemNotificationsTabProps> = ({
                   <MessageSquare className="w-4 h-4 text-blue-500" />
                   <span>{isFa ? `مشاهده تاریخچه تمامی اعلان‌ها (${notifications.length})` : 'View All Dispatched History'}</span>
                 </button>
+              </div>
+            </div>
+
+            {/* Lock Screen, Web Push & OS Capability Audit Card */}
+            <div className="bg-white dark:bg-slate-900 p-5 sm:p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+                <div className="flex items-center gap-2">
+                  <Smartphone className="w-4 h-4 text-rose-600" />
+                  <h4 className="text-xs sm:text-sm font-black text-slate-800 dark:text-slate-100">
+                    {isFa ? 'اعلان سیستمی صفحه قفل (Lock Screen) و Web Push' : 'OS Lock Screen & Web Push Engine'}
+                  </h4>
+                </div>
+                <span
+                  className={`text-[10px] font-black px-2.5 py-0.5 rounded-full ${
+                    pushSubscribed
+                      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                      : 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300'
+                  }`}
+                >
+                  {pushSubscribed ? (isFa ? 'فعال و متصل' : 'Subscribed') : (isFa ? 'نیازمند فعال‌سازی' : 'Needs Permission')}
+                </span>
+              </div>
+
+              <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed font-medium">
+                {isFa
+                  ? 'با فعال‌سازی اشتراک Web Push (استاندارد RFC 8030 + Service Worker)، هشدارهای فوری HSE حتی در صفحه Login (بدون ورود کاربر)، در پس‌زمینه و روی صفحه قفل (Lock Screen) تلفن همراه و رایانه به‌صورت اعلان بومی سیستم‌عامل همراه با دکمه «تأیید دریافت هشدار و قطع آژیر» نمایش داده می‌شوند.'
+                  : 'Enabling RFC 8030 Web Push delivers critical HSE notifications on the OS lock screen and Login screen without authentication.'}
+              </p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <button
+                  type="button"
+                  onClick={handleEnableLockScreenPush}
+                  className="py-2.5 px-3 rounded-xl text-xs font-black bg-emerald-600 hover:bg-emerald-700 text-white transition flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
+                >
+                  <ShieldCheck className="w-4 h-4 shrink-0" />
+                  <span>{isFa ? 'فعال‌سازی اعلان صفحه قفل در این دستگاه' : 'Enable Lock Screen Push'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleDelayedLockScreenTest}
+                  disabled={lockScreenTestCountdown !== null}
+                  className="py-2.5 px-3 rounded-xl text-xs font-black bg-rose-600 hover:bg-rose-700 disabled:opacity-65 text-white transition flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
+                >
+                  <Clock className="w-4 h-4 shrink-0" />
+                  <span>
+                    {lockScreenTestCountdown !== null
+                      ? `ارسال تست در ${lockScreenTestCountdown} ثانیه دیگر (صفحه را قفل کنید)...`
+                      : isFa
+                      ? 'تست عملی صفحه قفل (با تأخیر ۵ ثانیه)'
+                      : '5s Delayed Lock Screen Test'}
+                  </span>
+                </button>
+              </div>
+
+              {/* Technical Transparency Matrix: Web/PWA vs Native Android/iOS */}
+              <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 space-y-2.5 text-[11px]">
+                <div className="font-black text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+                  <Info className="w-4 h-4 text-sky-600 shrink-0" />
+                  <span>ممیزی فنی قابلیت‌های واقعی بستر وب/PWA در مقایسه با اپلیکیشن بومی (Android / iOS):</span>
+                </div>
+                <ul className="space-y-1.5 text-slate-600 dark:text-slate-300 leading-relaxed list-disc pr-4">
+                  <li>
+                    <strong className="text-emerald-700 dark:text-emerald-400">قابل اجرا در وب و PWA (پیاده‌سازی‌شده):</strong>{' '}
+                    دریافت بلادرنگ در صفحه Login بدون نیاز به ورود (از طریق WebSocket + SSE + Web Push)، نمایش بنر هشدار روی صفحه قفل (Lock Screen) همراه با سطح خطر، زمان انتشار، اقدام ضروری و دکمه «تأیید دریافت هشدار»، لرزش ممتد (Vibration)، روشن نگه‌داشتن صفحه در حین نمایش (Screen Wake Lock) و پخش پیوسته آژیر تا لحظه تأیید مستقل هر کاربر با ثبت در PostgreSQL.
+                  </li>
+                  <li>
+                    <strong className="text-amber-700 dark:text-amber-400">محدودیت امنیتی مرورگرها و سیستم‌عامل در وب:</strong>{' '}
+                    مرورگرهای موبایل اجازه نمی‌دهند یک وب‌سایت زمانی که صفحه گوشی کاملاً خاموش است، صفحه را به‌صورت خودکار مانند تماس تلفنی روشن (Wake Screen) کند یا در حالت سایلنت سخت‌افزاری (Silent/DND) بدون تعامل قبلی کاربر صدای آژیر پخش کند.
+                  </li>
+                  <li>
+                    <strong className="text-sky-700 dark:text-sky-400">راهکار تکمیلی بومی (Native Android / iOS Wrapper):</strong>{' '}
+                    در صورت نیاز به روشن شدن خودکار صفحه خاموش و عبور از حالت Silent/DND، خروجی همین سامانه را می‌توان در قالب Capacitor / Kotlin / Swift با مجوزهای بومی{' '}
+                    <code className="font-mono text-[10px] bg-slate-200 dark:bg-slate-700 px-1 py-0.5 rounded">USE_FULL_SCREEN_INTENT</code>،{' '}
+                    <code className="font-mono text-[10px] bg-slate-200 dark:bg-slate-700 px-1 py-0.5 rounded">USAGE_ALARM</code> و{' '}
+                    <code className="font-mono text-[10px] bg-slate-200 dark:bg-slate-700 px-1 py-0.5 rounded">iOS Critical Alerts</code> بسته‌بندی نمود.
+                  </li>
+                </ul>
               </div>
             </div>
           </div>

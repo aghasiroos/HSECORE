@@ -272,7 +272,8 @@ export function useDashboardMetrics(userId?: string) {
           headers['Authorization'] = `Bearer ${token}`;
         }
 
-        const res = await fetch('/api/v1/dashboard/metrics', { headers });
+        const url = force ? '/api/v1/dashboard/metrics?refresh=true' : '/api/v1/dashboard/metrics';
+        const res = await fetch(url, { headers });
         if (res.status === 429) {
           // Status 429: Too Many Requests - retain existing state without throwing
           return;
@@ -377,9 +378,28 @@ export function useDashboardMetrics(userId?: string) {
       }, 600);
     };
 
-    window.addEventListener('hse_data_mutated', handleMutation);
-    window.addEventListener('app_data_mutated', handleMutation);
-    window.addEventListener('hse_central_data_synced', handleMutation);
+    const MODULE_MUTATION_EVENTS = [
+      'hse_data_mutated',
+      'app_data_mutated',
+      'hse_central_data_synced',
+      'hse_incidents_updated',
+      'hse_permits_updated',
+      'hse_ptw_audits_updated',
+      'hse_medical_data_updated',
+      'hse_occ_health_data_updated',
+      'hse_health_env_updated',
+      'five_s_data_updated',
+      'hse_fire_vehicles_updated',
+      'hse_fire_daily_reports_updated',
+      'hse_training_updated',
+      'hse_safety_templates_updated',
+      'hse_warnings_updated',
+      'hse_risk_updated',
+      'hse_nutrition_records_updated',
+      'hse_personnel_updated',
+    ];
+
+    MODULE_MUTATION_EVENTS.forEach(evt => window.addEventListener(evt, handleMutation));
     window.addEventListener('hse_dashboard_updated', () => fetchLayout(userId));
 
     return () => {
@@ -389,9 +409,7 @@ export function useDashboardMetrics(userId?: string) {
       if (mutationDebounceTimer.current) {
         clearTimeout(mutationDebounceTimer.current);
       }
-      window.removeEventListener('hse_data_mutated', handleMutation);
-      window.removeEventListener('app_data_mutated', handleMutation);
-      window.removeEventListener('hse_central_data_synced', handleMutation);
+      MODULE_MUTATION_EVENTS.forEach(evt => window.removeEventListener(evt, handleMutation));
       window.removeEventListener('hse_dashboard_updated', () => fetchLayout(userId));
     };
   }, [fetchMetrics, fetchLayout, userId]);

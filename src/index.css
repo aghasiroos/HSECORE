@@ -14,8 +14,7 @@
   font-style: normal;
   font-weight: 300;
   font-display: swap;
-  src: url('/fonts/Vazirmatn-Light.woff2') format('woff2'),
-       url('./assets/fonts/Vazirmatn-Light.woff2') format('woff2');
+  src: local('Vazirmatn Light'), local('Vazirmatn-Light'), local('Vazirmatn');
 }
 
 @font-face {
@@ -23,8 +22,7 @@
   font-style: normal;
   font-weight: 500;
   font-display: swap;
-  src: url('/fonts/Vazirmatn-Medium.woff2') format('woff2'),
-       url('./assets/fonts/Vazirmatn-Medium.woff2') format('woff2');
+  src: local('Vazirmatn Medium'), local('Vazirmatn-Medium'), local('Vazirmatn');
 }
 
 @font-face {

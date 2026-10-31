@@ -25,11 +25,12 @@ export const DashboardHealthChart: React.FC<DashboardHealthChartProps> = ({
   const total = healthData?.totalExams || 0;
   const fitnessPercentage = total > 0 ? (healthData?.fitnessPercentage ?? Math.round(((fit + conditional) / total) * 100)) : 0;
 
-  const chartData = total > 0 ? [
+  const hasValidData = total > 0 && (fit > 0 || conditional > 0 || unfit > 0);
+  const chartData = hasValidData ? [
     { name: isFa ? 'کاملاً متناسب (Fit)' : 'Fit', value: fit, color: '#10b981' },
     { name: isFa ? 'متناسب مشروط (Conditional)' : 'Conditional', value: conditional, color: '#f59e0b' },
     { name: isFa ? 'نامتناسب با شغل (Unfit)' : 'Unfit', value: unfit, color: '#ef4444' },
-  ] : [
+  ].filter(d => d.value > 0) : [
     { name: isFa ? 'بدون داده معاینات' : 'No Data', value: 1, color: '#94a3b8' }
   ];
 
@@ -80,12 +81,12 @@ export const DashboardHealthChart: React.FC<DashboardHealthChartProps> = ({
         <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={170} debounce={50}>
           <PieChart>
             <Pie
-              data={chartData.some(d => d.value > 0) ? chartData.filter(d => d.value > 0) : [{ name: isFa ? 'بدون پرونده' : 'No records', value: 1, color: '#94a3b8' }]}
+              data={chartData}
               cx="50%"
               cy="50%"
               innerRadius={40}
               outerRadius={65}
-              paddingAngle={total > 0 ? 4 : 0}
+              paddingAngle={hasValidData && chartData.length > 1 ? 4 : 0}
               dataKey="value"
             >
               {chartData.map((entry, index) => (
@@ -101,7 +102,7 @@ export const DashboardHealthChart: React.FC<DashboardHealthChartProps> = ({
                 fontWeight: 'bold' 
               }} 
             />
-            {total > 0 && <Legend wrapperStyle={{ fontSize: '10px', fontWeight: 'bold' }} />}
+            {hasValidData && <Legend wrapperStyle={{ fontSize: '10px', fontWeight: 'bold' }} />}
           </PieChart>
         </ResponsiveContainer>
       </div>

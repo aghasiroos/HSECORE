@@ -858,10 +858,16 @@ export function syncAndGetExtractedDepartments(): Department[] {
     if (node.type === 'Plant' || node.type === 'Department' || node.type === 'Area' || node.type === 'Section') {
       const cleanName = node.name.trim();
       if (!unitMap.has(cleanName)) {
+        const linkedPerson = (node.managerPersonnelCode && findPersonnelFast(node.managerPersonnelCode, { bypassAccessFilter: true })) ||
+                             (node.managerPersonnelId && findPersonnelFast(String(node.managerPersonnelId), { bypassAccessFilter: true }));
+        const liveManagerName = linkedPerson
+          ? (linkedPerson.fullName || `${linkedPerson.firstName || ''} ${linkedPerson.lastName || ''}`.trim())
+          : (node.manager || '');
+
         unitMap.set(cleanName, {
           name: cleanName,
           headcount: 0,
-          managerCandidate: node.manager || '',
+          managerCandidate: liveManagerName,
           positions: new Set<string>(),
           workplaces: new Set<string>(node.location ? [node.location] : []),
           orgNodeMatch: node

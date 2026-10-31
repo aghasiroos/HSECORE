@@ -44,12 +44,41 @@ export interface NotificationRecord {
     userName?: string;
     timestamp: string;
     note?: string;
+    acknowledgmentSource?: 'in_app_modal' | 'os_notification_action' | 'login_screen' | string;
+    clientIp?: string;
+    status?: 'acknowledged';
   }>;
   entityType?: string;
   entityId?: string;
   link?: string;
   sirenType?: string;
   metadata?: Record<string, any>;
+  createdAt: string;
+}
+
+export interface WebPushSubscriptionRecord {
+  id: string;
+  endpoint: string;
+  keys: {
+    p256dh: string;
+    auth: string;
+  };
+  userId?: string;
+  userName?: string;
+  role?: string;
+  departmentIds?: string[];
+  guestSessionId?: string;
+  userAgent?: string;
+  platform?: string;
+  createdAt: string;
+  updatedAt: string;
+  lastSuccessAt?: string;
+}
+
+export interface VapidKeySet {
+  publicKey: string;
+  privateKey: string;
+  subject: string;
   createdAt: string;
 }
 
@@ -69,6 +98,7 @@ export interface UserNotificationPreferences {
   criticalHseCustomAudioUrl?: string;
   criticalHseCustomAudioName?: string;
   criticalHseCustomAudioSize?: number;
+  lockScreenSirenConfirmed?: boolean;
 }
 
 export const DEFAULT_NOTIFICATION_PREFERENCES: UserNotificationPreferences = {
@@ -84,4 +114,6 @@ export const DEFAULT_NOTIFICATION_PREFERENCES: UserNotificationPreferences = {
     critical_hse: true,
   },
   criticalHseAudioMode: 'default_synth',
+  lockScreenSirenConfirmed: false,
 };
+

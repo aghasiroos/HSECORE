@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Building2,
   Building,
@@ -32,10 +32,13 @@ import { syncAndGetExtractedDepartments } from '../utils/personnelHelper';
 import { Department } from '../types';
 import { getOrgUnitsStructure, saveOrgUnitsStructure, OrgUnitsDataMap } from '../utils/orgHelper';
 
+import { apiDb } from '../services/apiDatabaseClient';
+
 interface OrgStructureManagerProps {
   isFa: boolean;
   currentUser?: any;
   onUpdate?: () => void;
+  onOpenBackupRestore?: () => void;
 }
 
 export const ORG_TYPE_LABELS = {
@@ -48,12 +51,42 @@ export const ORG_TYPE_LABELS = {
   Team: { fa: 'تیم اجرایی / نوبت‌کار / شیفت', en: 'Team / Shift Group', badgeBg: 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700', icon: Users }
 };
 
-import { fetchStoredOrgNodes, saveStoredOrgNodes } from '../utils/personnelHelper';
+import { fetchStoredOrgNodes, saveStoredOrgNodes, findPersonnelFast } from '../utils/personnelHelper';
+import CentralPersonnelSelector from './CentralPersonnelSelector';
 
-export default function OrgStructureManager({ isFa, currentUser, onUpdate }: OrgStructureManagerProps) {
+export default function OrgStructureManager({ isFa, currentUser, onUpdate, onOpenBackupRestore }: OrgStructureManagerProps) {
   // --- STATE ---
   const [orgNodes, setOrgNodes] = useState<OrgNode[]>([]);
   const [isInitLoaded, setIsInitLoaded] = useState(false);
+
+  // Dynamically resolve live manager details from Central Personnel Master Data
+  const resolveManager = useCallback((node: OrgNode) => {
+    const p = (node.managerPersonnelCode && findPersonnelFast(node.managerPersonnelCode)) ||
+              (node.managerPersonnelId && findPersonnelFast(String(node.managerPersonnelId))) ||
+              (node.manager && findPersonnelFast(node.manager));
+
+    if (p) {
+      return {
+        fullName: p.fullName || `${p.firstName || ''} ${p.lastName || ''}`.trim() || node.manager || '',
+        personnelCode: p.effectiveCode || p.personnelCode || node.managerPersonnelCode || '',
+        jobTitle: p.jobTitle || p.position || node.managerJobTitle || '',
+        personnelId: p.id ? Number(p.id) : undefined,
+        nationalCode: p.nationalCode || node.managerNationalCode || '',
+        status: p.status || node.managerStatus || 'ACTIVE',
+        isLinked: true
+      };
+    }
+
+    return {
+      fullName: node.manager || '',
+      personnelCode: node.managerPersonnelCode || '',
+      jobTitle: node.managerJobTitle || '',
+      personnelId: node.managerPersonnelId || undefined,
+      nationalCode: node.managerNationalCode || '',
+      status: node.managerStatus || 'ACTIVE',
+      isLinked: false
+    };
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -69,7 +102,7 @@ export default function OrgStructureManager({ isFa, currentUser, onUpdate }: Org
     const handleRemoteUpdate = async (e?: any) => {
       if (!isMounted) return;
       const entity = String(e?.detail?.entityType || e?.detail?.entity || '').toLowerCase();
-      if (!entity || entity.includes('org') || entity.includes('node') || entity.includes('department') || entity.includes('setting')) {
+      if (!entity || entity.includes('org') || entity.includes('node') || entity.includes('department') || entity.includes('setting') || entity.includes('personnel')) {
         const nodes = await fetchStoredOrgNodes(true);
         if (isMounted) setOrgNodes(nodes);
       }
@@ -78,6 +111,7 @@ export default function OrgStructureManager({ isFa, currentUser, onUpdate }: Org
     window.addEventListener('app_data_mutated', handleRemoteUpdate);
     window.addEventListener('hse_data_mutated', handleRemoteUpdate);
     window.addEventListener('hse_central_data_synced', handleRemoteUpdate);
+    window.addEventListener('hse_personnel_updated', handleRemoteUpdate);
     window.addEventListener('hse_org_nodes_updated', () => {
       fetchStoredOrgNodes(false).then(nodes => {
         if (isMounted) setOrgNodes(nodes);
@@ -89,6 +123,7 @@ export default function OrgStructureManager({ isFa, currentUser, onUpdate }: Org
       window.removeEventListener('app_data_mutated', handleRemoteUpdate);
       window.removeEventListener('hse_data_mutated', handleRemoteUpdate);
       window.removeEventListener('hse_central_data_synced', handleRemoteUpdate);
+      window.removeEventListener('hse_personnel_updated', handleRemoteUpdate);
     };
   }, []);
 
@@ -107,6 +142,7 @@ export default function OrgStructureManager({ isFa, currentUser, onUpdate }: Org
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingNode, setEditingNode] = useState<OrgNode | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ node: OrgNode; childCount: number } | null>(null);
+  const [showResetConfirmModal, setShowResetConfirmModal] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Form Fields State
@@ -117,6 +153,10 @@ export default function OrgStructureManager({ isFa, currentUser, onUpdate }: Org
     parentId: string | null;
     code: string;
     manager: string;
+    managerPersonnelId?: number | null;
+    managerPersonnelCode?: string | null;
+    managerJobTitle?: string | null;
+    managerNationalCode?: string | null;
     description: string;
     location: string;
     headcount: number;
@@ -129,6 +169,10 @@ export default function OrgStructureManager({ isFa, currentUser, onUpdate }: Org
     parentId: null,
     code: '',
     manager: '',
+    managerPersonnelId: null,
+    managerPersonnelCode: '',
+    managerJobTitle: '',
+    managerNationalCode: '',
     description: '',
     location: '',
     headcount: 50,
@@ -168,6 +212,10 @@ export default function OrgStructureManager({ isFa, currentUser, onUpdate }: Org
       parentId: defaultParentId,
       code: `ORG-${Math.floor(100 + Math.random() * 900)}`,
       manager: '',
+      managerPersonnelId: null,
+      managerPersonnelCode: '',
+      managerJobTitle: '',
+      managerNationalCode: '',
       description: '',
       location: '',
       headcount: 25,
@@ -179,13 +227,18 @@ export default function OrgStructureManager({ isFa, currentUser, onUpdate }: Org
 
   const handleOpenEditModal = (node: OrgNode) => {
     setEditingNode(node);
+    const resolved = resolveManager(node);
     setFormData({
       name: node.name,
       nameEn: node.nameEn || '',
       type: node.type,
       parentId: node.parentId || null,
       code: node.code || '',
-      manager: node.manager || '',
+      manager: resolved.fullName || node.manager || '',
+      managerPersonnelId: node.managerPersonnelId ?? (resolved.personnelId ? Number(resolved.personnelId) : null),
+      managerPersonnelCode: node.managerPersonnelCode || resolved.personnelCode || '',
+      managerJobTitle: node.managerJobTitle || resolved.jobTitle || '',
+      managerNationalCode: node.managerNationalCode || resolved.nationalCode || '',
       description: node.description || '',
       location: node.location || '',
       headcount: node.headcount || 0,
@@ -214,6 +267,10 @@ export default function OrgStructureManager({ isFa, currentUser, onUpdate }: Org
             parentId: formData.parentId || null,
             code: formData.code.trim(),
             manager: formData.manager.trim(),
+            managerPersonnelId: formData.managerPersonnelId ?? null,
+            managerPersonnelCode: formData.managerPersonnelCode ? formData.managerPersonnelCode.trim() : null,
+            managerJobTitle: formData.managerJobTitle ? formData.managerJobTitle.trim() : null,
+            managerNationalCode: formData.managerNationalCode ? formData.managerNationalCode.trim() : null,
             description: formData.description.trim(),
             location: formData.location.trim(),
             headcount: Number(formData.headcount) || 0,
@@ -238,6 +295,10 @@ export default function OrgStructureManager({ isFa, currentUser, onUpdate }: Org
         parentId: formData.parentId || null,
         code: formData.code.trim(),
         manager: formData.manager.trim(),
+        managerPersonnelId: formData.managerPersonnelId ?? null,
+        managerPersonnelCode: formData.managerPersonnelCode ? formData.managerPersonnelCode.trim() : null,
+        managerJobTitle: formData.managerJobTitle ? formData.managerJobTitle.trim() : null,
+        managerNationalCode: formData.managerNationalCode ? formData.managerNationalCode.trim() : null,
         description: formData.description.trim(),
         location: formData.location.trim(),
         headcount: Number(formData.headcount) || 0,
@@ -345,38 +406,54 @@ export default function OrgStructureManager({ isFa, currentUser, onUpdate }: Org
   };
 
   const handleResetToSeeds = () => {
-    if (window.confirm(isFa ? 'آیا از بازنشانی ساختار سازمانی به داده‌های پیش‌فرض پتروشیمی اطمینان دارید؟' : 'Are you sure you want to reset organizational structure to petrochemical defaults?')) {
-      saveNodes(SEED_ORG_NODES);
-      showToast(isFa ? 'ساختار سازمانی به داده‌های استاندارد بازنشانی شد.' : 'Organizational structure reset to defaults.');
-    }
+    setShowResetConfirmModal(true);
   };
 
-  const handleExportJson = () => {
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(orgNodes, null, 2));
-    const downloadAnchor = document.createElement('a');
-    downloadAnchor.setAttribute("href", dataStr);
-    downloadAnchor.setAttribute("download", `hse_org_hierarchy_${Date.now()}.json`);
-    document.body.appendChild(downloadAnchor);
-    downloadAnchor.click();
-    downloadAnchor.remove();
+  const handleConfirmResetToSeeds = async () => {
+    await apiDb.createOrgBackup();
+    await saveNodes(SEED_ORG_NODES);
+    setShowResetConfirmModal(false);
+    showToast(isFa ? 'نسخه پشتیبان ایمنی تهیه شد و ساختار سازمانی به حالت استاندارد بازنشانی گردید.' : 'Safety backup created and organizational structure reset to defaults.');
+  };
+
+  const handleExportJson = async () => {
+    const res = await apiDb.createOrgBackup(['org_hierarchy', 'units_jobs', 'incident_types', 'ppe_equipment']);
+    if (res.success && res.data) {
+      const jsonStr = JSON.stringify(res.data, null, 2);
+      const blob = new Blob([jsonStr], { type: 'application/json;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.href = url;
+      downloadAnchor.download = `${res.data.metadata.backupId}.orgbackup.json`;
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      showToast(isFa ? 'نسخه پشتیبان یکپارچه ساختار سازمانی با امضای SHA-256 تهیه و دانلود شد.' : 'Signed organizational backup downloaded.');
+    }
   };
 
   // --- FILTERED NODES ---
   const filteredNodes = useMemo(() => {
     return orgNodes.filter(node => {
-      const matchSearch = 
-        node.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (node.nameEn && node.nameEn.toLowerCase().includes(searchQuery.toLowerCase())) ||
-        (node.code && node.code.toLowerCase().includes(searchQuery.toLowerCase())) ||
-        (node.manager && node.manager.toLowerCase().includes(searchQuery.toLowerCase())) ||
-        (node.location && node.location.toLowerCase().includes(searchQuery.toLowerCase()));
+      const resolved = resolveManager(node);
+      const q = searchQuery.toLowerCase().trim();
+      const matchSearch = !q ||
+        node.name.toLowerCase().includes(q) ||
+        (node.nameEn && node.nameEn.toLowerCase().includes(q)) ||
+        (node.code && node.code.toLowerCase().includes(q)) ||
+        (node.manager && node.manager.toLowerCase().includes(q)) ||
+        (resolved.fullName && resolved.fullName.toLowerCase().includes(q)) ||
+        (resolved.personnelCode && resolved.personnelCode.toLowerCase().includes(q)) ||
+        (resolved.jobTitle && resolved.jobTitle.toLowerCase().includes(q)) ||
+        (node.location && node.location.toLowerCase().includes(q));
       
       const matchType = typeFilter === 'ALL' || node.type === typeFilter;
       const matchStatus = statusFilter === 'ALL' || (node.status || 'active') === statusFilter;
 
       return matchSearch && matchType && matchStatus;
     });
-  }, [orgNodes, searchQuery, typeFilter, statusFilter]);
+  }, [orgNodes, searchQuery, typeFilter, statusFilter, resolveManager]);
 
   // Hierarchical tree builder
   const buildTree = (parentId: string | null = null): OrgNode[] => {
@@ -480,12 +557,25 @@ export default function OrgStructureManager({ isFa, currentUser, onUpdate }: Org
 
               {/* Sub-meta details row */}
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-slate-500 dark:text-slate-400 pt-1">
-                {node.manager && (
-                  <span className="flex items-center gap-1">
-                    <UserCheck className="w-3.5 h-3.5 text-amber-600" />
-                    <strong className="text-slate-700 dark:text-slate-200 font-bold">{node.manager}</strong>
-                  </span>
-                )}
+                {(node.manager || node.managerPersonnelCode) && (() => {
+                  const resolved = resolveManager(node);
+                  return (
+                    <span className="flex items-center gap-1.5 bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200 px-2 py-0.5 rounded-lg border border-amber-200 dark:border-amber-800/60">
+                      <UserCheck className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                      <strong className="text-slate-800 dark:text-slate-100 font-bold">{resolved.fullName}</strong>
+                      {resolved.jobTitle && (
+                        <span className="text-[10px] text-slate-500 dark:text-slate-400 font-normal">
+                          ({resolved.jobTitle})
+                        </span>
+                      )}
+                      {resolved.personnelCode && (
+                        <span className="font-mono text-[9px] bg-white dark:bg-slate-900 px-1.5 py-0.2 rounded text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800 shrink-0">
+                          #{resolved.personnelCode}
+                        </span>
+                      )}
+                    </span>
+                  );
+                })()}
                 {node.location && (
                   <span className="flex items-center gap-1">
                     <MapPin className="w-3.5 h-3.5 text-sky-500" />
@@ -763,15 +853,27 @@ export default function OrgStructureManager({ isFa, currentUser, onUpdate }: Org
             )}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {onOpenBackupRestore && (
+              <button
+                type="button"
+                onClick={onOpenBackupRestore}
+                className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                title={isFa ? 'مدیریت کامل پشتیبان‌گیری و بازیابی انتخابی زیرتب‌های ساختار سازمانی' : 'Backup & Restore Manager'}
+              >
+                <Download className="w-3.5 h-3.5 text-amber-300" />
+                <span>{isFa ? 'مرکز پشتیبان‌گیری و بازیابی ساختار' : 'Backup & Restore'}</span>
+              </button>
+            )}
+
             <button
               type="button"
               onClick={handleExportJson}
               className="px-3 py-2 bg-white dark:bg-slate-900 hover:bg-slate-100 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold border border-slate-200 dark:border-slate-700 transition flex items-center gap-1 cursor-pointer"
-              title={isFa ? 'خروجی فایل JSON از ساختار سازمانی' : 'Export JSON'}
+              title={isFa ? 'دانلود فوری فایل پشتیبان یکپارچه ساختار سازمانی (JSON)' : 'Quick Export JSON'}
             >
               <Download className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">{isFa ? 'پشتیبان ساختار (JSON)' : 'Export'}</span>
+              <span className="hidden sm:inline">{isFa ? 'دانلود سریع پشتیبان (JSON)' : 'Export'}</span>
             </button>
 
             <button
@@ -870,12 +972,27 @@ export default function OrgStructureManager({ isFa, currentUser, onUpdate }: Org
 
                   {/* Details */}
                   <div className="space-y-1.5 text-xs text-slate-600 dark:text-slate-300 border-t border-slate-100 dark:border-slate-800/80 pt-2.5">
-                    {node.manager && (
-                      <div className="flex items-center justify-between">
-                        <span className="text-[11px] text-slate-400">{isFa ? 'مسئول / مدیر:' : 'Manager:'}</span>
-                        <span className="font-bold text-slate-800 dark:text-slate-100">{node.manager}</span>
-                      </div>
-                    )}
+                    {(node.manager || node.managerPersonnelCode) && (() => {
+                      const resolved = resolveManager(node);
+                      return (
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="text-[11px] text-slate-400 shrink-0">{isFa ? 'مسئول / مدیر:' : 'Manager:'}</span>
+                          <div className="text-left font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1 truncate">
+                            <span className="truncate">{resolved.fullName}</span>
+                            {resolved.jobTitle && (
+                              <span className="text-[10px] text-blue-600 dark:text-blue-400 font-normal truncate">
+                                ({resolved.jobTitle})
+                              </span>
+                            )}
+                            {resolved.personnelCode && (
+                              <span className="font-mono text-[9px] text-slate-500 dark:text-slate-400 shrink-0">
+                                #{resolved.personnelCode}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })()}
                     {node.location && (
                       <div className="flex items-center justify-between">
                         <span className="text-[11px] text-slate-400">{isFa ? 'موقعیت:' : 'Location:'}</span>
@@ -979,7 +1096,26 @@ export default function OrgStructureManager({ isFa, currentUser, onUpdate }: Org
                           {parent ? parent.name : <span className="text-slate-400 italic">{isFa ? 'ریشه اصلی (Root)' : 'Root'}</span>}
                         </td>
                         <td className="p-3.5 text-slate-800 dark:text-slate-200">
-                          {node.manager || '—'}
+                          {(() => {
+                            const resolved = resolveManager(node);
+                            return resolved.fullName ? (
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="font-bold">{resolved.fullName}</span>
+                                {resolved.jobTitle && (
+                                  <span className="text-[10px] text-slate-500 dark:text-slate-400">
+                                    ({resolved.jobTitle})
+                                  </span>
+                                )}
+                                {resolved.personnelCode && (
+                                  <span className="font-mono text-[9px] text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/60 px-1 py-0.2 rounded border border-blue-200 dark:border-blue-800">
+                                    #{resolved.personnelCode}
+                                  </span>
+                                )}
+                              </div>
+                            ) : (
+                              '—'
+                            );
+                          })()}
                         </td>
                         <td className="p-3.5 text-slate-500 text-[11px]">
                           {node.location || '—'}
@@ -1156,18 +1292,57 @@ export default function OrgStructureManager({ isFa, currentUser, onUpdate }: Org
                   />
                 </div>
 
-                {/* 6. Manager / Supervisor */}
+                {/* 6. Manager / Supervisor (Directly connected to Complex Master Personnel Data) */}
                 <div className="space-y-1">
-                  <label className="text-xs font-black text-slate-700 dark:text-slate-200 block">
-                    {isFa ? 'مدیر / سرپرست / مسئول واحد' : 'Manager / Supervisor'}
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.manager}
-                    onChange={e => setFormData({ ...formData, manager: e.target.value })}
-                    placeholder={isFa ? 'نام و نام خانوادگی مدیر واحد...' : 'Manager full name...'}
-                    className="w-full bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-800 dark:text-slate-100 focus:outline-none focus:border-blue-500 transition"
+                  <CentralPersonnelSelector
+                    isFa={isFa}
+                    label={isFa ? 'مدیر / سرپرست / مسئول واحد' : 'Manager / Supervisor'}
+                    selectedPersonnelCode={formData.managerPersonnelCode || ''}
+                    value={formData.manager ? (formData.managerPersonnelCode ? `${formData.manager} (${formData.managerPersonnelCode})` : formData.manager) : ''}
+                    compact={true}
+                    showOrgBadges={false}
+                    placeholder={isFa ? 'جستجو در پرسنل مجتمع با نام، کد پرسنلی یا سمت...' : 'Search by name, code, national ID or title...'}
+                    helperText={isFa ? 'اتصال مستقیم به ماژول اطلاعات پرسنل مجتمع در پایگاه داده اصلی' : 'Direct live connection to Master Personnel in database'}
+                    onSelectPersonnel={(person) => {
+                      if (person) {
+                        setFormData(prev => ({
+                          ...prev,
+                          manager: person.fullName || `${person.firstName || ''} ${person.lastName || ''}`.trim() || '',
+                          managerPersonnelCode: person.effectiveCode || person.personnelCode || '',
+                          managerPersonnelId: person.id ? Number(person.id) : null,
+                          managerJobTitle: person.jobTitle || person.position || '',
+                          managerNationalCode: person.nationalCode || ''
+                        }));
+                      } else {
+                        setFormData(prev => ({
+                          ...prev,
+                          manager: '',
+                          managerPersonnelCode: '',
+                          managerPersonnelId: null,
+                          managerJobTitle: '',
+                          managerNationalCode: ''
+                        }));
+                      }
+                    }}
                   />
+                  {formData.manager && (
+                    <div className="flex items-center justify-between px-2.5 py-1.5 rounded-xl bg-blue-50/70 dark:bg-blue-950/40 border border-blue-200/80 dark:border-blue-800/60 text-[11px] animate-in fade-in-50">
+                      <div className="flex items-center gap-1.5 text-blue-700 dark:text-blue-300 font-bold truncate">
+                        <UserCheck className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                        <span className="truncate">{formData.manager}</span>
+                        {formData.managerJobTitle && (
+                          <span className="text-[10px] text-slate-500 dark:text-slate-400 font-normal truncate">
+                            ({formData.managerJobTitle})
+                          </span>
+                        )}
+                      </div>
+                      {formData.managerPersonnelCode && (
+                        <span className="font-mono text-[10px] bg-white dark:bg-slate-900 px-1.5 py-0.5 rounded text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800 shrink-0">
+                          #{formData.managerPersonnelCode}
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* 7. Location */}
@@ -1349,6 +1524,40 @@ export default function OrgStructureManager({ isFa, currentUser, onUpdate }: Org
               >
                 <Trash2 className="w-4 h-4" />
                 <span>{isFa ? 'حذف قطعی' : 'Delete'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showResetConfirmModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl">
+            <div className="flex items-center gap-3 text-amber-600 border-b border-slate-100 dark:border-slate-800 pb-3">
+              <RotateCcw className="w-6 h-6" />
+              <h4 className="font-black text-sm text-slate-900 dark:text-slate-100">
+                {isFa ? 'تأیید بازنشانی به ساختار پیش‌فرض' : 'Confirm Reset to Defaults'}
+              </h4>
+            </div>
+            <p className="text-xs text-slate-600 dark:text-slate-300 font-bold leading-relaxed">
+              {isFa
+                ? 'پیش از بازنشانی، یک نسخه پشتیبان ایمنی خودکار از ساختار فعلی شما در سرور ذخیره می‌شود تا در هر زمان قابل بازگردانی باشد. آیا ادامه می‌دهید؟'
+                : 'A safety backup will be created before resetting to default nodes. Proceed?'}
+            </p>
+            <div className="pt-3 flex items-center justify-end gap-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setShowResetConfirmModal(false)}
+                className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold text-xs rounded-xl"
+              >
+                {isFa ? 'انصراف' : 'Cancel'}
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmResetToSeeds}
+                className="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white font-black text-xs rounded-xl"
+              >
+                {isFa ? 'تأیید و بازنشانی ایمن' : 'Confirm Reset'}
               </button>
             </div>
           </div>

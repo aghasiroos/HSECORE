@@ -27,6 +27,7 @@ import {
   verifyPersonPtwAuthorization,
   PTW_UNAUTHORIZED_MESSAGE
 } from '../services/ptwQualificationService.ts';
+import { invalidateDashboardCache } from './dashboard.router.ts';
 
 const router = Router();
 
@@ -158,7 +159,7 @@ router.delete('/personnel/:identifier', requireAuth, requireRole('ADMIN', 'ADMIN
 // ============================================================================
 // 3. OCCUPATIONAL HEALTH & MEDICAL EXAMS (Primary single-source-of-truth)
 // ============================================================================
-router.get('/medical-exams', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR', 'HSE_MANAGER', 'DOCTOR_OCCUPATIONAL'), async (req: Request, res: Response) => {
+router.get('/medical-exams', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR', 'HSE_MANAGER', 'DOCTOR_OCCUPATIONAL', 'NUTRITIONIST', 'MEDICAL_STAFF', 'کارشناس تغذیه'), async (req: Request, res: Response) => {
   try {
     const year = req.query.year ? parseInt(req.query.year as string, 10) : undefined;
     const allList = await dbServices.getAllMedicalExams(year);
@@ -170,7 +171,7 @@ router.get('/medical-exams', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR', 
   }
 });
 
-router.get('/medical-exams/:id', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR', 'HSE_MANAGER', 'DOCTOR_OCCUPATIONAL'), async (req: Request, res: Response) => {
+router.get('/medical-exams/:id', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR', 'HSE_MANAGER', 'DOCTOR_OCCUPATIONAL', 'NUTRITIONIST', 'MEDICAL_STAFF', 'کارشناس تغذیه'), async (req: Request, res: Response) => {
   try {
     const examId = parseInt(req.params.id, 10);
     const details = await dbServices.getMedicalExamWithDetails(examId);
@@ -1150,6 +1151,7 @@ router.post('/settings/:key', requireAuth, async (req: Request, res: Response) =
     }
     await dbServices.setSystemSetting(key, incomingValue, req.body?.description);
     syncSettingsMemoryCache(key, incomingValue);
+    invalidateDashboardCache();
     broadcastDataMutation('settings', 'update', { key, value: incomingValue });
     res.json({ success: true, key });
   } catch (error: any) {
@@ -1161,6 +1163,7 @@ router.delete('/settings/:key', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR
   try {
     const result = await dbServices.deleteSystemSetting(req.params.key);
     syncSettingsMemoryCache(req.params.key, null);
+    invalidateDashboardCache();
     broadcastDataMutation('settings', 'delete', { key: req.params.key });
     res.json({ success: true, data: result });
   } catch (error: any) {

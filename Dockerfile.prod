@@ -19,20 +19,22 @@ ENV NODE_OPTIONS="--dns-result-order=ipv4first --max-old-space-size=2048" \
 # 1. Copy package manifests first to leverage Docker layer caching
 COPY package.json package-lock.json .npmrc* ./
 
-# 2. Fast 3-second registry probe + install locked dependencies with live HTTP output
+# 2. Fast 3-second registry probe + install locked dependencies with fallback
 RUN echo ">>> [Builder 1/3] Probing npm registry connectivity..." && \
     if ! wget -q -T 3 -O /dev/null https://registry.npmjs.org/react/-/react-19.0.1.tgz 2>/dev/null; then \
-      echo ">>> [Builder 1/3] registry.npmjs.org is slow/filtered on this server; switching immediately to https://registry.npmmirror.com ..." && \
+      echo ">>> [Builder 1/3] Switching to https://registry.npmmirror.com ..." && \
       sed -i 's|https://registry.npmjs.org/|https://registry.npmmirror.com/|g' package-lock.json && \
       npm config set registry https://registry.npmmirror.com; \
     else \
       echo ">>> [Builder 1/3] registry.npmjs.org is fast and reachable."; \
     fi && \
-    echo ">>> [Builder 2/3] Downloading & extracting npm packages (npm ci)..." && \
+    echo ">>> [Builder 2/3] Installing npm dependencies..." && \
     (npm ci --no-audit --no-fund --no-progress --prefer-offline --loglevel=http || \
      (echo ">>> [Builder 2/3] Retrying with registry.npmmirror.com mirror..." && \
       sed -i 's|https://registry.npmjs.org/|https://registry.npmmirror.com/|g' package-lock.json && \
-      npm ci --registry=https://registry.npmmirror.com --no-audit --no-fund --no-progress --prefer-offline --loglevel=http))
+      npm config set registry https://registry.npmmirror.com && \
+      (npm ci --no-audit --no-fund --no-progress --prefer-offline --loglevel=http || \
+       npm install --no-audit --no-fund --no-progress --prefer-offline --loglevel=http)))
 
 # 3. Copy project source files (.dockerignore excludes host node_modules and dist)
 COPY . .
@@ -52,6 +54,17 @@ WORKDIR /app
 ENV NODE_ENV=production \
     NPM_CONFIG_LOGLEVEL=error \
     NPM_CONFIG_UPDATE_NOTIFIER=false
+
+# Install poppler-utils, poppler-data, ghostscript and font support for perfect Persian PDF rendering
+RUN apk add --no-cache \
+    poppler-utils \
+    poppler-data \
+    ghostscript \
+    fontconfig \
+    ttf-dejavu \
+    ttf-freefont \
+    font-noto-arabic && \
+    fc-cache -f 2>/dev/null || true
 
 ARG APP_VERSION=0.2.8
 ARG BUILD_ID=local

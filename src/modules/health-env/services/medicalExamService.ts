@@ -16,6 +16,7 @@ import { matchPersonnelRecord, normalizePersianString } from './personnelMatchin
 import { labReferenceRangeService } from './labReferenceRangeService';
 import { occupationalHealthStructuredService } from './occupationalHealthStructuredService';
 import { MedicalItemCategory, MedicalResultStatus } from '../types';
+import { mergeOccHealthV2Data } from './healthEnvService';
 import { apiDb } from '../../../services/apiDatabaseClient';
 import { formatFileSize } from '../../../utils/fileHelpers';
 import { getCurrentShamsiTimestamp } from '../../../utils/jalaliDate';
@@ -40,6 +41,7 @@ export function notifyMedicalDataChange(detail?: any) {
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('hse_medical_data_updated', { detail }));
       window.dispatchEvent(new CustomEvent('hse_occ_health_data_updated', { detail }));
+      window.dispatchEvent(new CustomEvent('app_data_mutated', { detail: { entity: 'medicalExams', ...detail } }));
     }
   } catch (_) {}
 }
@@ -51,38 +53,54 @@ export class MedicalExamService {
   private structuredLabs: StructuredLabResult[] = [];
   private importAudits: ImportAuditLogRecord[] = [];
   private isReloading = false;
+  private reloadDebounceTimer: any = null;
+  private lastReloadTime = 0;
 
   constructor() {
     this.initData();
     if (typeof window !== 'undefined') {
       this.reloadFromServer();
-      window.addEventListener('app_data_mutated', (e: any) => {
-        const entity = String(e?.detail?.key || e?.detail?.data?.key || e?.detail?.entityType || e?.detail?.entity || '').toLowerCase();
-        if (entity.includes('medical') || entity.includes('structured_lab')) {
-          this.reloadFromServer();
-        }
+      window.addEventListener('hse_medical_data_updated', () => {
+        this.debouncedReload();
+      });
+      window.addEventListener('hse_occ_health_data_updated', () => {
+        this.debouncedReload();
       });
     }
   }
 
+  public debouncedReload = (delayMs = 300) => {
+    if (this.reloadDebounceTimer) clearTimeout(this.reloadDebounceTimer);
+    this.reloadDebounceTimer = setTimeout(() => {
+      this.reloadFromServer();
+    }, delayMs);
+  };
+
   public reloadFromServer = async () => {
     if (this.isReloading) return;
+    const now = Date.now();
+    if (now - this.lastReloadTime < 200) return;
     this.isReloading = true;
+    this.lastReloadTime = now;
     try {
-      const [recs, exms, atts, labs, audits] = await Promise.all([
+      const [recs, exms, atts, labs, audits, occV2] = await Promise.all([
         apiDb.getSetting(STORAGE_KEYS.RECORDS),
         apiDb.getSetting(STORAGE_KEYS.EXAMS),
         apiDb.getSetting(STORAGE_KEYS.ATTACHMENTS),
         apiDb.getSetting(STORAGE_KEYS.STRUCTURED_LABS),
         apiDb.getSetting(STORAGE_KEYS.IMPORT_AUDITS),
+        apiDb.getSetting('OCC_HEALTH_EXAMS_DATA_V2'),
       ]);
-      if (Array.isArray(recs)) this.records = recs;
-      if (Array.isArray(exms)) this.exams = exms;
+      const baseRecs = Array.isArray(recs) ? recs : this.records;
+      const baseExms = Array.isArray(exms) ? exms : this.exams;
+      const merged = mergeOccHealthV2Data(occV2, baseRecs, baseExms);
+      this.records = merged.records;
+      this.exams = merged.exams;
       if (Array.isArray(atts)) this.attachments = atts;
       if (Array.isArray(labs)) this.structuredLabs = labs;
       if (Array.isArray(audits)) this.importAudits = audits;
       this.syncImportAuditsFromExams();
-      notifyMedicalDataChange();
+      // Readers must never dispatch mutation notifications!
     } catch (_) {
     } finally {
       this.isReloading = false;
@@ -193,6 +211,8 @@ export class MedicalExamService {
         localStorage.removeItem(STORAGE_KEYS.STRUCTURED_LABS);
         localStorage.removeItem(STORAGE_KEYS.IMPORT_AUDITS);
       } catch (_) {}
+
+      notifyMedicalDataChange();
     } catch (e) {
       console.warn('[MedicalExamService] Storage write warning:', e);
     }
@@ -1523,7 +1543,16 @@ export class MedicalExamService {
     // 7. Remove from import audits
     this.importAudits = this.importAudits.filter(a => a.id !== auditLogId);
 
-    // 8. Clear any legacy localStorage keys
+    // 8. Clear any legacy localStorage keys and OCC_HEALTH_EXAMS_DATA_V2
+    try {
+      apiDb.getSetting('OCC_HEALTH_EXAMS_DATA_V2').then(v2 => {
+        if (Array.isArray(v2)) {
+          const filteredV2 = v2.filter((x: any) => !associatedExamIds.has(String(x.exam_id)) && !affectedCodes.has(String(x.personnel_code || x.personnel_id)));
+          apiDb.saveSetting('OCC_HEALTH_EXAMS_DATA_V2', filteredV2);
+        }
+      }).catch(() => {});
+    } catch (_) {}
+
     try {
       ['hse_medical_exams_v2', 'hse_medical_records_v2'].forEach(k => {
         const item = localStorage.getItem(k);

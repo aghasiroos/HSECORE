@@ -102,21 +102,16 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
 }
 
 if ('serviceWorker' in navigator) {
-  const isProd = typeof process !== 'undefined' ? process.env.NODE_ENV === 'production' : Boolean((import.meta as any).env?.PROD);
-  if (isProd) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('/sw.js').catch(() => {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker
+      .register('/sw.js', { scope: '/' })
+      .then((reg) => {
+        reg.update().catch(() => {});
+      })
+      .catch(() => {
         // Silently handled
       });
-    });
-  } else {
-    // In development mode, unregister existing service workers to ensure live module fetching
-    navigator.serviceWorker.getRegistrations().then((registrations) => {
-      for (const registration of registrations) {
-        registration.unregister();
-      }
-    }).catch(() => {});
-  }
+  });
 }
 
 import { WebSocketProvider } from './providers/WebSocketProvider';

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { 
   Apple, 
   Scale, 
@@ -29,12 +29,19 @@ import {
   NutritionRecord, 
   NutritionFilterState, 
   NutritionStatistics, 
-  NutritionBmiCategory 
+  NutritionBmiCategory,
+  HighRiskPersonnelProfile
 } from '../../types/nutritionTypes';
 import { nutritionService } from '../../services/nutritionService';
+import { highRiskNutritionService } from '../../services/highRiskNutritionService';
+import { medicalExamService } from '../../services/medicalExamService';
+import { occupationalHealthStructuredService } from '../../services/occupationalHealthStructuredService';
+import { getComplexPersonnelList, fetchCentralPersonnelList } from '../../../../utils/personnelHelper';
+import { apiDb } from '../../../../services/apiDatabaseClient';
 import NutritionRecordModal from './NutritionRecordModal';
 import NutritionRecordDetailModal from './NutritionRecordDetailModal';
 import NutritionCarePlanPrintModal from './NutritionCarePlanPrintModal';
+import HighRiskPersonnelTab from './HighRiskPersonnelTab';
 import { downloadCsvFile } from '../../../../utils/fileHelpers';
 
 interface Props {
@@ -47,7 +54,9 @@ export default function NutritionSubmoduleView({ language, currentUser }: Props)
 
   // State
   const [records, setRecords] = useState<NutritionRecord[]>([]);
+  const [highRiskProfiles, setHighRiskProfiles] = useState<HighRiskPersonnelProfile[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingHighRisk, setLoadingHighRisk] = useState(false);
   const [activeTab, setActiveTab] = useState<'table' | 'analytics' | 'high_risk'>('table');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<NutritionRecord | null>(null);
@@ -81,37 +90,103 @@ export default function NutritionSubmoduleView({ language, currentUser }: Props)
     }
   }, []);
 
-  // Load records from پایگاه داده
+  const inFlightRef = useRef(false);
+
+  // Load records from پایگاه داده and correlate with periodic medical exams
   const loadRecords = useCallback(async () => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     setLoading(true);
+    setLoadingHighRisk(true);
     try {
-      const list = await nutritionService.getRecords();
-      setRecords(list);
+      // 0. Ensure authoritative medical exams are freshly synced from server
+      await medicalExamService.reloadFromServer();
+
+      // 1. Fetch current nutrition records
+      const nutritionList = await nutritionService.getRecords();
+
+      // 2. Authoritative live periodic medical exams and records from service
+      const periodicExams = medicalExamService.getAllExams() || [];
+      const periodicRecords = medicalExamService.getAllRecords() || [];
+
+      // 3. Authoritative structured laboratory test results (تب آزمایشگاه)
+      const labResults = occupationalHealthStructuredService.getAllResults() || [];
+
+      // 4. Load master personnel directory (ensure fresh state from central database/cache)
+      let masterPersonnel = getComplexPersonnelList();
+      if (!masterPersonnel || masterPersonnel.length === 0) {
+        masterPersonnel = await fetchCentralPersonnelList();
+      }
+
+      // If personnel directory is loaded, filter out records belonging to explicitly deleted personnel
+      let activeNutritionList = nutritionList;
+      if (masterPersonnel && masterPersonnel.length > 0) {
+        const deletedCodes = new Set(
+          masterPersonnel
+            .filter(p => (p as any).isDeleted === true || (p as any).status === 'deleted')
+            .flatMap(p => [
+              p.personnelCode?.trim().toLowerCase(),
+              p.employeeCode?.trim().toLowerCase(),
+              p.nationalCode?.trim().toLowerCase()
+            ])
+            .filter(Boolean) as string[]
+        );
+        activeNutritionList = nutritionList.filter(r => {
+          const code = String(r.personnelCode || r.nationalCode || '').trim().toLowerCase();
+          return !deletedCodes.has(code);
+        });
+      }
+      setRecords(activeNutritionList);
+
+      // 5. Intelligently synthesize and build high-risk personnel profiles
+      // Automatically removes deleted personnel and personnel whose periodic exams were deleted
+      const highRisk = highRiskNutritionService.buildHighRiskProfiles(
+        activeNutritionList,
+        periodicExams,
+        periodicRecords,
+        masterPersonnel,
+        todayJalali,
+        labResults
+      );
+      setHighRiskProfiles(highRisk);
     } catch (err) {
-      console.error('Failed to load nutrition records:', err);
+      console.error('Failed to load nutrition records / high risk profiles:', err);
       setRecords([]);
+      setHighRiskProfiles([]);
     } finally {
+      inFlightRef.current = false;
       setLoading(false);
+      setLoadingHighRisk(false);
     }
-  }, []);
+  }, [todayJalali]);
 
   useEffect(() => {
     loadRecords();
 
-    // Listen for mutations
+    // Debounced listener prevents rapid event bursts or cascading renders
+    let updateTimeout: any = null;
     const handleUpdate = () => {
-      loadRecords();
+      if (updateTimeout) clearTimeout(updateTimeout);
+      updateTimeout = setTimeout(() => {
+        loadRecords();
+      }, 350);
     };
 
     window.addEventListener('hse_nutrition_records_updated', handleUpdate);
-    window.addEventListener('app_data_mutated', (e: any) => {
-      if (e.detail?.entity === 'nutritionRecords') {
-        loadRecords();
-      }
-    });
+    window.addEventListener('hse_medical_data_updated', handleUpdate);
+    window.addEventListener('hse_occ_health_data_updated', handleUpdate);
+    window.addEventListener('hse_occ_health_updated', handleUpdate);
+    window.addEventListener('hse_health_env_updated', handleUpdate);
+    window.addEventListener('hse_personnel_updated', handleUpdate);
 
     return () => {
+      if (updateTimeout) clearTimeout(updateTimeout);
       window.removeEventListener('hse_nutrition_records_updated', handleUpdate);
+      window.removeEventListener('hse_medical_data_updated', handleUpdate);
+      window.removeEventListener('hse_occ_health_data_updated', handleUpdate);
+      window.removeEventListener('hse_occ_health_updated', handleUpdate);
+      window.removeEventListener('hse_health_env_updated', handleUpdate);
+      window.removeEventListener('hse_personnel_updated', handleUpdate);
     };
   }, [loadRecords]);
 
@@ -389,7 +464,7 @@ export default function NutritionSubmoduleView({ language, currentUser }: Props)
             }`}
           >
             <AlertTriangle className="w-4 h-4 text-rose-600" />
-            <span>بیماران پرخطر و پیگیری‌ها ({highRiskRecords.length})</span>
+            <span>بیماری‌های پرخطر و پیگیری ({highRiskProfiles.length})</span>
           </button>
         </div>
       </div>
@@ -789,90 +864,15 @@ export default function NutritionSubmoduleView({ language, currentUser }: Props)
 
       {/* TAB 3: High Risk & Active Follow-ups */}
       {activeTab === 'high_risk' && (
-        <div className="space-y-4">
-          <div className="bg-amber-50 dark:bg-amber-950/30 p-4 rounded-3xl border border-amber-200 dark:border-amber-900/50 flex items-start gap-3">
-            <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-            <div className="text-xs text-amber-900 dark:text-amber-200 space-y-1">
-              <strong className="block font-black">معیار شناسایی پرسنل پرخطر:</strong>
-              <p className="leading-relaxed">
-                افراد دارای شاخص توده بدنی (BMI &gt;= 30)، کبد چرب گرید ۲ و ۳، سطح اولویت بالینی فوری/پرخطر یا افرادی که تاریخ پیگیری آن‌ها فرارسیده است.
-              </p>
-            </div>
-          </div>
-
-          <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-2xs overflow-hidden">
-            {highRiskRecords.length === 0 ? (
-              <div className="p-12 text-center text-xs text-slate-400 space-y-2">
-                <CheckCircle2 className="w-10 h-10 mx-auto text-emerald-500" />
-                <p className="font-bold">هیچ پرسنل پرخطری در حال حاضر ثبت نشده است.</p>
-                <p className="text-[11px] text-slate-400">تمام شاخص‌های ثبت‌شده در محدوده مطلوب یا روتین هستند.</p>
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-right border-collapse text-xs">
-                  <thead>
-                    <tr className="border-b border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/80 text-slate-500 dark:text-slate-400 font-bold">
-                      <th className="p-3.5">پرسنل</th>
-                      <th className="p-3.5">واحد سازمانی</th>
-                      <th className="p-3.5">شاخص BMI</th>
-                      <th className="p-3.5">کبد چرب</th>
-                      <th className="p-3.5">هدف رژیم</th>
-                      <th className="p-3.5">وضعیت پیگیری</th>
-                      <th className="p-3.5">تاریخ مراجعه بعدی</th>
-                      <th className="p-3.5 text-center">عملیات</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
-                    {highRiskRecords.map(record => (
-                      <tr key={record.id} className="hover:bg-rose-50/20 dark:hover:bg-rose-950/10">
-                        <td className="p-3.5">
-                          <strong className="text-slate-900 dark:text-white block">{record.fullName}</strong>
-                          <span className="text-[11px] font-mono text-slate-400">کد: {record.personnelCode}</span>
-                        </td>
-                        <td className="p-3.5">{record.unit || 'نامشخص'}</td>
-                        <td className="p-3.5 font-mono font-black text-rose-600 dark:text-rose-400">
-                          {record.bmi}
-                        </td>
-                        <td className="p-3.5 font-bold text-slate-800 dark:text-slate-200">
-                          {record.fattyLiverGrade === 'none' ? 'طبیعی' : `گرید ${record.fattyLiverGrade.replace('grade_', '')}`}
-                        </td>
-                        <td className="p-3.5">{getGoalLabel(record.dietGoal)}</td>
-                        <td className="p-3.5">
-                          <span className="font-medium text-slate-700 dark:text-slate-300">
-                            {record.followUpStatus === 'achieved' ? 'تحقق هدف' : record.followUpStatus === 'in_progress' ? 'در حال اجرا' : 'در انتظار پیگیری'}
-                          </span>
-                        </td>
-                        <td className="p-3.5 font-mono text-slate-800 dark:text-slate-200 font-bold">
-                          {record.nextFollowUpDate || 'تعیین‌نشده'}
-                        </td>
-                        <td className="p-3.5 text-center">
-                          <div className="flex items-center justify-center gap-1">
-                            <button
-                              type="button"
-                              onClick={() => setSelectedRecordForDetail(record)}
-                              className="p-1.5 text-slate-600 dark:text-slate-300 hover:text-emerald-600 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition cursor-pointer"
-                              title="مشاهده پرونده کامل"
-                            >
-                              <Eye className="w-4 h-4" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setSelectedRecordForPrint(record)}
-                              className="p-1.5 text-slate-600 dark:text-slate-300 hover:text-blue-600 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition cursor-pointer"
-                              title="چاپ برگه رژیم"
-                            >
-                              <Printer className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        </div>
+        <HighRiskPersonnelTab
+          profiles={highRiskProfiles}
+          loading={loadingHighRisk}
+          onRefresh={loadRecords}
+          onOpenDetail={(record) => setSelectedRecordForDetail(record)}
+          onOpenPrint={(record) => setSelectedRecordForPrint(record)}
+          currentUser={currentUser}
+          todayJalali={todayJalali}
+        />
       )}
 
       {/* Record Creation / Editing Modal */}

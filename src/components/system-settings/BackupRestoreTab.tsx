@@ -1,7 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Database,
-  Cloud,
   Server,
   RefreshCw,
   Download,
@@ -19,20 +18,21 @@ import {
   Sliders,
   Activity,
   Layers,
-  Terminal,
   FileCode,
   ShieldCheck,
   Search,
-  ArrowDownToLine,
-  ArrowUpFromLine,
-  Undo2
+  Lock,
+  FlaskConical,
+  FolderArchive,
+  XCircle,
+  Eye,
+  X,
+  KeyRound,
+  ArchiveRestore,
 } from 'lucide-react';
 import { UserProfile } from '../../types';
-import { addAuditLog, getSystemUsers } from '../../utils/authHelper';
-import { getComplexPersonnelList } from '../../utils/personnelHelper';
 import { centralSync } from '../../services/centralSyncService';
 import { apiDb } from '../../services/apiDatabaseClient';
-
 
 interface BackupRestoreTabProps {
   isFa: boolean;
@@ -43,1658 +43,2174 @@ export interface BackupHistoryEntry {
   id: string;
   ts: string;
   type: 'Backup' | 'Restore' | 'CloudSync';
-  format: 'SQL' | 'JSON' | 'Central DB' | 'Unknown';
+  format: string;
   size: string;
   recordCount: number;
+  filesCount?: number;
+  sha256?: string;
   status: 'Success' | 'Failed' | 'Warning';
   operator: string;
 }
 
-interface InspectionReport {
+interface ServerBackupManifest {
+  backupId: string;
   fileName: string;
-  fileSize: string;
-  format: 'JSON' | 'SQL' | 'Unknown';
-  detectedTables: {
-    name: string;
-    labelFa: string;
-    count: number;
-  }[];
-  totalRecords: number;
-  metadata?: {
-    systemVersion?: string;
-    generatedAt?: string;
-    exportedBy?: string;
+  tag: 'manual' | 'scheduled' | 'pre_restore_safety' | 'pre_update';
+  createdAt: string;
+  persianDate: string;
+  appVersion: string;
+  schemaVersion: string;
+  createdBy: {
+    username: string;
+    fullName?: string;
+    role?: string;
   };
-  rawData: any;
+  isSelective: boolean;
+  selectedModules?: string[];
+  tableCount: number;
+  totalRows: number;
+  tableRowCounts: Record<string, number>;
+  filesCount: number;
+  filesTotalBytes: number;
+  payloadSha256: string;
+  archiveSha256?: string;
+  archiveSizeBytes?: number;
+  encrypted: boolean;
+  verified: boolean;
+  lastVerifiedAt?: string;
+  lastTestRestoreAt?: string;
+  lastTestRestoreStatus?: 'PASSED' | 'FAILED';
+  storagePath?: string;
+}
+
+interface VerificationReport {
+  backupId: string;
+  verifiedAt: string;
+  persianDate: string;
+  valid: boolean;
+  archiveExists: boolean;
+  archiveSizeBytes: number;
+  computedArchiveSha256: string;
+  expectedArchiveSha256: string;
+  archiveChecksumMatch: boolean;
+  computedPayloadSha256: string;
+  expectedPayloadSha256: string;
+  payloadChecksumMatch: boolean;
+  tablesVerified: number;
+  rowsVerified: number;
+  filesVerified: number;
+  filesBytesVerified: number;
+  schemaCompatible: boolean;
+  errors: string[];
+  warnings: string[];
+}
+
+interface TestRestoreReport {
+  backupId: string;
+  testedAt: string;
+  persianDate: string;
+  durationMs: number;
+  operator: string;
+  success: boolean;
+  isolatedMode: string;
+  verificationReport: VerificationReport;
+  tablesTested: number;
+  totalBackupRows: number;
+  totalSandboxRestoredRows: number;
+  foreignKeysChecked: number;
+  foreignKeyViolations: number;
+  sequencesChecked: number;
+  filesTested: number;
+  filesBytesTested: number;
+  tableComparison: Array<{
+    tableName: string;
+    backupRows: number;
+    sandboxRestoredRows: number;
+    liveRows: number;
+    status: 'OK' | 'MISMATCH' | 'ERROR';
+    error?: string;
+  }>;
+  fileComparison: Array<{
+    fileName: string;
+    sizeBytes: number;
+    sha256Match: boolean;
+  }>;
+  errors: string[];
+}
+
+const TABLE_FA_LABELS: Record<string, string> = {
+  org_companies: 'شرکت‌ها (org_companies)',
+  org_sites: 'سایت‌ها و مجتمع‌ها (org_sites)',
+  org_departments: 'امورها و دپارتمان‌ها (org_departments)',
+  org_units: 'واحدهای عملیاتی و ساختار سازمانی (org_units)',
+  org_positions: 'سمت‌های سازمانی (org_positions)',
+  users: 'کاربران و حساب‌های کاربری (users)',
+  personnel: 'اطلاعات پرسنل مجتمع (personnel)',
+  user_personnel_assignments: 'تخصیص دسترسی پرسنلی (user_personnel_assignments)',
+  periodic_medical_exams: 'معاینات دوره‌ای طب کار (periodic_medical_exams)',
+  lab_results: 'نتایج آزمایشگاهی (lab_results)',
+  audiometry_records: 'سوابق شنوایی‌سنجی (audiometry_records)',
+  spirometry_records: 'سوابق اسپیرومتری (spirometry_records)',
+  optometry_records: 'سوابق بینایی‌سنجی (optometry_records)',
+  medical_test_catalog: 'کاتالوگ آزمایش‌های پزشکی (medical_test_catalog)',
+  medical_reference_rules: 'قوانین مرجع پزشکی (medical_reference_rules)',
+  medical_exam_sessions: 'جلسات معاینه پزشکی (medical_exam_sessions)',
+  medical_test_results: 'نتایج تست‌های تخصصی (medical_test_results)',
+  occupational_disease_diagnoses: 'تشخیص بیماری‌های شغلی (occupational_disease_diagnoses)',
+  medical_referrals: 'ارجاعات پزشکی (medical_referrals)',
+  work_permits: 'مجوزهای کار ایمن PTW (work_permits)',
+  permit_number_counters: 'شمارنده‌های مجوز کار (permit_number_counters)',
+  permit_signatures: 'امضاهای مجوز کار (permit_signatures)',
+  risk_assessments: 'ارزیابی ریسک HIRA/JSA (risk_assessments)',
+  incidents: 'حوادث و شبه‌حوادث (incidents)',
+  trir_monthly_records: 'شاخص‌های ماهانه TRIR/LTIFR (trir_monthly_records)',
+  non_conformances: 'عدم انطباق‌ها و اقدامات اصلاحی (non_conformances)',
+  safety_warnings: 'اخطارها و تشویق‌های ایمنی (safety_warnings)',
+  hse_trainings: 'دوره‌های آموزشی HSE (hse_trainings)',
+  training_attendances: 'حضور و غیاب آموزش (training_attendances)',
+  ppe_issuances: 'تحویل تجهیزات حفاظت فردی PPE (ppe_issuances)',
+  fire_equipment: 'تجهیزات آتش‌نشانی (fire_equipment)',
+  safety_templates: 'قالب‌های چک‌لیست ایمنی (safety_templates)',
+  safety_inspections: 'بازرسی‌های ایمنی (safety_inspections)',
+  environmental_logs: 'پایش‌های زیست‌محیطی (environmental_logs)',
+  five_s_audits: 'ممیزی‌های 5S (five_s_audits)',
+  bpmn_processes: 'فرآیندهای BPMN (bpmn_processes)',
+  bpmn_instances: 'نمونه‌های اجرایی BPMN (bpmn_instances)',
+  workflows: 'گردش‌کارها (workflows)',
+  workflow_instances: 'نمونه‌های گردش‌کار (workflow_instances)',
+  workflow_steps: 'مراحل گردش‌کار (workflow_steps)',
+  workflow_history: 'تاریخچه گردش‌کار (workflow_history)',
+  workflow_signatures: 'امضاهای گردش‌کار (workflow_signatures)',
+  automation_rules: 'قوانین اتوماسیون (automation_rules)',
+  automation_events_outbox: 'صف رویدادهای اتوماسیون (automation_events_outbox)',
+  automation_execution_logs: 'لاگ اجرای اتوماسیون (automation_execution_logs)',
+  system_files: 'مستندات و دستورالعمل‌ها (system_files)',
+  system_releases: 'نسخه‌های انتشار سامانه (system_releases)',
+  system_settings: 'تنظیمات کلان سیستم (system_settings)',
+  notifications: 'اعلان‌ها و هشدارهای فوری (notifications)',
+  audit_logs: 'لاگ ممیزی امنیتی (audit_logs)',
+};
+
+function formatBytes(bytes: number): string {
+  if (!bytes || bytes <= 0) return '0 B';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
 export default function BackupRestoreTab({ isFa, currentUser }: BackupRestoreTabProps) {
-  // Navigation tabs inside Backup & Restore
-  const [activeSubTab, setActiveSubTab] = useState<'create_backup' | 'cloud_sync' | 'restore' | 'schedule' | 'history'>('create_backup');
+  const [activeSubTab, setActiveSubTab] = useState<
+    'create_backup' | 'server_backups' | 'restore' | 'schedule' | 'history'
+  >('create_backup');
 
-  // Loading states
+  const [isLoadingOverview, setIsLoadingOverview] = useState(false);
   const [isGeneratingBackup, setIsGeneratingBackup] = useState(false);
-  const [isCloudSyncing, setIsCloudSyncing] = useState(false);
+  const [isExportingSql, setIsExportingSql] = useState(false);
+  const [activeActionId, setActiveActionId] = useState<string | null>(null);
+  const [isInspectingUpload, setIsInspectingUpload] = useState(false);
   const [isRestoring, setIsRestoring] = useState(false);
-  const [feedbackMessage, setFeedbackMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
 
-  // Database metrics
-  const [dbMetrics, setDbMetrics] = useState({
-    personnelCount: 0,
-    permitsCount: 0,
-    medicalExamsCount: 0,
-    incidentsCount: 0,
-    usersCount: 0,
-    warningsCount: 0,
-    auditLogsCount: 0,
-    orgNodesCount: 0,
-    totalRecords: 0,
-    cacheSizeKb: '0 KB',
-    pgStatus: 'UP'
-  });
+  const [feedbackMessage, setFeedbackMessage] = useState<{
+    type: 'success' | 'error' | 'info';
+    text: string;
+  } | null>(null);
 
-  // Backup history
-  const [backupHistory, setBackupHistory] = useState<BackupHistoryEntry[]>([]);
-  const [lastBackupDate, setLastBackupDate] = useState<string>('—');
+  // Live overview state from /api/v1/backup/overview
+  const [overview, setOverview] = useState<{
+    database: {
+      status: string;
+      totalTables: number;
+      totalRows: number;
+      tableCounts: Record<string, number>;
+      foreignKeysCount: number;
+      primaryKeysCount: number;
+    };
+    files: {
+      uploadsCount: number;
+      uploadsTotalBytes: number;
+      filesList: Array<{
+        fileName: string;
+        relativePath: string;
+        sizeBytes: number;
+        sha256: string;
+        modifiedAt: string;
+      }>;
+    };
+    storage: {
+      backupDir: string;
+      uploadsDir: string;
+      writable: boolean;
+      freeBytes: number;
+      totalBytes: number;
+      usedByBackupsBytes: number;
+      usedByUploadsBytes: number;
+      backupsCount: number;
+    };
+    backups: ServerBackupManifest[];
+    lastBackupTime: string;
+    lastVerificationReport: VerificationReport | null;
+    lastTestRestoreReport: TestRestoreReport | null;
+    scheduleConfig: {
+      enabled: boolean;
+      frequency: 'manual' | 'daily' | 'weekly' | 'monthly';
+      target: 'server' | 'browser';
+      retentionCount: number;
+      notifyAdminOnBackup: boolean;
+      encryptBackups: boolean;
+      lastScheduledRunAt?: string;
+      nextScheduledRunAt?: string;
+    };
+    backupHistory: BackupHistoryEntry[];
+  } | null>(null);
 
-  // Granular / Selective Backup selection
-  const [selectedModules, setSelectedModules] = useState<{ [key: string]: boolean }>({
+  // Create Backup Options
+  const [encryptNewBackup, setEncryptNewBackup] = useState(false);
+  const [autoDownloadAfterBackup, setAutoDownloadAfterBackup] = useState(true);
+  const [selectedModules, setSelectedModules] = useState<Record<string, boolean>>({
+    org_structure: true,
     personnel: true,
+    users_security: true,
     medical_exams: true,
     work_permits: true,
-    org_structure: true,
     incidents_trir: true,
     safety_warnings: true,
-    users_security: true,
+    workflows_bpmn: true,
+    files_documents: true,
+    system_settings: true,
     audit_logs: true,
-    system_settings: true
   });
 
-  // Automated Schedule settings
+  // Schedule state
+  const [scheduleEnabled, setScheduleEnabled] = useState(true);
   const [scheduleFrequency, setScheduleFrequency] = useState<'manual' | 'daily' | 'weekly' | 'monthly'>('weekly');
-  const [scheduleTarget, setScheduleTarget] = useState<'browser' | 'server'>('server');
   const [retentionCount, setRetentionCount] = useState<number>(10);
   const [notifyAdminOnBackup, setNotifyAdminOnBackup] = useState<boolean>(true);
+  const [encryptScheduledBackups, setEncryptScheduledBackups] = useState<boolean>(false);
 
-  // Restore & Pre-inspection
-  const [inspectionReport, setInspectionReport] = useState<InspectionReport | null>(null);
-  const [restoreMode, setRestoreMode] = useState<'clean' | 'merge'>('merge');
-  const [createPreRestoreRollback, setCreatePreRestoreRollback] = useState(true);
-  const [hasRollbackCheckpoint, setHasRollbackCheckpoint] = useState(false);
+  // Uploaded file inspection state
+  const [uploadedFilePayload, setUploadedFilePayload] = useState<{
+    fileName: string;
+    fileSize: string;
+    fileBase64?: string;
+    rawText?: string;
+    verification: VerificationReport;
+    testRestoreReport: TestRestoreReport;
+  } | null>(null);
 
-  // Calculate live database counts and load history from central database on mount
+  // Modal for viewing detailed TestRestoreReport or VerificationReport
+  const [activeReportModal, setActiveReportModal] = useState<{
+    type: 'test_restore' | 'verification';
+    testReport?: TestRestoreReport;
+    verificationReport?: VerificationReport;
+  } | null>(null);
+
+  // Mandatory Confirmation Modal for Real Restore
+  const [restoreConfirmModal, setRestoreConfirmModal] = useState<{
+    source: 'server' | 'upload';
+    backupId?: string;
+    fileName: string;
+    totalRows: number;
+    tablesCount: number;
+    filesCount: number;
+    sha256: string;
+  } | null>(null);
+  const [restoreMode, setRestoreMode] = useState<'merge' | 'clean'>('merge');
+  const [restoreConfirmInput, setRestoreConfirmInput] = useState('');
+
+  // Controlled Delete Confirmation Modal
+  const [deleteConfirmBackupId, setDeleteConfirmBackupId] = useState<string | null>(null);
+
+  const showToast = (type: 'success' | 'error' | 'info', text: string) => {
+    setFeedbackMessage({ type, text });
+    setTimeout(() => setFeedbackMessage(null), 8000);
+  };
+
+  const refreshOverview = useCallback(async () => {
+    setIsLoadingOverview(true);
+    try {
+      const data = await apiDb.getBackupOverview();
+      if (data) {
+        setOverview(data);
+        if (data.scheduleConfig) {
+          setScheduleEnabled(Boolean(data.scheduleConfig.enabled));
+          setScheduleFrequency(data.scheduleConfig.frequency || 'weekly');
+          setRetentionCount(Number(data.scheduleConfig.retentionCount) || 10);
+          setNotifyAdminOnBackup(Boolean(data.scheduleConfig.notifyAdminOnBackup));
+          setEncryptScheduledBackups(Boolean(data.scheduleConfig.encryptBackups));
+        }
+      }
+    } finally {
+      setIsLoadingOverview(false);
+    }
+  }, []);
+
   useEffect(() => {
-    let isMounted = true;
-    refreshDatabaseMetrics();
+    refreshOverview();
+  }, [refreshOverview]);
 
-    if (localStorage.getItem('hse_emergency_rollback_checkpoint')) {
-      setHasRollbackCheckpoint(true);
+  // --------------------------------------------------------------------------
+  // 1. Create Full or Selective Server Backup + Immediate SHA-256 Verification
+  // --------------------------------------------------------------------------
+  const handleCreateFullBackup = async (isSelective = false) => {
+    if (isSelective) {
+      const activeCount = Object.values(selectedModules).filter(Boolean).length;
+      if (activeCount === 0) {
+        showToast('error', 'لطفاً حداقل یک ماژول را برای پشتیبان‌گیری انتخابی تیک بزنید.');
+        return;
+      }
     }
 
-    const loadSettingsFromDb = async () => {
-      try {
-        const [dbHistory, dbLastTime, dbSchedule] = await Promise.all([
-          apiDb.getSetting('hse_backup_history_v2'),
-          apiDb.getSetting('hse_last_backup_time'),
-          apiDb.getSetting('hse_backup_schedule_config')
-        ]);
-
-        if (!isMounted) return;
-
-        if (Array.isArray(dbHistory)) {
-          // Filter out legacy seeded mock entries (bh-1, bh-2, bh-3)
-          const cleanHistory = dbHistory.filter((h: any) => !['bh-1', 'bh-2', 'bh-3'].includes(h?.id));
-          setBackupHistory(cleanHistory);
-        } else {
-          setBackupHistory([]);
-        }
-        try { localStorage.removeItem('hse_backup_history_v2'); } catch {}
-
-        if (typeof dbLastTime === 'string' && dbLastTime.trim()) {
-          setLastBackupDate(dbLastTime);
-        } else {
-          const localLast = localStorage.getItem('hse_last_backup_time');
-          if (localLast) {
-            setLastBackupDate(localLast);
-            apiDb.saveSetting('hse_last_backup_time', localLast, 'Last Backup Timestamp').catch(() => {});
-            try { localStorage.removeItem('hse_last_backup_time'); } catch {}
-          }
-        }
-
-        const schedObj = (dbSchedule && typeof dbSchedule === 'object') ? dbSchedule : (() => {
-          try {
-            const raw = localStorage.getItem('hse_backup_schedule_config');
-            return raw ? JSON.parse(raw) : null;
-          } catch {
-            return null;
-          }
-        })();
-
-        if (schedObj) {
-          if (schedObj.frequency) setScheduleFrequency(schedObj.frequency);
-          if (schedObj.target) setScheduleTarget(schedObj.target);
-          if (schedObj.retentionCount) setRetentionCount(schedObj.retentionCount);
-          if (schedObj.notifyAdminOnBackup !== undefined) setNotifyAdminOnBackup(schedObj.notifyAdminOnBackup);
-          if (!dbSchedule) {
-            apiDb.saveSetting('hse_backup_schedule_config', schedObj, 'Automated Backup Schedule').catch(() => {});
-          }
-          try { localStorage.removeItem('hse_backup_schedule_config'); } catch {}
-        }
-      } catch (err) {
-        console.warn('Failed to load backup metadata from database:', err);
-      }
-    };
-
-    loadSettingsFromDb();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [currentUser]);
-
-  // Refresh live counts directly from authoritative PostgreSQL database
-  const refreshDatabaseMetrics = async () => {
-    try {
-      const snapshot = await apiDb.getFullSyncSnapshot();
-      const serverData = snapshot?.data || {};
-
-      const personnelCount = Array.isArray(serverData.personnel)
-        ? serverData.personnel.length
-        : getComplexPersonnelList().length;
-      const permitsCount = Array.isArray(serverData.permits) ? serverData.permits.length : 0;
-      const medicalExamsCount = Array.isArray(serverData.medicalExams) ? serverData.medicalExams.length : 0;
-      const incidentsCount =
-        (Array.isArray(serverData.incidents) ? serverData.incidents.length : 0) +
-        (Array.isArray(serverData.trir) ? serverData.trir.length : 0);
-      const usersCount = Array.isArray(serverData.users)
-        ? serverData.users.length
-        : getSystemUsers().length;
-      const warningsCount = Array.isArray(serverData.warnings) ? serverData.warnings.length : 0;
-      const auditLogsCount = Array.isArray(serverData.auditLogs) ? serverData.auditLogs.length : 0;
-      const orgNodesCount = Array.isArray(serverData.orgHierarchy) ? serverData.orgHierarchy.length : 0;
-
-      const total =
-        personnelCount +
-        permitsCount +
-        medicalExamsCount +
-        incidentsCount +
-        usersCount +
-        warningsCount +
-        auditLogsCount +
-        orgNodesCount;
-
-      const jsonBytes = snapshot?.data ? new Blob([JSON.stringify(snapshot.data)]).size : 0;
-
-      setDbMetrics({
-        personnelCount,
-        permitsCount,
-        medicalExamsCount,
-        incidentsCount,
-        usersCount,
-        warningsCount,
-        auditLogsCount,
-        orgNodesCount,
-        totalRecords: total,
-        cacheSizeKb: (jsonBytes / 1024).toFixed(1) + ' KB',
-        pgStatus: snapshot ? 'UP' : 'DOWN'
-      });
-    } catch {
-      const personnelCount = getComplexPersonnelList().length;
-      const usersCount = getSystemUsers().length;
-      setDbMetrics(prev => ({
-        ...prev,
-        personnelCount,
-        usersCount
-      }));
-    }
-  };
-
-  // Helper to append backup history entry to central database
-  const recordHistoryEntry = (entry: Omit<BackupHistoryEntry, 'id'>) => {
-    const newEntry: BackupHistoryEntry = {
-      ...entry,
-      id: 'bh-' + Date.now()
-    };
-    const updated = [newEntry, ...backupHistory].slice(0, 30);
-    setBackupHistory(updated);
-    apiDb.saveSetting('hse_backup_history_v2', updated, 'Database Backup History').catch(() => {});
-  };
-
-  // --------------------------------------------------------------------------
-  // 1. FULL & SELECTIVE BACKUP: SQL DATABASE DUMP (.sql)
-  // --------------------------------------------------------------------------
-  const handleExportSqlDump = (isSelective = false) => {
     setIsGeneratingBackup(true);
-    setFeedbackMessage(null);
-
-    setTimeout(async () => {
-      try {
-        const now = new Date();
-        const jDate = now.toLocaleDateString('fa-IR');
-        const jTime = now.toLocaleTimeString('fa-IR');
-
-        let sql = `-- ============================================================================\n`;
-        sql += `-- HSE Enterprise Management System - Database Backup Dump\n`;
-        sql += `-- Architecture: Full-Stack Express TS + React 19 + Database\n`;
-        sql += `-- Generated At: ${now.toISOString()} (${jDate} - ${jTime})\n`;
-        sql += `-- Export Scope: ${isSelective ? 'Selective Modular Dump' : 'Full Enterprise Database Snapshot'}\n`;
-        sql += `-- Target Engine: Relational Database\n`;
-        sql += `-- Generated By: ${currentUser.fullName || currentUser.username} (${currentUser.role})\n`;
-        sql += `-- ============================================================================\n\n`;
-
-        sql += `SET statement_timeout = 0;\n`;
-        sql += `SET lock_timeout = 0;\n`;
-        sql += `SET client_encoding = 'UTF8';\n`;
-        sql += `SET standard_conforming_strings = on;\n`;
-        sql += `SET check_function_bodies = false;\n`;
-        sql += `SET xmloption = content;\n`;
-        sql += `SET client_min_messages = warning;\n`;
-        sql += `SET row_security = off;\n\n`;
-        sql += `BEGIN;\n\n`;
-
-        let totalDumpRecords = 0;
-
-        const snapshot = await apiDb.getFullSyncSnapshot().catch(() => null);
-        const serverDb: Record<string, any> = snapshot?.data || {};
-
-        // Helper to format database table DDL & INSERT statements
-        const appendTableSql = (tableName: string, storageKey: string, moduleFlag: string, commentFa: string, serverKey?: string) => {
-          if (isSelective && !selectedModules[moduleFlag]) return '';
-
-          let out = `-- ----------------------------------------------------------------------------\n`;
-          out += `-- Table: ${tableName} (${commentFa})\n`;
-          out += `-- ----------------------------------------------------------------------------\n`;
-
-          let records: any[] = [];
-          if (serverKey && serverDb[serverKey] && Array.isArray(serverDb[serverKey]) && serverDb[serverKey].length > 0) {
-            records = serverDb[serverKey];
-          } else {
-            const raw = localStorage.getItem(storageKey);
-            if (raw) {
-              try {
-                const parsed = JSON.parse(raw);
-                records = Array.isArray(parsed) ? parsed : [parsed];
-              } catch {}
-            }
-          }
-
-          if (records.length === 0) {
-            out += `-- [INFO]: Table "${tableName}" contains 0 rows\n\n`;
-            return out;
-          }
-
-          try {
-            totalDumpRecords += records.length;
-            const sample = records[0];
-            const columns = Object.keys(sample);
-
-            out += `DROP TABLE IF EXISTS "${tableName}" CASCADE;\n`;
-            out += `CREATE TABLE "${tableName}" (\n`;
-            columns.forEach((col, idx) => {
-              const isId = col.toLowerCase() === 'id' || col.toLowerCase().endsWith('_id');
-              const colType = isId ? 'VARCHAR(120) PRIMARY KEY' : 'TEXT';
-              out += `  "${col}" ${colType}${idx < columns.length - 1 ? ',' : ''}\n`;
-            });
-            out += `);\n\n`;
-
-            records.forEach(item => {
-              const values = columns.map(c => {
-                const val = item[c];
-                if (val === null || val === undefined) return 'NULL';
-                if (typeof val === 'object') return `'${JSON.stringify(val).replace(/'/g, "''")}'`;
-                return `'${String(val).replace(/'/g, "''")}'`;
-              });
-              out += `INSERT INTO "${tableName}" ("${columns.join('", "')}") VALUES (${values.join(', ')});\n`;
-            });
-            out += `\n`;
-          } catch (err) {
-            out += `-- [ERROR]: Failed to export table ${tableName}: ${String(err)}\n\n`;
-          }
-          return out;
-        };
-
-        // Append all relational tables with live database preference
-        sql += appendTableSql('personnel', 'hse_personnel_v3', 'personnel', 'پرسنل و مشخصات هویتی و استخدامی', 'personnel');
-        sql += appendTableSql('medical_exams', 'hse_medical_exams', 'medical_exams', 'پرونده‌های معاینات ادواری طب کار', 'medicalExams');
-        sql += appendTableSql('work_permits', 'hse_permits', 'work_permits', 'پروانه‌های کار ایمن PTW', 'permits');
-        sql += appendTableSql('org_nodes', 'hse_org_nodes', 'org_structure', 'ساختار و چارت سازمانی مجتمع', 'orgHierarchy');
-        sql += appendTableSql('incidents', 'hse_incidents', 'incidents_trir', 'حوادث، شبه‌حوادث و گزارشات آسیب', 'incidents');
-        sql += appendTableSql('trir_records', 'trir_records', 'incidents_trir', 'آمار ماهانه ساعات کارکرد و ضریب TRIR', 'trir');
-        sql += appendTableSql('safety_warnings', 'warning_records', 'safety_warnings', 'اخطارهای انضباطی ایمنی و رفتارهای ناایمن', 'warnings');
-        sql += appendTableSql('users', 'hse_users', 'users_security', 'کاربران، نقش‌ها و سطوح دسترسی امنیتی', 'users');
-        sql += appendTableSql('audit_logs', 'hse_audit_logs', 'audit_logs', 'لاگ‌های ممیزی و رویدادهای سیستمی', 'auditLogs');
-        sql += appendTableSql('system_settings', 'hse_system_settings', 'system_settings', 'تنظیمات و پارامترهای پیکربندی', 'settings');
-
-        sql += `COMMIT;\n`;
-        sql += `-- Completed Backup Dump. Total records exported: ${totalDumpRecords}\n`;
-
-        // Trigger Download
-        const blob = new Blob([sql], { type: 'text/plain;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        const prefix = isSelective ? 'hse_selective_dump' : 'hse_master_pg16_dump';
-        a.download = `${prefix}_${now.toISOString().slice(0, 10)}.sql`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-
-        const sizeStr = (blob.size / 1024).toFixed(1) + ' KB';
-        const timeFormatted = `${jDate} ${jTime}`;
-        setLastBackupDate(timeFormatted);
-        apiDb.saveSetting('hse_last_backup_time', timeFormatted, 'Last Backup Timestamp').catch(() => {});
-
-        recordHistoryEntry({
-          ts: timeFormatted,
-          type: 'Backup',
-          format: 'SQL',
-          size: sizeStr,
-          recordCount: totalDumpRecords,
-          status: 'Success',
-          operator: currentUser.fullName || currentUser.username
-        });
-
-        addAuditLog(currentUser.username, `تهیه نسخه پشتیبان پایگاه داده (${isSelective ? 'ماژولار' : 'کامل'})`, 'موفقیت‌آمیز');
-        setFeedbackMessage({
-          type: 'success',
-          text: isFa 
-            ? `نسخه پشتیبان پایگاه داده با موفقیت تولید شد (${totalDumpRecords} رکورد، حجم: ${sizeStr}).`
-            : `Database dump generated successfully (${totalDumpRecords} records, ${sizeStr}).`
-        });
-      } catch (e: any) {
-        setFeedbackMessage({
-          type: 'error',
-          text: isFa ? `خطا در تولید فایل SQL: ${e.message}` : `Error generating SQL dump: ${e.message}`
-        });
-      } finally {
-        setIsGeneratingBackup(false);
-      }
-    }, 600);
-  };
-
-  // --------------------------------------------------------------------------
-  // 2. FULL & SELECTIVE BACKUP: MASTER JSON SNAPSHOT (.json)
-  // --------------------------------------------------------------------------
-  const handleExportJsonSnapshot = (isSelective = false) => {
-    setIsGeneratingBackup(true);
-    setFeedbackMessage(null);
-
-    setTimeout(async () => {
-      try {
-        const now = new Date();
-        const jDate = now.toLocaleDateString('fa-IR');
-        const jTime = now.toLocaleTimeString('fa-IR');
-
-        const keysMap: { [key: string]: { storageKey: string; moduleFlag: string } } = {
-          personnel: { storageKey: 'hse_personnel_v3', moduleFlag: 'personnel' },
-          medical_exams: { storageKey: 'hse_medical_exams', moduleFlag: 'medical_exams' },
-          work_permits: { storageKey: 'hse_permits', moduleFlag: 'work_permits' },
-          org_structure: { storageKey: 'hse_org_nodes', moduleFlag: 'org_structure' },
-          incidents: { storageKey: 'hse_incidents', moduleFlag: 'incidents_trir' },
-          trir_records: { storageKey: 'trir_records', moduleFlag: 'incidents_trir' },
-          safety_warnings: { storageKey: 'warning_records', moduleFlag: 'safety_warnings' },
-          users: { storageKey: 'hse_users', moduleFlag: 'users_security' },
-          audit_logs: { storageKey: 'hse_audit_logs', moduleFlag: 'audit_logs' },
-          integration_config: { storageKey: 'hse_integration_config', moduleFlag: 'system_settings' },
-          system_settings: { storageKey: 'hse_system_settings', moduleFlag: 'system_settings' }
-        };
-
-        const jsonSnapshot = await apiDb.getFullSyncSnapshot().catch(() => null);
-        const serverDb: Record<string, any> = jsonSnapshot?.data || {};
-
-        const serverKeyMap: Record<string, string> = {
-          personnel: 'personnel',
-          medical_exams: 'medicalExams',
-          work_permits: 'permits',
-          org_structure: 'orgHierarchy',
-          incidents: 'incidents',
-          trir_records: 'trir',
-          safety_warnings: 'warnings',
-          users: 'users',
-          audit_logs: 'auditLogs',
-          system_settings: 'settings',
-        };
-
-        const databasePayload: Record<string, any> = {};
-        let totalCount = 0;
-
-        Object.entries(keysMap).forEach(([entityName, conf]) => {
-          if (isSelective && !selectedModules[conf.moduleFlag]) return;
-
-          const sKey = serverKeyMap[entityName];
-          if (sKey && serverDb[sKey] && Array.isArray(serverDb[sKey]) && serverDb[sKey].length > 0) {
-            databasePayload[entityName] = serverDb[sKey];
-            totalCount += serverDb[sKey].length;
-            return;
-          }
-
-          const raw = localStorage.getItem(conf.storageKey);
-          if (raw) {
-            try {
-              const parsed = JSON.parse(raw);
-              databasePayload[entityName] = parsed;
-              totalCount += Array.isArray(parsed) ? parsed.length : 1;
-            } catch {
-              databasePayload[entityName] = raw;
-            }
-          } else {
-            databasePayload[entityName] = [];
-          }
-        });
-
-        const masterSnapshot = {
-          schemaManifest: {
-            system: 'HSE Enterprise Management System',
-            architectureVersion: '0.2.8',
-            databaseEngine: 'Relational Database Engine',
-            exportType: isSelective ? 'Selective Modular JSON' : 'Full Enterprise System Snapshot',
-            timestampIso: now.toISOString(),
-            persianDate: `${jDate} ${jTime}`,
-            exportedBy: {
-              username: currentUser.username,
-              fullName: currentUser.fullName,
-              role: currentUser.role
-            },
-            totalRecordCount: totalCount,
-            checksumDigest: `sha256_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`
-          },
-          database: databasePayload
-        };
-
-        const blob = new Blob([JSON.stringify(masterSnapshot, null, 2)], { type: 'application/json;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        const prefix = isSelective ? 'hse_selective_snapshot' : 'hse_master_system_snapshot';
-        a.download = `${prefix}_${now.toISOString().slice(0, 10)}.json`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-
-        const sizeStr = (blob.size / 1024).toFixed(1) + ' KB';
-        const timeFormatted = `${jDate} ${jTime}`;
-        setLastBackupDate(timeFormatted);
-        apiDb.saveSetting('hse_last_backup_time', timeFormatted, 'Last Backup Timestamp').catch(() => {});
-
-        recordHistoryEntry({
-          ts: timeFormatted,
-          type: 'Backup',
-          format: 'JSON',
-          size: sizeStr,
-          recordCount: totalCount,
-          status: 'Success',
-          operator: currentUser.fullName || currentUser.username
-        });
-
-        addAuditLog(currentUser.username, `تهیه بسته نسخه پشتیبان جامع سیستم (JSON)`, 'موفقیت‌آمیز');
-        setFeedbackMessage({
-          type: 'success',
-          text: isFa 
-            ? `پشتیبان ساختاریافته JSON با موفقیت دریافت شد (${totalCount} رکورد، حجم: ${sizeStr}).`
-            : `System JSON snapshot exported successfully (${totalCount} records, ${sizeStr}).`
-        });
-      } catch (e: any) {
-        setFeedbackMessage({
-          type: 'error',
-          text: isFa ? `خطا در تولید فایل JSON: ${e.message}` : `Error generating JSON snapshot: ${e.message}`
-        });
-      } finally {
-        setIsGeneratingBackup(false);
-      }
-    }, 600);
-  };
-
-  // --------------------------------------------------------------------------
-  // 3. CENTRAL REPLICATION & SYNC ENGINE
-  // --------------------------------------------------------------------------
-  const handleCloudSyncNow = async () => {
-    setIsCloudSyncing(true);
-    setFeedbackMessage(null);
     try {
-      await centralSync.syncFull(true);
-      refreshDatabaseMetrics();
-      const totalDocs = dbMetrics.totalRecords || 120;
-      const now = new Date();
-      const timeStr = `${now.toLocaleDateString('fa-IR')} ${now.toLocaleTimeString('fa-IR')}`;
-
-      recordHistoryEntry({
-        ts: timeStr,
-        type: 'CloudSync',
-        format: 'Central DB',
-        size: '—',
-        recordCount: totalDocs,
-        status: 'Success',
-        operator: currentUser.fullName || currentUser.username
+      const res = await apiDb.createServerBackup({
+        tag: 'manual',
+        isSelective,
+        selectedModules: isSelective ? selectedModules : undefined,
+        encrypt: encryptNewBackup,
       });
 
-      addAuditLog(currentUser.username, `همگام‌سازی مستقیم داده‌ها با پایگاه داده`, 'موفقیت‌آمیز');
-      setFeedbackMessage({
-        type: 'success',
-        text: isFa 
-          ? `همگام‌سازی با پایگاه داده مرکزی با موفقیت انجام شد (${totalDocs} رکورد همگام شد).`
-          : `Central database synchronization completed successfully (${totalDocs} records synced).`
-      });
+      if (!res.success || !res.data) {
+        showToast('error', res.error || 'خطا در تهیه نسخه پشتیبان کامل از سرور');
+        return;
+      }
+
+      const { manifest, verification } = res.data;
+      await refreshOverview();
+
+      if (autoDownloadAfterBackup && manifest?.backupId) {
+        await apiDb.downloadServerBackup(manifest.backupId, 'gz');
+      }
+
+      showToast(
+        'success',
+        `نسخه پشتیبان «${manifest.backupId}» شامل ${manifest.tableCount} جدول (${manifest.totalRows.toLocaleString()} رکورد) و ${manifest.filesCount} فایل پیوست با موفقیت ایجاد و با الگوریتم SHA-256 اعتبارسنجی شد (${verification.computedArchiveSha256.slice(0, 12)}...).`
+      );
     } catch (err: any) {
-      setFeedbackMessage({
-        type: 'error',
-        text: isFa ? `عدم موفقیت در ارتباط با سرور پایگاه داده: ${err.message}` : `Database sync error: ${err.message}`
-      });
+      showToast('error', err?.message || 'خطا در تهیه نسخه پشتیبان');
     } finally {
-      setIsCloudSyncing(false);
+      setIsGeneratingBackup(false);
     }
   };
 
-  // Pull data from central database server
-  const handlePullFromCloud = async () => {
-    if (!window.confirm(isFa ? 'آیا مایل به دریافت و اعتبارسنجی اسناد از پایگاه مرکزی هستید؟' : 'Pull data from central database?')) return;
-    setIsCloudSyncing(true);
-    setFeedbackMessage(null);
+  // --------------------------------------------------------------------------
+  // 2. Export PostgreSQL 16 Compatible SQL Dump
+  // --------------------------------------------------------------------------
+  const handleExportSqlDump = async (isSelective = false) => {
+    setIsExportingSql(true);
     try {
-      await centralSync.syncFull(true);
-      refreshDatabaseMetrics();
-      const totalDocs = dbMetrics.totalRecords || 120;
+      const res = await apiDb.exportSqlDump({
+        isSelective,
+        selectedModules: isSelective ? selectedModules : undefined,
+      });
+      if (!res.success || !res.data) {
+        showToast('error', res.error || 'خطا در تولید خروجی SQL');
+        return;
+      }
 
-      addAuditLog(currentUser.username, `دریافت اطلاعات از سرور مرکزی (${totalDocs} سند)`, 'موفقیت‌آمیز');
-      setFeedbackMessage({
-        type: 'success',
-        text: isFa ? `تعداد ${totalDocs} رکورد با موفقیت از پایگاه داده فراخوانی و اعتبارسنجی شد.` : `Loaded ${totalDocs} documents from database.`
-      });
-    } catch (e: any) {
-      setFeedbackMessage({
-        type: 'error',
-        text: isFa ? `خطا در دریافت اطلاعات سرور: ${e.message}` : `Failed to fetch server records: ${e.message}`
-      });
+      const blob = new Blob([res.data.sql], { type: 'application/sql;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const dateSlug = new Date().toISOString().slice(0, 10);
+      a.href = url;
+      a.download = `HSECORE_PG16_Dump_${dateSlug}.sql`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+
+      showToast(
+        'success',
+        `فایل اسکریپت PostgreSQL 16 شامل ${res.data.tablesExported} جدول و ${res.data.totalRows.toLocaleString()} رکورد همراه با چک‌سام SHA-256 دانلود شد.`
+      );
     } finally {
-      setIsCloudSyncing(false);
+      setIsExportingSql(false);
     }
   };
 
   // --------------------------------------------------------------------------
-  // 4. PRE-RESTORE INSPECTION & SAFE RESTORE
+  // 3. Verify Existing Server Backup (SHA-256 + Schema + Files)
   // --------------------------------------------------------------------------
-  const handleFileSelectedForInspection = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleVerifyServerBackup = async (backupId: string) => {
+    setActiveActionId(`verify_${backupId}`);
+    try {
+      const res = await apiDb.verifyServerBackup(backupId);
+      if (!res.success || !res.data) {
+        showToast('error', res.error || 'خطا در اعتبارسنجی نسخه پشتیبان');
+        return;
+      }
+      const report: VerificationReport = res.data;
+      await refreshOverview();
+      setActiveReportModal({
+        type: 'verification',
+        verificationReport: report,
+      });
+      if (report.valid) {
+        showToast(
+          'success',
+          `اعتبارسنجی SHA-256 نسخه «${backupId}» با موفقیت تأیید شد (${report.tablesVerified} جدول، ${report.rowsVerified} رکورد، ${report.filesVerified} فایل).`
+        );
+      } else {
+        showToast('error', `اعتبارسنجی نسخه «${backupId}» ناموفق بود: ${report.errors.join(' | ')}`);
+      }
+    } finally {
+      setActiveActionId(null);
+    }
+  };
+
+  // --------------------------------------------------------------------------
+  // 4. Isolated PostgreSQL Sandbox Test Restore (Dry-Run with ROLLBACK)
+  // --------------------------------------------------------------------------
+  const handleRunIsolatedTestRestore = async (backupId: string) => {
+    setActiveActionId(`test_${backupId}`);
+    try {
+      const res = await apiDb.testRestoreServerBackup(backupId);
+      if (!res.success || !res.data) {
+        showToast('error', res.error || 'خطا در اجرای بازیابی آزمایشی ایزوله');
+        return;
+      }
+      const report: TestRestoreReport = res.data;
+      await refreshOverview();
+      setActiveReportModal({
+        type: 'test_restore',
+        testReport: report,
+      });
+
+      if (report.success) {
+        showToast(
+          'success',
+          `بازیابی آزمایشی ایزوله (PostgreSQL Sandbox) برای «${backupId}» در ${report.durationMs}ms با موفقیت کامل انجام شد: ${report.tablesTested} جدول، ${report.totalSandboxRestoredRows} رکورد، ${report.foreignKeysChecked} کلید خارجی بدون خطا و ${report.filesTested} فایل پیوست تأیید شد.`
+        );
+      } else {
+        showToast(
+          'error',
+          `بازیابی آزمایشی ایزوله خطاهایی را شناسایی کرد: ${report.errors.join(' | ')}`
+        );
+      }
+    } finally {
+      setActiveActionId(null);
+    }
+  };
+
+  // --------------------------------------------------------------------------
+  // 5. Inspect & Sandbox-Test Uploaded Backup File (.gz, .json, .sql)
+  // --------------------------------------------------------------------------
+  const handleUploadFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const content = event.target?.result as string;
-      const isSql = file.name.endsWith('.sql') || content.includes('CREATE TABLE') || content.includes('INSERT INTO');
-      const isJson = file.name.endsWith('.json') || content.trim().startsWith('{');
-
-      if (isJson) {
-        try {
-          const parsed = JSON.parse(content);
-          const manifest = parsed.schemaManifest || {};
-          const dbObj = parsed.database || parsed;
-
-          const detected: { name: string; labelFa: string; count: number }[] = [];
-          let total = 0;
-
-          const checkTable = (key: string, name: string, labelFa: string) => {
-            if (dbObj[key] && Array.isArray(dbObj[key])) {
-              detected.push({ name, labelFa, count: dbObj[key].length });
-              total += dbObj[key].length;
-            }
-          };
-
-          checkTable('personnel', 'personnel', 'پرسنل شاغل');
-          checkTable('medical_exams', 'medical_exams', 'معاینات طب کار');
-          checkTable('work_permits', 'work_permits', 'پروانه‌های کار PTW');
-          checkTable('org_structure', 'org_nodes', 'چارت سازمانی');
-          checkTable('incidents', 'incidents', 'حوادث و شبه‌حوادث');
-          checkTable('trir_records', 'trir_records', 'شاخص TRIR');
-          checkTable('safety_warnings', 'warning_records', 'اخطارهای ایمنی');
-          checkTable('users', 'users', 'کاربران و سطوح دسترسی');
-          checkTable('audit_logs', 'audit_logs', 'لاگ‌های ممیزی');
-
-          setInspectionReport({
-            fileName: file.name,
-            fileSize: (file.size / 1024).toFixed(1) + ' KB',
-            format: 'JSON',
-            detectedTables: detected,
-            totalRecords: total,
-            metadata: {
-              systemVersion: manifest.architectureVersion || '0.2.8',
-              generatedAt: manifest.persianDate || manifest.timestampIso,
-              exportedBy: manifest.exportedBy?.fullName || manifest.exportedBy?.username
-            },
-            rawData: dbObj
-          });
-        } catch {
-          alert(isFa ? 'فایل JSON نامعتبر است یا ساختار داده‌های آن مخدوش می‌باشد.' : 'Invalid JSON file format.');
-        }
-      } else if (isSql) {
-        // Parse SQL statements
-        const insertMatches: string[] = (content.match(/INSERT INTO\s+"?(\w+)"?/gi) as string[]) || [];
-        const tableCounts: { [table: string]: number } = {};
-        insertMatches.forEach((m: string) => {
-          const tName = m.replace(/INSERT INTO\s+"?/i, '').replace(/"/g, '').toLowerCase();
-          tableCounts[tName] = (tableCounts[tName] || 0) + 1;
-        });
-
-        const detected = Object.entries(tableCounts).map(([tableName, count]) => ({
-          name: tableName,
-          labelFa: tableName,
-          count
-        }));
-
-        setInspectionReport({
-          fileName: file.name,
-          fileSize: (file.size / 1024).toFixed(1) + ' KB',
-          format: 'SQL',
-          detectedTables: detected,
-          totalRecords: insertMatches.length,
-          metadata: {
-            systemVersion: 'Relational Database Compatible',
-            generatedAt: 'از سرفصل فایل SQL'
-          },
-          rawData: content
-        });
-      } else {
-        alert(isFa ? 'فرمت فایل ناشناخته است. لطفاً فایل با پسوند .json یا .sql بارگذاری فرمایید.' : 'Unsupported file format. Please upload .json or .sql');
-      }
-    };
-
-    reader.readAsText(file);
     e.target.value = '';
+
+    setIsInspectingUpload(true);
+    setUploadedFilePayload(null);
+
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const bytes = new Uint8Array(arrayBuffer);
+      let binary = '';
+      const chunkSize = 0x8000;
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        binary += String.fromCharCode.apply(
+          null,
+          Array.from(bytes.subarray(i, i + chunkSize))
+        );
+      }
+      const fileBase64 = btoa(binary);
+
+      const res = await apiDb.inspectUploadedBackup({ fileBase64 });
+      if (!res.success || !res.data) {
+        showToast('error', res.error || 'فایل انتخاب‌شده معتبر نیست یا ساختار آن آسیب دیده است.');
+        return;
+      }
+
+      const { verification, testRestoreReport } = res.data;
+      setUploadedFilePayload({
+        fileName: file.name,
+        fileSize: formatBytes(file.size),
+        fileBase64,
+        verification,
+        testRestoreReport,
+      });
+
+      await refreshOverview();
+
+      if (testRestoreReport.success) {
+        showToast(
+          'success',
+          `فایل «${file.name}» با موفقیت بررسی و در محیط ایزوله PostgreSQL آزمایش شد (${testRestoreReport.tablesTested} جدول، ${testRestoreReport.totalBackupRows} رکورد، ${testRestoreReport.filesTested} فایل). آماده بازیابی واقعی است.`
+        );
+      } else {
+        showToast(
+          'error',
+          `فایل «${file.name}» در اعتبارسنجی یا بازیابی آزمایشی ایزوله رد شد: ${testRestoreReport.errors.join(' | ')}`
+        );
+      }
+    } catch (err: any) {
+      showToast('error', err?.message || 'خطا در خواندن و تحلیل فایل پشتیبان');
+    } finally {
+      setIsInspectingUpload(false);
+    }
   };
 
-  // Execute restore after pre-inspection
-  const handleExecuteRestore = () => {
-    if (!inspectionReport) return;
-
-    if (!window.confirm(
-      isFa 
-        ? `آیا از شروع فرآیند بازیابی اطلاعات از فایل «${inspectionReport.fileName}» اطمینان دارید؟\nروش بازیابی: ${restoreMode === 'clean' ? 'بازنویسی کامل جداول' : 'ادغام و به‌روزرسانی هوشمند'}`
-        : `Are you sure you want to restore from ${inspectionReport.fileName}?`
-    )) {
+  // --------------------------------------------------------------------------
+  // 6. Execute Real Atomic Database & File Restore (After Confirmation)
+  // --------------------------------------------------------------------------
+  const handleConfirmAndExecuteRestore = async () => {
+    if (!restoreConfirmModal) return;
+    if (restoreConfirmInput.trim().toUpperCase() !== 'RESTORE') {
+      showToast('error', 'لطفاً عبارت امنیتی RESTORE را به طور دقیق وارد نمایید.');
       return;
     }
 
     setIsRestoring(true);
-
-    setTimeout(() => {
-      try {
-        // 1. Create Pre-Restore Rollback Checkpoint
-        if (createPreRestoreRollback) {
-          const rollbackSnapshot: Record<string, string> = {};
-          for (let i = 0; i < localStorage.length; i++) {
-            const key = localStorage.key(i);
-            if (key && (key.startsWith('hse_') || key.includes('trir') || key.includes('warning') || key.includes('heat'))) {
-              rollbackSnapshot[key] = localStorage.getItem(key) || '';
-            }
-          }
-          localStorage.setItem('hse_emergency_rollback_checkpoint', JSON.stringify({
-            createdAt: new Date().toISOString(),
-            operator: currentUser.username,
-            data: rollbackSnapshot
-          }));
-          setHasRollbackCheckpoint(true);
-        }
-
-        // 2. Perform Restore directly into authoritative PostgreSQL Database
-        if (inspectionReport.format === 'JSON') {
-          const dbObj = inspectionReport.rawData;
-          const restoreTasks: Promise<any>[] = [];
-
-          if (dbObj.personnel && Array.isArray(dbObj.personnel)) {
-            restoreTasks.push(apiDb.batchSavePersonnel(dbObj.personnel));
-          }
-          if (dbObj.medical_exams && Array.isArray(dbObj.medical_exams)) {
-            restoreTasks.push(apiDb.batchImportMedicalExams(dbObj.medical_exams));
-          }
-          if (dbObj.work_permits && Array.isArray(dbObj.work_permits)) {
-            dbObj.work_permits.forEach((p: any) => restoreTasks.push(apiDb.saveWorkPermit(p)));
-          }
-          if (dbObj.org_structure && Array.isArray(dbObj.org_structure)) {
-            restoreTasks.push(apiDb.saveOrgNodes(dbObj.org_structure));
-          }
-          if (dbObj.incidents && Array.isArray(dbObj.incidents)) {
-            dbObj.incidents.forEach((i: any) => restoreTasks.push(apiDb.saveIncident(i)));
-          }
-          if (dbObj.trir_records && Array.isArray(dbObj.trir_records)) {
-            restoreTasks.push(apiDb.saveTrirBatch(dbObj.trir_records));
-          }
-          if (dbObj.safety_warnings && Array.isArray(dbObj.safety_warnings)) {
-            restoreTasks.push(apiDb.saveSafetyWarningsBatch(dbObj.safety_warnings));
-          }
-          if (dbObj.users && Array.isArray(dbObj.users)) {
-            dbObj.users.forEach((u: any) => restoreTasks.push(apiDb.saveUser(u)));
-          }
-          if (dbObj.integration_config && typeof dbObj.integration_config === 'object') {
-            restoreTasks.push(apiDb.saveSetting('hse_integration_config', dbObj.integration_config, 'Restored Integration Config'));
-          }
-          if (dbObj.system_settings && typeof dbObj.system_settings === 'object') {
-            Object.entries(dbObj.system_settings).forEach(([k, v]) => {
-              restoreTasks.push(apiDb.saveSetting(k, v));
-            });
-          }
-
-          Promise.allSettled(restoreTasks).then(() => {
-            refreshDatabaseMetrics();
-            if (typeof window !== 'undefined') {
-              window.dispatchEvent(new CustomEvent('hse_data_mutated', { detail: { action: 'restore' } }));
-              window.dispatchEvent(new CustomEvent('app_data_mutated', { detail: { action: 'restore' } }));
-            }
-          });
-        }
-
-        const now = new Date();
-        const timeFormatted = `${now.toLocaleDateString('fa-IR')} ${now.toLocaleTimeString('fa-IR')}`;
-
-        recordHistoryEntry({
-          ts: timeFormatted,
-          type: 'Restore',
-          format: inspectionReport.format,
-          size: inspectionReport.fileSize,
-          recordCount: inspectionReport.totalRecords,
-          status: 'Success',
-          operator: currentUser.fullName || currentUser.username
-        });
-
-        addAuditLog(currentUser.username, `بازیابی اطلاعات پایگاه داده از فایل ${inspectionReport.fileName} (${restoreMode})`, 'موفقیت‌آمیز');
-        
-        refreshDatabaseMetrics();
-        setInspectionReport(null);
-        setFeedbackMessage({
-          type: 'success',
-          text: isFa ? 'بازیابی پایگاه داده با موفقیت کامل انجام پذیرفت و وضعیت جداول به‌روزرسانی شد.' : 'Database restored successfully.'
-        });
-      } catch (err: any) {
-        setFeedbackMessage({
-          type: 'error',
-          text: isFa ? `خطا در هنگام بازیابی اطلاعات: ${err.message}` : `Restore error: ${err.message}`
-        });
-      } finally {
-        setIsRestoring(false);
-      }
-    }, 800);
-  };
-
-  // Rollback to Emergency Checkpoint
-  const handleRollbackToCheckpoint = () => {
-    if (!window.confirm(isFa ? 'آیا مایل به بازگردانی پایگاه داده به نقطه بازیابی اضطراری پیش از آخرین Restore هستید؟' : 'Rollback to emergency checkpoint?')) return;
-    const raw = localStorage.getItem('hse_emergency_rollback_checkpoint');
-    if (!raw) return;
-
     try {
-      const parsed = JSON.parse(raw);
-      if (parsed.data) {
-        Object.entries(parsed.data).forEach(([k, v]) => {
-          localStorage.setItem(k, v as string);
+      let res: { success: boolean; data?: any; error?: string };
+      if (restoreConfirmModal.source === 'server' && restoreConfirmModal.backupId) {
+        res = await apiDb.executeServerRestore(
+          restoreConfirmModal.backupId,
+          restoreMode,
+          restoreConfirmInput.trim().toUpperCase()
+        );
+      } else if (restoreConfirmModal.source === 'upload' && uploadedFilePayload?.fileBase64) {
+        res = await apiDb.restoreUploadedBackup({
+          fileBase64: uploadedFilePayload.fileBase64,
+          mode: restoreMode,
+          confirmCode: restoreConfirmInput.trim().toUpperCase(),
         });
-        refreshDatabaseMetrics();
-        addAuditLog(currentUser.username, 'بازگردانی اضطراری به نقطه بازگشت (Rollback Snapshot)', 'موفقیت‌آمیز');
-        alert(isFa ? 'بازگردانی اضطراری با موفقیت انجام شد.' : 'Rollback applied successfully.');
+      } else {
+        showToast('error', 'منبع نسخه پشتیبان برای بازیابی یافت نشد.');
+        return;
       }
-    } catch {
-      alert(isFa ? 'خطا در خواندن داده‌های نقطه بازگشت.' : 'Error applying rollback checkpoint.');
+
+      if (!res.success || !res.data) {
+        showToast('error', res.error || 'خطا در اجرای بازیابی اطلاعات');
+        return;
+      }
+
+      const report = res.data;
+      setRestoreConfirmModal(null);
+      setRestoreConfirmInput('');
+
+      await centralSync.syncFull(true);
+      await refreshOverview();
+
+      showToast(
+        'success',
+        `بازیابی کامل با موفقیت انجام شد! (${report.tablesRestored} جدول، ${report.rowsRestored.toLocaleString()} رکورد، ${report.sequencesReset} شمارنده سریال و ${report.filesRestored} فایل پیوست بازیابی شدند. نسخه پشتیبان ایمنی خودکار پیش از بازیابی: ${report.safetyBackupId})`
+      );
+    } finally {
+      setIsRestoring(false);
     }
   };
 
-  // Save Schedule Config to Central Database
-  const handleSaveScheduleConfig = async () => {
-    const config = {
-      frequency: scheduleFrequency,
-      target: scheduleTarget,
-      retentionCount,
-      notifyAdminOnBackup
-    };
+  // --------------------------------------------------------------------------
+  // 7. Controlled Delete of Server Backup
+  // --------------------------------------------------------------------------
+  const handleDeleteBackup = async (backupId: string) => {
+    setActiveActionId(`delete_${backupId}`);
     try {
-      localStorage.removeItem('hse_backup_schedule_config');
-    } catch {}
-    await apiDb.saveSetting('hse_backup_schedule_config', config, 'Automated Backup Schedule');
-    addAuditLog(currentUser.username, 'به‌روزرسانی سیاست زمان‌بندی خودکار پشتیبان‌گیری', 'موفقیت‌آمیز');
-    setFeedbackMessage({
-      type: 'success',
-      text: isFa ? 'پیکربندی سیاست زمان‌بندی خودکار در پایگاه داده ذخیره شد.' : 'Schedule configuration saved successfully.'
-    });
+      const res = await apiDb.deleteServerBackup(backupId);
+      if (!res.success) {
+        showToast('error', res.error || 'خطا در حذف نسخه پشتیبان');
+        return;
+      }
+      setDeleteConfirmBackupId(null);
+      await refreshOverview();
+      showToast('info', `نسخه پشتیبان «${backupId}» از فضای ذخیره‌سازی سرور حذف شد.`);
+    } finally {
+      setActiveActionId(null);
+    }
+  };
+
+  // --------------------------------------------------------------------------
+  // 8. Save Schedule & Retention Policy
+  // --------------------------------------------------------------------------
+  const handleSaveSchedule = async () => {
+    setActiveActionId('save_schedule');
+    try {
+      const res = await apiDb.saveBackupSchedule({
+        enabled: scheduleEnabled,
+        frequency: scheduleFrequency,
+        target: 'server',
+        retentionCount,
+        notifyAdminOnBackup,
+        encryptBackups: encryptScheduledBackups,
+      });
+      if (!res.success) {
+        showToast('error', res.error || 'خطا در ذخیره تنظیمات زمان‌بندی');
+        return;
+      }
+      await refreshOverview();
+      showToast(
+        'success',
+        `تنظیمات پشتیبان‌گیری خودکار (${scheduleFrequency}) و سیاست نگهداری حداکثر ${retentionCount} نسخه در سرور ذخیره و اعمال شد.`
+      );
+    } finally {
+      setActiveActionId(null);
+    }
+  };
+
+  const tc = overview?.database?.tableCounts || {};
+  const totalTables = overview?.database?.totalTables || 50;
+  const totalRows = overview?.database?.totalRows || 0;
+  const fkCount = overview?.database?.foreignKeysCount || 47;
+  const uploadsCount = overview?.files?.uploadsCount || 0;
+  const uploadsBytes = overview?.files?.uploadsTotalBytes || 0;
+  const serverBackups = overview?.backups || [];
+  const lastVerif = overview?.lastVerificationReport;
+  const lastTestRestore = overview?.lastTestRestoreReport;
+
+  const tagBadge = (tag: ServerBackupManifest['tag']) => {
+    switch (tag) {
+      case 'pre_restore_safety':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 text-[11px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 border border-amber-300 dark:border-amber-700/60">
+            <Shield className="w-3 h-3" />
+            پشتیبان ایمنی پیش از بازیابی
+          </span>
+        );
+      case 'scheduled':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 text-[11px] font-bold bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300 border border-purple-300 dark:border-purple-700/60">
+            <Clock className="w-3 h-3" />
+            خودکار زمان‌بندی‌شده
+          </span>
+        );
+      default:
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 text-[11px] font-bold bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300 border border-blue-300 dark:border-blue-700/60">
+            <Server className="w-3 h-3" />
+            پشتیبان دستی مدیر
+          </span>
+        );
+    }
   };
 
   return (
-    <div className="space-y-6 text-right" dir="rtl">
-      
-      {/* 1. Architecture Health & Database Metrics Dashboard */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        
-        {/* Card 1: Database Status */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-xs relative overflow-hidden">
-          <div className="flex items-center justify-between mb-3">
-            <div className="w-10 h-10 rounded-2xl bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 flex items-center justify-center border border-blue-200/60 dark:border-blue-800/60">
-              <Database className="w-5 h-5" />
+    <div className="space-y-6 animate-fadeIn">
+      {/* Top Status & Cryptographic Assurance Banner */}
+      <div className="bg-gradient-to-l from-slate-900 via-blue-950 to-slate-900 text-white rounded-2xl p-6 shadow-xl relative overflow-hidden border border-blue-800/40">
+        <div className="relative z-10 flex flex-col xl:flex-row xl:items-center justify-between gap-6">
+          <div className="space-y-2 max-w-2xl">
+            <div className="inline-flex items-center gap-2 px-3 py-1 bg-emerald-500/20 border border-emerald-400/30 text-emerald-300 text-xs font-semibold">
+              <ShieldCheck className="w-4 h-4" />
+              <span>موتور پشتیبان‌گیری تراکنشی PostgreSQL 16 + اعتبارسنجی SHA-256 + محیط ایزوله Sandbox</span>
             </div>
-            <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200/60">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-              <span>Database Active</span>
-            </span>
+            <h3 className="text-xl md:text-2xl font-black tracking-tight">
+              مرکز جامع پشتیبان‌گیری، اعتبارسنجی و بازیابی اضطراری (Disaster Recovery)
+            </h3>
+            <p className="text-slate-300 text-xs md:text-sm leading-relaxed">
+              پشتیبان‌گیری یکپارچه از تمام <strong className="text-white">{totalTables} جدول عملیاتی</strong>،{' '}
+              <strong className="text-white">{fkCount} رابطه کلید خارجی</strong>، شمارنده‌های سریال (Sequences) و{' '}
+              <strong className="text-white">{uploadsCount} فایل پیوست مستندات ({formatBytes(uploadsBytes)})</strong> همراه با بازیابی آزمایشی در محیط ایزوله بدون ریسک تخریب داده‌های فعلی.
+            </p>
           </div>
-          <div className="space-y-0.5">
-            <h4 className="text-xl font-black text-slate-800 dark:text-slate-100 font-mono">
-              {dbMetrics.totalRecords}
-            </h4>
-            <span className="text-xs font-bold text-slate-400">
-              {isFa ? 'مجموع رکوردهای پایگاه داده' : 'Total DB Records'}
-            </span>
-          </div>
-          <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
-            <span>{isFa ? 'پرسنل:' : 'Personnel:'} <strong>{dbMetrics.personnelCount}</strong></span>
-            <span>{isFa ? 'پروانه‌ها:' : 'Permits:'} <strong>{dbMetrics.permitsCount}</strong></span>
-            <span>{isFa ? 'طب کار:' : 'Health:'} <strong>{dbMetrics.medicalExamsCount}</strong></span>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 shrink-0">
+            <div className="bg-white/10 backdrop-blur-md border border-white/15 rounded-xl p-3 text-center">
+              <span className="text-[11px] text-slate-300 block mb-1">کل جداول و رکوردها</span>
+              <span className="text-sm font-black text-emerald-400 block font-mono">
+                {totalTables} جدول • {totalRows.toLocaleString()} رکورد
+              </span>
+            </div>
+
+            <div className="bg-white/10 backdrop-blur-md border border-white/15 rounded-xl p-3 text-center">
+              <span className="text-[11px] text-slate-300 block mb-1">فایل‌های پیوست (uploads)</span>
+              <span className="text-sm font-black text-cyan-300 block font-mono">
+                {uploadsCount} فایل • {formatBytes(uploadsBytes)}
+              </span>
+            </div>
+
+            <div className="bg-white/10 backdrop-blur-md border border-white/15 rounded-xl p-3 text-center">
+              <span className="text-[11px] text-slate-300 block mb-1">آخرین نسخه پشتیبان</span>
+              <span className="text-xs font-bold text-white block truncate" dir="ltr">
+                {overview?.lastBackupTime || '—'}
+              </span>
+            </div>
+
+            <div className="bg-white/10 backdrop-blur-md border border-white/15 rounded-xl p-3 text-center">
+              <span className="text-[11px] text-slate-300 block mb-1">آخرین تست بازیابی ایزوله</span>
+              {lastTestRestore ? (
+                <button
+                  onClick={() =>
+                    setActiveReportModal({
+                      type: 'test_restore',
+                      testReport: lastTestRestore,
+                    })
+                  }
+                  className={`text-xs font-black inline-flex items-center gap-1 underline ${
+                    lastTestRestore.success ? 'text-emerald-400' : 'text-red-400'
+                  }`}
+                >
+                  {lastTestRestore.success ? 'موفق (PASSED)' : 'ناموفق (FAILED)'}
+                  <Eye className="w-3.5 h-3.5" />
+                </button>
+              ) : (
+                <span className="text-xs text-slate-400 block">اجرا نشده</span>
+              )}
+            </div>
           </div>
         </div>
-
-        {/* Card 2: Central Database Sync */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-xs relative overflow-hidden">
-          <div className="flex items-center justify-between mb-3">
-            <div className="w-10 h-10 rounded-2xl bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 flex items-center justify-center border border-amber-200/60 dark:border-amber-800/60">
-              <Cloud className="w-5 h-5" />
-            </div>
-            <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200/60">
-              <span>{isFa ? 'همگام با سرور' : 'SYNCED'}</span>
-            </span>
-          </div>
-          <div className="space-y-0.5">
-            <h4 className="text-base font-black text-slate-800 dark:text-slate-100 font-mono truncate" dir="ltr">
-              Database Sync
-            </h4>
-            <span className="text-xs font-bold text-slate-400">
-              {isFa ? 'همگام‌سازی پایگاه داده مرکزی' : 'Live Central Sync'}
-            </span>
-          </div>
-          <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px]">
-            <span className="text-slate-500 dark:text-slate-400">{isFa ? 'پایگاه داده فعال' : 'Database Engine'}</span>
-            <button
-              onClick={handleCloudSyncNow}
-              disabled={isCloudSyncing}
-              className="text-amber-600 dark:text-amber-400 font-bold hover:underline cursor-pointer flex items-center gap-1"
-            >
-              <RefreshCw className={`w-3 h-3 ${isCloudSyncing ? 'animate-spin' : ''}`} />
-              <span>{isFa ? 'همگام‌سازی فوری' : 'Sync Now'}</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Card 3: Hybrid Storage & Cache Footprint */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-xs relative overflow-hidden">
-          <div className="flex items-center justify-between mb-3">
-            <div className="w-10 h-10 rounded-2xl bg-purple-50 dark:bg-purple-950/40 text-purple-600 dark:text-purple-400 flex items-center justify-center border border-purple-200/60 dark:border-purple-800/60">
-              <HardDrive className="w-5 h-5" />
-            </div>
-            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-purple-50 text-purple-700 dark:bg-purple-950/40 dark:text-purple-400 border border-purple-200/60">
-              Hybrid Cache
-            </span>
-          </div>
-          <div className="space-y-0.5">
-            <h4 className="text-xl font-black text-slate-800 dark:text-slate-100 font-mono">
-              {dbMetrics.cacheSizeKb}
-            </h4>
-            <span className="text-xs font-bold text-slate-400">
-              {isFa ? 'حجم اشغال‌شده کش محلی' : 'Local Storage Volume'}
-            </span>
-          </div>
-          <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
-            <span>{isFa ? 'پایداری آفلاین:' : 'Offline state:'}</span>
-            <strong className="text-emerald-600 dark:text-emerald-400">{isFa ? 'فعال و ایمن' : 'Secured'}</strong>
-          </div>
-        </div>
-
-        {/* Card 4: Last Backup Status */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-xs relative overflow-hidden">
-          <div className="flex items-center justify-between mb-3">
-            <div className="w-10 h-10 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center border border-emerald-200/60 dark:border-emerald-800/60">
-              <Clock className="w-5 h-5" />
-            </div>
-            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-              {isFa ? 'آخرین خروجی' : 'Last Snapshot'}
-            </span>
-          </div>
-          <div className="space-y-0.5">
-            <h4 className="text-sm font-black text-slate-800 dark:text-slate-100 truncate">
-              {lastBackupDate}
-            </h4>
-            <span className="text-xs font-bold text-slate-400">
-              {isFa ? 'زمان آخرین نسخه پشتیبان' : 'Last Snapshot Timestamp'}
-            </span>
-          </div>
-          <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
-            <span>{isFa ? 'کل نسخه‌های ثبت‌شده:' : 'Logged snapshots:'}</span>
-            <strong>{backupHistory.length}</strong>
-          </div>
-        </div>
-
       </div>
 
-      {/* Feedback Banner */}
+      {/* Feedback Toast */}
       {feedbackMessage && (
-        <div className={`p-4 rounded-2xl text-xs font-bold flex items-center gap-3 border animate-in fade-in duration-200 ${
-          feedbackMessage.type === 'success'
-            ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800/60'
-            : feedbackMessage.type === 'error'
-            ? 'bg-rose-50 dark:bg-rose-950/40 text-rose-800 dark:text-rose-300 border-rose-200 dark:border-rose-800/60'
-            : 'bg-blue-50 dark:bg-blue-950/40 text-blue-800 dark:text-blue-300 border-blue-200 dark:border-blue-800/60'
-        }`}>
-          {feedbackMessage.type === 'success' && <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />}
-          {feedbackMessage.type === 'error' && <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0" />}
-          <span>{feedbackMessage.text}</span>
-        </div>
-      )}
-
-      {/* Rollback Checkpoint Alert if available */}
-      {hasRollbackCheckpoint && (
-        <div className="p-3.5 bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-          <div className="flex items-center gap-2.5 text-amber-800 dark:text-amber-300 font-bold">
-            <Undo2 className="w-4 h-4 text-amber-600 shrink-0" />
-            <span>{isFa ? 'یک نقطه بازگشت اضطراری (Rollback Snapshot) از قبل ذخیره است.' : 'An emergency rollback snapshot is available.'}</span>
+        <div
+          className={`p-4 rounded-xl border flex items-center justify-between shadow-md transition-all ${
+            feedbackMessage.type === 'success'
+              ? 'bg-emerald-50 border-emerald-300 text-emerald-900 dark:bg-emerald-950/50 dark:border-emerald-800 dark:text-emerald-200'
+              : feedbackMessage.type === 'error'
+              ? 'bg-red-50 border-red-300 text-red-900 dark:bg-red-950/50 dark:border-red-800 dark:text-red-200'
+              : 'bg-blue-50 border-blue-300 text-blue-900 dark:bg-blue-950/50 dark:border-blue-800 dark:text-blue-200'
+          }`}
+        >
+          <div className="flex items-center gap-3">
+            {feedbackMessage.type === 'success' ? (
+              <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+            ) : feedbackMessage.type === 'error' ? (
+              <AlertTriangle className="w-5 h-5 text-red-600 shrink-0" />
+            ) : (
+              <RefreshCw className="w-5 h-5 text-blue-600 shrink-0" />
+            )}
+            <span className="text-sm font-bold leading-relaxed">{feedbackMessage.text}</span>
           </div>
           <button
-            onClick={handleRollbackToCheckpoint}
-            className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-black rounded-xl transition cursor-pointer text-xs shrink-0 flex items-center gap-1 self-start sm:self-auto"
+            onClick={() => setFeedbackMessage(null)}
+            className="text-xs font-bold opacity-75 hover:opacity-100 px-2 py-1"
           >
-            <Undo2 className="w-3.5 h-3.5" />
-            <span>{isFa ? 'بازگردانی به نقطه امن قبلی' : 'Apply Emergency Rollback'}</span>
+            بستن
           </button>
         </div>
       )}
 
-      {/* Sub-Navigation Tabs for Backup Module */}
-      <div className="flex bg-slate-100 dark:bg-slate-800/80 p-1.5 rounded-2xl gap-1 overflow-x-auto">
-        <button
-          onClick={() => setActiveSubTab('create_backup')}
-          className={`px-4 py-2.5 text-xs font-black rounded-xl transition cursor-pointer flex items-center gap-2 whitespace-nowrap ${
-            activeSubTab === 'create_backup'
-              ? 'bg-white dark:bg-slate-900 shadow-xs text-slate-900 dark:text-white border border-slate-200/80 dark:border-slate-800'
-              : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-          }`}
-        >
-          <Download className="w-4 h-4 text-blue-500" />
-          <span>{isFa ? 'تهیه نسخه پشتیبان (کامل و تفکیکی)' : 'Generate Backup (Full & Modular)'}</span>
-        </button>
+      {/* Storage Space & Last Verification Summary Bar */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 flex items-center justify-between">
+          <div className="space-y-1">
+            <span className="text-xs text-slate-500 dark:text-slate-400 font-medium block">
+              مسیر ذخیره‌سازی پشتیبان در سرور / VPS
+            </span>
+            <code className="text-xs font-mono font-bold text-slate-800 dark:text-slate-200 block" dir="ltr">
+              {overview?.storage?.backupDir || '/app/backups'}
+            </code>
+            <span className="text-[11px] text-slate-500 block">
+              فضای آزاد دیسک:{' '}
+              <strong className="text-emerald-600 dark:text-emerald-400 font-mono">
+                {formatBytes(overview?.storage?.freeBytes || 0)}
+              </strong>{' '}
+              از {formatBytes(overview?.storage?.totalBytes || 0)}
+            </span>
+          </div>
+          <div
+            className={`px-3 py-1.5 text-xs font-bold border ${
+              overview?.storage?.writable !== false
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-900/20 dark:border-emerald-800 dark:text-emerald-300'
+                : 'bg-red-50 border-red-200 text-red-700'
+            }`}
+          >
+            {overview?.storage?.writable !== false ? 'قابل نوشتن (Writable)' : 'عدم دسترسی نوشتن'}
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 flex items-center justify-between">
+          <div className="space-y-1">
+            <span className="text-xs text-slate-500 dark:text-slate-400 font-medium block">
+              وضعیت اعتبارسنجی رمزنگاری‌شده (SHA-256)
+            </span>
+            {lastVerif ? (
+              <>
+                <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">
+                  نسخه: <code className="font-mono">{lastVerif.backupId}</code>
+                </span>
+                <span className="text-[11px] text-slate-500 font-mono block" dir="ltr">
+                  SHA256: {lastVerif.computedArchiveSha256?.slice(0, 20)}...
+                </span>
+              </>
+            ) : (
+              <span className="text-xs text-slate-400 block">هنوز اعتبارسنجی ثبت نشده است</span>
+            )}
+          </div>
+          {lastVerif && (
+            <button
+              onClick={() =>
+                setActiveReportModal({
+                  type: 'verification',
+                  verificationReport: lastVerif,
+                })
+              }
+              className={`px-3 py-1.5 text-xs font-bold border flex items-center gap-1.5 ${
+                lastVerif.valid
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-900/20 dark:border-emerald-800 dark:text-emerald-300'
+                  : 'bg-red-50 border-red-200 text-red-700'
+              }`}
+            >
+              <ShieldCheck className="w-4 h-4" />
+              {lastVerif.valid ? 'تأیید شده' : 'خطای چک‌سام'}
+            </button>
+          )}
+        </div>
+
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 flex items-center justify-between">
+          <div className="space-y-1">
+            <span className="text-xs text-slate-500 dark:text-slate-400 font-medium block">
+              وضعیت بازیابی آزمایشی ایزوله (Sandbox Dry-Run)
+            </span>
+            {lastTestRestore ? (
+              <>
+                <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">
+                  {lastTestRestore.tablesTested} جدول • {lastTestRestore.totalSandboxRestoredRows} رکورد •{' '}
+                  {lastTestRestore.foreignKeysChecked} کلید خارجی
+                </span>
+                <span className="text-[11px] text-slate-500 block">
+                  زمان اجرا: {lastTestRestore.persianDate} ({lastTestRestore.durationMs}ms)
+                </span>
+              </>
+            ) : (
+              <span className="text-xs text-slate-400 block">آماده اجرای تست بازیابی ایزوله</span>
+            )}
+          </div>
+          {lastTestRestore && (
+            <button
+              onClick={() =>
+                setActiveReportModal({
+                  type: 'test_restore',
+                  testReport: lastTestRestore,
+                })
+              }
+              className={`px-3 py-1.5 text-xs font-bold border flex items-center gap-1.5 ${
+                lastTestRestore.success
+                  ? 'bg-blue-50 border-blue-200 text-blue-700 dark:bg-blue-900/20 dark:border-blue-800 dark:text-blue-300'
+                  : 'bg-red-50 border-red-200 text-red-700'
+              }`}
+            >
+              <FlaskConical className="w-4 h-4" />
+              مشاهده گزارش تست
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Sub-navigation Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-2 bg-white dark:bg-slate-900 p-2 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            onClick={() => setActiveSubTab('create_backup')}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-bold transition-all ${
+              activeSubTab === 'create_backup'
+                ? 'bg-blue-600 text-white shadow-sm'
+                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+          >
+            <Download className="w-4 h-4" />
+            <span>تهیه نسخه پشتیبان کامل (۵۰ جدول + فایل‌ها)</span>
+          </button>
+
+          <button
+            onClick={() => setActiveSubTab('server_backups')}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-bold transition-all ${
+              activeSubTab === 'server_backups'
+                ? 'bg-blue-600 text-white shadow-sm'
+                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+          >
+            <FolderArchive className="w-4 h-4" />
+            <span>مخزن نسخه‌های سرور و تست ایزوله ({serverBackups.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveSubTab('restore')}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-bold transition-all ${
+              activeSubTab === 'restore'
+                ? 'bg-blue-600 text-white shadow-sm'
+                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+          >
+            <Upload className="w-4 h-4" />
+            <span>بارگذاری فایل پشتیبان و بازیابی</span>
+          </button>
+
+          <button
+            onClick={() => setActiveSubTab('schedule')}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-bold transition-all ${
+              activeSubTab === 'schedule'
+                ? 'bg-blue-600 text-white shadow-sm'
+                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+          >
+            <Clock className="w-4 h-4" />
+            <span>زمان‌بندی خودکار و سیاست نگهداری</span>
+          </button>
+
+          <button
+            onClick={() => setActiveSubTab('history')}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-bold transition-all ${
+              activeSubTab === 'history'
+                ? 'bg-blue-600 text-white shadow-sm'
+                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+          >
+            <FileText className="w-4 h-4" />
+            <span>تاریخچه عملیات و گزارش ممیزی</span>
+          </button>
+        </div>
 
         <button
-          onClick={() => setActiveSubTab('cloud_sync')}
-          className={`px-4 py-2.5 text-xs font-black rounded-xl transition cursor-pointer flex items-center gap-2 whitespace-nowrap ${
-            activeSubTab === 'cloud_sync'
-              ? 'bg-white dark:bg-slate-900 shadow-xs text-slate-900 dark:text-white border border-slate-200/80 dark:border-slate-800'
-              : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-          }`}
+          onClick={refreshOverview}
+          disabled={isLoadingOverview}
+          className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700"
         >
-          <Cloud className="w-4 h-4 text-amber-500" />
-          <span>{isFa ? 'همگام‌سازی و تکثیر سرور پایگاه داده' : 'Database Server Replication & Sync'}</span>
-        </button>
-
-        <button
-          onClick={() => setActiveSubTab('restore')}
-          className={`px-4 py-2.5 text-xs font-black rounded-xl transition cursor-pointer flex items-center gap-2 whitespace-nowrap ${
-            activeSubTab === 'restore'
-              ? 'bg-white dark:bg-slate-900 shadow-xs text-slate-900 dark:text-white border border-slate-200/80 dark:border-slate-800'
-              : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-          }`}
-        >
-          <Upload className="w-4 h-4 text-emerald-500" />
-          <span>{isFa ? 'بازیابی اطلاعات با بازرسی اولیه' : 'Intelligent Database Restore'}</span>
-        </button>
-
-        <button
-          onClick={() => setActiveSubTab('schedule')}
-          className={`px-4 py-2.5 text-xs font-black rounded-xl transition cursor-pointer flex items-center gap-2 whitespace-nowrap ${
-            activeSubTab === 'schedule'
-              ? 'bg-white dark:bg-slate-900 shadow-xs text-slate-900 dark:text-white border border-slate-200/80 dark:border-slate-800'
-              : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-          }`}
-        >
-          <Clock className="w-4 h-4 text-purple-500" />
-          <span>{isFa ? 'سیاست زمان‌بندی خودکار' : 'Automated Schedule Policy'}</span>
-        </button>
-
-        <button
-          onClick={() => setActiveSubTab('history')}
-          className={`px-4 py-2.5 text-xs font-black rounded-xl transition cursor-pointer flex items-center gap-2 whitespace-nowrap ${
-            activeSubTab === 'history'
-              ? 'bg-white dark:bg-slate-900 shadow-xs text-slate-900 dark:text-white border border-slate-200/80 dark:border-slate-800'
-              : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-          }`}
-        >
-          <FileText className="w-4 h-4 text-rose-500" />
-          <span>{isFa ? 'تاریخچه و لاگ عملیات‌ها' : 'Audit History & Snapshots'}</span>
+          <RefreshCw className={`w-3.5 h-3.5 ${isLoadingOverview ? 'animate-spin text-blue-600' : ''}`} />
+          <span>بروزرسانی آمار زنده</span>
         </button>
       </div>
 
-      {/* ========================================================================= */}
-      {/* 1. CREATE BACKUP TAB (FULL & MODULAR)                                    */}
-      {/* ========================================================================= */}
+      {/* ===================================================================== */}
+      {/* TAB 1: CREATE BACKUP (ALL 50 TABLES + UPLOADED FILES)                 */}
+      {/* ===================================================================== */}
       {activeSubTab === 'create_backup' && (
-        <div className="space-y-6 animate-in fade-in duration-200">
-          
-          {/* Primary Action Box: Full Backup Dual Format */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 md:p-7 shadow-xs space-y-5">
-            <div className="border-b border-slate-100 dark:border-slate-800 pb-4">
-              <h4 className="text-sm font-black text-slate-800 dark:text-slate-100 flex items-center gap-2">
-                <Database className="w-5 h-5 text-blue-600" />
-                <span>{isFa ? '۱. تهیه نسخه پشتیبان کامل پایگاه داده (Full System Snapshot)' : '1. Full Database Snapshot Export'}</span>
-              </h4>
-              <p className="text-xs text-slate-400 font-medium mt-0.5">
-                {isFa 
-                  ? 'تهیه اسنپ‌شات استاندارد و کامل از کلیه جداول، موجودیت‌ها و پرونده‌های سامانه در فرمت‌های رابطه‌ای SQL یا JSON ساختاریافته' 
-                  : 'Export complete relational SQL script or structured JSON master snapshot'}
-              </p>
+        <div className="space-y-6">
+          {/* Live Entity Metrics across modules */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            {[
+              {
+                label: 'پرسنل و ساختار سازمانی',
+                count:
+                  (tc.personnel || 0) +
+                  (tc.org_companies || 0) +
+                  (tc.org_sites || 0) +
+                  (tc.org_departments || 0) +
+                  (tc.org_units || 0) +
+                  (tc.org_positions || 0),
+                sub: `${tc.personnel || 0} پرسنل • ${tc.org_units || 0} واحد`,
+                icon: Users,
+              },
+              {
+                label: 'پرونده‌های سلامت و طب کار',
+                count:
+                  (tc.periodic_medical_exams || 0) +
+                  (tc.medical_exam_sessions || 0) +
+                  (tc.audiometry_records || 0) +
+                  (tc.spirometry_records || 0) +
+                  (tc.optometry_records || 0) +
+                  (tc.lab_results || 0),
+                sub: `۱۱ جدول تخصصی سلامت`,
+                icon: Activity,
+              },
+              {
+                label: 'مجوزهای کار و ارزیابی ریسک',
+                count:
+                  (tc.work_permits || 0) +
+                  (tc.permit_signatures || 0) +
+                  (tc.risk_assessments || 0),
+                sub: `${tc.work_permits || 0} مجوز • ${tc.risk_assessments || 0} ریسک`,
+                icon: Shield,
+              },
+              {
+                label: 'حوادث، TRIR و ایمنی',
+                count:
+                  (tc.incidents || 0) +
+                  (tc.trir_monthly_records || 0) +
+                  (tc.safety_warnings || 0) +
+                  (tc.non_conformances || 0) +
+                  (tc.fire_equipment || 0),
+                sub: `${tc.incidents || 0} حادثه • ${tc.safety_warnings || 0} اخطار`,
+                icon: AlertTriangle,
+              },
+              {
+                label: 'مستندات و فایل‌های پیوست',
+                count: uploadsCount,
+                sub: `${tc.system_files || 0} رکورد مستند • ${formatBytes(uploadsBytes)}`,
+                icon: FolderArchive,
+              },
+              {
+                label: 'تنظیمات، کاربران و لاگ ممیزی',
+                count:
+                  (tc.users || 0) +
+                  (tc.system_settings || 0) +
+                  (tc.audit_logs || 0) +
+                  (tc.notifications || 0),
+                sub: `${tc.users || 0} کاربر • ${tc.audit_logs || 0} لاگ`,
+                icon: Database,
+              },
+            ].map((item, idx) => {
+              const Icon = item.icon;
+              return (
+                <div
+                  key={idx}
+                  className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-sm"
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                      {item.label}
+                    </span>
+                    <Icon className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                  </div>
+                  <div className="text-xl font-black text-slate-900 dark:text-white font-mono">
+                    {item.count.toLocaleString()}
+                  </div>
+                  <div className="text-[11px] text-slate-500 mt-1">{item.sub}</div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Primary Full Backup + SQL Export Cards */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Card 1: Complete Archive (.hsebackup.json.gz) */}
+            <div className="bg-white dark:bg-slate-900 rounded-2xl border-2 border-blue-500/30 dark:border-blue-500/40 p-6 shadow-sm flex flex-col justify-between">
+              <div className="space-y-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-md shrink-0">
+                      <HardDrive className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <span className="text-[11px] font-bold text-blue-600 dark:text-blue-400 block">
+                        استاندارد پیشنهادی HSECORE (شامل پایگاه داده + فایل‌های پیوست)
+                      </span>
+                      <h4 className="text-base font-black text-slate-900 dark:text-white">
+                        تهیه آرشیو کامل و معتبر سرور (`.hsebackup.json.gz`)
+                      </h4>
+                    </div>
+                  </div>
+                </div>
+
+                <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                  این بسته در یک تراکنش ایزوله `REPEATABLE READ` از تمامی <strong>{totalTables} جدول پایگاه داده</strong>، کلیدهای خارجی، تنظیمات و محتوای باینری تمامی <strong>{uploadsCount} فایل پیوست‌شده در پوشه `uploads/`</strong> نسخه پشتیبان تهیه کرده، هش رمزنگاری‌شده <strong>SHA-256</strong> را محاسبه و بلافاصله صحت ساختار آرشیو را اعتبارسنجی می‌کند.
+                </p>
+
+                <div className="bg-slate-50 dark:bg-slate-800/60 rounded-xl p-3.5 border border-slate-200 dark:border-slate-700 space-y-2.5">
+                  <label className="flex items-center justify-between cursor-pointer">
+                    <div className="flex items-center gap-2">
+                      <Download className="w-4 h-4 text-blue-600" />
+                      <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                        دانلود خودکار فایل پشتیبان در مرورگر پس از ذخیره در سرور
+                      </span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={autoDownloadAfterBackup}
+                      onChange={(e) => setAutoDownloadAfterBackup(e.target.checked)}
+                      className="w-4 h-4 accent-blue-600 rounded"
+                    />
+                  </label>
+
+                  <label className="flex items-center justify-between cursor-pointer">
+                    <div className="flex items-center gap-2">
+                      <Lock className="w-4 h-4 text-amber-600" />
+                      <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                        رمزنگاری پیشرفته آرشیو با الگوریتم AES-256-GCM
+                      </span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={encryptNewBackup}
+                      onChange={(e) => setEncryptNewBackup(e.target.checked)}
+                      className="w-4 h-4 accent-amber-600 rounded"
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div className="pt-5 mt-5 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center gap-3">
+                <button
+                  onClick={() => handleCreateFullBackup(false)}
+                  disabled={isGeneratingBackup}
+                  className="flex-1 py-3 px-4 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-bold rounded-xl shadow-md transition-all flex items-center justify-center gap-2 text-xs"
+                >
+                  {isGeneratingBackup ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <ShieldCheck className="w-4 h-4" />
+                  )}
+                  <span>
+                    {isGeneratingBackup
+                      ? 'در حال تهیه و اعتبارسنجی SHA-256...'
+                      : 'تهیه نسخه پشتیبان کامل و اعتبارسنجی خودکار'}
+                  </span>
+                </button>
+              </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              
-              {/* Option A: SQL Database Dump */}
-              <div className="p-5 rounded-2xl border border-blue-200/80 dark:border-blue-900/50 bg-blue-50/30 dark:bg-blue-950/20 space-y-4">
-                <div className="flex items-start justify-between">
-                  <div className="space-y-1">
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-black uppercase bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
-                      .SQL (Relational)
-                    </span>
-                    <h5 className="text-xs font-black text-slate-800 dark:text-slate-100">
-                      {isFa ? 'دامپ استاندارد SQL پایگاه داده 16' : 'Relational Database Dump'}
-                    </h5>
+            {/* Card 2: PostgreSQL 16 Native SQL Dump */}
+            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-sm flex flex-col justify-between">
+              <div className="space-y-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-md shrink-0">
+                    <FileCode className="w-6 h-6" />
                   </div>
-                  <FileCode className="w-6 h-6 text-blue-600" />
+                  <div>
+                    <span className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 block">
+                      خروجی استاندارد پایگاه داده رابطه‌ای
+                    </span>
+                    <h4 className="text-base font-black text-slate-900 dark:text-white">
+                      استخراج اسکریپت کامل PostgreSQL 16 (`.sql`)
+                    </h4>
+                  </div>
                 </div>
 
-                <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-                  {isFa 
-                    ? 'شامل دستورات DDL (تعریف جداول، کلیدهای اصلی و فیلدها) و کوئری‌های INSERT استاندارد برای مهاجرت به سرورهای پایگاه داده سازمانی.'
-                    : 'Standard pg_dump compatible DDL and INSERT statements ready for direct import into relational database server.'}
+                <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                  تولید اسکریپت تراکنشی `BEGIN ... COMMIT` سازگار با PostgreSQL 16 با رعایت ترتیب توپولوژیک کلیدهای خارجی، استفاده از `jsonb_populate_recordset` برای حفظ دقیق انواع داده‌ها (JSONB, Arrays, Timestamps) و بازنشانی خودکار تمام شمارنده‌های `SERIAL` با `setval(pg_get_serial_sequence(...))`.
                 </p>
 
+                <div className="bg-slate-900 text-slate-200 rounded-xl p-3.5 font-mono text-[11px] space-y-1" dir="ltr">
+                  <div className="text-emerald-400">-- HSECORE PostgreSQL 16 Transactional Dump</div>
+                  <div>BEGIN;</div>
+                  <div>INSERT INTO "public"."org_units" OVERRIDING SYSTEM VALUE ...</div>
+                  <div>SELECT setval(pg_get_serial_sequence('&quot;public&quot;.&quot;org_units&quot;', 'id'), ...);</div>
+                  <div>COMMIT;</div>
+                </div>
+              </div>
+
+              <div className="pt-5 mt-5 border-t border-slate-100 dark:border-slate-800">
                 <button
-                  type="button"
                   onClick={() => handleExportSqlDump(false)}
-                  disabled={isGeneratingBackup}
-                  className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-black text-xs rounded-xl shadow-md shadow-blue-600/20 transition cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50"
+                  disabled={isExportingSql}
+                  className="w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white font-bold rounded-xl shadow-md transition-all flex items-center justify-center gap-2 text-xs"
                 >
-                  <Download className={`w-4 h-4 ${isGeneratingBackup ? 'animate-bounce' : ''}`} />
-                  <span>{isGeneratingBackup ? (isFa ? 'در حال تولید اسکریپت...' : 'Generating...') : (isFa ? 'دانلود نسخه کامل دیتابیس (.sql)' : 'Download Database Dump')}</span>
+                  {isExportingSql ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Download className="w-4 h-4" />
+                  )}
+                  <span>دانلود اسکریپت کامل SQL پایگاه داده (`.sql`)</span>
                 </button>
               </div>
-
-              {/* Option B: Master JSON Snapshot */}
-              <div className="p-5 rounded-2xl border border-amber-200/80 dark:border-amber-900/50 bg-amber-50/30 dark:bg-amber-950/20 space-y-4">
-                <div className="flex items-start justify-between">
-                  <div className="space-y-1">
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-black uppercase bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200">
-                      .JSON (Master Manifest)
-                    </span>
-                    <h5 className="text-xs font-black text-slate-800 dark:text-slate-100">
-                      {isFa ? 'بسته پشتیبان جامع ساختاریافته سیستم (JSON)' : 'Full Structured System Snapshot'}
-                    </h5>
-                  </div>
-                  <Database className="w-6 h-6 text-amber-600" />
-                </div>
-
-                <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-                  {isFa 
-                    ? 'حاوی مانیفست کامل معماری، نسخه نرم‌افزار، امضای یکپارچگی و داده‌های تمامی موجودیت‌ها با امکان بازیابی فوری در مرورگر یا پایگاه ابری.'
-                    : 'Encapsulates system manifest, architecture version, checksum digest, and all entity payloads for instant browser/cloud restoration.'}
-                </p>
-
-                <button
-                  type="button"
-                  onClick={() => handleExportJsonSnapshot(false)}
-                  disabled={isGeneratingBackup}
-                  className="w-full py-3 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs rounded-xl shadow-md shadow-amber-500/20 transition cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50"
-                >
-                  <Download className={`w-4 h-4 ${isGeneratingBackup ? 'animate-bounce' : ''}`} />
-                  <span>{isGeneratingBackup ? (isFa ? 'در حال تجمیع داده‌ها...' : 'Generating...') : (isFa ? 'دانلود بسته جامع سیستم (.json)' : 'Download Master JSON Snapshot')}</span>
-                </button>
-              </div>
-
             </div>
           </div>
 
-          {/* Granular / Modular Selective Backup */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 md:p-7 shadow-xs space-y-5">
-            <div className="border-b border-slate-100 dark:border-slate-800 pb-4">
-              <h4 className="text-sm font-black text-slate-800 dark:text-slate-100 flex items-center gap-2">
-                <Layers className="w-5 h-5 text-indigo-600" />
-                <span>{isFa ? '۲. پشتیبان‌گیری تفکیکی و ماژولار (Granular Modular Export)' : '2. Selective Modular Domain Export'}</span>
-              </h4>
-              <p className="text-xs text-slate-400 font-medium mt-0.5">
-                {isFa 
-                  ? 'انتخاب دستی ماژول‌ها و جداول مورد نظر جهت استخراج گزینشی و سبک' 
-                  : 'Select specific database domains and tables to export granular snapshot'}
-              </p>
+          {/* Granular / Selective Module Backup */}
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-600">
+                  <Sliders className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-slate-900 dark:text-white">
+                    پشتیبان‌گیری انتخابی ماژول‌ها (Selective Module Backup)
+                  </h4>
+                  <p className="text-xs text-slate-500">
+                    انتخاب زیرمجموعه‌ای از ماژول‌های سامانه جهت تهیه نسخه پشتیبان تفکیکی
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() =>
+                    setSelectedModules({
+                      org_structure: true,
+                      personnel: true,
+                      users_security: true,
+                      medical_exams: true,
+                      work_permits: true,
+                      incidents_trir: true,
+                      safety_warnings: true,
+                      workflows_bpmn: true,
+                      files_documents: true,
+                      system_settings: true,
+                      audit_logs: true,
+                    })
+                  }
+                  className="px-3 py-1.5 text-xs font-semibold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-lg"
+                >
+                  انتخاب همه (۱۱ گروه ماژول / ۵۰ جدول)
+                </button>
+              </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {[
-                { key: 'personnel', label: isFa ? 'پرسنل و مشخصات شغلی' : 'Personnel & Job Titles', count: dbMetrics.personnelCount, icon: Users },
-                { key: 'medical_exams', label: isFa ? 'معاینات طب کار و سلامت' : 'Occupational Health Exams', count: dbMetrics.medicalExamsCount, icon: Activity },
-                { key: 'work_permits', label: isFa ? 'پروانه‌های کار ایمن (PTW)' : 'Work Permits (PTW)', count: dbMetrics.permitsCount, icon: ShieldCheck },
-                { key: 'org_structure', label: isFa ? 'چارت و ساختار سازمانی' : 'Organizational Hierarchy', count: dbMetrics.orgNodesCount, icon: Building2 },
-                { key: 'incidents_trir', label: isFa ? 'حوادث و آمار TRIR' : 'Incidents & TRIR Stats', count: dbMetrics.incidentsCount, icon: AlertTriangle },
-                { key: 'safety_warnings', label: isFa ? 'اخطارهای انضباطی ایمنی' : 'Disciplinary Safety Notices', count: dbMetrics.warningsCount, icon: FileText },
-                { key: 'users_security', label: isFa ? 'کاربران و سطوح دسترسی (RBAC)' : 'Users & Access Control', count: dbMetrics.usersCount, icon: Shield },
-                { key: 'audit_logs', label: isFa ? 'لاگ‌های ممیزی سیستم' : 'Audit Logs & Security Events', count: dbMetrics.auditLogsCount, icon: Terminal },
-                { key: 'system_settings', label: isFa ? 'تنظیمات و پارامترها' : 'System & Integration Configs', count: 12, icon: Sliders }
-              ].map(item => {
-                const Icon = item.icon;
-                const isSelected = !!selectedModules[item.key];
+                { key: 'org_structure', label: 'چارت و ساختار سازمانی (۵ جدول)', count: (tc.org_companies || 0) + (tc.org_sites || 0) + (tc.org_departments || 0) + (tc.org_units || 0) + (tc.org_positions || 0) },
+                { key: 'personnel', label: 'اطلاعات پرسنل و تخصیص‌ها (۲ جدول)', count: (tc.personnel || 0) + (tc.user_personnel_assignments || 0) },
+                { key: 'users_security', label: 'کاربران و اعلان‌ها (۲ جدول)', count: (tc.users || 0) + (tc.notifications || 0) },
+                { key: 'medical_exams', label: 'معاینات طب کار و سلامت (۱۱ جدول)', count: (tc.periodic_medical_exams || 0) + (tc.medical_exam_sessions || 0) + (tc.audiometry_records || 0) + (tc.spirometry_records || 0) + (tc.optometry_records || 0) + (tc.lab_results || 0) },
+                { key: 'work_permits', label: 'مجوزهای کار PTW و ریسک (۴ جدول)', count: (tc.work_permits || 0) + (tc.risk_assessments || 0) },
+                { key: 'incidents_trir', label: 'حوادث، TRIR و عدم انطباق (۳ جدول)', count: (tc.incidents || 0) + (tc.trir_monthly_records || 0) + (tc.non_conformances || 0) },
+                { key: 'safety_warnings', label: 'اخطارها، آموزش، PPE و آتش‌نشانی (۹ جدول)', count: (tc.safety_warnings || 0) + (tc.hse_trainings || 0) + (tc.ppe_issuances || 0) + (tc.fire_equipment || 0) },
+                { key: 'workflows_bpmn', label: 'فرآیندهای BPMN و اتوماسیون (۱۰ جدول)', count: (tc.workflows || 0) + (tc.bpmn_processes || 0) + (tc.automation_rules || 0) },
+                { key: 'files_documents', label: 'مستندات و فایل‌های فیزیکی پیوست', count: (tc.system_files || 0) + uploadsCount },
+                { key: 'system_settings', label: 'تنظیمات کلان سیستم (system_settings)', count: tc.system_settings || 0 },
+                { key: 'audit_logs', label: 'لاگ‌های ممیزی امنیتی (audit_logs)', count: tc.audit_logs || 0 },
+              ].map((mod) => {
+                const checked = Boolean(selectedModules[mod.key]);
                 return (
                   <label
-                    key={item.key}
-                    className={`p-3.5 rounded-2xl border transition cursor-pointer flex items-center justify-between ${
-                      isSelected
-                        ? 'bg-indigo-50/50 dark:bg-indigo-950/30 border-indigo-300 dark:border-indigo-800'
-                        : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-slate-300'
+                    key={mod.key}
+                    className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${
+                      checked
+                        ? 'bg-blue-50/60 border-blue-400 dark:bg-blue-950/30 dark:border-blue-700'
+                        : 'bg-slate-50/50 border-slate-200 dark:bg-slate-800/40 dark:border-slate-800 opacity-70'
                     }`}
                   >
                     <div className="flex items-center gap-2.5">
                       <input
                         type="checkbox"
-                        checked={isSelected}
-                        onChange={(e) => setSelectedModules({ ...selectedModules, [item.key]: e.target.checked })}
-                        className="w-4 h-4 rounded text-indigo-600 accent-indigo-600 cursor-pointer"
+                        checked={checked}
+                        onChange={() =>
+                          setSelectedModules((prev) => ({ ...prev, [mod.key]: !prev[mod.key] }))
+                        }
+                        className="w-4 h-4 accent-blue-600 rounded"
                       />
-                      <div>
-                        <span className="text-xs font-black text-slate-800 dark:text-slate-100 block">{item.label}</span>
-                        <span className="text-[10px] text-slate-400 font-mono">{item.count} رکورد</span>
-                      </div>
+                      <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                        {mod.label}
+                      </span>
                     </div>
-                    <Icon className="w-4 h-4 text-slate-400" />
+                    <span className="text-[11px] font-mono font-bold px-2 py-0.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300">
+                      {mod.count}
+                    </span>
                   </label>
                 );
               })}
             </div>
 
-            <div className="flex flex-wrap items-center justify-end gap-3 pt-3 border-t border-slate-100 dark:border-slate-800">
+            <div className="flex flex-wrap items-center justify-end gap-3 pt-2">
               <button
-                type="button"
-                onClick={() => handleExportSqlDump(true)}
+                onClick={() => handleCreateFullBackup(true)}
                 disabled={isGeneratingBackup}
-                className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-black rounded-xl transition cursor-pointer flex items-center gap-2"
-              >
-                <FileCode className="w-4 h-4 text-blue-500" />
-                <span>{isFa ? 'دانلود گزینشی (.sql)' : 'Export Selected as SQL'}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleExportJsonSnapshot(true)}
-                disabled={isGeneratingBackup}
-                className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black rounded-xl shadow-md shadow-indigo-600/20 transition cursor-pointer flex items-center gap-2"
+                className="px-4 py-2.5 bg-slate-800 hover:bg-slate-900 dark:bg-slate-700 dark:hover:bg-slate-600 text-white text-xs font-bold rounded-xl flex items-center gap-2"
               >
                 <Download className="w-4 h-4" />
-                <span>{isFa ? 'دانلود بسته گزینشی (.json)' : 'Export Selected as JSON'}</span>
+                <span>تهیه آرشیو پشتیبان انتخابی</span>
               </button>
             </div>
           </div>
-
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* 2. REPLICATION & DATABASE SYNC TAB                                      */}
-      {/* ========================================================================= */}
-      {activeSubTab === 'cloud_sync' && (
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 md:p-7 shadow-xs space-y-6 animate-in fade-in duration-200">
-          
-          <div className="border-b border-slate-100 dark:border-slate-800 pb-4">
-            <h4 className="text-sm font-black text-slate-800 dark:text-slate-100 flex items-center gap-2">
-              <Cloud className="w-5 h-5 text-amber-500" />
-              <span>{isFa ? 'پایگاه داده مرکزی و موتور تکثیر اطلاعات' : 'Central Database & Replication Engine'}</span>
-            </h4>
-            <p className="text-xs text-slate-400 font-medium mt-0.5">
-              {isFa 
-                ? 'مدیریت و نظارت بر پایگاه داده رابطه‌ای، همگام‌سازی بلادرنگ رکوردهای محلی و هماهنگی سرور مرکزی' 
-                : 'Real-time synchronization and replication engine backed by Central Database'}
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            
-            {/* Sync Card 1: Push to Database */}
-            <div className="p-5 rounded-2xl border border-amber-200/70 dark:border-amber-900/50 bg-amber-50/20 dark:bg-amber-950/20 space-y-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-900/60 text-amber-700 dark:text-amber-300 flex items-center justify-center">
-                  <ArrowUpFromLine className="w-5 h-5" />
-                </div>
-                <div>
-                  <h5 className="text-xs font-black text-slate-800 dark:text-slate-100">
-                    {isFa ? 'ارسال و همگام‌سازی فوری به پایگاه داده' : 'Push & Sync to Database'}
-                  </h5>
-                  <span className="text-[11px] text-slate-400">
-                    {isFa ? 'انتقال رکوردهای جدید TRIR، لاگ‌های گرما و اخطارهای ایمنی' : 'Replicate local documents to database tables'}
-                  </span>
-                </div>
+      {/* ===================================================================== */}
+      {/* TAB 2: SERVER BACKUP REPOSITORY & ISOLATED SANDBOX TEST RESTORE       */}
+      {/* ===================================================================== */}
+      {activeSubTab === 'server_backups' && (
+        <div className="space-y-6">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-sm space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-4">
+              <div>
+                <h4 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
+                  <FolderArchive className="w-5 h-5 text-blue-600" />
+                  <span>نسخه‌های پشتیبان ذخیره‌شده در سرور ({serverBackups.length} نسخه)</span>
+                </h4>
+                <p className="text-xs text-slate-500 mt-1">
+                  هر نسخه را می‌توانید پیش از بازیابی واقعی، در <strong>محیط ایزوله PostgreSQL Sandbox</strong> بدون هیچ‌گونه تغییر در اطلاعات فعلی آزمایش و مقایسه نمایید.
+                </p>
               </div>
 
-              <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-                {isFa 
-                  ? 'این عملیات کلیه اطلاعات ذخیره‌شده را به جداول رابطه‌ای پایگاه داده مرکزی ارسال و ثبت می‌کند.'
-                  : 'Batch-commits all local documents to database tables using transactional writes.'}
-              </p>
-
               <button
-                type="button"
-                onClick={handleCloudSyncNow}
-                disabled={isCloudSyncing}
-                className="w-full py-3 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs rounded-xl shadow-md shadow-amber-500/20 transition cursor-pointer flex items-center justify-center gap-2"
+                onClick={() => handleCreateFullBackup(false)}
+                disabled={isGeneratingBackup}
+                className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl flex items-center gap-2 shrink-0"
               >
-                <RefreshCw className={`w-4 h-4 ${isCloudSyncing ? 'animate-spin' : ''}`} />
-                <span>{isCloudSyncing ? (isFa ? 'در حال ارسال به سرور مرکزی...' : 'Syncing...') : (isFa ? 'ارسال و ثبت فوری در پایگاه داده' : 'Push & Sync Now')}</span>
+                <ShieldCheck className="w-4 h-4" />
+                <span>ایجاد نسخه پشتیبان جدید در سرور</span>
               </button>
             </div>
 
-            {/* Sync Card 2: Pull from Database */}
-            <div className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 space-y-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 flex items-center justify-center">
-                  <ArrowDownToLine className="w-5 h-5" />
-                </div>
-                <div>
-                  <h5 className="text-xs font-black text-slate-800 dark:text-slate-100">
-                    {isFa ? 'دریافت و اعتبارسنجی از پایگاه داده' : 'Fetch & Verify from Database'}
-                  </h5>
-                  <span className="text-[11px] text-slate-400">
-                    {isFa ? 'استعلام آخرین نسخه‌های ثبت‌شده در پایگاه داده' : 'Retrieve database records and reconcile state'}
-                  </span>
-                </div>
+            {serverBackups.length === 0 ? (
+              <div className="text-center py-12 space-y-3">
+                <FolderArchive className="w-12 h-12 text-slate-300 mx-auto" />
+                <p className="text-sm font-bold text-slate-600 dark:text-slate-400">
+                  هنوز نسخه پشتیبانی در مسیر سرور ایجاد نشده است.
+                </p>
+                <button
+                  onClick={() => handleCreateFullBackup(false)}
+                  className="px-4 py-2 bg-blue-600 text-white text-xs font-bold rounded-xl"
+                >
+                  تهیه اولین نسخه پشتیبان کامل
+                </button>
               </div>
+            ) : (
+              <div className="space-y-4">
+                {serverBackups.map((bk) => {
+                  const isVerifying = activeActionId === `verify_${bk.backupId}`;
+                  const isTesting = activeActionId === `test_${bk.backupId}`;
+                  return (
+                    <div
+                      key={bk.backupId}
+                      className="border border-slate-200 dark:border-slate-800 rounded-xl p-4 hover:border-blue-400/60 transition-all bg-slate-50/40 dark:bg-slate-800/30 space-y-3"
+                    >
+                      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                        <div className="space-y-1.5">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <code className="text-sm font-black font-mono text-slate-900 dark:text-white" dir="ltr">
+                              {bk.backupId}
+                            </code>
+                            {tagBadge(bk.tag)}
+                            {bk.encrypted && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                                <Lock className="w-3 h-3" />
+                                AES-256-GCM
+                              </span>
+                            )}
+                            {bk.verified && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700/60">
+                                <CheckCircle2 className="w-3 h-3" />
+                                تأیید شده SHA-256
+                              </span>
+                            )}
+                            {bk.lastTestRestoreStatus === 'PASSED' && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-bold bg-cyan-100 text-cyan-800 dark:bg-cyan-900/40 dark:text-cyan-300 border border-cyan-300 dark:border-cyan-700/60">
+                                <FlaskConical className="w-3 h-3" />
+                                تست ایزوله موفق (Sandbox Verified)
+                              </span>
+                            )}
+                          </div>
 
-              <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-                {isFa 
-                  ? 'در صورت تغییر تجهیزات یا ورود با مرورگر جدید، اطلاعات ثبت شده در سرور مرکزی را بازخوانی و فعال می‌نماید.'
-                  : 'Fetches database records to hydrate cache when switching devices or clearing browser storage.'}
-              </p>
+                          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-600 dark:text-slate-400">
+                            <span>
+                              تاریخ: <strong className="text-slate-800 dark:text-slate-200">{bk.persianDate}</strong>
+                            </span>
+                            <span>
+                              محتوا:{' '}
+                              <strong className="text-slate-800 dark:text-slate-200">
+                                {bk.tableCount} جدول • {bk.totalRows.toLocaleString()} رکورد • {bk.filesCount} فایل پیوست ({formatBytes(bk.filesTotalBytes)})
+                              </strong>
+                            </span>
+                            <span>
+                              حجم آرشیو فشرده:{' '}
+                              <strong className="text-slate-800 dark:text-slate-200 font-mono">
+                                {formatBytes(bk.archiveSizeBytes || 0)}
+                              </strong>
+                            </span>
+                            <span>
+                              ایجادکننده:{' '}
+                              <strong className="text-slate-800 dark:text-slate-200">
+                                {bk.createdBy?.fullName || bk.createdBy?.username}
+                              </strong>
+                            </span>
+                          </div>
 
-              <button
-                type="button"
-                onClick={handlePullFromCloud}
-                disabled={isCloudSyncing}
-                className="w-full py-3 bg-slate-800 hover:bg-slate-900 dark:bg-slate-700 dark:hover:bg-slate-600 text-white font-black text-xs rounded-xl transition cursor-pointer flex items-center justify-center gap-2"
-              >
-                <Cloud className="w-4 h-4" />
-                <span>{isFa ? 'فراخوانی و بازنشانی از پایگاه داده' : 'Pull from Database'}</span>
-              </button>
-            </div>
+                          <div className="text-[11px] text-slate-500 font-mono flex flex-wrap items-center gap-4" dir="ltr">
+                            <span>SHA-256: {bk.archiveSha256 || bk.payloadSha256}</span>
+                            {bk.storagePath && <span>Path: {bk.storagePath}</span>}
+                          </div>
+                        </div>
 
+                        {/* Actions */}
+                        <div className="flex flex-wrap items-center gap-2 shrink-0">
+                          <button
+                            onClick={() => handleVerifyServerBackup(bk.backupId)}
+                            disabled={isVerifying}
+                            className="px-3 py-2 text-xs font-bold bg-white dark:bg-slate-800 hover:bg-slate-100 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-lg flex items-center gap-1.5"
+                            title="بررسی مجدد چک‌سام SHA-256 و ساختار فایل"
+                          >
+                            <ShieldCheck className={`w-3.5 h-3.5 text-emerald-600 ${isVerifying ? 'animate-spin' : ''}`} />
+                            <span>اعتبارسنجی SHA-256</span>
+                          </button>
+
+                          <button
+                            onClick={() => handleRunIsolatedTestRestore(bk.backupId)}
+                            disabled={isTesting}
+                            className="px-3 py-2 text-xs font-bold bg-cyan-50 hover:bg-cyan-100 dark:bg-cyan-950/50 border border-cyan-300 dark:border-cyan-800 text-cyan-800 dark:text-cyan-200 rounded-lg flex items-center gap-1.5"
+                            title="اجرای بازیابی آزمایشی واقعی در جداول موقت ایزوله PostgreSQL بدون تغییر در داده‌های فعلی"
+                          >
+                            <FlaskConical className={`w-3.5 h-3.5 ${isTesting ? 'animate-spin' : ''}`} />
+                            <span>{isTesting ? 'در حال تست ایزوله...' : 'بازیابی آزمایشی (ایزوله)'}</span>
+                          </button>
+
+                          <button
+                            onClick={() => apiDb.downloadServerBackup(bk.backupId, 'gz')}
+                            className="px-3 py-2 text-xs font-bold bg-white dark:bg-slate-800 hover:bg-slate-100 border border-slate-200 dark:border-slate-700 text-blue-600 dark:text-blue-400 rounded-lg flex items-center gap-1.5"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                            <span>دانلود آرشیو</span>
+                          </button>
+
+                          <button
+                            onClick={() => {
+                              setRestoreMode('merge');
+                              setRestoreConfirmInput('');
+                              setRestoreConfirmModal({
+                                source: 'server',
+                                backupId: bk.backupId,
+                                fileName: bk.fileName,
+                                totalRows: bk.totalRows,
+                                tablesCount: bk.tableCount,
+                                filesCount: bk.filesCount,
+                                sha256: bk.archiveSha256 || bk.payloadSha256,
+                              });
+                            }}
+                            className="px-3 py-2 text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-lg flex items-center gap-1.5 shadow-sm"
+                          >
+                            <ArchiveRestore className="w-3.5 h-3.5" />
+                            <span>بازیابی واقعی</span>
+                          </button>
+
+                          <button
+                            onClick={() => setDeleteConfirmBackupId(bk.backupId)}
+                            className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg border border-transparent hover:border-red-200"
+                            title="حذف نسخه پشتیبان"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
-
-          <div className="p-4 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-800 rounded-2xl text-xs space-y-2">
-            <span className="font-black text-slate-700 dark:text-slate-200 block">
-              {isFa ? 'مشخصات معماری پایگاه داده متصل:' : 'Connected Database Configuration:'}
-            </span>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 font-mono text-[11px] text-slate-500 dark:text-slate-400" dir="ltr">
-              <div className="bg-white dark:bg-slate-900 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800">
-                <span className="text-slate-400 text-[10px] block">Database Engine:</span>
-                <span className="font-bold text-slate-800 dark:text-slate-200 truncate block">Relational Database Engine</span>
-              </div>
-              <div className="bg-white dark:bg-slate-900 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800">
-                <span className="text-slate-400 text-[10px] block">Primary Tables:</span>
-                <span className="font-bold text-slate-800 dark:text-slate-200 block">users, trir_records, heat_logs, warnings, ptw</span>
-              </div>
-              <div className="bg-white dark:bg-slate-900 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800">
-                <span className="text-slate-400 text-[10px] block">Replication Mode:</span>
-                <span className="font-bold text-emerald-600 dark:text-emerald-400 block">Direct Relational + SSE</span>
-              </div>
-            </div>
-          </div>
-
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* 3. INTELLIGENT RESTORE ENGINE TAB (PRE-INSPECTION)                        */}
-      {/* ========================================================================= */}
+      {/* ===================================================================== */}
+      {/* TAB 3: UPLOAD EXTERNAL BACKUP FILE & PRE-FLIGHT SANDBOX RESTORE       */}
+      {/* ===================================================================== */}
       {activeSubTab === 'restore' && (
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 md:p-7 shadow-xs space-y-6 animate-in fade-in duration-200">
-          
-          <div className="border-b border-slate-100 dark:border-slate-800 pb-4">
-            <h4 className="text-sm font-black text-slate-800 dark:text-slate-100 flex items-center gap-2">
-              <Upload className="w-5 h-5 text-emerald-600" />
-              <span>{isFa ? 'موتور هوشمند بازیابی اطلاعات با بازرسی اولیه (Pre-Restore Inspection)' : 'Intelligent Database Restore & Inspection'}</span>
-            </h4>
-            <p className="text-xs text-slate-400 font-medium mt-0.5">
-              {isFa 
-                ? 'بارگذاری فایل‌های پشتیبان .json یا .sql با اعتبارسنجی ساختار داده‌ها، نمایش پیش‌نمایش رکوردها و انتخاب استراتژی بازیابی' 
-                : 'Upload .json or .sql backup files with automated pre-validation before executing'}
-            </p>
+        <div className="space-y-6">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-sm space-y-6">
+            <div className="flex items-start gap-3">
+              <div className="p-3 rounded-xl bg-amber-500/10 text-amber-600 shrink-0">
+                <Upload className="w-6 h-6" />
+              </div>
+              <div>
+                <h4 className="text-base font-black text-slate-900 dark:text-white">
+                  بارگذاری فایل پشتیبان، بازرسی امنیتی SHA-256 و بازیابی آزمایشی ایزوله
+                </h4>
+                <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                  فایل پشتیبان (`.hsebackup.json.gz`، `.json` یا `.sql`) را انتخاب کنید. سامانه پیش از هرگونه تغییر در پایگاه داده اصلی، ابتدا فایل را در <strong>محیط ایزوله تراکنشی PostgreSQL Sandbox</strong> بازیابی آزمایشی کرده و سلامت تمام جداول، کلیدهای خارجی و فایل‌های پیوست را گزارش می‌دهد.
+                </p>
+              </div>
+            </div>
+
+            <label className="block border-2 border-dashed border-blue-400/60 dark:border-blue-700/60 hover:border-blue-600 bg-blue-50/30 dark:bg-blue-950/20 rounded-2xl p-8 text-center cursor-pointer transition-all">
+              <input
+                type="file"
+                accept=".gz,.json,.sql"
+                onChange={handleUploadFileChange}
+                className="hidden"
+              />
+              <div className="w-14 h-14 rounded-2xl bg-blue-600/10 text-blue-600 flex items-center justify-center mx-auto mb-3">
+                {isInspectingUpload ? (
+                  <RefreshCw className="w-7 h-7 animate-spin" />
+                ) : (
+                  <Upload className="w-7 h-7" />
+                )}
+              </div>
+              <p className="text-sm font-black text-slate-800 dark:text-slate-100">
+                {isInspectingUpload
+                  ? 'در حال اعتبارسنجی SHA-256 و اجرای بازیابی آزمایشی ایزوله در سرور...'
+                  : 'برای انتخاب فایل پشتیبان (.hsebackup.json.gz ، .json یا .sql) کلیک کنید'}
+              </p>
+              <p className="text-xs text-slate-500 mt-1">
+                پشتیبانی کامل از آرشیوهای فشرده Gzip، رمزنگاری‌شده AES-256-GCM و اسکریپت‌های SQL
+              </p>
+            </label>
+
+            {uploadedFilePayload && (
+              <div className="border-2 border-slate-200 dark:border-slate-700 rounded-2xl p-5 space-y-5 bg-slate-50/50 dark:bg-slate-800/40">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 dark:border-slate-700 pb-4">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-black text-slate-900 dark:text-white" dir="ltr">
+                        {uploadedFilePayload.fileName}
+                      </span>
+                      <span className="text-xs font-mono px-2 py-0.5 bg-slate-200 dark:bg-slate-700 rounded">
+                        {uploadedFilePayload.fileSize}
+                      </span>
+                      {uploadedFilePayload.testRestoreReport.success ? (
+                        <span className="px-2.5 py-0.5 text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                          تأیید شده در تست بازیابی ایزوله
+                        </span>
+                      ) : (
+                        <span className="px-2.5 py-0.5 text-xs font-bold bg-red-100 text-red-800 border border-red-300">
+                          دارای خطای ساختار یا چک‌سام
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs font-mono text-slate-500" dir="ltr">
+                      SHA-256: {uploadedFilePayload.verification.computedArchiveSha256}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() =>
+                        setActiveReportModal({
+                          type: 'test_restore',
+                          testReport: uploadedFilePayload.testRestoreReport,
+                        })
+                      }
+                      className="px-3.5 py-2 text-xs font-bold bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-xl flex items-center gap-1.5"
+                    >
+                      <Eye className="w-4 h-4 text-blue-600" />
+                      <span>مشاهده جزئیات کامل ۵۰ جدول در Sandbox</span>
+                    </button>
+
+                    {uploadedFilePayload.testRestoreReport.success && (
+                      <button
+                        onClick={() => {
+                          setRestoreMode('merge');
+                          setRestoreConfirmInput('');
+                          setRestoreConfirmModal({
+                            source: 'upload',
+                            fileName: uploadedFilePayload.fileName,
+                            totalRows: uploadedFilePayload.testRestoreReport.totalBackupRows,
+                            tablesCount: uploadedFilePayload.testRestoreReport.tablesTested,
+                            filesCount: uploadedFilePayload.testRestoreReport.filesTested,
+                            sha256: uploadedFilePayload.verification.computedArchiveSha256,
+                          });
+                        }}
+                        className="px-4 py-2 text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-xl flex items-center gap-1.5 shadow-md"
+                      >
+                        <ArchiveRestore className="w-4 h-4" />
+                        <span>آغاز بازیابی واقعی در پایگاه داده اصلی</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Summary metrics of the sandbox test */}
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                  <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <span className="text-[11px] text-slate-500 block">جداول آزمایش‌شده</span>
+                    <span className="text-base font-black text-slate-900 dark:text-white font-mono">
+                      {uploadedFilePayload.testRestoreReport.tablesTested} جدول
+                    </span>
+                  </div>
+                  <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <span className="text-[11px] text-slate-500 block">رکوردهای بازیابی‌شده در Sandbox</span>
+                    <span className="text-base font-black text-emerald-600 font-mono">
+                      {uploadedFilePayload.testRestoreReport.totalSandboxRestoredRows.toLocaleString()} /{' '}
+                      {uploadedFilePayload.testRestoreReport.totalBackupRows.toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <span className="text-[11px] text-slate-500 block">تست یکپارچگی کلیدهای خارجی</span>
+                    <span className="text-base font-black text-blue-600 font-mono">
+                      {uploadedFilePayload.testRestoreReport.foreignKeysChecked} رابطه (بدون خطا)
+                    </span>
+                  </div>
+                  <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <span className="text-[11px] text-slate-500 block">فایل‌های پیوست بررسی‌شده</span>
+                    <span className="text-base font-black text-cyan-600 font-mono">
+                      {uploadedFilePayload.testRestoreReport.filesTested} فایل
+                    </span>
+                  </div>
+                  <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <span className="text-[11px] text-slate-500 block">زمان اجرای تست ایزوله</span>
+                    <span className="text-base font-black text-slate-800 dark:text-slate-200 font-mono">
+                      {uploadedFilePayload.testRestoreReport.durationMs} ms
+                    </span>
+                  </div>
+                </div>
+
+                {uploadedFilePayload.testRestoreReport.errors.length > 0 && (
+                  <div className="bg-red-50 dark:bg-red-950/40 border border-red-300 dark:border-red-800 rounded-xl p-4 space-y-1">
+                    <div className="text-xs font-bold text-red-800 dark:text-red-300">
+                      خطاهای شناسایی‌شده در اعتبارسنجی یا محیط ایزوله:
+                    </div>
+                    {uploadedFilePayload.testRestoreReport.errors.map((err, i) => (
+                      <div key={i} className="text-xs text-red-700 dark:text-red-300">
+                        • {err}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* TAB 4: SCHEDULE & RETENTION POLICY                                    */}
+      {/* ===================================================================== */}
+      {activeSubTab === 'schedule' && (
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-sm space-y-6">
+          <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-xl bg-purple-500/10 text-purple-600">
+                <Clock className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="text-base font-black text-slate-900 dark:text-white">
+                  زمان‌بندی خودکار پشتیبان‌گیری سرور و سیاست نگهداری نسخه‌ها (Retention Policy)
+                </h4>
+                <p className="text-xs text-slate-500">
+                  تنظیم دوره اجرای خودکار در پس‌زمینه سرور و حذف کنترل‌شده قدیمی‌ترین نسخه‌های منقضی‌شده
+                </p>
+              </div>
+            </div>
           </div>
 
-          {/* File Upload Drop Zone */}
-          <div className="p-8 border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-emerald-500 dark:hover:border-emerald-500 rounded-3xl text-center space-y-4 bg-slate-50/50 dark:bg-slate-800/30 transition">
-            <div className="w-14 h-14 mx-auto rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center border border-emerald-200 dark:border-emerald-800/50">
-              <Upload className="w-7 h-7" />
-            </div>
-
-            <div className="space-y-1">
-              <h5 className="text-sm font-black text-slate-800 dark:text-slate-100">
-                {isFa ? 'فایل پشتیبان (.json یا .sql) را اینجا رها کنید یا کلیک نمایید' : 'Drag & Drop Backup File (.json or .sql) or Click to Browse'}
-              </h5>
-              <p className="text-xs text-slate-400">
-                {isFa ? 'پشتیبانی کامل از دامپ‌های دیتابیس و پکیج‌های جامع JSON سیستم' : 'Supports SQL database dumps and structured JSON snapshots'}
-              </p>
-            </div>
-
-            <div>
-              <label className="inline-flex items-center gap-2 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-xl shadow-md shadow-emerald-600/20 transition cursor-pointer">
-                <Search className="w-4 h-4" />
-                <span>{isFa ? 'انتخاب فایل از سیستم' : 'Choose File'}</span>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-4">
+              <label className="flex items-center justify-between p-4 rounded-xl border border-slate-200 dark:border-slate-700 cursor-pointer">
+                <div>
+                  <span className="text-sm font-bold text-slate-800 dark:text-slate-200 block">
+                    فعال‌سازی زمان‌بند خودکار سرور (Background Cron Scheduler)
+                  </span>
+                  <span className="text-xs text-slate-500">
+                    اجرای خودکار پشتیبان‌گیری کامل بدون نیاز به حضور کاربر در مرورگر
+                  </span>
+                </div>
                 <input
-                  type="file"
-                  accept=".json,.sql"
-                  onChange={handleFileSelectedForInspection}
-                  className="hidden"
+                  type="checkbox"
+                  checked={scheduleEnabled}
+                  onChange={(e) => setScheduleEnabled(e.target.checked)}
+                  className="w-5 h-5 accent-blue-600 rounded"
+                />
+              </label>
+
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block">
+                  دوره تناوب پشتیبان‌گیری خودکار
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {[
+                    { id: 'daily', label: 'روزانه (هر ۲۴ ساعت)' },
+                    { id: 'weekly', label: 'هفتگی (هر ۷ روز)' },
+                    { id: 'monthly', label: 'ماهانه (هر ۳۰ روز)' },
+                    { id: 'manual', label: 'فقط دستی' },
+                  ].map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => setScheduleFrequency(opt.id as any)}
+                      className={`p-3 rounded-xl border text-xs font-bold transition-all ${
+                        scheduleFrequency === opt.id
+                          ? 'bg-blue-600 text-white border-blue-600'
+                          : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block">
+                  حداکثر تعداد نسخه‌های نگهداری‌شده در سرور (Retention Count):{' '}
+                  <strong className="text-blue-600 font-mono">{retentionCount} نسخه</strong>
+                </label>
+                <input
+                  type="range"
+                  min={2}
+                  max={50}
+                  value={retentionCount}
+                  onChange={(e) => setRetentionCount(Number(e.target.value))}
+                  className="w-full accent-blue-600"
+                />
+                <p className="text-[11px] text-slate-500">
+                  در صورت عبور تعداد نسخه‌ها از این سقف، قدیمی‌ترین نسخه‌های منقضی‌شده به‌صورت کنترل‌شده حذف می‌شوند (نسخه‌های ایمنی پیش از بازیابی حفظ می‌گردند).
+                </p>
+              </div>
+
+              <label className="flex items-center justify-between p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 cursor-pointer">
+                <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                  رمزنگاری خودکار نسخه‌های زمان‌بندی‌شده با الگوریتم AES-256-GCM
+                </span>
+                <input
+                  type="checkbox"
+                  checked={encryptScheduledBackups}
+                  onChange={(e) => setEncryptScheduledBackups(e.target.checked)}
+                  className="w-4 h-4 accent-amber-600 rounded"
+                />
+              </label>
+
+              <label className="flex items-center justify-between p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 cursor-pointer">
+                <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                  ثبت رویداد در لاگ ممیزی و ارسال اعلان به مدیر سیستم پس از هر پشتیبان‌گیری
+                </span>
+                <input
+                  type="checkbox"
+                  checked={notifyAdminOnBackup}
+                  onChange={(e) => setNotifyAdminOnBackup(e.target.checked)}
+                  className="w-4 h-4 accent-blue-600 rounded"
                 />
               </label>
             </div>
           </div>
 
-          {/* Pre-Restore Inspection Modal / View */}
-          {inspectionReport && (
-            <div className="p-5 border border-emerald-300 dark:border-emerald-800 rounded-2xl bg-emerald-50/20 dark:bg-emerald-950/20 space-y-5 animate-in zoom-in-95 duration-150">
-              
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-emerald-200/60 dark:border-emerald-800/60 pb-3">
-                <div className="flex items-center gap-2.5">
-                  <ShieldCheck className="w-5 h-5 text-emerald-600" />
-                  <div>
-                    <h5 className="text-xs font-black text-slate-800 dark:text-slate-100">
-                      {isFa ? 'گزارش بازرسی و اعتبارسنجی فایل پشتیبان' : 'Pre-Restore Inspection Report'}
-                    </h5>
-                    <span className="text-[11px] text-slate-400 font-mono" dir="ltr">
-                      {inspectionReport.fileName} ({inspectionReport.fileSize})
-                    </span>
-                  </div>
-                </div>
-
-                <span className="px-3 py-1 rounded-full text-xs font-bold font-mono bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200 self-start sm:self-auto">
-                  {inspectionReport.format}
-                </span>
-              </div>
-
-              {/* Detected Tables Grid */}
-              <div className="space-y-2">
-                <span className="text-xs font-black text-slate-700 dark:text-slate-200 block">
-                  {isFa ? 'جداول و رکوردهای کشف‌شده در فایل:' : 'Detected Relational Tables & Records:'}
-                </span>
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
-                  {inspectionReport.detectedTables.map((t, idx) => (
-                    <div key={idx} className="p-2.5 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs">
-                      <span className="font-bold text-slate-700 dark:text-slate-200">{t.labelFa}</span>
-                      <span className="font-mono font-black text-emerald-600 dark:text-emerald-400">{t.count}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Restore Strategy Selection */}
-              <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-3">
-                <span className="text-xs font-black text-slate-700 dark:text-slate-200 block">
-                  {isFa ? 'انتخاب استراتژی اعمال بازیابی:' : 'Select Restore Strategy:'}
-                </span>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                  <label className={`p-3 rounded-xl border cursor-pointer flex items-start gap-2.5 ${
-                    restoreMode === 'merge'
-                      ? 'border-emerald-500 bg-emerald-50/50 dark:bg-emerald-950/40 text-emerald-950 dark:text-emerald-200'
-                      : 'border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300'
-                  }`}>
-                    <input
-                      type="radio"
-                      name="restore_mode"
-                      value="merge"
-                      checked={restoreMode === 'merge'}
-                      onChange={() => setRestoreMode('merge')}
-                      className="mt-0.5 text-emerald-600 accent-emerald-600 cursor-pointer"
-                    />
-                    <div>
-                      <strong className="block font-black mb-0.5">{isFa ? 'ادغام و به‌روزرسانی هوشمند (Merge & Upsert)' : 'Smart Merge & Upsert'}</strong>
-                      <span className="text-[11px] text-slate-400 leading-tight block">
-                        {isFa ? 'رکوردهای موجود حفظ شده و رکوردهای مشترک یا جدید فایل به‌روزرسانی می‌شوند.' : 'Keeps existing records and updates matching identifiers.'}
-                      </span>
-                    </div>
-                  </label>
-
-                  <label className={`p-3 rounded-xl border cursor-pointer flex items-start gap-2.5 ${
-                    restoreMode === 'clean'
-                      ? 'border-rose-500 bg-rose-50/50 dark:bg-rose-950/40 text-rose-950 dark:text-rose-200'
-                      : 'border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300'
-                  }`}>
-                    <input
-                      type="radio"
-                      name="restore_mode"
-                      value="clean"
-                      checked={restoreMode === 'clean'}
-                      onChange={() => setRestoreMode('clean')}
-                      className="mt-0.5 text-rose-600 accent-rose-600 cursor-pointer"
-                    />
-                    <div>
-                      <strong className="block font-black mb-0.5">{isFa ? 'بازنویسی کامل و تمیز (Clean Overwrite)' : 'Clean Overwrite (Truncate & Insert)'}</strong>
-                      <span className="text-[11px] text-slate-400 leading-tight block">
-                        {isFa ? 'جداول فعلی پاکسازی شده و دقیقاً با محتوای این فایل جایگزین خواهند شد.' : 'Truncates existing tables and recreates from backup snapshot.'}
-                      </span>
-                    </div>
-                  </label>
-                </div>
-
-                <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
-                  <label className="flex items-center gap-2 text-xs font-bold text-slate-600 dark:text-slate-300 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={createPreRestoreRollback}
-                      onChange={(e) => setCreatePreRestoreRollback(e.target.checked)}
-                      className="w-4 h-4 rounded text-emerald-600 accent-emerald-600 cursor-pointer"
-                    />
-                    <span>{isFa ? 'ایجاد خودکار نقطه بازگشت اضطراری (Emergency Rollback Checkpoint) پیش از شروع' : 'Create automatic emergency rollback checkpoint before restoring'}</span>
-                  </label>
-                </div>
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex items-center justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={() => setInspectionReport(null)}
-                  className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-bold rounded-xl cursor-pointer"
-                >
-                  {isFa ? 'انصراف' : 'Cancel'}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleExecuteRestore}
-                  disabled={isRestoring}
-                  className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-xl shadow-md shadow-emerald-600/20 transition cursor-pointer flex items-center gap-2 disabled:opacity-50"
-                >
-                  <Check className={`w-4 h-4 ${isRestoring ? 'animate-spin' : ''}`} />
-                  <span>{isRestoring ? (isFa ? 'در حال بازیابی اطلاعات...' : 'Restoring...') : (isFa ? 'تایید و اجرای نهایی بازیابی' : 'Execute Restore')}</span>
-                </button>
-              </div>
-
-            </div>
-          )}
-
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* 4. AUTOMATED SCHEDULE POLICY TAB                                          */}
-      {/* ========================================================================= */}
-      {activeSubTab === 'schedule' && (
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 md:p-7 shadow-xs space-y-6 animate-in fade-in duration-200">
-          
-          <div className="border-b border-slate-100 dark:border-slate-800 pb-4">
-            <h4 className="text-sm font-black text-slate-800 dark:text-slate-100 flex items-center gap-2">
-              <Clock className="w-5 h-5 text-purple-600" />
-              <span>{isFa ? 'سیاست‌گذاری و زمان‌بندی خودکار پشتیبان‌گیری (Automated Schedule Policy)' : 'Automated Backup Schedule Policy'}</span>
-            </h4>
-            <p className="text-xs text-slate-400 font-medium mt-0.5">
-              {isFa 
-                ? 'تعیین تناوب زمانی، مقصد ذخیره‌سازی، سیاست نگهداری (Retention) و اعلان‌های خودکار سیستم' 
-                : 'Configure automated backup intervals, storage targets, and retention rules'}
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-600 dark:text-slate-400 block">
-                {isFa ? 'تناوب زمانی پشتیبان‌گیری خودکار *' : 'Backup Frequency *'}
-              </label>
-              <select
-                value={scheduleFrequency}
-                onChange={(e) => setScheduleFrequency(e.target.value as any)}
-                className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-800 dark:text-slate-100 focus:outline-none"
-              >
-                <option value="manual">{isFa ? 'دستی (فقط به درخواست مدیر)' : 'Manual Only'}</option>
-                <option value="daily">{isFa ? 'روزانه (هر شب ساعت ۲۴:۰۰)' : 'Daily at 00:00'}</option>
-                <option value="weekly">{isFa ? 'هفتگی (جمعه‌ها ساعت ۲۳:۰۰)' : 'Weekly on Fridays'}</option>
-                <option value="monthly">{isFa ? 'ماهانه (پایان هر ماه شمسی)' : 'Monthly'}</option>
-              </select>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-600 dark:text-slate-400 block">
-                {isFa ? 'مقصد ذخیره‌سازی پیش‌فرض *' : 'Target Storage Medium *'}
-              </label>
-              <select
-                value={scheduleTarget}
-                onChange={(e) => setScheduleTarget(e.target.value as any)}
-                className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-800 dark:text-slate-100 focus:outline-none"
-              >
-                <option value="server">{isFa ? 'سرور پایگاه داده (پیشنهادی)' : 'Database Server (Recommended)'}</option>
-                <option value="browser">{isFa ? 'دانلود مستقیم در مرورگر کاربر' : 'Client Browser Download'}</option>
-              </select>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-600 dark:text-slate-400 block">
-                {isFa ? 'سیاست نگهداری (Retention Policy) *' : 'Retention History Count *'}
-              </label>
-              <select
-                value={retentionCount}
-                onChange={(e) => setRetentionCount(parseInt(e.target.value, 10))}
-                className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-800 dark:text-slate-100 focus:outline-none"
-              >
-                <option value={5}>{isFa ? 'نگهداری آخرین ۵ نسخه' : 'Keep last 5 snapshots'}</option>
-                <option value={10}>{isFa ? 'نگهداری آخرین ۱۰ نسخه (استاندارد)' : 'Keep last 10 snapshots'}</option>
-                <option value={30}>{isFa ? 'نگهداری آخرین ۳۰ نسخه' : 'Keep last 30 snapshots'}</option>
-              </select>
-            </div>
-
-          </div>
-
-          <div className="p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 rounded-2xl">
-            <label className="flex items-center gap-2.5 text-xs font-bold text-slate-700 dark:text-slate-200 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={notifyAdminOnBackup}
-                onChange={(e) => setNotifyAdminOnBackup(e.target.checked)}
-                className="w-4 h-4 rounded text-purple-600 accent-purple-600 cursor-pointer"
-              />
-              <span>{isFa ? 'ارسال پیامک و گزارش اعلان به مدیر سیستم پس از اتمام موفق یا بروز خطای پشتیبان‌گیری' : 'Dispatch notification to system administrator upon backup completion or failure'}</span>
-            </label>
-          </div>
-
-          <div className="flex justify-end">
+          <div className="flex justify-end pt-4 border-t border-slate-100 dark:border-slate-800">
             <button
-              type="button"
-              onClick={handleSaveScheduleConfig}
-              className="px-6 py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-black text-xs rounded-xl shadow-md shadow-purple-600/20 transition cursor-pointer"
+              onClick={handleSaveSchedule}
+              disabled={activeActionId === 'save_schedule'}
+              className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-md flex items-center gap-2"
             >
-              {isFa ? 'ذخیره سیاست زمان‌بندی' : 'Save Policy Settings'}
+              <Check className="w-4 h-4" />
+              <span>ذخیره و اعمال سیاست زمان‌بندی و نگهداری</span>
             </button>
           </div>
-
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* 5. AUDIT HISTORY & SNAPSHOTS TABLE TAB                                    */}
-      {/* ========================================================================= */}
+      {/* ===================================================================== */}
+      {/* TAB 5: BACKUP & RESTORE AUDIT HISTORY                                 */}
+      {/* ===================================================================== */}
       {activeSubTab === 'history' && (
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 md:p-7 shadow-xs space-y-5 animate-in fade-in duration-200">
-          
-          <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
-            <div>
-              <h4 className="text-sm font-black text-slate-800 dark:text-slate-100 flex items-center gap-2">
-                <FileText className="w-5 h-5 text-rose-500" />
-                <span>{isFa ? 'تاریخچه و لاگ عملیات‌های پشتیبان‌گیری و بازیابی' : 'Audit Trail & Snapshot History'}</span>
-              </h4>
-              <p className="text-xs text-slate-400 font-medium mt-0.5">
-                {isFa ? 'ثبت غیرقابل دستکاری کلیه عملیات‌های خروجی، بازیابی و همگام‌سازی ابری با ذکر اپراتور' : 'Detailed operational audit of snapshots and database restorations'}
-              </p>
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-sm space-y-4">
+          <h4 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
+            <FileText className="w-5 h-5 text-blue-600" />
+            <span>تاریخچه کامل عملیات پشتیبان‌گیری و بازیابی ثبت‌شده در پایگاه داده</span>
+          </h4>
+
+          {(overview?.backupHistory || []).length === 0 ? (
+            <div className="text-center py-10 text-xs text-slate-500">
+              هنوز سابقه عملیاتی ثبت نشده است.
             </div>
-
-            <button
-              type="button"
-              onClick={() => {
-                if (!window.confirm(isFa ? 'آیا از پاکسازی تاریخچه لاگ‌های پشتیبان اطمینان دارید؟' : 'Clear history?')) return;
-                setBackupHistory([]);
-                localStorage.removeItem('hse_backup_history_v2');
-              }}
-              className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-slate-500 hover:text-rose-600 text-xs font-bold rounded-xl transition cursor-pointer flex items-center gap-1"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>{isFa ? 'پاکسازی تاریخچه' : 'Clear'}</span>
-            </button>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-right text-xs">
-              <thead>
-                <tr className="border-b border-slate-200 dark:border-slate-800 text-slate-400 font-bold">
-                  <th className="pb-3 px-3">#</th>
-                  <th className="pb-3 px-3">{isFa ? 'تاریخ و ساعت' : 'Timestamp'}</th>
-                  <th className="pb-3 px-3">{isFa ? 'نوع عملیات' : 'Action Type'}</th>
-                  <th className="pb-3 px-3">{isFa ? 'فرمت / پروتکل' : 'Format'}</th>
-                  <th className="pb-3 px-3">{isFa ? 'تعداد رکورد' : 'Records'}</th>
-                  <th className="pb-3 px-3">{isFa ? 'حجم' : 'Size'}</th>
-                  <th className="pb-3 px-3">{isFa ? 'اپراتور' : 'Operator'}</th>
-                  <th className="pb-3 px-3">{isFa ? 'وضعیت' : 'Status'}</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
-                {backupHistory.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} className="py-8 text-center text-slate-400">
-                      {isFa ? 'هیچ رکوردی در تاریخچه ثبت نشده است.' : 'No audit history logged.'}
-                    </td>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-right text-xs border-collapse">
+                <thead>
+                  <tr className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-b border-slate-200 dark:border-slate-700">
+                    <th className="p-3 font-bold">شناسه عملیات</th>
+                    <th className="p-3 font-bold">زمان ثبت</th>
+                    <th className="p-3 font-bold">نوع عملیات</th>
+                    <th className="p-3 font-bold">قالب / حالت</th>
+                    <th className="p-3 font-bold">تعداد رکورد / فایل</th>
+                    <th className="p-3 font-bold">حجم</th>
+                    <th className="p-3 font-bold">چک‌سام SHA-256</th>
+                    <th className="p-3 font-bold">اپراتور</th>
+                    <th className="p-3 font-bold">وضعیت</th>
                   </tr>
-                ) : (
-                  backupHistory.map((item, index) => (
-                    <tr key={item.id || index} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition">
-                      <td className="py-3 px-3 text-slate-400 font-mono text-[11px]">{index + 1}</td>
-                      <td className="py-3 px-3 font-mono font-bold text-slate-700 dark:text-slate-200">{item.ts}</td>
-                      <td className="py-3 px-3">
-                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
-                          item.type === 'Backup' 
-                            ? 'bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300' 
-                            : item.type === 'Restore' 
-                            ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300' 
-                            : 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300'
-                        }`}>
-                          {item.type === 'Backup' ? (isFa ? 'پشتیبان‌گیری' : 'Backup') : item.type === 'Restore' ? (isFa ? 'بازیابی' : 'Restore') : (isFa ? 'همگام‌سازی ابری' : 'Cloud Sync')}
-                        </span>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {(overview?.backupHistory || []).map((h) => (
+                    <tr key={h.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                      <td className="p-3 font-mono font-bold text-slate-800 dark:text-slate-200" dir="ltr">
+                        {h.id}
                       </td>
-                      <td className="py-3 px-3 font-mono text-[11px] text-slate-600 dark:text-slate-300">{item.format}</td>
-                      <td className="py-3 px-3 font-mono text-slate-700 dark:text-slate-200">{item.recordCount || '—'}</td>
-                      <td className="py-3 px-3 font-mono text-slate-500">{item.size}</td>
-                      <td className="py-3 px-3 font-bold text-slate-700 dark:text-slate-300">{item.operator}</td>
-                      <td className="py-3 px-3">
-                        <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-bold text-[11px]">
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>{isFa ? 'موفق' : 'Success'}</span>
+                      <td className="p-3 text-slate-600 dark:text-slate-400">{h.ts}</td>
+                      <td className="p-3 font-bold">
+                        {h.type === 'Restore' ? (
+                          <span className="text-amber-600">بازیابی (Restore)</span>
+                        ) : (
+                          <span className="text-blue-600">پشتیبان‌گیری (Backup)</span>
+                        )}
+                      </td>
+                      <td className="p-3 text-slate-600 dark:text-slate-400">{h.format}</td>
+                      <td className="p-3 font-mono">
+                        {(h.recordCount || 0).toLocaleString()} رکورد
+                        {h.filesCount !== undefined ? ` • ${h.filesCount} فایل` : ''}
+                      </td>
+                      <td className="p-3 font-mono" dir="ltr">
+                        {h.size}
+                      </td>
+                      <td className="p-3 font-mono text-slate-500" dir="ltr">
+                        {h.sha256 || '—'}
+                      </td>
+                      <td className="p-3 font-bold text-slate-700 dark:text-slate-300">{h.operator}</td>
+                      <td className="p-3">
+                        <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 font-bold text-[11px]">
+                          موفق و تأییدشده
                         </span>
                       </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
+      {/* ===================================================================== */}
+      {/* MODAL 1: ISOLATED TEST RESTORE / VERIFICATION DETAILED REPORT         */}
+      {/* ===================================================================== */}
+      {activeReportModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl max-w-5xl w-full max-h-[88vh] flex flex-col overflow-hidden">
+            <div className="p-5 bg-slate-900 text-white flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <FlaskConical className="w-6 h-6 text-cyan-400" />
+                <div>
+                  <h4 className="text-base font-black">
+                    {activeReportModal.type === 'test_restore'
+                      ? 'گزارش کامل بازیابی آزمایشی ایزوله (PostgreSQL Sandbox Dry-Run)'
+                      : 'گزارش اعتبارسنجی رمزنگاری‌شده SHA-256 و ساختار پشتیبان'}
+                  </h4>
+                  <p className="text-xs text-slate-300 font-mono" dir="ltr">
+                    Backup ID:{' '}
+                    {activeReportModal.testReport?.backupId ||
+                      activeReportModal.verificationReport?.backupId}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setActiveReportModal(null)}
+                className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto space-y-6 text-xs">
+              {activeReportModal.testReport && (
+                <>
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                    <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                      <span className="text-slate-500 block mb-1">نتیجه نهایی تست ایزوله</span>
+                      <span
+                        className={`text-sm font-black ${
+                          activeReportModal.testReport.success ? 'text-emerald-600' : 'text-red-600'
+                        }`}
+                      >
+                        {activeReportModal.testReport.success
+                          ? 'موفق (۱۰۰٪ منطبق)'
+                          : 'ناموفق (دارای خطا)'}
+                      </span>
+                    </div>
+                    <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                      <span className="text-slate-500 block mb-1">جداول تست‌شده در Sandbox</span>
+                      <span className="text-sm font-black font-mono">
+                        {activeReportModal.testReport.tablesTested} جدول
+                      </span>
+                    </div>
+                    <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                      <span className="text-slate-500 block mb-1">رکوردهای بازیابی‌شده آزمایشی</span>
+                      <span className="text-sm font-black font-mono text-blue-600">
+                        {activeReportModal.testReport.totalSandboxRestoredRows.toLocaleString()} از{' '}
+                        {activeReportModal.testReport.totalBackupRows.toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                      <span className="text-slate-500 block mb-1">بررسی کلیدهای خارجی (FK)</span>
+                      <span className="text-sm font-black font-mono text-emerald-600">
+                        {activeReportModal.testReport.foreignKeysChecked} رابطه (
+                        {activeReportModal.testReport.foreignKeyViolations} خطا)
+                      </span>
+                    </div>
+                    <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                      <span className="text-slate-500 block mb-1">فایل‌های پیوست تست‌شده</span>
+                      <span className="text-sm font-black font-mono text-cyan-600">
+                        {activeReportModal.testReport.filesTested} فایل (
+                        {formatBytes(activeReportModal.testReport.filesBytesTested)})
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Cryptographic Hash Comparison */}
+                  <div className="bg-slate-900 text-slate-200 p-4 rounded-xl font-mono space-y-1.5" dir="ltr">
+                    <div className="text-emerald-400 font-bold">
+                      Cryptographic SHA-256 Integrity Check:
+                    </div>
+                    <div>
+                      Archive SHA-256 (Computed):{' '}
+                      {activeReportModal.testReport.verificationReport.computedArchiveSha256}
+                    </div>
+                    <div>
+                      Payload SHA-256 (Computed):{' '}
+                      {activeReportModal.testReport.verificationReport.computedPayloadSha256}
+                    </div>
+                    <div>
+                      Isolation Method: {activeReportModal.testReport.isolatedMode} (Duration:{' '}
+                      {activeReportModal.testReport.durationMs}ms)
+                    </div>
+                  </div>
+
+                  {/* Physical Files Comparison */}
+                  {activeReportModal.testReport.fileComparison.length > 0 && (
+                    <div className="space-y-2">
+                      <h5 className="font-black text-slate-900 dark:text-white">
+                        تطابق فایل‌های فیزیکی پیوست (`uploads/`):
+                      </h5>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        {activeReportModal.testReport.fileComparison.map((f, idx) => (
+                          <div
+                            key={idx}
+                            className="p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 flex items-center justify-between"
+                          >
+                            <span className="font-mono truncate max-w-[180px]" dir="ltr">
+                              {f.fileName}
+                            </span>
+                            <span className="text-emerald-600 font-bold">
+                              {formatBytes(f.sizeBytes)} • {f.sha256Match ? 'SHA-256 OK' : 'MISMATCH'}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 50-Table Comparison */}
+                  <div className="space-y-2">
+                    <h5 className="font-black text-slate-900 dark:text-white">
+                      جدول مقایسه رکوردهای نسخه پشتیبان، محیط ایزوله Sandbox و پایگاه داده زنده ({activeReportModal.testReport.tableComparison.length} جدول):
+                    </h5>
+                    <div className="max-h-72 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-xl">
+                      <table className="w-full text-right border-collapse">
+                        <thead className="bg-slate-100 dark:bg-slate-800 sticky top-0">
+                          <tr>
+                            <th className="p-2.5 font-bold">نام جدول در پایگاه داده</th>
+                            <th className="p-2.5 font-bold">تعداد در پشتیبان</th>
+                            <th className="p-2.5 font-bold">بازیابی‌شده در Sandbox ایزوله</th>
+                            <th className="p-2.5 font-bold">تعداد فعلی در دیتابیس زنده</th>
+                            <th className="p-2.5 font-bold">وضعیت تطابق</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                          {activeReportModal.testReport.tableComparison.map((row) => (
+                            <tr key={row.tableName}>
+                              <td className="p-2.5 font-bold text-slate-800 dark:text-slate-200">
+                                {TABLE_FA_LABELS[row.tableName] || row.tableName}
+                              </td>
+                              <td className="p-2.5 font-mono font-bold">{row.backupRows}</td>
+                              <td className="p-2.5 font-mono font-bold text-blue-600">
+                                {row.sandboxRestoredRows}
+                              </td>
+                              <td className="p-2.5 font-mono text-slate-500">{row.liveRows}</td>
+                              <td className="p-2.5">
+                                {row.status === 'OK' ? (
+                                  <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 font-bold text-[11px]">
+                                    تأیید شده (OK)
+                                  </span>
+                                ) : (
+                                  <span className="px-2 py-0.5 bg-red-100 text-red-800 font-bold text-[11px]">
+                                    {row.error || 'عدم تطابق'}
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {activeReportModal.type === 'verification' && activeReportModal.verificationReport && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                      <span className="text-slate-500 block">وضعیت کلی چک‌سام</span>
+                      <span
+                        className={`text-sm font-black ${
+                          activeReportModal.verificationReport.valid
+                            ? 'text-emerald-600'
+                            : 'text-red-600'
+                        }`}
+                      >
+                        {activeReportModal.verificationReport.valid ? 'معتبر (VALID)' : 'نامعتبر (INVALID)'}
+                      </span>
+                    </div>
+                    <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                      <span className="text-slate-500 block">جداول بررسی‌شده</span>
+                      <span className="text-sm font-black font-mono">
+                        {activeReportModal.verificationReport.tablesVerified} جدول
+                      </span>
+                    </div>
+                    <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                      <span className="text-slate-500 block">رکوردهای بررسی‌شده</span>
+                      <span className="text-sm font-black font-mono">
+                        {activeReportModal.verificationReport.rowsVerified.toLocaleString()} رکورد
+                      </span>
+                    </div>
+                    <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                      <span className="text-slate-500 block">فایل‌های پیوست</span>
+                      <span className="text-sm font-black font-mono">
+                        {activeReportModal.verificationReport.filesVerified} فایل
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-900 text-slate-200 p-4 rounded-xl font-mono space-y-1.5" dir="ltr">
+                    <div>
+                      Expected Archive SHA-256:{' '}
+                      {activeReportModal.verificationReport.expectedArchiveSha256}
+                    </div>
+                    <div>
+                      Computed Archive SHA-256:{' '}
+                      {activeReportModal.verificationReport.computedArchiveSha256}
+                    </div>
+                    <div>
+                      Computed Payload SHA-256:{' '}
+                      {activeReportModal.verificationReport.computedPayloadSha256}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="p-4 border-t border-slate-200 dark:border-slate-800 flex justify-end">
+              <button
+                onClick={() => setActiveReportModal(null)}
+                className="px-5 py-2 bg-slate-800 text-white text-xs font-bold rounded-xl"
+              >
+                بستن گزارش
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* MODAL 2: MANDATORY PRE-RESTORE CONFIRMATION MODAL                     */}
+      {/* ===================================================================== */}
+      {restoreConfirmModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border-2 border-amber-500 rounded-2xl shadow-2xl max-w-xl w-full overflow-hidden">
+            <div className="p-5 bg-amber-600 text-white flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <AlertTriangle className="w-6 h-6" />
+                <h4 className="text-base font-black">
+                  تأیید نهایی بازیابی اطلاعات در پایگاه داده اصلی
+                </h4>
+              </div>
+              <button
+                onClick={() => setRestoreConfirmModal(null)}
+                className="p-1 rounded-lg bg-white/10 hover:bg-white/20"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4 text-xs">
+              <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 p-4 rounded-xl space-y-1.5 text-amber-900 dark:text-amber-200">
+                <div className="font-black">تضمین‌های امنیتی پیش از اجرای بازیابی:</div>
+                <div>
+                  ۱. ابتدا نسخه پشتیبان در محیط ایزوله PostgreSQL آزمایش می‌شود.
+                </div>
+                <div>
+                  ۲. به‌طور خودکار یک <strong>نسخه پشتیبان ایمنی (pre_restore_safety)</strong> از وضعیت فعلی سامانه ذخیره می‌گردد.
+                </div>
+                <div>
+                  ۳. تمام عملیات در یک تراکنش اتمیک (`BEGIN ... COMMIT`) اجرا شده و در صورت بروز هرگونه خطا، به‌صورت کامل `ROLLBACK` می‌شود.
+                </div>
+              </div>
+
+              <div className="space-y-1 bg-slate-100 dark:bg-slate-800 p-3.5 rounded-xl">
+                <div>
+                  فایل / شناسه نسخه:{' '}
+                  <strong className="font-mono" dir="ltr">
+                    {restoreConfirmModal.backupId || restoreConfirmModal.fileName}
+                  </strong>
+                </div>
+                <div>
+                  محتوای قابل بازیابی:{' '}
+                  <strong>
+                    {restoreConfirmModal.tablesCount} جدول •{' '}
+                    {restoreConfirmModal.totalRows.toLocaleString()} رکورد •{' '}
+                    {restoreConfirmModal.filesCount} فایل پیوست
+                  </strong>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="font-bold text-slate-800 dark:text-slate-200 block">
+                  انتخاب استراتژی بازیابی:
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setRestoreMode('merge')}
+                    className={`p-3 rounded-xl border text-right transition-all ${
+                      restoreMode === 'merge'
+                        ? 'bg-blue-50 border-blue-600 dark:bg-blue-950/40'
+                        : 'border-slate-200 dark:border-slate-700'
+                    }`}
+                  >
+                    <div className="font-black text-slate-900 dark:text-white">
+                      ادغام هوشمند (Merge / Upsert) — پیشنهادی
+                    </div>
+                    <div className="text-[11px] text-slate-500 mt-0.5">
+                      حفظ رکوردهای جدیدتر فعلی و به‌روزرسانی/افزودن رکوردهای موجود در پشتیبان
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setRestoreMode('clean')}
+                    className={`p-3 rounded-xl border text-right transition-all ${
+                      restoreMode === 'clean'
+                        ? 'bg-red-50 border-red-600 dark:bg-red-950/40'
+                        : 'border-slate-200 dark:border-slate-700'
+                    }`}
+                  >
+                    <div className="font-black text-red-700 dark:text-red-400">
+                      جایگزینی کامل (Clean Replace)
+                    </div>
+                    <div className="text-[11px] text-slate-500 mt-0.5">
+                      پاکسازی رکوردهای فعلی جداول و بازگردانی دقیق به نقطه زمانی نسخه پشتیبان
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="font-bold text-slate-800 dark:text-slate-200 block">
+                  برای تأیید و آغاز عملیات، عبارت <code className="text-red-600 font-mono">RESTORE</code> را وارد نمایید:
+                </label>
+                <input
+                  type="text"
+                  value={restoreConfirmInput}
+                  onChange={(e) => setRestoreConfirmInput(e.target.value)}
+                  placeholder="RESTORE"
+                  dir="ltr"
+                  className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-mono font-bold text-center tracking-widest"
+                />
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-50 dark:bg-slate-800/60 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-3">
+              <button
+                onClick={() => setRestoreConfirmModal(null)}
+                disabled={isRestoring}
+                className="px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-300"
+              >
+                انصراف
+              </button>
+              <button
+                onClick={handleConfirmAndExecuteRestore}
+                disabled={isRestoring || restoreConfirmInput.trim().toUpperCase() !== 'RESTORE'}
+                className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 disabled:bg-slate-300 text-white text-xs font-bold rounded-xl flex items-center gap-2"
+              >
+                {isRestoring ? (
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                ) : (
+                  <KeyRound className="w-4 h-4" />
+                )}
+                <span>
+                  {isRestoring
+                    ? 'در حال تهیه پشتیبان ایمنی و بازیابی تراکنشی...'
+                    : 'تأیید و اجرای بازیابی واقعی'}
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* MODAL 3: CONTROLLED DELETE CONFIRMATION                               */}
+      {/* ===================================================================== */}
+      {deleteConfirmBackupId && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl max-w-md w-full p-6 space-y-4">
+            <div className="flex items-center gap-3 text-red-600">
+              <Trash2 className="w-6 h-6" />
+              <h4 className="text-base font-black">حذف کنترل‌شده نسخه پشتیبان</h4>
+            </div>
+            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+              آیا از حذف نسخه پشتیبان{' '}
+              <code className="font-mono font-bold text-slate-900 dark:text-white" dir="ltr">
+                {deleteConfirmBackupId}
+              </code>{' '}
+              از فضای ذخیره‌سازی سرور اطمینان دارید؟ این رویداد در لاگ ممیزی ثبت خواهد شد.
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                onClick={() => setDeleteConfirmBackupId(null)}
+                className="px-4 py-2 text-xs font-bold text-slate-600"
+              >
+                انصراف
+              </button>
+              <button
+                onClick={() => handleDeleteBackup(deleteConfirmBackupId)}
+                disabled={activeActionId === `delete_${deleteConfirmBackupId}`}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-xl"
+              >
+                تأیید و حذف نسخه
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

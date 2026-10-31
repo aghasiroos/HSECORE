@@ -53,9 +53,193 @@ export function extractShamsiYear(dateStr?: string | number): number | null {
   return null;
 }
 
+export function mergeOccHealthV2Data(
+  occData: any,
+  baseRecords: PeriodicMedicalRecord[],
+  baseExams: PeriodicMedicalExam[]
+): { records: PeriodicMedicalRecord[]; exams: PeriodicMedicalExam[]; rawOccExams: any[] } {
+  const recordsMap = new Map<string, PeriodicMedicalRecord>();
+  baseRecords.forEach(r => {
+    if (r && r.id) recordsMap.set(r.id, r);
+  });
+
+  const examsMap = new Map<string, PeriodicMedicalExam>();
+  baseExams.forEach(e => {
+    if (e && e.id) examsMap.set(e.id, e);
+  });
+
+  const rawExams: any[] = Array.isArray(occData?.examinations) ? occData.examinations : [];
+  const pMap: Record<string, any> = occData?.personnelMap && typeof occData.personnelMap === 'object' ? occData.personnelMap : {};
+
+  rawExams.forEach((raw, idx) => {
+    if (!raw) return;
+    const pInfo = (raw.personnel_id && pMap[raw.personnel_id]) ? pMap[raw.personnel_id] : {};
+    const pcode = String(raw.pcode || pInfo.pcode || raw.nid || pInfo.nid || raw.personnel_id || raw.id || `EMP-${idx + 1}`).trim();
+    const nid = String(raw.nid || pInfo.nid || pcode).trim();
+    const fname = String(raw.fname || pInfo.fname || '').trim();
+    const lname = String(raw.lname || pInfo.lname || '').trim();
+    const fullName = `${fname} ${lname}`.trim() || `پرسنل ${pcode}`;
+    const company = String(raw.company || pInfo.company || 'عملیات').trim();
+    const examYear = Number(raw.exam_year) || extractShamsiYear(raw.exam_date) || getCurrentShamsiYear();
+
+    let existingRec = Array.from(recordsMap.values()).find(
+      r =>
+        String(r.employeeCode).trim().toLowerCase() === pcode.toLowerCase() ||
+        (nid && String(r.nationalCode).trim().toLowerCase() === nid.toLowerCase())
+    );
+
+    if (!existingRec) {
+      const recId = `med-rec-occ-${pcode}`;
+      existingRec = {
+        id: recId,
+        employeeId: String(raw.personnel_id || pcode),
+        employeeCode: pcode,
+        nationalCode: nid,
+        firstName: fname || fullName,
+        lastName: lname,
+        fullName,
+        department: company,
+        jobTitle: String(raw.job_title || 'پرسنل عملیاتی'),
+        birthDate: '',
+        age: Number(raw.age || pInfo.age) || 35,
+        phone: '',
+        maritalStatus: String(raw.marital || pInfo.marital || ''),
+        isComplete: true,
+        chronicConditions: [raw.dis_nonocc_known, raw.dis_occ_known, raw.dis_nonocc_new, raw.dis_occ_new]
+          .filter(Boolean)
+          .map((c, i) => ({
+            id: `cc-${pcode}-${i}`,
+            conditionName: String(c),
+            diagnosedYear: examYear,
+            treatmentStatus: 'تحت پایش'
+          })),
+        createdAt: String(raw.exam_date || `${examYear}/01/01`),
+        updatedAt: String(raw.exam_date || `${examYear}/01/01`),
+        createdBy: 'سامانه طب کار',
+        updatedBy: 'سامانه طب کار'
+      };
+      recordsMap.set(recId, existingRec);
+    }
+
+    const duplicateExam = Array.from(examsMap.values()).find(
+      e =>
+        (String(e.employeeCode).trim().toLowerCase() === pcode.toLowerCase() || e.recordId === existingRec!.id) &&
+        Number(e.examYear) === examYear
+    );
+
+    const opinion = String(raw.final_opinion || '').trim();
+    let status: MedicalExamStatus = 'fit';
+    if (opinion.includes('عدم صلاحیت') || opinion.includes('نامناسب')) {
+      status = 'unfit';
+    } else if (opinion.includes('مشروط') || (raw.final_conditions && String(raw.final_conditions).trim())) {
+      status = 'fit_with_limitations';
+    } else if (opinion.includes('ارجاع') || raw.final_followup_needed === 'بله' || raw.ref1_type) {
+      status = 'needs_specialist';
+    } else if (opinion.includes('بلامانع') || opinion.includes('مناسب') || opinion.includes('سالم')) {
+      status = 'fit';
+    } else if (opinion) {
+      status = 'under_review';
+    }
+
+    const heightCm = Number(raw.height) || undefined;
+    const weightKg = Number(raw.weight) || undefined;
+    let bmiVal = Number(raw.bmi) || undefined;
+    if (!bmiVal && heightCm && weightKg && heightCm > 0) {
+      const hM = heightCm / 100;
+      bmiVal = Number((weightKg / (hM * hM)).toFixed(1));
+    }
+
+    const bpSys = Number(raw.bp_sys) || undefined;
+    const bpDia = Number(raw.bp_dia) || undefined;
+    const bpStr = bpSys && bpDia ? `${bpSys}/${bpDia}` : undefined;
+
+    if (!duplicateExam) {
+      const examId = String(raw.exam_id || `exam-occ-${pcode}-${examYear}`);
+      const mappedExam: PeriodicMedicalExam & Record<string, any> = {
+        id: examId,
+        recordId: existingRec.id,
+        employeeCode: pcode,
+        employeeName: fullName,
+        department: company,
+        examYear,
+        examDate: String(raw.exam_date || `${examYear}/02/15`),
+        examType: 'دوره‌ای سالانه',
+        medicalCenter: 'مرکز تخصصی طب کار',
+        doctor: String(raw.final_doctor || 'پزشک طب کار'),
+        status,
+        findings: {
+          heightCm,
+          weightKg,
+          bmi: bmiVal,
+          bloodPressure: bpStr,
+          spirometry: raw.spiro_result ? String(raw.spiro_result) : undefined,
+          audiometry: (raw.audio_r || raw.audio_l) ? `R: ${raw.audio_r || '-'} | L: ${raw.audio_l || '-'}` : undefined,
+          ecg: raw.ecg ? String(raw.ecg) : undefined,
+          bloodTests: raw.lab_abnormal_cats ? String(raw.lab_abnormal_cats) : undefined,
+          generalConclusion: opinion || 'بلامانع'
+        },
+        recommendations: [raw.final_advice, raw.nutr_advice, raw.final_conditions].filter(Boolean).join(' | '),
+        description: [raw.exam_notes, raw.final_risks, raw.final_followup_reason].filter(Boolean).join(' | '),
+        importBatchId: raw.batch_id,
+        importFileName: raw.batch_file_name,
+        importSource: 'Excel',
+        createdAt: String(raw.exam_date || `${examYear}/02/15`),
+        updatedAt: String(raw.exam_date || `${examYear}/02/15`),
+        createdBy: 'سامانه طب کار',
+        updatedBy: 'سامانه طب کار',
+        // Preserve clinical biomarkers & occupational exposures for direct analytics
+        fbs: Number(raw.fbs) || undefined,
+        chol: Number(raw.chol) || undefined,
+        tg: Number(raw.tg) || undefined,
+        hdl: Number(raw.hdl) || undefined,
+        ldl: Number(raw.ldl) || undefined,
+        ast: Number(raw.ast) || undefined,
+        alt: Number(raw.alt) || undefined,
+        hb: Number(raw.hb) || undefined,
+        bp_sys: bpSys,
+        bp_dia: bpDia,
+        haz_phys: raw.haz_phys,
+        haz_chem: raw.haz_chem,
+        haz_bio: raw.haz_bio,
+        haz_ergo: raw.haz_ergo,
+        haz_psych: raw.haz_psych,
+        haz_other: raw.haz_other,
+        final_opinion: opinion,
+        final_followup_needed: raw.final_followup_needed,
+        final_followup_date: raw.final_followup_date,
+        nutr_advice: raw.nutr_advice,
+        dis_nonocc_new: raw.dis_nonocc_new,
+        dis_nonocc_known: raw.dis_nonocc_known,
+        dis_occ_new: raw.dis_occ_new,
+        dis_occ_known: raw.dis_occ_known
+      };
+      examsMap.set(examId, mappedExam);
+    }
+  });
+
+  return {
+    records: Array.from(recordsMap.values()),
+    exams: Array.from(examsMap.values()),
+    rawOccExams: rawExams
+  };
+}
+
+function mergeById<T extends { id?: string }>(primary: T[], secondary: T[]): T[] {
+  const map = new Map<string, T>();
+  [...(primary || []), ...(secondary || [])].forEach((item, idx) => {
+    if (!item || typeof item !== 'object') return;
+    const key = item.id || `item_${idx}`;
+    if (!map.has(key)) {
+      map.set(key, item);
+    }
+  });
+  return Array.from(map.values());
+}
+
 export class HealthEnvService {
   private records: PeriodicMedicalRecord[] = [];
   private periodicExams: PeriodicMedicalExam[] = [];
+  private rawOccExams: any[] = [];
   private nonPeriodicExams: NonPeriodicMedicalExam[] = [];
   private attachments: MedicalExamAttachment[] = [];
   private envMonitoring: EnvMonitoringRecord[] = [];
@@ -70,8 +254,8 @@ export class HealthEnvService {
   constructor() {
     if (typeof window !== 'undefined') {
       window.addEventListener('app_data_mutated', (e: any) => {
-        const entity = String(e?.detail?.entityType || e?.detail?.entity || '').toLowerCase();
-        if (entity && (entity.includes('health') || entity.includes('env') || entity.includes('medical') || entity.includes('exam'))) {
+        const entity = String(e?.detail?.key || e?.detail?.entityType || e?.detail?.entity || '').toLowerCase();
+        if (!entity || entity.includes('health') || entity.includes('env') || entity.includes('medical') || entity.includes('exam') || entity.includes('occ_health')) {
           this.kpisCache.clear();
           this.reloadFromServer();
         }
@@ -89,22 +273,40 @@ export class HealthEnvService {
     this.isReloading = true;
     this.kpisCache.clear();
     try {
-      const logs = await apiDb.getEnvironmentalLogs();
-      if (logs) {
-         this.wasteRecords = logs.filter((l: any) => l.category === 'WASTE').map((l: any) => l.extraData || {});
-         this.wastewaterRecords = logs.filter((l: any) => l.category === 'WASTEWATER').map((l: any) => l.extraData || {});
-         this.airQualityRecords = logs.filter((l: any) => l.category === 'AIR_EMISSIONS').map((l: any) => l.extraData || {});
-         this.waterSoilRecords = logs.filter((l: any) => l.category === 'SOIL').map((l: any) => l.extraData || {});
-         this.envMonitoring = logs.filter((l: any) => l.category === 'MONITORING').map((l: any) => l.extraData || {});
-         this.nonConformances = logs.filter((l: any) => l.category === 'NON_CONFORMANCE').map((l: any) => l.extraData || {});
+      const [logs, settings] = await Promise.all([
+        apiDb.getEnvironmentalLogs().catch(() => []),
+        apiDb.getSystemSettings().catch(() => ({} as Record<string, any>))
+      ]);
+
+      const logWaste = Array.isArray(logs) ? logs.filter((l: any) => l.category === 'WASTE').map((l: any) => l.extraData || {}).filter((x: any) => x && x.id) : [];
+      const logWastewater = Array.isArray(logs) ? logs.filter((l: any) => l.category === 'WASTEWATER').map((l: any) => l.extraData || {}).filter((x: any) => x && x.id) : [];
+      const logAir = Array.isArray(logs) ? logs.filter((l: any) => l.category === 'AIR_EMISSIONS').map((l: any) => l.extraData || {}).filter((x: any) => x && x.id) : [];
+      const logSoil = Array.isArray(logs) ? logs.filter((l: any) => l.category === 'SOIL').map((l: any) => l.extraData || {}).filter((x: any) => x && x.id) : [];
+      const logMonitoring = Array.isArray(logs) ? logs.filter((l: any) => l.category === 'MONITORING').map((l: any) => l.extraData || {}).filter((x: any) => x && x.id) : [];
+      const logNc = Array.isArray(logs) ? logs.filter((l: any) => l.category === 'NON_CONFORMANCE').map((l: any) => l.extraData || {}).filter((x: any) => x && x.id) : [];
+
+      this.wasteRecords = mergeById(Array.isArray(settings[STORAGE_KEYS.WASTE]) ? settings[STORAGE_KEYS.WASTE] : [], logWaste);
+      this.wastewaterRecords = mergeById(Array.isArray(settings[STORAGE_KEYS.WASTEWATER]) ? settings[STORAGE_KEYS.WASTEWATER] : [], logWastewater);
+      this.airQualityRecords = mergeById(Array.isArray(settings[STORAGE_KEYS.AIR_QUALITY]) ? settings[STORAGE_KEYS.AIR_QUALITY] : [], logAir);
+      this.waterSoilRecords = mergeById(Array.isArray(settings[STORAGE_KEYS.WATER_SOIL]) ? settings[STORAGE_KEYS.WATER_SOIL] : [], logSoil);
+      this.envMonitoring = mergeById(Array.isArray(settings[STORAGE_KEYS.ENV_MONITORING]) ? settings[STORAGE_KEYS.ENV_MONITORING] : [], logMonitoring);
+      this.nonConformances = mergeById(Array.isArray(settings[STORAGE_KEYS.NON_CONFORMANCES]) ? settings[STORAGE_KEYS.NON_CONFORMANCES] : [], logNc);
+
+      const settingRecords: PeriodicMedicalRecord[] = Array.isArray(settings[STORAGE_KEYS.RECORDS]) ? settings[STORAGE_KEYS.RECORDS] : [];
+      const settingExams: PeriodicMedicalExam[] = Array.isArray(settings[STORAGE_KEYS.EXAMS]) ? settings[STORAGE_KEYS.EXAMS] : [];
+      const occV2Data = settings['OCC_HEALTH_EXAMS_DATA_V2'];
+
+      const mergedMedical = mergeOccHealthV2Data(occV2Data, settingRecords, settingExams);
+      this.records = mergedMedical.records;
+      this.periodicExams = mergedMedical.exams;
+      this.rawOccExams = mergedMedical.rawOccExams;
+
+      if (Array.isArray(settings[STORAGE_KEYS.NON_PERIODIC_EXAMS])) {
+        this.nonPeriodicExams = settings[STORAGE_KEYS.NON_PERIODIC_EXAMS];
       }
-      
-      const settings = await apiDb.getSystemSettings();
-      if (settings[STORAGE_KEYS.EXAMS] !== undefined) this.periodicExams = settings[STORAGE_KEYS.EXAMS] || [];
-      if (settings[STORAGE_KEYS.RECORDS] !== undefined) {
-        this.records = settings[STORAGE_KEYS.RECORDS] || [];
+      if (Array.isArray(settings[STORAGE_KEYS.ATTACHMENTS])) {
+        this.attachments = settings[STORAGE_KEYS.ATTACHMENTS];
       }
-      if (settings[STORAGE_KEYS.NON_PERIODIC_EXAMS] !== undefined) this.nonPeriodicExams = settings[STORAGE_KEYS.NON_PERIODIC_EXAMS] || [];
 
       if (typeof window !== 'undefined') {
         try {
@@ -119,6 +321,10 @@ export class HealthEnvService {
     } finally {
       this.isReloading = false;
     }
+  }
+
+  public getRawOccExams(): any[] {
+    return [...this.rawOccExams];
   }
 
   private loadKey = <T>(key: string, fallback: T[]): T[] => {

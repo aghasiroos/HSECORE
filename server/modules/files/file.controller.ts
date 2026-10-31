@@ -57,7 +57,7 @@ export class FileController {
 
   async downloadFile(req: Request, res: Response) {
     const fileId = req.params.id;
-    const { file, stream } = await fileService.getFileById(fileId);
+    const { file, buffer } = await fileService.getFileBufferById(fileId);
 
     res.setHeader('Content-Type', file.mimeType);
     res.setHeader(
@@ -66,15 +66,16 @@ export class FileController {
         file.originalName
       )}`
     );
-    res.setHeader('Content-Length', file.fileSize);
+    res.setHeader('Content-Length', String(buffer.length));
+    res.setHeader('Cache-Control', 'private, no-transform, max-age=3600');
     res.setHeader('X-Content-Type-Options', 'nosniff');
 
-    stream.pipe(res);
+    res.end(buffer);
   }
 
   async previewFile(req: Request, res: Response) {
     const fileId = req.params.id;
-    const { file, stream } = await fileService.getFileById(fileId);
+    const { file, buffer } = await fileService.getFileBufferById(fileId);
 
     res.setHeader('Content-Type', file.mimeType);
     res.setHeader(
@@ -83,10 +84,11 @@ export class FileController {
         file.originalName
       )}`
     );
-    res.setHeader('Content-Length', file.fileSize);
+    res.setHeader('Content-Length', String(buffer.length));
+    res.setHeader('Cache-Control', 'private, no-transform, max-age=3600');
     res.setHeader('X-Content-Type-Options', 'nosniff');
 
-    stream.pipe(res);
+    res.end(buffer);
   }
 
   async renderPdfPage(req: Request, res: Response) {

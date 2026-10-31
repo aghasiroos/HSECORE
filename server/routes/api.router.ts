@@ -20,11 +20,16 @@ import { dashboardRouter } from './dashboard.router.ts';
 import { referralRouter } from './referral.router.ts';
 import { webhooksRouter } from './webhooks.router.ts';
 import { automationRouter } from './automation.router.ts';
+import { backupRouter } from './backup.router.ts';
+import { initBackupScheduler } from '../services/backup.service.ts';
 import { requireAuth, requireRole } from '../core/middleware/auth.ts';
 import { authController } from '../modules/auth/auth.controller.ts';
 
 export function createApiRouter(): Router {
   const router = Router();
+
+  // Initialize background backup retention & schedule monitor
+  initBackupScheduler();
 
   // ==========================================
   // Modular Monolith v1 Enterprise API Routes
@@ -32,6 +37,7 @@ export function createApiRouter(): Router {
   const v1 = Router();
   v1.use('/dashboard', dashboardRouter);
   v1.use('/settings', settingsRouter);
+  v1.use('/backup', backupRouter);
   v1.use('/webhooks', webhooksRouter);
   v1.use('/organization', organizationRouter);
   v1.use('/auth', authRoutes);
@@ -57,6 +63,7 @@ export function createApiRouter(): Router {
 
   // Mount /api/v1
   router.use('/v1', v1);
+  router.use('/backup', backupRouter);
   router.use('/webhooks', webhooksRouter);
   router.use('/automation', automationRouter);
 
@@ -101,7 +108,7 @@ export function createApiRouter(): Router {
   router.use('/ai', requireAuth, aiRoutes);
 
   // Health and medical legacy routes
-  router.use('/medical-exams', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR', 'HSE_MANAGER', 'DOCTOR_OCCUPATIONAL'), healthRoutes);
+  router.use('/medical-exams', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR', 'HSE_MANAGER', 'DOCTOR_OCCUPATIONAL', 'NUTRITIONIST', 'MEDICAL_STAFF', 'کارشناس تغذیه'), healthRoutes);
 
   // HSE submodules legacy routes
   router.use('/hse', requireAuth, hseRoutes);

@@ -133,6 +133,12 @@ async function saveToStorage(exams: any[], pMap: Record<string, any>, batches: I
     };
     // Save authoritatively to پایگاه داده database
     await apiDb.saveSetting(STORAGE_KEY, payload);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('hse_medical_data_updated'));
+      window.dispatchEvent(new CustomEvent('hse_occ_health_data_updated'));
+      window.dispatchEvent(new CustomEvent('app_data_mutated', { detail: { entity: 'medical', key: STORAGE_KEY } }));
+      window.dispatchEvent(new Event('hse_health_env_updated'));
+    }
 
     // Clean browser local storage to prevent duplicate or stale cache
     try {
@@ -228,22 +234,27 @@ export const PeriodicMedicalExamsApp: React.FC<Props> = ({ language = 'fa', curr
 
     loadData();
 
-    // Real-time synchronization across multiple clients/browsers
+    // Real-time synchronization across multiple clients/browsers with debounce
+    let debounceTimer: any = null;
     const handleRemoteChange = (e: any) => {
-      const entity = e?.detail?.entity || e?.detail?.key;
-      if (!entity || entity === STORAGE_KEY || entity === 'settings') {
-        apiDb.getSetting(STORAGE_KEY).then(data => {
-          if (data && Array.isArray(data.examinations) && isMounted) {
-            setExaminations(data.examinations || []);
-            setPersonnelMap(data.personnelMap || {});
-            setImportedBatches(data.importedBatches || []);
-          }
-        }).catch(() => {});
+      const entity = String(e?.detail?.entity || e?.detail?.key || '').toLowerCase();
+      if (entity === STORAGE_KEY.toLowerCase() || entity === 'medical') {
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          apiDb.getSetting(STORAGE_KEY).then(data => {
+            if (data && Array.isArray(data.examinations) && isMounted) {
+              setExaminations(data.examinations || []);
+              setPersonnelMap(data.personnelMap || {});
+              setImportedBatches(data.importedBatches || []);
+            }
+          }).catch(() => {});
+        }, 300);
       }
     };
     window.addEventListener('app_data_mutated', handleRemoteChange);
     return () => {
       isMounted = false;
+      if (debounceTimer) clearTimeout(debounceTimer);
       window.removeEventListener('app_data_mutated', handleRemoteChange);
     };
   }, []);
@@ -428,21 +439,27 @@ export const PeriodicMedicalExamsApp: React.FC<Props> = ({ language = 'fa', curr
     try {
       const buffer = await file.arrayBuffer();
 
-      // Attempt parsing in Web Worker for non-blocking UI
+      // Non-blocking parsing with progress updates
+      let wb: XLSX.WorkBook | null = null;
       try {
-        await workerManager.executeTask(
+        const workerRes = await workerManager.executeTask(
           'EXCEL_PARSE_MEDICAL_EXAMS',
           { fileBuffer: buffer },
           (prog, msg) => {
-            setImportStatus(`در حال پردازش ورکر: ${msg || `${prog}%`}`);
+            setImportStatus(`در حال پردازش فایل: ${msg || `${prog}%`}`);
           }
         ).promise;
+        if (workerRes?.workbook) {
+          wb = workerRes.workbook;
+        }
       } catch (workerErr) {
         console.warn('Periodic exams parsing via worker notice:', workerErr);
       }
 
       // Convert buffer with canonical health schema
-      const wb = XLSX.read(buffer, { type: 'array' });
+      if (!wb) {
+        wb = XLSX.read(buffer, { type: 'array' });
+      }
       const parseResult = parseOccupationalHealthExcel(wb);
       const objs = parseResult.records;
 
@@ -511,7 +528,7 @@ export const PeriodicMedicalExamsApp: React.FC<Props> = ({ language = 'fa', curr
           age: raw.age || null
         };
       }
-      const examYear = jalaliYear(raw.exam_date) || (raw.exam_year ? String(raw.exam_year) : '1402');
+      const examYear = jalaliYear(raw.exam_date) || (raw.exam_year ? String(raw.exam_year) : '1404');
       batchYears.add(examYear);
 
       newExams.push({

@@ -28,7 +28,11 @@ import {
   Users,
 } from 'lucide-react';
 import { useNotification } from '../../context/NotificationContext';
-import { AppNotification, getPublicAcknowledgedAlertIds } from '../../services/notificationService';
+import {
+  AppNotification,
+  CentralNotificationService,
+  getPublicAcknowledgedAlertIds,
+} from '../../services/notificationService';
 import {
   startSirenLoop,
   stopSirenLoop,
@@ -47,6 +51,7 @@ export const NotificationPopupModal: React.FC = () => {
     markAsRead,
     currentUser,
     preferences,
+    prefsLoaded,
   } = useNotification();
 
   const [ackNote, setAckNote] = useState('');
@@ -54,6 +59,7 @@ export const NotificationPopupModal: React.FC = () => {
   const [showNoteField, setShowNoteField] = useState(false);
   const [audioBlocked, setAudioBlocked] = useState(false);
   const [isSirenActive, setIsSirenActive] = useState(false);
+  const [isConfirmingReadiness, setIsConfirmingReadiness] = useState(false);
 
   const notif = activePopupAlert;
 
@@ -87,6 +93,13 @@ export const NotificationPopupModal: React.FC = () => {
 
   const hasSiren = Boolean(sirenDef) && (isCritical || notif?.requiresAck || Boolean(notif?.sirenType));
 
+  // Stop siren cleanly if modal component unmounts completely
+  useEffect(() => {
+    return () => {
+      stopSirenLoop();
+    };
+  }, []);
+
   // Continuous Siren Looping Effect
   useEffect(() => {
     if (!notif || isAcknowledgedByCurrentUser || !hasSiren || !preferences.soundEnabled) {
@@ -106,7 +119,8 @@ export const NotificationPopupModal: React.FC = () => {
         ? preferences.criticalHseCustomAudioUrl
         : undefined;
 
-    startSirenLoop(chosenSiren, volume, customUrl);
+    // Idempotent call: if already started by NotificationContext for this alert, continues seamlessly without restarting
+    startSirenLoop(chosenSiren, volume, customUrl, notif.title);
     setIsSirenActive(true);
 
     if (isAudioContextSuspended()) {
@@ -117,18 +131,28 @@ export const NotificationPopupModal: React.FC = () => {
 
     const handleLoopState = (e: any) => {
       if (e.detail) {
-        setIsSirenActive(e.detail.isPlaying);
+        setIsSirenActive(Boolean(e.detail.isPlaying));
+        if (typeof e.detail.audioBlocked === 'boolean') {
+          setAudioBlocked(e.detail.audioBlocked);
+        }
       }
     };
+
+    const handleAudioUnlocked = () => {
+      setAudioBlocked(false);
+      setIsSirenActive(true);
+    };
+
     window.addEventListener('hse_siren_loop_state', handleLoopState);
+    window.addEventListener('hse_audio_unlocked', handleAudioUnlocked);
 
     return () => {
-      stopSirenLoop();
-      setIsSirenActive(false);
       window.removeEventListener('hse_siren_loop_state', handleLoopState);
+      window.removeEventListener('hse_audio_unlocked', handleAudioUnlocked);
     };
   }, [
     notif?.notifId,
+    notif?.title,
     isAcknowledgedByCurrentUser,
     hasSiren,
     sirenDef?.id,
@@ -139,7 +163,69 @@ export const NotificationPopupModal: React.FC = () => {
     isCritical,
   ]);
 
-  if (!activePopupAlert) return null;
+  const needsPostLoginConfirmation = Boolean(
+    currentUser &&
+      (currentUser.id || currentUser.username) &&
+      prefsLoaded &&
+      !preferences.lockScreenSirenConfirmed &&
+      !CentralNotificationService.isLockScreenSirenConfirmed(currentUser.id || currentUser.username)
+  );
+
+  const handleConfirmFirstLoginReadiness = async () => {
+    setIsConfirmingReadiness(true);
+    try {
+      await resumeAudioContext();
+      await CentralNotificationService.confirmLockScreenSiren(currentUser);
+    } finally {
+      setIsConfirmingReadiness(false);
+    }
+  };
+
+  if (!activePopupAlert) {
+    if (!needsPostLoginConfirmation) return null;
+
+    return (
+      <div
+        className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6"
+        style={{ direction: 'rtl' }}
+        role="dialog"
+        aria-modal="true"
+      >
+        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm transition-opacity animate-in fade-in duration-200" />
+        <div className="relative w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-rose-200 dark:border-rose-900/60 p-6 space-y-5 z-10 animate-in zoom-in-95">
+          <div className="flex items-start gap-3.5">
+            <div className="w-12 h-12 rounded-2xl bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
+              <Bell className="w-6 h-6" />
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-sm sm:text-base font-black text-slate-900 dark:text-slate-100">
+                تأیید فعال‌سازی اعلان صفحه قفل و آژیر اضطراری HSE
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed font-medium">
+                جهت دریافت بلادرنگ هشدارهای فوری HSE بر روی صفحه قفل (Lock Screen) و پخش خودکار آژیر ایمنی در مواقع بحرانی، لطفاً فعال‌سازی را برای این حساب و دستگاه تأیید فرمایید. این تأییدیه ذخیره شده و مجدداً سؤال نخواهد شد.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-end pt-2 border-t border-slate-100 dark:border-slate-800">
+            <button
+              type="button"
+              disabled={isConfirmingReadiness}
+              onClick={handleConfirmFirstLoginReadiness}
+              className="w-full py-2.5 px-4 rounded-xl text-xs font-black text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-60 transition cursor-pointer shadow-md shadow-rose-600/20 flex items-center justify-center gap-2"
+            >
+              <Bell className="w-4 h-4" />
+              <span>
+                {isConfirmingReadiness
+                  ? 'در حال ثبت و فعال‌سازی...'
+                  : 'تأیید و فعال‌سازی اعلان صفحه قفل و آژیر'}
+              </span>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // Handle browser autoplay policy unblocking
   const handleUnlockAudio = async () => {
@@ -148,7 +234,7 @@ export const NotificationPopupModal: React.FC = () => {
     if (hasSiren && !isAcknowledgedByCurrentUser && preferences.soundEnabled) {
       const chosenSiren = sirenDef?.id || 'siren_evacuation';
       const volume = preferences.soundVolume || 0.85;
-      startSirenLoop(chosenSiren, volume);
+      startSirenLoop(chosenSiren, volume, undefined, notif?.title);
       setIsSirenActive(true);
     }
   };
@@ -254,40 +340,45 @@ export const NotificationPopupModal: React.FC = () => {
 
   return (
     <div
-      className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6 overflow-y-auto"
+      className="fixed inset-0 z-[99999] flex items-center justify-center p-3 sm:p-5 overflow-y-auto"
       style={{ direction: 'rtl' }}
       role="dialog"
       aria-modal="true"
     >
       {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-slate-950/75 backdrop-blur-md transition-opacity animate-in fade-in duration-300"
+        className="fixed inset-0 bg-slate-950/80 backdrop-blur-md transition-opacity animate-in fade-in duration-300"
         onClick={notif.requiresAck ? undefined : handleSimpleDismiss}
       />
 
       {/* Central Modal Card */}
       <div
-        className={`relative w-full max-w-xl bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border-2 transition-all duration-300 overflow-hidden z-10 animate-in zoom-in-95 ${
+        className={`relative w-full max-w-lg sm:max-w-xl md:max-w-2xl max-h-[92vh] flex flex-col bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border-2 transition-all duration-300 overflow-hidden z-10 animate-in zoom-in-95 ${
           isCritical
-            ? 'border-rose-500/80 ring-4 ring-rose-500/25 shadow-rose-950/50'
+            ? 'border-rose-500 ring-4 ring-rose-500/30 shadow-[0_0_50px_rgba(244,63,94,0.35)]'
             : isWarning
-            ? 'border-amber-500/70 ring-4 ring-amber-500/15'
+            ? 'border-amber-500 ring-4 ring-amber-500/20 shadow-[0_0_35px_rgba(245,158,11,0.25)]'
             : isError
-            ? 'border-red-500/70 ring-4 ring-red-500/15'
+            ? 'border-red-500 ring-4 ring-red-500/20 shadow-[0_0_35px_rgba(239,68,68,0.25)]'
             : isSuccess
-            ? 'border-emerald-500/70 ring-4 ring-emerald-500/15'
-            : 'border-blue-500/70 ring-4 ring-blue-500/15'
+            ? 'border-emerald-500 ring-4 ring-emerald-500/20'
+            : 'border-blue-500 ring-4 ring-blue-500/20'
         }`}
+        onClick={() => {
+          if (isAudioContextSuspended()) {
+            resumeAudioContext().catch(() => {});
+          }
+        }}
       >
         {/* Top Emergency Visual Flasher Banner for Critical Alerts */}
         {isCritical && (
-          <div className="bg-gradient-to-r from-rose-600 via-red-600 to-rose-700 text-white px-4 py-2.5 text-xs font-black flex items-center justify-between shadow-inner animate-pulse">
+          <div className="shrink-0 bg-gradient-to-r from-rose-600 via-red-600 to-rose-700 text-white px-4 py-2.5 text-xs font-black flex items-center justify-between shadow-inner animate-pulse">
             <div className="flex items-center gap-2">
               <ShieldAlert className="w-4 h-4 shrink-0 animate-bounce" />
               <span>هشدار بحرانی و وضعیت اضطراری HSE (HSE CRITICAL ALERT)</span>
             </div>
             {hasSiren && (
-              <div className="flex items-center gap-1.5 font-mono text-[10px] bg-rose-950/50 px-2.5 py-0.5 rounded-full border border-rose-400/30">
+              <div className="flex items-center gap-1.5 font-mono text-[10px] bg-rose-950/60 px-2.5 py-0.5 rounded-full border border-rose-400/30">
                 <Radio className="w-3 h-3 text-rose-300 animate-pulse" />
                 <span>پخش پیوسته آژیر</span>
               </div>
@@ -295,7 +386,7 @@ export const NotificationPopupModal: React.FC = () => {
           </div>
         )}
 
-        <div className="p-6 sm:p-7 space-y-4">
+        <div className="overflow-y-auto flex-1 p-5 sm:p-7 space-y-4">
           {/* Header row */}
           <div className="flex items-start justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-4">
             <div className="flex items-start gap-3.5">
@@ -363,7 +454,7 @@ export const NotificationPopupModal: React.FC = () => {
                   )}
                 </div>
 
-                <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-slate-100 leading-snug">
+                <h3 className="text-base sm:text-lg md:text-xl font-black text-slate-900 dark:text-slate-100 leading-snug">
                   {notif.title}
                 </h3>
               </div>
@@ -381,10 +472,10 @@ export const NotificationPopupModal: React.FC = () => {
             )}
           </div>
 
-          {/* Real-time Siren & Browser Autoplay Banner */}
+          {/* Real-time Siren Indicator (Clean, without blocking banner on login screen) */}
           {hasSiren && (
             <div className="space-y-2">
-              {audioBlocked ? (
+              {audioBlocked && currentUser ? (
                 <button
                   type="button"
                   onClick={handleUnlockAudio}
@@ -425,19 +516,48 @@ export const NotificationPopupModal: React.FC = () => {
 
           {/* Body Content */}
           <div className="space-y-3.5">
+            {/* Structured Emergency Metadata Bar (Risk Level & Publish Time) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div className={`p-3 rounded-2xl border flex items-center justify-between ${
+                isCritical
+                  ? 'bg-rose-500/10 border-rose-500/30 text-rose-900 dark:text-rose-200'
+                  : 'bg-amber-500/10 border-amber-500/30 text-amber-900 dark:text-amber-200'
+              }`}>
+                <span className="text-[11px] font-bold opacity-80">سطح خطر:</span>
+                <span className="text-xs font-black">
+                  {(notif as any).riskLevelFa ||
+                    notif.metadata?.riskLevelFa ||
+                    (isCritical
+                      ? 'بحرانی و اضطراری (سطح ۱)'
+                      : notif.priority === 'high'
+                      ? 'فوری و پرخطر (سطح ۲)'
+                      : 'هشدار ایمنی و عملیاتی')}
+                </span>
+              </div>
+
+              <div className="p-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 flex items-center justify-between">
+                <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">زمان انتشار:</span>
+                <span className="text-xs font-mono font-black text-slate-800 dark:text-slate-200">
+                  {formatPersianTime(notif.createdAt)}
+                </span>
+              </div>
+            </div>
+
             <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-100 dark:border-slate-800/80 leading-relaxed text-sm text-slate-700 dark:text-slate-200">
               <p className="whitespace-pre-line font-medium leading-relaxed">{notif.body}</p>
             </div>
 
             {/* Action Guidelines / Protective Instructions */}
-            {(notif.actionGuidelines || notif.metadata?.actionGuidelines) && (
+            {(notif.actionGuidelines || notif.metadata?.actionGuidelines || isCritical) && (
               <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl space-y-1.5 animate-in fade-in">
                 <div className="flex items-center gap-2 text-xs font-black text-amber-800 dark:text-amber-300">
                   <ShieldAlert className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400" />
-                  <span>دستورالعمل اقدام و الزامات ایمنی:</span>
+                  <span>اقدام ضروری و الزامات ایمنی:</span>
                 </div>
                 <p className="text-xs text-amber-950 dark:text-amber-100 leading-relaxed font-semibold whitespace-pre-line">
-                  {notif.actionGuidelines || notif.metadata?.actionGuidelines}
+                  {notif.actionGuidelines ||
+                    notif.metadata?.actionGuidelines ||
+                    'حفظ خونسردی، توقف فوری عملیات پرخطر، رعایت پروتکل واکنش در شرایط اضطراری (ERP) و ثبت تأیید دریافت هشدار.'}
                 </p>
               </div>
             )}
@@ -498,73 +618,73 @@ export const NotificationPopupModal: React.FC = () => {
               </div>
             )}
           </div>
+        </div>
 
-          {/* Action Buttons */}
-          <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-100 dark:border-slate-800">
-            {/* Action Link button */}
-            {notif.actionUrl ? (
-              <button
-                type="button"
-                onClick={handleNavigate}
-                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:hover:bg-blue-900/60 dark:text-blue-300 transition-colors cursor-pointer border border-blue-200 dark:border-blue-800 shadow-xs"
-              >
-                <ExternalLink className="w-4 h-4" />
-                <span>
-                  {notif.sourceModule === 'referral' || notif.sourceModule === 'signature' || notif.sourceModule === 'workflow'
-                    ? 'مشاهده سند در کارتابل و اقدام'
-                    : notif.sourceModule === 'ptw'
-                    ? 'مشاهده پروانه کار'
-                    : notif.sourceModule === 'warnings'
-                    ? 'مشاهده اخطار کتبی'
-                    : notif.sourceModule === 'incidents'
-                    ? 'مشاهده گزارش حادثه'
-                    : 'انتقال مستقیم به رکورد و ماژول'}
-                </span>
-              </button>
-            ) : (
-              <div />
-            )}
+        {/* Sticky Responsive Action Footer */}
+        <div className="shrink-0 p-4 sm:p-5 border-t border-slate-100 dark:border-slate-800 bg-slate-50/90 dark:bg-slate-900/95 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+          {/* Action Link button */}
+          {notif.actionUrl ? (
+            <button
+              type="button"
+              onClick={handleNavigate}
+              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:hover:bg-blue-900/60 dark:text-blue-300 transition-colors cursor-pointer border border-blue-200 dark:border-blue-800 shadow-xs order-2 sm:order-1"
+            >
+              <ExternalLink className="w-4 h-4 shrink-0" />
+              <span>
+                {notif.sourceModule === 'referral' || notif.sourceModule === 'signature' || notif.sourceModule === 'workflow'
+                  ? 'مشاهده سند در کارتابل و اقدام'
+                  : notif.sourceModule === 'ptw'
+                  ? 'مشاهده پروانه کار'
+                  : notif.sourceModule === 'warnings'
+                  ? 'مشاهده اخطار کتبی'
+                  : notif.sourceModule === 'incidents'
+                  ? 'مشاهده گزارش حادثه'
+                  : 'انتقال مستقیم به رکورد و ماژول'}
+              </span>
+            </button>
+          ) : (
+            <div className="hidden sm:block" />
+          )}
 
-            <div className="flex items-center gap-2.5">
-              {/* Mandatory or Optional Acknowledge Button */}
-              {notif.requiresAck ? (
-                <>
-                  {!showNoteField && (
-                    <button
-                      type="button"
-                      onClick={() => setShowNoteField(true)}
-                      className="text-xs text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 underline cursor-pointer"
-                    >
-                      افزودن یادداشت اقدام
-                    </button>
-                  )}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 order-1 sm:order-2">
+            {/* Mandatory or Optional Acknowledge Button */}
+            {notif.requiresAck ? (
+              <>
+                {!showNoteField && (
                   <button
                     type="button"
-                    onClick={handleAcknowledge}
-                    disabled={isSubmittingAck}
-                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black text-white bg-gradient-to-r from-rose-600 via-red-600 to-rose-700 hover:from-rose-700 hover:to-red-800 shadow-md hover:shadow-lg transition-all cursor-pointer disabled:opacity-50"
+                    onClick={() => setShowNoteField(true)}
+                    className="text-xs text-center text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 underline cursor-pointer py-1"
                   >
-                    <Check className="w-4 h-4 stroke-[3]" />
-                    <span>
-                      {isSubmittingAck
-                        ? 'در حال ثبت تأییدیه...'
-                        : hasSiren
-                        ? 'تأیید هشدار و قطع آژیر'
-                        : 'تأیید و اعلام آگاهی'}
-                    </span>
+                    افزودن یادداشت اقدام
                   </button>
-                </>
-              ) : (
+                )}
                 <button
                   type="button"
-                  onClick={handleSimpleDismiss}
-                  className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-xs font-black text-white bg-slate-800 hover:bg-slate-900 dark:bg-slate-700 dark:hover:bg-slate-600 transition-colors cursor-pointer shadow-sm"
+                  onClick={handleAcknowledge}
+                  disabled={isSubmittingAck}
+                  className="inline-flex items-center justify-center gap-2 px-6 py-3 sm:py-2.5 rounded-xl text-xs sm:text-sm font-black text-white bg-gradient-to-r from-rose-600 via-red-600 to-rose-700 hover:from-rose-700 hover:to-red-800 shadow-lg shadow-rose-600/25 hover:shadow-rose-600/40 transition-all cursor-pointer disabled:opacity-50 active:scale-[0.99]"
                 >
-                  <Check className="w-4 h-4" />
-                  <span>متوجه شدم</span>
+                  <Check className="w-4 h-4 stroke-[3] shrink-0" />
+                  <span>
+                    {isSubmittingAck
+                      ? 'در حال ثبت تأییدیه...'
+                      : hasSiren
+                      ? 'تأیید دریافت هشدار و قطع آژیر'
+                      : 'تأیید دریافت هشدار'}
+                  </span>
                 </button>
-              )}
-            </div>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={handleSimpleDismiss}
+                className="inline-flex items-center justify-center gap-1.5 px-6 py-2.5 rounded-xl text-xs font-black text-white bg-slate-800 hover:bg-slate-900 dark:bg-slate-700 dark:hover:bg-slate-600 transition-colors cursor-pointer shadow-sm"
+              >
+                <Check className="w-4 h-4 shrink-0" />
+                <span>متوجه شدم</span>
+              </button>
+            )}
           </div>
         </div>
       </div>

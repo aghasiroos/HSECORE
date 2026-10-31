@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
-import { eq, and, isNull, desc } from 'drizzle-orm';
+import { eq, and, isNull, desc, sql } from 'drizzle-orm';
 import { db, schema } from '../../core/db.ts';
 import { config } from '../../core/config.ts';
 import { NotFoundError, ValidationError, ForbiddenError } from '../../core/errors.ts';
@@ -176,6 +176,12 @@ export function verifyActualFileSignature(buffer: Buffer): {
   return { valid: false };
 }
 
+function sanitizeMetadataForClient(metadata: any): any {
+  if (!metadata || typeof metadata !== 'object') return {};
+  const { contentBase64, ...rest } = metadata;
+  return rest;
+}
+
 export class FileService {
   async saveFile(params: {
     entityType: string;
@@ -235,6 +241,11 @@ export class FileService {
     // 3. Safe unique file naming to prevent collisions and path traversal
     const fileId = uuidv4();
     const storedName = `${fileId}${safeExt}`;
+    if (!fs.existsSync(config.security.uploadDir)) {
+      try {
+        fs.mkdirSync(config.security.uploadDir, { recursive: true });
+      } catch {}
+    }
     const safeTargetPath = path.join(config.security.uploadDir, storedName);
 
     // Prevent directory traversal
@@ -252,6 +263,11 @@ export class FileService {
     fs.writeFileSync(safeTargetPath, params.fileBuffer);
 
     const versionNumber = params.version && params.version > 0 ? params.version : 1;
+    const dbMetadata = {
+      ...(params.metadata && typeof params.metadata === 'object' ? params.metadata : {}),
+      contentBase64: params.fileBuffer.toString('base64'),
+    };
+    const clientMetadata = sanitizeMetadataForClient(dbMetadata);
 
     const record: SystemFileDTO = {
       id: inMemoryFiles.length + 1,
@@ -268,7 +284,7 @@ export class FileService {
       uploaderRole: params.uploaderRole,
       version: versionNumber,
       isPublic: params.isPublic || false,
-      metadata: params.metadata || {},
+      metadata: clientMetadata,
       createdAt: new Date().toISOString(),
     };
 
@@ -289,7 +305,7 @@ export class FileService {
           uploaderRole: record.uploaderRole,
           version: record.version,
           isPublic: record.isPublic,
-          metadata: record.metadata,
+          metadata: dbMetadata,
         })
         .returning();
 
@@ -301,7 +317,7 @@ export class FileService {
       logger.warn('System file database insert warning, keeping in fallback store', e);
     }
 
-    inMemoryFiles.unshift(record);
+    inMemoryFiles.unshift({ ...record, metadata: dbMetadata });
 
     await auditService.log({
       action: 'UPLOAD_FILE',
@@ -320,8 +336,9 @@ export class FileService {
     return record;
   }
 
-  async getFileById(fileId: string): Promise<{ file: SystemFileDTO; stream: fs.ReadStream }> {
+  async getFileBufferById(fileId: string): Promise<{ file: SystemFileDTO; buffer: Buffer }> {
     let fileMeta: SystemFileDTO | undefined = inMemoryFiles.find((f) => f.fileId === fileId);
+    let rawMetadata: any = fileMeta?.metadata;
 
     try {
       const [dbFile] = await db
@@ -330,6 +347,7 @@ export class FileService {
         .where(and(eq(schema.systemFiles.fileId, fileId), isNull(schema.systemFiles.deletedAt)));
 
       if (dbFile) {
+        rawMetadata = dbFile.metadata;
         fileMeta = {
           id: dbFile.id,
           fileId: dbFile.fileId,
@@ -345,25 +363,107 @@ export class FileService {
           uploaderRole: dbFile.uploaderRole || undefined,
           version: dbFile.version,
           isPublic: dbFile.isPublic,
-          metadata: dbFile.metadata,
+          metadata: sanitizeMetadataForClient(dbFile.metadata),
           createdAt: dbFile.createdAt.toISOString(),
         };
       }
-    } catch (e) {
+    } catch {
       // Fallback
+    }
+
+    if (!fileMeta) {
+      const candidateDirs = [
+        config.security.uploadDir,
+        path.resolve(process.cwd(), 'uploads'),
+        path.resolve(process.cwd(), 'data', 'uploads'),
+      ];
+      for (const dir of candidateDirs) {
+        const directPdf = path.join(dir, `${fileId}.pdf`);
+        const directGeneric = path.join(dir, fileId);
+        const chosenPath = fs.existsSync(directPdf)
+          ? directPdf
+          : fs.existsSync(directGeneric)
+          ? directGeneric
+          : null;
+        if (chosenPath) {
+          const stats = fs.statSync(chosenPath);
+          fileMeta = {
+            id: 0,
+            fileId,
+            entityType: 'document',
+            entityId: fileId,
+            originalName: `${fileId}.pdf`,
+            storedName: path.basename(chosenPath),
+            mimeType: 'application/pdf',
+            fileSize: stats.size,
+            filePath: chosenPath,
+            version: 1,
+            isPublic: true,
+            createdAt: stats.birthtime.toISOString(),
+          };
+          break;
+        }
+      }
     }
 
     if (!fileMeta) {
       throw new NotFoundError('فایل درخواستی در سامانه پیدا نشد.');
     }
 
-    if (!fs.existsSync(fileMeta.filePath)) {
-      throw new NotFoundError('محتوای فیزیکی فایل بر روی سرور موجود نیست.');
+    // Resolve physical path across possible upload directory mounts (Docker / Host / Relative)
+    const candidatePaths = [
+      fileMeta.filePath,
+      fileMeta.storedName ? path.join(config.security.uploadDir, path.basename(fileMeta.storedName)) : '',
+      fileMeta.storedName ? path.resolve(process.cwd(), 'uploads', path.basename(fileMeta.storedName)) : '',
+      fileMeta.storedName ? path.resolve(process.cwd(), 'data', 'uploads', path.basename(fileMeta.storedName)) : '',
+      fileMeta.filePath ? path.join(config.security.uploadDir, path.basename(fileMeta.filePath)) : '',
+    ].filter(Boolean);
+
+    let existingPath = candidatePaths.find((p) => {
+      try {
+        return fs.existsSync(p) && fs.statSync(p).isFile() && fs.statSync(p).size > 0;
+      } catch {
+        return false;
+      }
+    });
+
+    // Self-heal from PostgreSQL metadata.contentBase64 if container was rebuilt or disk file moved
+    if (!existingPath && rawMetadata && typeof rawMetadata.contentBase64 === 'string' && rawMetadata.contentBase64.length > 0) {
+      try {
+        const recoveredBuffer = Buffer.from(rawMetadata.contentBase64, 'base64');
+        if (recoveredBuffer.length > 0) {
+          if (!fs.existsSync(config.security.uploadDir)) {
+            fs.mkdirSync(config.security.uploadDir, { recursive: true });
+          }
+          const targetHealPath = path.join(
+            config.security.uploadDir,
+            path.basename(fileMeta.storedName || `${fileMeta.fileId}.bin`)
+          );
+          fs.writeFileSync(targetHealPath, recoveredBuffer);
+          fileMeta.filePath = targetHealPath;
+          fileMeta.fileSize = recoveredBuffer.length;
+          return { file: fileMeta, buffer: recoveredBuffer };
+        }
+      } catch (healErr) {
+        logger.warn('Failed to self-heal file from database base64 payload', healErr);
+      }
     }
 
+    if (!existingPath) {
+      throw new NotFoundError('محتوای فیزیکی فایل بر روی سرور موجود نیست. در صورت بازسازی کانتینر قبلی، لطفاً فایل نسخه جدید را جایگزین نمایید.');
+    }
+
+    fileMeta.filePath = existingPath;
+    const buffer = fs.readFileSync(existingPath);
+    fileMeta.fileSize = buffer.length;
+    return { file: fileMeta, buffer };
+  }
+
+  async getFileById(fileId: string): Promise<{ file: SystemFileDTO; stream: fs.ReadStream }> {
+    const { file } = await this.getFileBufferById(fileId);
     return {
-      file: fileMeta,
-      stream: fs.createReadStream(fileMeta.filePath),
+      file,
+      stream: fs.createReadStream(file.filePath),
     };
   }
 
@@ -412,62 +512,74 @@ export class FileService {
     }
 
     const safePage = Math.max(1, Math.min(pageNumber, totalPages));
+
+    const cacheDir = path.join('/tmp', 'pdf_cache');
+    if (!fs.existsSync(cacheDir)) {
+      try { fs.mkdirSync(cacheDir, { recursive: true }); } catch {}
+    }
+    const cachedPagePath = path.join(cacheDir, `${fileId}_p${safePage}.png`);
+    if (fs.existsSync(cachedPagePath) && fs.statSync(cachedPagePath).size > 0) {
+      return { buffer: fs.readFileSync(cachedPagePath), totalPages };
+    }
+
     const tmpPrefix = path.join('/tmp', `pdf_render_${fileId}_${Date.now()}`);
 
     try {
       let generatedPath = `${tmpPrefix}.png`;
       let rendered = false;
 
-      // Strategy 1: Ghostscript (native on Linux, fast, high fidelity 150 DPI)
+      // Strategy 1: pdftoppm (Poppler + Cairo + FreeType: flawless Persian/Arabic font shaping and ligatures)
       try {
-        await execFileAsync('gs', [
-          '-dQUIET',
-          '-dBATCH',
-          '-dNOPAUSE',
-          '-dNOSAFER',
-          '-sDEVICE=png16m',
-          `-dFirstPage=${safePage}`,
-          `-dLastPage=${safePage}`,
-          '-r150',
-          `-sOutputFile=${generatedPath}`,
+        await execFileAsync('pdftoppm', [
+          '-png',
+          '-r', '150',
+          '-f', String(safePage),
+          '-l', String(safePage),
           file.filePath,
+          tmpPrefix,
         ]);
-        if (fs.existsSync(generatedPath) && fs.statSync(generatedPath).size > 0) {
-          rendered = true;
+
+        const expectedFile1 = `${tmpPrefix}-${safePage}.png`;
+        const expectedFile2 = `${tmpPrefix}-${String(safePage).padStart(2, '0')}.png`;
+        const expectedFile3 = `${tmpPrefix}-${String(safePage).padStart(3, '0')}.png`;
+
+        if (fs.existsSync(expectedFile1)) { generatedPath = expectedFile1; rendered = true; }
+        else if (fs.existsSync(expectedFile2)) { generatedPath = expectedFile2; rendered = true; }
+        else if (fs.existsSync(expectedFile3)) { generatedPath = expectedFile3; rendered = true; }
+        else {
+          const tmpDir = '/tmp';
+          const files = fs.readdirSync(tmpDir).filter(f => f.startsWith(path.basename(tmpPrefix)) && f.endsWith('.png'));
+          if (files.length > 0) {
+            generatedPath = path.join(tmpDir, files[0]);
+            rendered = true;
+          }
         }
-      } catch (gsErr: any) {
-        logger.warn('Ghostscript rendering attempt failed, trying fallback', { error: gsErr?.message });
+      } catch (ppmErr: any) {
+        logger.warn('pdftoppm rendering attempt failed, trying Ghostscript fallback', { error: ppmErr?.message });
       }
 
-      // Strategy 2: pdftoppm (if available in environment)
+      // Strategy 2: Ghostscript (native fallback with antialiasing)
       if (!rendered) {
         try {
-          await execFileAsync('pdftoppm', [
-            '-png',
-            '-r', '150',
-            '-f', String(safePage),
-            '-l', String(safePage),
+          await execFileAsync('gs', [
+            '-dQUIET',
+            '-dBATCH',
+            '-dNOPAUSE',
+            '-dNOSAFER',
+            '-dTextAlphaBits=4',
+            '-dGraphicsAlphaBits=4',
+            '-sDEVICE=png16m',
+            `-dFirstPage=${safePage}`,
+            `-dLastPage=${safePage}`,
+            '-r150',
+            `-sOutputFile=${generatedPath}`,
             file.filePath,
-            tmpPrefix,
           ]);
-
-          const expectedFile1 = `${tmpPrefix}-${safePage}.png`;
-          const expectedFile2 = `${tmpPrefix}-${String(safePage).padStart(2, '0')}.png`;
-          const expectedFile3 = `${tmpPrefix}-${String(safePage).padStart(3, '0')}.png`;
-
-          if (fs.existsSync(expectedFile1)) { generatedPath = expectedFile1; rendered = true; }
-          else if (fs.existsSync(expectedFile2)) { generatedPath = expectedFile2; rendered = true; }
-          else if (fs.existsSync(expectedFile3)) { generatedPath = expectedFile3; rendered = true; }
-          else {
-            const tmpDir = '/tmp';
-            const files = fs.readdirSync(tmpDir).filter(f => f.startsWith(path.basename(tmpPrefix)) && f.endsWith('.png'));
-            if (files.length > 0) {
-              generatedPath = path.join(tmpDir, files[0]);
-              rendered = true;
-            }
+          if (fs.existsSync(generatedPath) && fs.statSync(generatedPath).size > 0) {
+            rendered = true;
           }
-        } catch (ppmErr: any) {
-          logger.warn('pdftoppm rendering attempt failed, trying ImageMagick', { error: ppmErr?.message });
+        } catch (gsErr: any) {
+          logger.warn('Ghostscript rendering attempt failed, trying ImageMagick fallback', { error: gsErr?.message });
         }
       }
 
@@ -493,6 +605,9 @@ export class FileService {
       }
 
       const pngBuffer = fs.readFileSync(generatedPath);
+      try {
+        fs.writeFileSync(cachedPagePath, pngBuffer);
+      } catch {}
       try {
         fs.unlinkSync(generatedPath);
       } catch {}
@@ -534,7 +649,7 @@ export class FileService {
           uploaderRole: f.uploaderRole || undefined,
           version: f.version,
           isPublic: f.isPublic,
-          metadata: f.metadata,
+          metadata: sanitizeMetadataForClient(f.metadata),
           createdAt: f.createdAt.toISOString(),
         }));
       }
@@ -542,7 +657,9 @@ export class FileService {
       // Fallback
     }
 
-    return inMemoryFiles.filter((f) => f.entityType === entityType && f.entityId === entityId);
+    return inMemoryFiles
+      .filter((f) => f.entityType === entityType && f.entityId === entityId)
+      .map((f) => ({ ...f, metadata: sanitizeMetadataForClient(f.metadata) }));
   }
 
   async softDeleteFile(fileId: string, user?: string): Promise<void> {
@@ -685,12 +802,14 @@ export class FileService {
         uploaderRole: f.uploaderRole || undefined,
         version: f.version,
         isPublic: f.isPublic,
-        metadata: f.metadata,
+        metadata: sanitizeMetadataForClient(f.metadata),
         createdAt: f.createdAt.toISOString(),
       }));
     } catch (e) {
       logger.warn('Fallback to inMemoryFiles for listHseDocuments', e);
-      rawFiles = inMemoryFiles.filter((f) => f.entityType === 'DOCUMENT');
+      rawFiles = inMemoryFiles
+        .filter((f) => f.entityType === 'DOCUMENT')
+        .map((f) => ({ ...f, metadata: sanitizeMetadataForClient(f.metadata) }));
     }
 
     let docs = this.buildHseDocumentsFromRows(rawFiles);
@@ -822,7 +941,7 @@ export class FileService {
       updatedBy: params.uploadedBy || 'کاربر سیستم',
     };
 
-    // Mark previous versions as isLatest = false in DB
+    // Mark previous versions as isLatest = false in DB while preserving contentBase64
     for (const prev of existingFiles) {
       const updatedPrevMeta = {
         ...(prev.metadata || {}),
@@ -838,10 +957,16 @@ export class FileService {
       try {
         await db
           .update(schema.systemFiles)
-          .set({ metadata: updatedPrevMeta })
+          .set({
+            metadata: sql`COALESCE(${schema.systemFiles.metadata}, '{}'::jsonb) || ${JSON.stringify(updatedPrevMeta)}::jsonb`,
+          })
           .where(eq(schema.systemFiles.fileId, prev.fileId));
       } catch (e) {
         // Ignore fallback
+      }
+      const memItem = inMemoryFiles.find((m) => m.fileId === prev.fileId);
+      if (memItem) {
+        memItem.metadata = { ...(memItem.metadata || {}), ...updatedPrevMeta };
       }
     }
 
@@ -933,7 +1058,9 @@ export class FileService {
       try {
         await db
           .update(schema.systemFiles)
-          .set({ metadata: nextMeta })
+          .set({
+            metadata: sql`COALESCE(${schema.systemFiles.metadata}, '{}'::jsonb) || ${JSON.stringify(nextMeta)}::jsonb`,
+          })
           .where(eq(schema.systemFiles.fileId, f.fileId));
       } catch (e) {
         // Fallback
@@ -941,7 +1068,7 @@ export class FileService {
 
       const memItem = inMemoryFiles.find((m) => m.fileId === f.fileId);
       if (memItem) {
-        memItem.metadata = nextMeta;
+        memItem.metadata = { ...(memItem.metadata || {}), ...nextMeta };
       }
     }
 

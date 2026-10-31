@@ -24,6 +24,7 @@ import { apiDb } from '../services/apiDatabaseClient';
 import { HseLogo } from './HseLogo';
 import { HseCoreBrandText } from './common/HseCoreBrandText';
 import { useSystemBranding, getLoginScreenBranding } from '../utils/systemBrandingHelper';
+import { resumeAudioContext } from '../utils/notificationAudio';
 
 interface LoginScreenProps {
   onLoginSuccess: (user: UserProfile) => void;
@@ -76,10 +77,28 @@ export default function LoginScreen({
     } catch {
       // Ignore storage access errors
     }
+
+    // Silently unlock audio context on initial user interaction so emergency sirens play seamlessly
+    const unlockAudio = () => {
+      resumeAudioContext().catch(() => {});
+      window.removeEventListener('click', unlockAudio);
+      window.removeEventListener('keydown', unlockAudio);
+      window.removeEventListener('touchstart', unlockAudio);
+    };
+    window.addEventListener('click', unlockAudio, { once: true });
+    window.addEventListener('keydown', unlockAudio, { once: true });
+    window.addEventListener('touchstart', unlockAudio, { once: true });
+
+    return () => {
+      window.removeEventListener('click', unlockAudio);
+      window.removeEventListener('keydown', unlockAudio);
+      window.removeEventListener('touchstart', unlockAudio);
+    };
   }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    resumeAudioContext().catch(() => {});
     setErrorMsg('');
     setInfoMsg('');
 

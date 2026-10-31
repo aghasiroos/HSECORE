@@ -66,7 +66,11 @@ async function startServer() {
     threshold: 1024,
     level: 6,
     filter: (req, res) => {
-      if (req.headers['x-no-compression']) {
+      if (
+        req.headers['x-no-compression'] ||
+        req.originalUrl.includes('/files/') ||
+        req.originalUrl.startsWith('/uploads/')
+      ) {
         return false;
       }
       return compression.filter(req, res);
@@ -508,6 +512,15 @@ async function startServer() {
     logger.error('Failed to initialize Socket.IO', err);
   }
 }
+
+// Global process resilience handlers to protect dev server pre-warming
+process.on('uncaughtException', (err) => {
+  logger.error('Uncaught Exception caught gracefully:', err);
+});
+
+process.on('unhandledRejection', (reason) => {
+  logger.error('Unhandled Promise Rejection caught gracefully:', reason);
+});
 
 startServer().catch((err) => {
   logger.error('Failed to start server', err);

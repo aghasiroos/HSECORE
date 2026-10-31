@@ -21,6 +21,7 @@ import {
   CardLayoutItem, 
   DEFAULT_DASHBOARD_CARDS_LAYOUT 
 } from '../hooks/useDashboardMetrics';
+import { medicalExamService } from '../modules/health-env/services/medicalExamService';
 import { 
   Thermometer, 
   Droplets, 
@@ -187,6 +188,60 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
     }
     return heatRecord;
   }, [heatRecord, metrics?.climate]);
+
+  // ── EXACT OCCUPATIONAL HEALTH & MEDICAL EXAMS DATA EXTRACTION ──
+  const effectiveHealthData = useMemo(() => {
+    const backendHealth = metrics?.health;
+    if (backendHealth && backendHealth.totalExams > 0 && (backendHealth.fit > 0 || backendHealth.conditional > 0 || backendHealth.unfit > 0)) {
+      return backendHealth;
+    }
+    // Live authoritative extraction directly from occupational health medical exam service
+    const liveExams = medicalExamService.getAllExams() || [];
+    if (liveExams.length > 0) {
+      let fit = 0;
+      let conditional = 0;
+      let unfit = 0;
+      liveExams.forEach(e => {
+        const text = String(
+          e.findings?.generalConclusion ||
+          e.status ||
+          e.recommendations ||
+          (e as any).final_opinion ||
+          (e as any).opinion ||
+          ''
+        ).toLowerCase();
+        if (text.includes('عدم') || text.includes('نامناسب') || e.status === 'unfit') {
+          unfit++;
+        } else if (
+          text.includes('مشروط') || 
+          text.includes('ارجاع') || 
+          e.status === 'fit_with_limitations' || 
+          e.status === 'needs_specialist' ||
+          Boolean((e as any).final_conditions) ||
+          String((e as any).final_followup_needed).trim() === 'بله'
+        ) {
+          conditional++;
+        } else {
+          fit++;
+        }
+      });
+      const total = liveExams.length;
+      return {
+        totalExams: total,
+        fit,
+        conditional,
+        unfit,
+        fitnessPercentage: total > 0 ? Math.round(((fit + conditional) / total) * 100) : 0,
+      };
+    }
+    return backendHealth || {
+      totalExams: 0,
+      fit: 0,
+      conditional: 0,
+      unfit: 0,
+      fitnessPercentage: 0,
+    };
+  }, [metrics?.health]);
 
   // Save layout directly to database (per-user or global default)
   const handleSaveLayoutToDb = useCallback(async () => {
@@ -967,7 +1022,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
       case 'card-health-chart':
         return (
           <DashboardHealthChart 
-            healthData={metrics?.health}
+            healthData={effectiveHealthData}
             isFa={isFa}
             onNavigate={onNavigate}
           />
@@ -1079,8 +1134,8 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
 
       // 23. KPI: Occupational Health Fitness Rate
       case 'kpi-health-rate':
-        const totalExamsCount = metrics?.health?.totalExams ?? 0;
-        const displayHealthRate = totalExamsCount > 0 ? `${metrics?.health?.fitnessPercentage ?? 0}%` : (isFa ? '۰%' : '0%');
+        const totalExamsCount = effectiveHealthData?.totalExams ?? 0;
+        const displayHealthRate = totalExamsCount > 0 ? `${effectiveHealthData?.fitnessPercentage ?? 0}%` : (isFa ? '۰%' : '0%');
         return (
           <div className={`bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between relative overflow-hidden transition-all duration-300 h-full min-h-[140px] ${isClickable ? 'hover:border-emerald-400 hover:shadow-md cursor-pointer group/kpi' : ''}`}>
             <div className="flex items-center justify-between">

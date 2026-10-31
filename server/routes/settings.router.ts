@@ -20,6 +20,7 @@ import {
   saveIntegrationConfigToDb,
   syncIntegrationConfigCache,
 } from '../services/webhookDispatcher.ts';
+import { invalidateDashboardCache } from './dashboard.router.ts';
 
 export const settingsRouter = Router();
 
@@ -201,6 +202,10 @@ settingsRouter.post('/:key', requireAuth, async (req, res) => {
   }
 
   try {
+    const isUnchanged =
+      memorySettingsCache[key] !== undefined &&
+      JSON.stringify(memorySettingsCache[key]) === JSON.stringify(value);
+
     await withDbRetry(() => db.insert(systemSettings)
       .values({ key, value })
       .onConflictDoUpdate({
@@ -208,9 +213,13 @@ settingsRouter.post('/:key', requireAuth, async (req, res) => {
         set: { value, updatedAt: new Date() }
       }));
     memorySettingsCache[key] = value;
-    broadcastDataMutation('settings', 'update', { key, value });
-    if (key !== 'settings') {
-      broadcastDataMutation(key, 'update', value);
+
+    if (!isUnchanged) {
+      invalidateDashboardCache();
+      broadcastDataMutation('settings', 'update', { key, value });
+      if (key !== 'settings') {
+        broadcastDataMutation(key, 'update', value);
+      }
     }
     res.json({ success: true, message: 'Setting saved successfully', key, value });
   } catch (err) {
@@ -235,6 +244,7 @@ settingsRouter.delete('/:key', requireAuth, async (req, res) => {
   try {
     await withDbRetry(() => db.delete(systemSettings).where(eq(systemSettings.key, key)));
     delete memorySettingsCache[key];
+    invalidateDashboardCache();
     broadcastDataMutation('settings', 'delete', { key });
     broadcastDataMutation(key, 'delete', null);
     res.json({ success: true, message: 'Setting deleted successfully' });

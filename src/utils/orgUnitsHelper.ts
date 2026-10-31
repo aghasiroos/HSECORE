@@ -15,6 +15,10 @@ export interface UnifiedOrgUnit {
   parentName?: string;
   fullPath?: string;
   manager?: string;
+  managerPersonnelCode?: string | null;
+  managerPersonnelId?: number | null;
+  managerJobTitle?: string | null;
+  managerNationalCode?: string | null;
   headcount?: number;
   riskLevel?: 'Low' | 'Medium' | 'High' | 'Critical';
   location?: string;
@@ -62,6 +66,10 @@ export function getUnifiedOrgUnits(): UnifiedOrgUnit[] {
       parentName: parentNode?.name,
       fullPath: parentNode?.name ? `${parentNode.name.trim()} / ${trimmedName}` : trimmedName,
       manager: node.manager,
+      managerPersonnelCode: node.managerPersonnelCode,
+      managerPersonnelId: node.managerPersonnelId,
+      managerJobTitle: node.managerJobTitle,
+      managerNationalCode: node.managerNationalCode,
       headcount: node.headcount || 0,
       location: node.location,
       status: node.status || 'active',

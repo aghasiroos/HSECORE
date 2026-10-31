@@ -65,7 +65,7 @@ export default function PdfDocumentViewer({
   const [rotation, setRotation] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<'single' | 'all'>('all'); // 'single' page or 'all' pages scrollable
+  const [viewMode, setViewMode] = useState<'single' | 'all' | 'native'>('all'); // 'single', 'all' continuous, or 'native' vector
   const [blobUrl, setBlobUrl] = useState<string>('');
   
   // High-fidelity page image cache when fileId is present
@@ -91,8 +91,10 @@ export default function PdfDocumentViewer({
       } else {
         setBlobUrl(fileData);
       }
+    } else if (fileId) {
+      setBlobUrl(`/api/v1/files/${fileId}/download`);
     }
-  }, [fileData]);
+  }, [fileData, fileId]);
 
   // Load server-rendered page images when fileId is available
   const [loadingPageMap, setLoadingPageMap] = useState<{ [pageNum: number]: boolean }>({});
@@ -202,8 +204,14 @@ export default function PdfDocumentViewer({
       } catch (err: any) {
         console.error('[PdfDocumentViewer] Error loading PDF:', err);
         if (isMounted) {
-          setError(err?.message || 'خطا در بارگذاری و پردازش فایل PDF');
-          setLoading(false);
+          if (fileData && (fileData.startsWith('blob:') || fileData.startsWith('http') || fileData.startsWith('/'))) {
+            setViewMode('native');
+            setError(null);
+            setLoading(false);
+          } else {
+            setError(err?.message || 'خطا در بارگذاری و پردازش فایل PDF');
+            setLoading(false);
+          }
         }
       }
     }
@@ -430,7 +438,7 @@ export default function PdfDocumentViewer({
           </div>
         )}
 
-        {/* View mode toggle: Continuous Scroll vs Single Page */}
+        {/* View mode toggle: Continuous Scroll vs Single Page vs Native Vector */}
         <div className="flex items-center gap-1.5 bg-slate-800 p-1 rounded-xl border border-slate-700">
           <button
             onClick={() => setViewMode('all')}
@@ -454,6 +462,20 @@ export default function PdfDocumentViewer({
             <FileText className="w-3.5 h-3.5" />
             <span>{isFa ? 'تک صفحه' : 'Single'}</span>
           </button>
+          {blobUrl && (
+            <button
+              onClick={() => setViewMode('native')}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors cursor-pointer flex items-center gap-1 ${
+                viewMode === 'native' 
+                  ? 'bg-blue-600 text-white shadow-xs' 
+                  : 'text-slate-300 hover:text-white'
+              }`}
+              title={isFa ? 'نمایش برداری با موتور مرورگر' : 'Vector Browser View'}
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+              <span>{isFa ? 'نمایش برداری' : 'Vector'}</span>
+            </button>
+          )}
         </div>
 
         {/* Right: External Open & Download */}
@@ -532,12 +554,21 @@ export default function PdfDocumentViewer({
           </div>
         )}
 
-        {!loading && !error && numPages > 0 && (
-          <>
-            {isServerRenderMode ? (
-              // ================================================================
-              // Native High-Fidelity Server Mode (Perfect Persian font shaping)
-              // ================================================================
+        {!loading && !error && (
+          viewMode === 'native' && blobUrl ? (
+            <div className="w-full h-full min-h-[720px] p-2 flex flex-col items-center">
+              <iframe
+                src={`${blobUrl}#toolbar=1&navpanes=1`}
+                className="w-full h-full min-h-[700px] rounded-xl border border-slate-700 bg-white shadow-2xl"
+                title={displayName || fileName || 'PDF Document'}
+              />
+            </div>
+          ) : numPages > 0 ? (
+            <>
+              {isServerRenderMode ? (
+                // ================================================================
+                // Native High-Fidelity Server Mode (Perfect Persian font shaping)
+                // ================================================================
               viewMode === 'single' ? (
                 <div className="flex flex-col items-center justify-center p-2 w-full">
                   <div
@@ -635,6 +666,7 @@ export default function PdfDocumentViewer({
               )
             )}
           </>
+          ) : null
         )}
       </div>
 

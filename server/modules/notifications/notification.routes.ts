@@ -4,13 +4,29 @@ import { requireAuth, requireRole } from '../../core/middleware/auth.ts';
 
 const router = Router();
 
-// 0. Public Active Emergency Alerts & Acknowledgment (Login Screen / Guest Access)
+// 0. Public Active Emergency Alerts, Web Push Subscriptions & SSE Stream (Login Screen / Guest / Lock Screen Access)
 router.get('/public/active', (req, res, next) => {
   notificationController.getPublicActiveEmergencies(req, res).catch(next);
 });
 
 router.post('/public/acknowledge', (req, res, next) => {
   notificationController.acknowledgePublic(req, res).catch(next);
+});
+
+router.get('/public/vapid-public-key', (req, res, next) => {
+  notificationController.getVapidPublicKey(req, res).catch(next);
+});
+
+router.post('/public/push-subscribe', (req, res, next) => {
+  notificationController.subscribeWebPush(req, res).catch(next);
+});
+
+router.post('/public/push-unsubscribe', (req, res, next) => {
+  notificationController.unsubscribeWebPush(req, res).catch(next);
+});
+
+router.get('/public/stream', (req, res) => {
+  notificationController.streamPublicEvents(req, res);
 });
 
 // 1. Get notifications with query parameters

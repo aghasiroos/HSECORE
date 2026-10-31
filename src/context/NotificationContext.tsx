@@ -3,11 +3,11 @@ import {
   CentralNotificationService,
   AppNotification,
   NotificationPreferences,
-  DEFAULT_PREFERENCES,
   getPublicAcknowledgedAlertIds,
+  markPublicAlertAcknowledgedLocally,
 } from '../services/notificationService';
 import { useWebSocket } from '../providers/WebSocketProvider';
-import { stopSirenLoop } from '../utils/notificationAudio';
+import { startSirenLoop, stopSirenLoop } from '../utils/notificationAudio';
 import { UserProfile } from '../types';
 
 interface NotificationContextType {
@@ -22,6 +22,7 @@ interface NotificationContextType {
   isSettingsOpen: boolean;
   isBroadcastOpen: boolean;
   isLoading: boolean;
+  prefsLoaded: boolean;
   openSettings: () => void;
   closeSettings: () => void;
   openBroadcast: () => void;
@@ -32,7 +33,7 @@ interface NotificationContextType {
   dismissPopup: (notifId: string) => void;
   markAsRead: (id: string | number) => Promise<boolean>;
   markAllAsRead: () => Promise<boolean>;
-  acknowledgeAlert: (id: string | number, note?: string) => Promise<boolean>;
+  acknowledgeAlert: (id: string | number, note?: string, acknowledgmentSource?: string) => Promise<boolean>;
   deleteNotification: (id: string | number) => Promise<boolean>;
   clearAll: () => Promise<boolean>;
   refreshNotifications: () => Promise<void>;
@@ -98,16 +99,32 @@ export const NotificationProvider: React.FC<{
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isBroadcastOpen, setIsBroadcastOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [prefsLoaded, setPrefsLoaded] = useState(false);
 
   // Set of dismissed popup notification IDs in current browser session
   const [dismissedPopupIds, setDismissedPopupIds] = useState<Set<string>>(new Set());
   const dismissedPopupIdsRef = React.useRef<Set<string>>(dismissedPopupIds);
   dismissedPopupIdsRef.current = dismissedPopupIds;
 
+  // Deduplication set for real-time incoming alerts across WebSocket + SSE + ServiceWorker Push
+  const recentlyProcessedAlertIdsRef = React.useRef<Map<string, number>>(new Map());
+
+  // Automatically register Web Push subscription if notification permission is already granted
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+      CentralNotificationService.subscribeToWebPush(currentUser).catch(() => {});
+    }
+  }, [currentUser?.id, currentUser?.username]);
+
   // Load preferences on mount, user change, and preference update events
   useEffect(() => {
-    CentralNotificationService.loadPreferences().then((p) => {
-      setPreferences(p);
+    let active = true;
+    setPrefsLoaded(false);
+    CentralNotificationService.loadPreferences(currentUser?.id || currentUser?.username).then((p) => {
+      if (active) {
+        setPreferences(p);
+        setPrefsLoaded(true);
+      }
     });
 
     const handlePrefsEvent = (e: any) => {
@@ -117,9 +134,10 @@ export const NotificationProvider: React.FC<{
     };
     window.addEventListener('hse_notif_preferences_updated', handlePrefsEvent);
     return () => {
+      active = false;
       window.removeEventListener('hse_notif_preferences_updated', handlePrefsEvent);
     };
-  }, [currentUser?.id]);
+  }, [currentUser?.id, currentUser?.username]);
 
   // Fetch notifications from database (supports authenticated user and login page guest mode)
   const refreshNotifications = useCallback(async () => {
@@ -128,7 +146,6 @@ export const NotificationProvider: React.FC<{
         const data = await CentralNotificationService.getNotifications();
         setNotifications(data);
 
-        // Check for unacknowledged critical alerts, referrals, signatures, and popup notifications
         const isCriticalAlert = (n: AppNotification) => n.category === 'critical_hse' || n.priority === 'critical';
         const isWorkflowOrReferral = (n: AppNotification) =>
           n.priority === 'high' ||
@@ -142,22 +159,23 @@ export const NotificationProvider: React.FC<{
           n.sourceModule === 'incidents';
 
         const popupPref = preferences.showCenterPopup || 'important_and_critical';
-        
+        const ackedSet = getPublicAcknowledgedAlertIds();
+
         const unackPopups = data.filter((n) => {
           if (n.read) return false;
+          if (ackedSet.has(n.notifId)) return false;
           if (dismissedPopupIdsRef.current.has(n.notifId)) return false;
 
-          // If explicitly acknowledged already by this user
-          if (n.requiresAck && n.acknowledgedBy && n.acknowledgedBy.some(a => a.userId === currentUser.id || a.userName === currentUser.username)) {
+          if (
+            n.requiresAck &&
+            n.acknowledgedBy &&
+            n.acknowledgedBy.some((a) => a.userId === currentUser.id || a.userName === currentUser.username)
+          ) {
             return false;
           }
 
           if (popupPref === 'none') return false;
-
-          // Direct popup type or requires explicit ack
           if (n.type === 'popup' || n.requiresAck) return true;
-
-          // Preferences evaluation
           if (popupPref === 'all') return true;
           if (popupPref === 'important_and_critical' && (isCriticalAlert(n) || isWorkflowOrReferral(n))) return true;
           if (popupPref === 'critical_only' && isCriticalAlert(n)) return true;
@@ -165,7 +183,6 @@ export const NotificationProvider: React.FC<{
           return false;
         });
 
-        // Automatically queue alerts for popup display
         if (unackPopups.length > 0) {
           setPopupQueue((prev) => {
             const existingIds = new Set(prev.map((p) => p.notifId));
@@ -205,12 +222,17 @@ export const NotificationProvider: React.FC<{
     refreshNotifications().finally(() => setIsLoading(false));
 
     const handleOnline = () => {
-      // Auto-reconnection sync: fetch any emergency alerts published while disconnected
       refreshNotifications();
     };
 
+    // Automatic safety polling: 8 seconds on Login Screen (for near-instant public emergency popups), 30s when logged in
+    const pollInterval = setInterval(() => {
+      refreshNotifications();
+    }, currentUser ? 30000 : 8000);
+
     window.addEventListener('online', handleOnline);
     return () => {
+      clearInterval(pollInterval);
       window.removeEventListener('online', handleOnline);
     };
   }, [currentUser?.id, refreshNotifications]);
@@ -219,8 +241,14 @@ export const NotificationProvider: React.FC<{
   const isTargetUser = useCallback(
     (notif: AppNotification) => {
       if (!currentUser) {
-        // On login screen: only accept public emergencies (critical HSE or target all)
-        return notif.category === 'critical_hse' || notif.priority === 'critical' || notif.targetType === 'all';
+        return (
+          notif.category === 'critical_hse' ||
+          notif.priority === 'critical' ||
+          notif.priority === 'high' ||
+          notif.requiresAck === true ||
+          notif.targetType === 'all' ||
+          !notif.targetType
+        );
       }
       const targetType = notif.targetType || 'all';
       if (targetType === 'all') return true;
@@ -252,103 +280,194 @@ export const NotificationProvider: React.FC<{
     [currentUser]
   );
 
-  // Listen for real-time WebSocket events and browser custom events
-  useEffect(() => {
-    if (!socket) return;
+  // Unified Incoming Alert Processor (Deduplicates across Local Dispatch, Socket.IO, SSE, and Service Worker Push)
+  const processIncomingAlert = useCallback(
+    (newNotif: AppNotification, sourceChannel: 'local' | 'socket' | 'sse' | 'sw_push' = 'socket') => {
+      if (!newNotif) return;
 
-    const processIncomingAlert = (newNotif: AppNotification) => {
-      // Check deduplication: skip if already acknowledged or dismissed on this client
+      const notifId = String(newNotif.notifId || newNotif.id || '');
+      if (!notifId) return;
+
+      const normalizedNotif: AppNotification = {
+        ...newNotif,
+        notifId,
+      };
+
+      const now = Date.now();
+      const contentSig = `${normalizedNotif.category || ''}:${normalizedNotif.title || ''}:${normalizedNotif.sirenType || ''}`;
+      const lastProcessedById = recentlyProcessedAlertIdsRef.current.get(notifId);
+      const lastProcessedBySig = recentlyProcessedAlertIdsRef.current.get(contentSig);
+      if (
+        (lastProcessedById && now - lastProcessedById < 12000) ||
+        (lastProcessedBySig && now - lastProcessedBySig < 4000)
+      ) {
+        // Already processed via another real-time channel (local / socket / sse / sw_push)
+        return;
+      }
+
       const ackedSet = getPublicAcknowledgedAlertIds();
-      if (ackedSet.has(newNotif.notifId) || dismissedPopupIdsRef.current.has(newNotif.notifId)) {
+      if (ackedSet.has(notifId) || dismissedPopupIdsRef.current.has(notifId)) {
         return;
       }
 
-      // Check audience targeting
-      if (!isTargetUser(newNotif)) {
+      if (!isTargetUser(normalizedNotif)) {
         return;
       }
 
-      const siren = newNotif.sirenType || newNotif.metadata?.sirenType;
+      recentlyProcessedAlertIdsRef.current.set(notifId, now);
+      recentlyProcessedAlertIdsRef.current.set(contentSig, now);
 
-      // 1. Play sound based on user preferences and selected siren
-      CentralNotificationService.playAlertSound(newNotif.category, newNotif.priority, siren);
+      const isCritical = normalizedNotif.category === 'critical_hse' || normalizedNotif.priority === 'critical';
+      const siren =
+        normalizedNotif.sirenType ||
+        normalizedNotif.metadata?.sirenType ||
+        (isCritical ? 'siren_evacuation' : undefined);
+      const playSoundAllowed = normalizedNotif.metadata?.playSound !== false;
 
-      // 2. Add to notification list
-      setNotifications((prev) => [newNotif, ...prev.filter((n) => n.notifId !== newNotif.notifId)]);
+      // 1. Add to notification list
+      setNotifications((prev) => [normalizedNotif, ...prev.filter((n) => n.notifId !== notifId)]);
 
-      // 3. Dispatch event for real-time bell ringing animation
-      window.dispatchEvent(new CustomEvent('hse_new_notification_received', { detail: newNotif }));
+      // 2. Dispatch event for real-time bell ringing animation
+      window.dispatchEvent(new CustomEvent('hse_new_notification_received', { detail: normalizedNotif }));
 
-      // 4. Background Web Notification / Service Worker Notification if window is in background
-      if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted' && document.hidden) {
-        try {
-          if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
-            navigator.serviceWorker.ready.then((reg) => {
-              reg.showNotification(newNotif.title, {
-                body: newNotif.body,
-                icon: '/assets/aistudio/ChatGPT_Image_Oct_8__2026__12_04_00_PM_42699341.png',
-                tag: newNotif.notifId,
-                requireInteraction: true,
-              });
-            }).catch(() => {});
-          } else {
-            new Notification(newNotif.title, {
-              body: newNotif.body,
-              icon: '/assets/aistudio/ChatGPT_Image_Oct_8__2026__12_04_00_PM_42699341.png',
-            });
-          }
-        } catch {}
-      }
-
-      // 5. Determine if popup should appear
-      const isCritical = newNotif.category === 'critical_hse' || newNotif.priority === 'critical';
+      // 3. Queue center popup modal
       const isImportantOrWorkflow =
-        newNotif.priority === 'high' ||
-        newNotif.category === 'warning' ||
-        newNotif.sourceModule === 'workflow' ||
-        newNotif.sourceModule === 'referral' ||
-        newNotif.sourceModule === 'signature' ||
-        newNotif.sourceModule === 'ptw' ||
-        newNotif.sourceModule === 'inspection' ||
-        newNotif.sourceModule === 'warnings' ||
-        newNotif.sourceModule === 'incidents';
+        normalizedNotif.priority === 'high' ||
+        normalizedNotif.category === 'warning' ||
+        normalizedNotif.sourceModule === 'workflow' ||
+        normalizedNotif.sourceModule === 'referral' ||
+        normalizedNotif.sourceModule === 'signature' ||
+        normalizedNotif.sourceModule === 'ptw' ||
+        normalizedNotif.sourceModule === 'inspection' ||
+        normalizedNotif.sourceModule === 'warnings' ||
+        normalizedNotif.sourceModule === 'incidents';
       const popupPref = preferences.showCenterPopup || 'important_and_critical';
 
       const shouldShowPopup =
-        newNotif.type === 'popup' ||
-        newNotif.requiresAck ||
+        normalizedNotif.type === 'popup' ||
+        normalizedNotif.requiresAck ||
         isCritical ||
-        (!currentUser && isCritical) ||
-        (popupPref === 'all') ||
+        (!currentUser && (isCritical || normalizedNotif.requiresAck || normalizedNotif.type === 'popup' || normalizedNotif.priority === 'high')) ||
+        popupPref === 'all' ||
         (popupPref === 'important_and_critical' && (isCritical || isImportantOrWorkflow)) ||
         (popupPref === 'critical_only' && isCritical);
 
-      if (shouldShowPopup && popupPref !== 'none') {
+      const willOpenPopup = shouldShowPopup && popupPref !== 'none';
+
+      if (willOpenPopup) {
         setPopupQueue((prev) => {
-          if (prev.some((p) => p.notifId === newNotif.notifId)) return prev;
-          return [...prev, newNotif];
+          if (prev.some((p) => p.notifId === notifId)) return prev;
+          return [...prev, normalizedNotif];
         });
       }
-    };
 
-    // Standard notification alert handler
-    socket.on('notification_alert', processIncomingAlert);
+      // 4. Play alert sound / start continuous siren (idempotent single-stream engine prevents any overlap with popup modal)
+      if (playSoundAllowed && preferences.soundEnabled) {
+        if (isCritical || normalizedNotif.requiresAck) {
+          const customUrl =
+            preferences.criticalHseAudioMode === 'custom_mp3' && preferences.criticalHseCustomAudioUrl
+              ? preferences.criticalHseCustomAudioUrl
+              : undefined;
+          startSirenLoop(
+            siren || 'siren_evacuation',
+            preferences.soundVolume || 0.85,
+            customUrl,
+            normalizedNotif.title
+          );
+        } else {
+          CentralNotificationService.playAlertSound(normalizedNotif.category, normalizedNotif.priority, siren);
+        }
+      }
 
-    // Dedicated public emergency alert handler (login page & unauthenticated clients)
-    socket.on('public_emergency_alert', processIncomingAlert);
+      // 5. Native System / Lock Screen Notification via Service Worker
+      if (sourceChannel !== 'sw_push' && (isCritical || document.hidden || !currentUser)) {
+        CentralNotificationService.dispatchSystemOsNotification(normalizedNotif).catch(() => {});
+      }
+    },
+    [currentUser, isTargetUser, preferences]
+  );
 
-    // Auto-reconnect handler: sync latest alerts when socket reconnects
+  // Listen for real-time Socket.IO events
+  useEffect(() => {
+    if (!socket) return;
+
+    const onSocketAlert = (notif: AppNotification) => processIncomingAlert(notif, 'socket');
+    socket.on('notification_alert', onSocketAlert);
+    socket.on('public_emergency_alert', onSocketAlert);
+
     const handleSocketReconnect = () => {
       refreshNotifications();
     };
     socket.on('connect', handleSocketReconnect);
 
     return () => {
-      socket.off('notification_alert', processIncomingAlert);
-      socket.off('public_emergency_alert', processIncomingAlert);
+      socket.off('notification_alert', onSocketAlert);
+      socket.off('public_emergency_alert', onSocketAlert);
       socket.off('connect', handleSocketReconnect);
     };
-  }, [socket, preferences, isTargetUser, currentUser, refreshNotifications]);
+  }, [socket, processIncomingAlert, refreshNotifications]);
+
+  // Redundant Public SSE Stream (Works without login on Login Screen & auto-reconnects if WebSocket is blocked by proxy)
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof EventSource === 'undefined') return;
+
+    let es: EventSource | null = null;
+    try {
+      es = new EventSource('/api/v1/notifications/public/stream');
+      es.onmessage = (event) => {
+        try {
+          const parsed = JSON.parse(event.data);
+          if (parsed && (parsed.event === 'public_emergency_alert' || parsed.event === 'notification_alert') && parsed.data) {
+            processIncomingAlert(parsed.data as AppNotification, 'sse');
+          }
+        } catch {}
+      };
+    } catch {}
+
+    return () => {
+      if (es) {
+        es.close();
+      }
+    };
+  }, [processIncomingAlert]);
+
+  // Listen to Service Worker messages (Web Push received in background / Lock Screen action button clicked)
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
+
+    const handleSwMessage = (event: MessageEvent) => {
+      const msg = event.data;
+      if (!msg || typeof msg !== 'object') return;
+
+      if (msg.type === 'HSE_SW_EMERGENCY_PUSH' && msg.payload) {
+        processIncomingAlert(msg.payload as AppNotification, 'sw_push');
+      } else if (msg.type === 'HSE_SW_EMERGENCY_ACKNOWLEDGED' && msg.notifId) {
+        const ackId = String(msg.notifId);
+        // Immediately stop the siren loop on this client
+        stopSirenLoop();
+        markPublicAlertAcknowledgedLocally(ackId);
+        setDismissedPopupIds((prev) => new Set(prev).add(ackId));
+        setPopupQueue((prev) => prev.filter((p) => p.notifId !== ackId));
+        setActivePopupAlert((curr) => (curr?.notifId === ackId ? null : curr));
+        setNotifications((prev) =>
+          prev.map((n) => (n.notifId === ackId ? { ...n, read: true } : n))
+        );
+      } else if (msg.type === 'HSE_SW_EMERGENCY_OPENED' && msg.payload) {
+        const alert = msg.payload as AppNotification;
+        if (alert && alert.notifId) {
+          setPopupQueue((prev) => {
+            if (prev.some((p) => p.notifId === alert.notifId)) return prev;
+            return [alert, ...prev];
+          });
+        }
+      }
+    };
+
+    navigator.serviceWorker.addEventListener('message', handleSwMessage);
+    return () => {
+      navigator.serviceWorker.removeEventListener('message', handleSwMessage);
+    };
+  }, [processIncomingAlert]);
 
   // Listen for local system events
   useEffect(() => {
@@ -356,9 +475,16 @@ export const NotificationProvider: React.FC<{
       refreshNotifications();
     };
 
-    const handlePopupRequest = (e: any) => {
+    const handleLocalDispatched = (e: any) => {
       const alert = e.detail as AppNotification;
       if (alert) {
+        processIncomingAlert(alert, 'local');
+      }
+    };
+
+    const handlePopupRequest = (e: any) => {
+      const alert = e.detail as AppNotification;
+      if (alert && alert.notifId) {
         setPopupQueue((prev) => {
           if (prev.some((p) => p.notifId === alert.notifId)) return prev;
           return [...prev, alert];
@@ -373,15 +499,17 @@ export const NotificationProvider: React.FC<{
     };
 
     window.addEventListener('hse_notifications_updated', handleUpdated);
+    window.addEventListener('hse_local_notification_dispatched', handleLocalDispatched);
     window.addEventListener('hse_popup_alert_requested', handlePopupRequest);
     window.addEventListener('hse_notif_preferences_updated', handlePreferencesUpdated);
 
     return () => {
       window.removeEventListener('hse_notifications_updated', handleUpdated);
+      window.removeEventListener('hse_local_notification_dispatched', handleLocalDispatched);
       window.removeEventListener('hse_popup_alert_requested', handlePopupRequest);
       window.removeEventListener('hse_notif_preferences_updated', handlePreferencesUpdated);
     };
-  }, [refreshNotifications]);
+  }, [refreshNotifications, processIncomingAlert]);
 
   // Synchronize activePopupAlert from queue
   useEffect(() => {
@@ -393,21 +521,25 @@ export const NotificationProvider: React.FC<{
   const closePopup = useCallback(() => {
     stopSirenLoop();
     if (activePopupAlert) {
-      // Mark as dismissed for session
       setDismissedPopupIds((prev) => new Set(prev).add(activePopupAlert.notifId));
+      CentralNotificationService.closeSystemOsNotification(activePopupAlert.notifId).catch(() => {});
     }
     setActivePopupAlert(null);
     setPopupQueue((prev) => prev.slice(1));
   }, [activePopupAlert]);
 
-  const dismissPopup = useCallback((notifId: string) => {
-    stopSirenLoop();
-    setDismissedPopupIds((prev) => new Set(prev).add(notifId));
-    setPopupQueue((prev) => prev.filter((p) => p.notifId !== notifId));
-    if (activePopupAlert?.notifId === notifId) {
-      setActivePopupAlert(null);
-    }
-  }, [activePopupAlert]);
+  const dismissPopup = useCallback(
+    (notifId: string) => {
+      stopSirenLoop();
+      setDismissedPopupIds((prev) => new Set(prev).add(notifId));
+      CentralNotificationService.closeSystemOsNotification(notifId).catch(() => {});
+      setPopupQueue((prev) => prev.filter((p) => p.notifId !== notifId));
+      if (activePopupAlert?.notifId === notifId) {
+        setActivePopupAlert(null);
+      }
+    },
+    [activePopupAlert]
+  );
 
   const markAsRead = useCallback(async (id: string | number) => {
     const success = await CentralNotificationService.markAsRead(id);
@@ -428,15 +560,24 @@ export const NotificationProvider: React.FC<{
   }, []);
 
   const acknowledgeAlert = useCallback(
-    async (id: string | number, note?: string) => {
+    async (id: string | number, note?: string, acknowledgmentSource?: string) => {
       const idStr = String(id);
+      // Immediately stop the siren on this device before network round-trip
+      stopSirenLoop();
       let success = false;
 
       if (currentUser?.id) {
-        success = await CentralNotificationService.acknowledge(id, note);
+        success = await CentralNotificationService.acknowledge(
+          id,
+          note,
+          acknowledgmentSource || 'in_app_modal'
+        );
       } else {
-        // Public guest user acknowledgment on Login Screen
-        success = await CentralNotificationService.acknowledgePublic(id, note);
+        success = await CentralNotificationService.acknowledgePublic(
+          id,
+          note,
+          acknowledgmentSource || 'login_screen'
+        );
       }
 
       if (success) {
@@ -453,6 +594,8 @@ export const NotificationProvider: React.FC<{
                       userName: currentUser?.fullName || currentUser?.username || 'کاربر (صفحه ورود)',
                       timestamp: new Date().toISOString(),
                       note,
+                      acknowledgmentSource: acknowledgmentSource || (currentUser?.id ? 'in_app_modal' : 'login_screen'),
+                      status: 'acknowledged',
                     },
                   ],
                 }
@@ -501,20 +644,23 @@ export const NotificationProvider: React.FC<{
     [updatePreferences]
   );
 
-  const triggerTestAlert = useCallback(async (category = 'critical_hse', priority = 'critical') => {
-    try {
-      const { apiDb } = await import('../services/apiDatabaseClient');
-      await apiDb.triggerTestAlert({ category, priority });
-      await refreshNotifications();
-      window.dispatchEvent(
-        new CustomEvent('hse_new_notification_received', {
-          detail: { notifId: `test-${Date.now()}`, category, priority, read: false },
-        })
-      );
-    } catch (e) {
-      console.error(e);
-    }
-  }, [refreshNotifications]);
+  const triggerTestAlert = useCallback(
+    async (category = 'critical_hse', priority = 'critical') => {
+      try {
+        const { apiDb } = await import('../services/apiDatabaseClient');
+        await apiDb.triggerTestAlert({ category, priority });
+        await refreshNotifications();
+        window.dispatchEvent(
+          new CustomEvent('hse_new_notification_received', {
+            detail: { notifId: `test-${Date.now()}`, category, priority, read: false },
+          })
+        );
+      } catch (e) {
+        console.error(e);
+      }
+    },
+    [refreshNotifications]
+  );
 
   const unreadCount = useMemo(() => {
     return notifications.filter((n) => !n.read).length;
@@ -540,6 +686,7 @@ export const NotificationProvider: React.FC<{
     isSettingsOpen,
     isBroadcastOpen,
     isLoading,
+    prefsLoaded,
     openSettings: () => setIsSettingsOpen(true),
     closeSettings: () => setIsSettingsOpen(false),
     openBroadcast: () => setIsBroadcastOpen(true),

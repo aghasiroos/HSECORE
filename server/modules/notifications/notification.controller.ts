@@ -109,9 +109,14 @@ export class NotificationController {
     const userId = user?.uid || user?.username || 'user';
     const userName = user?.fullName || user?.username || 'کاربر سیستم';
     const note = req.body?.note;
+    const acknowledgmentSource = req.body?.acknowledgmentSource || 'in_app_modal';
+    const ip = req.ip || (req.socket as any)?.remoteAddress || 'unknown';
 
-    await notificationService.acknowledge(id, userId, userName, note);
-    return res.json({ success: true, message: 'اعلان با موفقیت توسط شما تأیید گردید.' });
+    await notificationService.acknowledge(id, userId, userName, note, {
+      acknowledgmentSource,
+      clientIp: ip,
+    });
+    return res.json({ success: true, message: 'اعلان با موفقیت توسط شما تأیید گردید و آژیر متوقف شد.' });
   }
 
   async deleteNotification(req: Request, res: Response) {
@@ -144,28 +149,97 @@ export class NotificationController {
   }
 
   async triggerTestAlert(req: Request, res: Response) {
-    const { type, category, priority } = req.body;
+    const { type, category, priority, sirenType, title, body, actionGuidelines } = req.body;
     const testCategory = category || 'critical_hse';
     const testPriority = priority || 'critical';
+    const chosenSiren = sirenType || 'siren_evacuation';
     const user = req.user as any;
 
     const testAlert = await notificationService.send({
-      title: 'آزمایش سیستم اعلان و هشدار مرکزی HSE',
-      body: 'این یک اعلان آزمایشی جهت بررسی صوت هشدار، افکت‌های بصری و پنجره Popup مرکزی سامانه HSECORE است.',
+      title: title || 'آزمایش هشدار فوری HSE (اعلان صفحه قفل و پخش خودکار آژیر)',
+      body:
+        body ||
+        'این یک هشدار فوری آزمایشی جهت بررسی اعلان بومی سیستم‌عامل (Web Push / Lock Screen)، پخش خودکار آژیر بدون نیاز به ورود به سامانه و ثبت مستقل تأییدیه دریافت است.',
       category: testCategory,
       priority: testPriority,
-      sourceModule: 'system',
+      sourceModule: 'safety-unit',
       actionUrl: '#dashboard',
-      sender: user?.fullName || 'مدیر سیستم',
-      requiresAck: testCategory === 'critical_hse',
+      targetType: 'all',
+      sender: user?.fullName || user?.username || 'مرکز فرماندهی HSE',
+      requiresAck: testCategory === 'critical_hse' || testPriority === 'critical',
+      sirenType: chosenSiren,
+      metadata: {
+        sirenType: chosenSiren,
+        actionGuidelines:
+          actionGuidelines ||
+          'دستورالعمل اقدام فوری: خونسردی خود را حفظ کرده، به مسیرهای خروج اضطراری هدایت شوید و دریافت هشدار را جهت توقف آژیر تأیید نمایید.',
+      },
     });
 
-    return res.json({ success: true, data: testAlert, message: 'اعلان آزمایشی ارسال شد.' });
+    return res.json({ success: true, data: testAlert, message: 'اعلان آزمایشی با موفقیت ارسال شد.' });
   }
 
   streamEvents(req: Request, res: Response) {
     const clientId = `client-${Date.now()}-${uuidv4().slice(0, 6)}`;
     notificationService.registerSSEClient(clientId, res, req.user?.uid, req.user?.role);
+  }
+
+  streamPublicEvents(req: Request, res: Response) {
+    const clientId = `pub-${Date.now()}-${uuidv4().slice(0, 6)}`;
+    notificationService.registerPublicSSEClient(clientId, res);
+  }
+
+  async getVapidPublicKey(req: Request, res: Response) {
+    const info = await notificationService.getVapidPublicKey();
+    return res.json({
+      success: true,
+      publicKey: info.publicKey,
+      pushEnabled: info.pushEnabled,
+      activeSubscriptions: info.activeSubscriptions,
+    });
+  }
+
+  async subscribeWebPush(req: Request, res: Response) {
+    const { subscription, userId, userName, role, departmentIds, guestSessionId, platform } = req.body || {};
+    const endpoint = subscription?.endpoint || req.body?.endpoint;
+    const keys = subscription?.keys || req.body?.keys;
+
+    if (!endpoint || !keys?.p256dh || !keys?.auth) {
+      return res.status(400).json({
+        success: false,
+        error: 'اطلاعات اشتراک Web Push (endpoint و کلیدهای رمزنگاری p256dh/auth) الزامی است.',
+      });
+    }
+
+    const saved = await notificationService.registerPushSubscription({
+      endpoint: String(endpoint),
+      keys: {
+        p256dh: String(keys.p256dh),
+        auth: String(keys.auth),
+      },
+      userId: req.user?.uid || (userId ? String(userId) : undefined),
+      userName: (req.user as any)?.fullName || req.user?.username || (userName ? String(userName) : undefined),
+      role: req.user?.role || (role ? String(role) : undefined),
+      departmentIds: Array.isArray(departmentIds) ? departmentIds.map(String) : undefined,
+      guestSessionId: guestSessionId ? String(guestSessionId) : undefined,
+      userAgent: String(req.headers['user-agent'] || '').slice(0, 300),
+      platform: platform ? String(platform).slice(0, 80) : undefined,
+    });
+
+    return res.json({
+      success: true,
+      data: { id: saved.id, endpoint: saved.endpoint, updatedAt: saved.updatedAt },
+      message: 'اشتراک اعلان سیستمی و صفحه قفل (Web Push) با موفقیت در سرور ثبت گردید.',
+    });
+  }
+
+  async unsubscribeWebPush(req: Request, res: Response) {
+    const endpoint = req.body?.endpoint || req.body?.subscription?.endpoint;
+    if (!endpoint) {
+      return res.status(400).json({ success: false, error: 'آدرس endpoint اشتراک الزامی است.' });
+    }
+    await notificationService.unregisterPushSubscription(String(endpoint));
+    return res.json({ success: true, message: 'اشتراک Web Push لغو شد.' });
   }
 
   async streamCustomSiren(req: Request, res: Response) {
@@ -235,21 +309,48 @@ export class NotificationController {
   }
 
   async getPublicActiveEmergencies(req: Request, res: Response) {
-    const list = await notificationService.getPublicActiveEmergencies();
+    const since = typeof req.query.since === 'string' ? req.query.since : undefined;
+    const list = await notificationService.getPublicActiveEmergencies(since);
     return res.json({
       success: true,
       data: list,
       count: list.length,
+      serverTime: new Date().toISOString(),
     });
   }
 
   async acknowledgePublic(req: Request, res: Response) {
-    const { notifId, clientSessionId, note } = req.body;
+    const { notifId, clientSessionId, note, userId, userName, acknowledgmentSource } = req.body || {};
     if (!notifId) {
       return res.status(400).json({ success: false, error: 'شناسه هشدار الزامی است.' });
     }
     const ip = req.ip || (req.socket as any)?.remoteAddress || 'unknown';
-    const success = await notificationService.acknowledgePublic(notifId, clientSessionId, note, ip);
+
+    // If userId was provided (e.g. from Service Worker action or stored session), record under that userId
+    if (userId && String(userId).trim()) {
+      const success = await notificationService.acknowledge(
+        String(notifId),
+        String(userId).trim(),
+        userName ? String(userName).trim() : String(userId).trim(),
+        note ? String(note).slice(0, 300) : undefined,
+        {
+          acknowledgmentSource: acknowledgmentSource || 'os_notification_action',
+          clientIp: ip,
+        }
+      );
+      return res.json({
+        success,
+        message: 'تأییدیه دریافت هشدار فوری HSE و توقف آژیر با موفقیت در پایگاه داده ثبت گردید.',
+      });
+    }
+
+    const success = await notificationService.acknowledgePublic(
+      String(notifId),
+      clientSessionId,
+      note,
+      ip,
+      acknowledgmentSource
+    );
     return res.json({
       success,
       message: 'تأییدیه دریافت هشدار فوری HSE با موفقیت در پایگاه داده ثبت گردید.',
@@ -258,3 +359,4 @@ export class NotificationController {
 }
 
 export const notificationController = new NotificationController();
+

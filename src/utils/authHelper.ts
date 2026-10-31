@@ -1381,6 +1381,11 @@ export interface OrgNode {
   type: 'Company' | 'Site' | 'Plant' | 'Area' | 'Department' | 'Section' | 'Team' | 'Unit';
   parentId: string | null;
   manager?: string;
+  managerPersonnelId?: number | null;
+  managerPersonnelCode?: string | null;
+  managerJobTitle?: string | null;
+  managerNationalCode?: string | null;
+  managerStatus?: string;
   code?: string;
   description?: string;
   location?: string;

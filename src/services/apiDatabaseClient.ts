@@ -991,13 +991,13 @@ export const apiDb = {
     }
   },
 
-  async acknowledgeNotification(id: string, note?: string): Promise<boolean> {
+  async acknowledgeNotification(id: string, note?: string, acknowledgmentSource?: string): Promise<boolean> {
     try {
       invalidateCacheKeys('notifications', 'sync:full');
       const res = await authFetch(`/api/v1/notifications/${encodeURIComponent(id)}/acknowledge`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ note }),
+        body: JSON.stringify({ note, acknowledgmentSource: acknowledgmentSource || 'in_app_modal' }),
       });
       invalidateCacheKeys('notifications', 'sync:full');
       return res.ok;
@@ -1070,9 +1070,12 @@ export const apiDb = {
     }
   },
 
-  async getPublicActiveEmergencyAlerts(): Promise<any[]> {
+  async getPublicActiveEmergencyAlerts(sinceIso?: string): Promise<any[]> {
     try {
-      const res = await fetch('/api/v1/notifications/public/active');
+      const url = sinceIso
+        ? `/api/v1/notifications/public/active?since=${encodeURIComponent(sinceIso)}`
+        : '/api/v1/notifications/public/active';
+      const res = await fetch(url);
       if (!res.ok) return [];
       const json: ApiResponse = await res.json();
       return json.data || [];
@@ -1082,18 +1085,70 @@ export const apiDb = {
     }
   },
 
-  async acknowledgePublicEmergency(notifId: string, clientSessionId?: string, note?: string): Promise<boolean> {
+  async acknowledgePublicEmergency(
+    notifId: string,
+    clientSessionId?: string,
+    note?: string,
+    acknowledgmentSource?: string
+  ): Promise<boolean> {
     try {
       invalidateCacheKeys('notifications', 'sync:full');
       const res = await fetch('/api/v1/notifications/public/acknowledge', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ notifId, clientSessionId, note }),
+        body: JSON.stringify({
+          notifId,
+          clientSessionId,
+          note,
+          acknowledgmentSource: acknowledgmentSource || 'login_screen',
+        }),
       });
       invalidateCacheKeys('notifications', 'sync:full');
       return res.ok;
     } catch (e) {
       console.error('Failed to acknowledge public emergency:', e);
+      return false;
+    }
+  },
+
+  async getVapidPublicKey(): Promise<string | null> {
+    try {
+      const res = await fetch('/api/v1/notifications/public/vapid-public-key');
+      if (!res.ok) return null;
+      const json: ApiResponse = await res.json();
+      return json.data?.publicKey || null;
+    } catch {
+      return null;
+    }
+  },
+
+  async subscribeWebPush(payload: {
+    subscription: any;
+    userId?: string;
+    username?: string;
+    clientSessionId?: string;
+  }): Promise<boolean> {
+    try {
+      const res = await fetch('/api/v1/notifications/public/push-subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  },
+
+  async unsubscribeWebPush(endpoint: string): Promise<boolean> {
+    try {
+      const res = await fetch('/api/v1/notifications/public/push-unsubscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpoint }),
+      });
+      return res.ok;
+    } catch {
       return false;
     }
   },
@@ -2044,6 +2099,326 @@ export const apiDb = {
       return true;
     } catch {
       return false;
+    }
+  },
+
+  // --------------------------------------------------------------------------
+  // Enterprise Backup, SHA-256 Verification, Sandbox Test Restore & Real Restore
+  // --------------------------------------------------------------------------
+  async getBackupOverview(): Promise<any | null> {
+    try {
+      const res = await authFetch('/api/v1/backup/overview');
+      if (!res.ok) return null;
+      const json = await res.json();
+      return json.data || null;
+    } catch {
+      return null;
+    }
+  },
+
+  async createServerBackup(options?: {
+    tag?: 'manual' | 'scheduled' | 'pre_restore_safety' | 'pre_update';
+    isSelective?: boolean;
+    selectedModules?: Record<string, boolean>;
+    encrypt?: boolean;
+  }): Promise<{ success: boolean; data?: any; error?: string }> {
+    try {
+      const res = await authFetch('/api/v1/backup/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(options || {}),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        return { success: false, error: json.error || 'خطا در تهیه نسخه پشتیبان' };
+      }
+      return { success: true, data: json.data };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'خطا در ارتباط با سرور' };
+    }
+  },
+
+  async exportSqlDump(options?: {
+    isSelective?: boolean;
+    selectedModules?: Record<string, boolean>;
+  }): Promise<{ success: boolean; data?: { sql: string; totalRows: number; tablesExported: number; sha256: string }; error?: string }> {
+    try {
+      const res = await authFetch('/api/v1/backup/export-sql', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(options || {}),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        return { success: false, error: json.error || 'خطا در تولید خروجی SQL' };
+      }
+      return { success: true, data: json.data };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'خطا در ارتباط با سرور' };
+    }
+  },
+
+  async downloadServerBackup(backupId: string, format: 'gz' | 'json' = 'gz'): Promise<boolean> {
+    try {
+      const res = await authFetch(
+        `/api/v1/backup/${encodeURIComponent(backupId)}/download?format=${format}`
+      );
+      if (!res.ok) return false;
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = format === 'json' ? `${backupId}.hsebackup.json` : `${backupId}.hsebackup.json.gz`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
+  async verifyServerBackup(backupId: string): Promise<{ success: boolean; data?: any; error?: string }> {
+    try {
+      const res = await authFetch(`/api/v1/backup/${encodeURIComponent(backupId)}/verify`, {
+        method: 'POST',
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        return { success: false, error: json.error || 'خطا در اعتبارسنجی نسخه پشتیبان' };
+      }
+      return { success: true, data: json.data };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'خطا در ارتباط با سرور' };
+    }
+  },
+
+  async testRestoreServerBackup(backupId: string): Promise<{ success: boolean; data?: any; error?: string }> {
+    try {
+      const res = await authFetch(`/api/v1/backup/${encodeURIComponent(backupId)}/test-restore`, {
+        method: 'POST',
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        return { success: false, error: json.error || 'خطا در اجرای بازیابی آزمایشی ایزوله' };
+      }
+      return { success: true, data: json.data };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'خطا در ارتباط با سرور' };
+    }
+  },
+
+  async executeServerRestore(
+    backupId: string,
+    mode: 'clean' | 'merge',
+    confirmCode: string
+  ): Promise<{ success: boolean; data?: any; error?: string }> {
+    try {
+      invalidateCacheKeys('sync:full');
+      const res = await authFetch(`/api/v1/backup/${encodeURIComponent(backupId)}/restore`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode, confirmCode }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        return { success: false, error: json.error || 'خطا در اجرای بازیابی' };
+      }
+      return { success: true, data: json.data };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'خطا در ارتباط با سرور' };
+    }
+  },
+
+  async inspectUploadedBackup(payload: {
+    fileBase64?: string;
+    rawText?: string;
+    jsonObject?: any;
+  }): Promise<{ success: boolean; data?: any; error?: string }> {
+    try {
+      const res = await authFetch('/api/v1/backup/upload-inspect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        return { success: false, error: json.error || 'فایل پشتیبان نامعتبر است' };
+      }
+      return { success: true, data: json.data };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'خطا در ارتباط با سرور' };
+    }
+  },
+
+  async restoreUploadedBackup(payload: {
+    fileBase64?: string;
+    rawText?: string;
+    jsonObject?: any;
+    mode: 'clean' | 'merge';
+    confirmCode: string;
+  }): Promise<{ success: boolean; data?: any; error?: string }> {
+    try {
+      invalidateCacheKeys('sync:full');
+      const res = await authFetch('/api/v1/backup/upload-restore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        return { success: false, error: json.error || 'خطا در بازیابی از فایل بارگذاری‌شده' };
+      }
+      return { success: true, data: json.data };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'خطا در ارتباط با سرور' };
+    }
+  },
+
+  async deleteServerBackup(backupId: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await authFetch(`/api/v1/backup/${encodeURIComponent(backupId)}`, {
+        method: 'DELETE',
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        return { success: false, error: json.error || 'خطا در حذف نسخه پشتیبان' };
+      }
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'خطا در ارتباط با سرور' };
+    }
+  },
+
+  async saveBackupSchedule(config: any): Promise<{ success: boolean; data?: any; error?: string }> {
+    try {
+      const res = await authFetch('/api/v1/backup/schedule', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        return { success: false, error: json.error || 'خطا در ذخیره زمان‌بندی پشتیبان‌گیری' };
+      }
+      return { success: true, data: json.data };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'خطا در ارتباط با سرور' };
+    }
+  },
+
+  // --------------------------------------------------------------------------
+  // Organizational Structure Module Integrated Backup, Restore & Rollback
+  // --------------------------------------------------------------------------
+  async getOrgBackupOverview(): Promise<any | null> {
+    try {
+      const res = await authFetch('/api/v1/organization/backup/overview');
+      if (!res.ok) return null;
+      const json = await res.json();
+      return json.data || null;
+    } catch {
+      return null;
+    }
+  },
+
+  async createOrgBackup(
+    selectedSubTabs?: Array<'org_hierarchy' | 'units_jobs' | 'incident_types' | 'ppe_equipment'>
+  ): Promise<{ success: boolean; data?: any; error?: string }> {
+    try {
+      const res = await authFetch('/api/v1/organization/backup/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ selectedSubTabs }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        return { success: false, error: json.error || 'خطا در تهیه نسخه پشتیبان ساختار سازمانی' };
+      }
+      return { success: true, data: json.data };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'خطا در ارتباط با سرور' };
+    }
+  },
+
+  async getOrgSnapshotById(backupId: string): Promise<{ success: boolean; data?: any; error?: string }> {
+    try {
+      const res = await authFetch(
+        `/api/v1/organization/backup/snapshot/${encodeURIComponent(backupId)}`
+      );
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        return { success: false, error: json.error || 'نسخه پشتیبان یافت نشد' };
+      }
+      return { success: true, data: json.data };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'خطا در ارتباط با سرور' };
+    }
+  },
+
+  async inspectOrgBackup(payload: {
+    backupId?: string;
+    backupPackage?: any;
+  }): Promise<{ success: boolean; data?: any; error?: string }> {
+    try {
+      const res = await authFetch('/api/v1/organization/backup/inspect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        return { success: false, error: json.error || 'فایل پشتیبان نامعتبر است', data: json.data };
+      }
+      return { success: true, data: json.data };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'خطا در ارتباط با سرور' };
+    }
+  },
+
+  async restoreOrgBackup(payload: {
+    backupId?: string;
+    backupPackage?: any;
+    selectedSubTabs: Array<'org_hierarchy' | 'units_jobs' | 'incident_types' | 'ppe_equipment'>;
+    mode: 'safe_merge' | 'full_replace';
+    confirmed: boolean;
+  }): Promise<{ success: boolean; data?: any; error?: string }> {
+    try {
+      invalidateCacheKeys('settings', 'org_nodes', 'sync:full');
+      const res = await authFetch('/api/v1/organization/backup/restore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json();
+      invalidateCacheKeys('settings', 'org_nodes', 'sync:full');
+      if (!res.ok || !json.success) {
+        return { success: false, error: json.error || 'خطا در بازیابی اطلاعات ساختار سازمانی' };
+      }
+      return { success: true, data: json.data };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'خطا در ارتباط با سرور' };
+    }
+  },
+
+  async rollbackOrgBackup(backupId: string): Promise<{ success: boolean; data?: any; error?: string }> {
+    try {
+      invalidateCacheKeys('settings', 'org_nodes', 'sync:full');
+      const res = await authFetch(
+        `/api/v1/organization/backup/rollback/${encodeURIComponent(backupId)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
+      const json = await res.json();
+      invalidateCacheKeys('settings', 'org_nodes', 'sync:full');
+      if (!res.ok || !json.success) {
+        return { success: false, error: json.error || 'خطا در بازگردانی وضعیت قبلی' };
+      }
+      return { success: true, data: json.data };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'خطا در ارتباط با سرور' };
     }
   },
 
