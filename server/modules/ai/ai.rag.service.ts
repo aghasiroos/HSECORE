@@ -200,7 +200,6 @@ export class AIRagService {
         metadata: schema.aiKnowledgeChunks.metadata,
         docTitle: schema.aiKnowledgeDocs.title,
         category: schema.aiKnowledgeDocs.category,
-        docMetadata: schema.aiKnowledgeDocs.metadata,
       })
       .from(schema.aiKnowledgeChunks)
       .innerJoin(schema.aiKnowledgeDocs, eq(schema.aiKnowledgeChunks.docId, schema.aiKnowledgeDocs.id))
