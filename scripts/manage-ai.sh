@@ -83,6 +83,7 @@ cmd_start() {
   check_docker
   echo -e "${BLUE}[*] Starting HSECORE Local AI Engine container...${NC}"
   bash "${PROJECT_DIR}/scripts/ensure-ai-network.sh"
+  docker volume inspect hse_ai_models >/dev/null 2>&1 || docker volume create hse_ai_models >/dev/null
   docker compose -f "${COMPOSE_FILE}" up -d --pull missing hse-ai-engine
   echo -e "${BLUE}[*] Waiting for engine healthcheck...${NC}"
   local attempts=0
@@ -270,6 +271,7 @@ cmd_update() {
   check_docker
   echo -e "${BLUE}[*] Updating the pinned Local AI Engine image...${NC}"
   bash "${PROJECT_DIR}/scripts/ensure-ai-network.sh"
+  docker volume inspect hse_ai_models >/dev/null 2>&1 || docker volume create hse_ai_models >/dev/null
   docker compose -f "${COMPOSE_FILE}" pull hse-ai-engine
   echo -e "${BLUE}[*] Recreating AI container with the configured image version...${NC}"
   docker compose -f "${COMPOSE_FILE}" up -d --force-recreate hse-ai-engine
