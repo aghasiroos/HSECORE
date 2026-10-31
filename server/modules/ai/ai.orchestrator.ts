@@ -191,7 +191,10 @@ export class AIOrchestrator {
       // These tools currently aggregate organization-wide records and do not yet
       // implement row-level organizational scoping. Fail closed for non-global roles.
       const canonicalRole = normalizeRoleToCanonical(userContext?.role);
-      if (!userContext || !['ADMINISTRATOR', 'HSE_MANAGER'].includes(canonicalRole) ||
+      const rawRole = String(userContext?.role || '').trim().toUpperCase();
+      const hasOrganizationWideScope = rawRole === 'ADMIN' || rawRole === 'ADMINISTRATOR' ||
+        rawRole === 'HSE_MANAGER' || canonicalRole === 'ADMINISTRATOR' && (rawRole.includes('مدیر سامانه') || rawRole.includes('مدیر سیستم'));
+      if (!userContext || !hasOrganizationWideScope ||
           !assistant.tools.includes(toolName) || !checkUserHasPermission(userContext, toolPermissions[toolName] || '')) return;
       if (!executedToolNames.has(toolName)) {
         executedToolNames.add(toolName);
