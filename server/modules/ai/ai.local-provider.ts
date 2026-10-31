@@ -37,6 +37,11 @@ export interface OllamaHealthStatus {
   queuedRequests: number;
   latencyMs?: number;
   error?: string;
+  chatModelInstalled: boolean;
+  embeddingModelInstalled: boolean;
+  localInferenceReady: boolean;
+  cloudFallbackEnabled: boolean;
+  cloudFallbackConfigured: boolean;
 }
 
 export interface LocalChatOptions {
@@ -56,9 +61,23 @@ export class LocalAIProvider {
   private queue: Array<{ run: () => void; reject: (err: any) => void; timer?: NodeJS.Timeout }> = [];
   private offlineUntil = 0;
   private readonly offlineCooldownMs = 60_000;
+  private pullInProgress = false;
 
   private get baseUrl(): string {
     return config.aiEngine.url;
+  }
+
+  private normalizeModelName(name: string): string | null {
+    const normalized = typeof name === 'string' ? name.trim() : '';
+    if (!normalized || normalized.length > 160) return null;
+    const [repository, tag, ...extra] = normalized.split(':');
+    if (extra.length > 0 || !repository) return null;
+    if (tag !== undefined && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(tag)) return null;
+    const segments = repository.split('/');
+    if (segments.length > 3 || segments.some(segment =>
+      !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(segment) || segment.includes('..')
+    )) return null;
+    return normalized;
   }
 
   private markOfflineIfNetworkError(err: any): boolean {
@@ -156,6 +175,11 @@ export class LocalAIProvider {
       defaultEmbedModel: config.aiEngine.defaultEmbedModel,
       activeRequests: this.activeCount,
       queuedRequests: this.queue.length,
+      chatModelInstalled: false,
+      embeddingModelInstalled: false,
+      localInferenceReady: false,
+      cloudFallbackEnabled: config.aiEngine.allowCloudFallback,
+      cloudFallbackConfigured: config.aiEngine.allowCloudFallback && Boolean(config.geminiApiKey),
     };
 
     if (!config.aiEngine.enabled) {
@@ -190,6 +214,13 @@ export class LocalAIProvider {
       const data = (await resp.json()) as { models?: OllamaModelInfo[] };
       status.isAvailable = true;
       status.installedModels = data.models || [];
+      const installedNames = new Set(status.installedModels.flatMap(model =>
+        [model.name, model.model].filter((name): name is string => typeof name === 'string')
+      ).map(name => name.toLowerCase()));
+      status.chatModelInstalled = installedNames.has(config.aiEngine.defaultChatModel.toLowerCase());
+      status.embeddingModelInstalled = installedNames.has(config.aiEngine.defaultEmbedModel.toLowerCase());
+      // Engine reachability is not equivalent to inference readiness.
+      status.localInferenceReady = status.chatModelInstalled;
 
       // Query version
       try {
@@ -245,40 +276,91 @@ export class LocalAIProvider {
    * Request pulling/downloading a model inside the container
    */
   async pullModel(modelName: string): Promise<{ success: boolean; message: string }> {
+    const normalized = this.normalizeModelName(modelName);
+    if (!normalized) {
+      return { success: false, message: 'شناسه مدل نامعتبر است.' };
+    }
+    const allowed = config.aiEngine.allowedModels.some(name => name.toLowerCase() === normalized.toLowerCase());
+    if (!allowed) {
+      return { success: false, message: 'این مدل در فهرست مجاز دانلود مدل‌های HSECORE قرار ندارد.' };
+    }
+    if (this.pullInProgress) {
+      return { success: false, message: 'در حال حاضر یک عملیات دریافت مدل در حال اجرا است.' };
+    }
+    if (this.activeCount > 0 || this.queue.length > 0) {
+      return { success: false, message: 'برای جلوگیری از فشار حافظه، دریافت مدل هنگام اجرای درخواست‌های AI مجاز نیست.' };
+    }
+
+    this.pullInProgress = true;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), config.aiEngine.modelPullTimeoutMs);
     try {
       const resp = await fetch(`${this.baseUrl}/api/pull`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: modelName, stream: false }),
+        body: JSON.stringify({ name: normalized, stream: false }),
+        signal: controller.signal,
       });
       if (!resp.ok) {
         return { success: false, message: `خطا در دریافت مدل: HTTP ${resp.status}` };
       }
+      await resp.json().catch(() => null);
       this.offlineUntil = 0;
-      return { success: true, message: `مدل ${modelName} با موفقیت بارگیری شد.` };
+      return { success: true, message: `مدل ${normalized} با موفقیت بارگیری شد.` };
     } catch (err: any) {
       this.markOfflineIfNetworkError(err);
-      return { success: false, message: 'موتور محلی Ollama در این محیط فعال نیست؛ سامانه از موتور هوشمند داخلی استفاده می‌کند.' };
+      return {
+        success: false,
+        message: err?.name === 'AbortError'
+          ? 'مهلت مجاز دریافت مدل به پایان رسید.'
+          : 'موتور محلی Ollama در دسترس نیست یا دریافت مدل با خطا مواجه شد.',
+      };
+    } finally {
+      clearTimeout(timeout);
+      this.pullInProgress = false;
     }
   }
 
   /**
-   * Delete a model from local engine storage
+   * Delete a model from local engine storage. Active/default models are protected.
    */
   async deleteModel(modelName: string): Promise<{ success: boolean; message: string }> {
+    const normalized = this.normalizeModelName(modelName);
+    if (!normalized) return { success: false, message: 'شناسه مدل نامعتبر است.' };
+
+    const protectedModels = [
+      config.aiEngine.defaultChatModel,
+      config.aiEngine.defaultEmbedModel,
+    ].map(name => name.toLowerCase());
+    if (protectedModels.includes(normalized.toLowerCase())) {
+      return { success: false, message: 'حذف مدل پیش‌فرض گفت‌وگو یا embedding مجاز نیست.' };
+    }
+    if (this.pullInProgress || this.activeCount > 0 || this.queue.length > 0) {
+      return { success: false, message: 'حذف مدل هنگام اجرای عملیات AI یا دریافت مدل مجاز نیست.' };
+    }
+
+    const installed = await this.listInstalledModels();
+    const exists = installed.some(model =>
+      [model.name, model.model].some(name => typeof name === 'string' && name.toLowerCase() === normalized.toLowerCase())
+    );
+    if (!exists) return { success: false, message: 'مدل موردنظر در موتور محلی نصب نشده است.' };
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
     try {
       const resp = await fetch(`${this.baseUrl}/api/delete`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: modelName }),
+        body: JSON.stringify({ name: normalized }),
+        signal: controller.signal,
       });
-      if (!resp.ok) {
-        return { success: false, message: `خطا در حذف مدل: HTTP ${resp.status}` };
-      }
-      return { success: true, message: `مدل ${modelName} با موفقیت حذف گردید.` };
+      if (!resp.ok) return { success: false, message: `خطا در حذف مدل: HTTP ${resp.status}` };
+      return { success: true, message: `مدل ${normalized} با موفقیت حذف گردید.` };
     } catch (err: any) {
       this.markOfflineIfNetworkError(err);
-      return { success: false, message: err.message || 'خطا در حذف مدل' };
+      return { success: false, message: err?.name === 'AbortError' ? 'مهلت حذف مدل به پایان رسید.' : 'خطا در حذف مدل.' };
+    } finally {
+      clearTimeout(timeout);
     }
   }
 
