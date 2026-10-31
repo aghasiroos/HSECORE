@@ -83,5 +83,8 @@ test('department and unit restrictions cannot be combined across separate assign
 test('malformed ACL metadata fails closed', () => {
   assert.equal(canAccessKnowledgeDocument({ accessControl: { allowedRoles: [42] } }, user, scope), false);
   assert.equal(canAccessKnowledgeDocument({ accessControl: { departmentIds: ['10'] } }, user, scope), false);
+  assert.equal(canAccessKnowledgeDocument({ accessControl: null }, user, scope), false);
+  assert.equal(canAccessKnowledgeDocument({ accessControl: 'invalid' }, user, scope), false);
+  assert.equal(canAccessKnowledgeDocument({ accessControl: [] }, user, scope), false);
 });
 console.log('AI document ACL tests: ' + passed + '/13 passed');
