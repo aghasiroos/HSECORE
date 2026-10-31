@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { db, sql } from '../server/core/db.ts';
 import { pool } from '../src/db/index.ts';
 import { aiRagService } from '../server/modules/ai/ai.rag.service.ts';
+import { migrateLegacyAIKnowledgeMetadata } from '../server/modules/ai/ai.metadata.migration.ts';
 import type { UserContext } from '../server/core/middleware/auth.ts';
 
 const databaseName = process.env.SQL_DB_NAME || process.env.PGDATABASE || '';
@@ -172,6 +173,52 @@ async function run() {
       permissions: ['ptw:read'],
     };
 
+    // Controlled legacy migration: only SQL NULL is backfilled. Category ACL
+    // remains the authorization boundary when no document-level ACL exists.
+    const legacyInsert = await db.execute(sql`
+      INSERT INTO ai_knowledge_docs (title, category, content, status, metadata)
+      VALUES ('Legacy NULL metadata test document', 'PTW', 'legacy category access', 'INDEXED', NULL)
+      RETURNING id
+    `);
+    const legacyDocId = Number((legacyInsert as any).rows[0].id);
+    const malformedInsert = await db.execute(sql`
+      INSERT INTO ai_knowledge_docs (title, category, content, status, metadata)
+      VALUES ('Malformed metadata must remain blocked', 'PTW', 'invalid ACL metadata', 'INDEXED', '"invalid-metadata"'::jsonb)
+      RETURNING id
+    `);
+    const malformedDocId = Number((malformedInsert as any).rows[0].id);
+
+    assert.equal(await aiRagService.canAccessDocument(legacyDocId, ['PTW'], user), false);
+    const migrationResult = await migrateLegacyAIKnowledgeMetadata();
+    assert.equal(migrationResult.skipped, false);
+    assert.equal(migrationResult.migratedCount, 1);
+    assert.equal(await aiRagService.canAccessDocument(legacyDocId, ['PTW'], user), true);
+    assert.equal(await aiRagService.canAccessDocument(legacyDocId, ['HEALTH'], user), false);
+    assert.equal(await aiRagService.canAccessDocument(malformedDocId, ['PTW'], user), false);
+
+    const legacyMetadata = await db.execute(sql`
+      SELECT metadata FROM ai_knowledge_docs WHERE id = ${legacyDocId}
+    `);
+    assert.deepEqual((legacyMetadata as any).rows[0].metadata, {});
+
+    const defaultInsert = await db.execute(sql`
+      INSERT INTO ai_knowledge_docs (title, category, content, status)
+      VALUES ('New document default metadata test', 'PTW', 'default metadata', 'INDEXED')
+      RETURNING metadata
+    `);
+    assert.deepEqual((defaultInsert as any).rows[0].metadata, {});
+
+    const metadataColumn = await db.execute(sql`
+      SELECT is_nullable, column_default
+      FROM information_schema.columns
+      WHERE table_schema = current_schema()
+        AND table_name = 'ai_knowledge_docs'
+        AND column_name = 'metadata'
+    `);
+    assert.equal((metadataColumn as any).rows[0].is_nullable, 'NO');
+    assert.ok(String((metadataColumn as any).rows[0].column_default).includes('{}'));
+    console.log('PASS legacy NULL metadata migrates to {} while category ACL remains enforced');
+
     assert.equal(await aiRagService.canAccessDocument(authorizedDocId, ['PTW'], user), true);
     assert.equal(await aiRagService.canAccessDocument(deniedDocId, ['PTW'], user), false);
     assert.equal(await aiRagService.canAccessDocument(authorizedDocId, ['HEALTH'], user), false);
@@ -179,6 +226,7 @@ async function run() {
 
     const visibleDocs = await aiRagService.listDocuments(['PTW'], user);
     assert.ok(visibleDocs.some(doc => doc.id === authorizedDocId));
+    assert.ok(visibleDocs.some(doc => doc.id === legacyDocId));
     assert.equal(visibleDocs.some(doc => doc.id === deniedDocId), false);
     assert.equal(visibleDocs.some(doc => doc.title.startsWith('Blocked document ')), false);
     assert.equal(Object.prototype.hasOwnProperty.call(visibleDocs[0] || {}, 'metadata'), false);
@@ -206,7 +254,7 @@ async function run() {
     assert.equal((deletedChunks as any).rows.length, 0);
     console.log('PASS PostgreSQL document deletion cascades to its chunks');
 
-    console.log('AI RAG PostgreSQL integration tests: 4/4 passed');
+    console.log('AI RAG PostgreSQL integration tests: 5/5 passed');
   } finally {
     await db.execute(sql`DROP TABLE IF EXISTS ai_knowledge_chunks CASCADE`).catch(() => undefined);
     await db.execute(sql`DROP TABLE IF EXISTS ai_knowledge_docs CASCADE`).catch(() => undefined);
