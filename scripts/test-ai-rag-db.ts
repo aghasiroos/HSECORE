@@ -84,7 +84,7 @@ async function run() {
     await db.execute(sql`
       INSERT INTO ai_knowledge_docs (title, category, content, status, metadata)
       SELECT
-        'Blocked document ' || series,
+        'Blocked document ' || series.value,
         'PTW',
         'blocked content',
         'INDEXED',
@@ -92,7 +92,7 @@ async function run() {
           'accessControl',
           jsonb_build_object('userUids', jsonb_build_array('not-this-user'))
         )
-      FROM generate_series(1, 205) AS series
+      FROM generate_series(1, 205) AS series(value)
     `);
     await db.execute(sql`
       INSERT INTO ai_knowledge_chunks (doc_id, chunk_index, chunk_text, token_count, embedding, metadata)
