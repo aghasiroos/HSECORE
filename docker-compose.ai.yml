@@ -45,4 +45,4 @@ networks:
 volumes:
   hse_ai_models:
     name: hse_ai_models
-    driver: local
+    external: true
