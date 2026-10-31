@@ -6,6 +6,7 @@ import fs from 'fs';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { users } from '../src/db/schema.ts';
+import { migrateLegacyAIKnowledgeMetadata } from './modules/ai/ai.metadata.migration.ts';
 
 export async function runMigrations() {
   const maxRetries = 5;
@@ -63,6 +64,15 @@ export async function runMigrations() {
 
     // 4. Ensure all table columns and custom tables exist in پایگاه داده
     await ensureSchemaColumnsAndTables();
+
+    // Backfill legacy AI knowledge docs only after schema migrations have run.
+    // NULL becomes {}, preserving category-level permissions for legacy documents.
+    const aiMetadataMigration = await migrateLegacyAIKnowledgeMetadata();
+    if (aiMetadataMigration.skipped) {
+      console.log('[Migration] AI knowledge metadata backfill skipped: table or metadata column not present yet.');
+    } else {
+      console.log(`[Migration] AI knowledge metadata backfill complete: ${aiMetadataMigration.migratedCount} legacy document(s) converted from NULL to {}.`);
+    }
 
     // 5. Ensure high-performance composite and lookup indexes
     await ensurePerformanceIndexes();
