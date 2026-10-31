@@ -12,7 +12,8 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "icons:build": "node scripts/build-windows-icon.js",
-    "lint": "tsc --noEmit --skipLibCheck"
+    "lint": "tsc --noEmit --skipLibCheck",
+    "test:ai-acl": "tsx scripts/test-ai-acl.ts"
   },
   "dependencies": {
     "@bpmn-io/properties-panel": "^3.48.0",
