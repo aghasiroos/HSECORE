@@ -16,6 +16,7 @@ export interface KnowledgeDocumentAccessControl {
 export interface KnowledgeDocumentScope {
   departmentIds: number[];
   unitIds: number[];
+  assignments?: Array<{ departmentId: number | null; unitId: number | null }>;
 }
 
 /**
@@ -56,11 +57,20 @@ export function canAccessKnowledgeDocument(
     return false;
   }
 
-  if (Array.isArray(acl.departmentIds) && acl.departmentIds.length > 0 &&
-      !acl.departmentIds.some(id => scope.departmentIds.includes(id))) return false;
-
-  if (Array.isArray(acl.unitIds) && acl.unitIds.length > 0 &&
-      !acl.unitIds.some(id => scope.unitIds.includes(id))) return false;
+  const departmentRestricted = Array.isArray(acl.departmentIds) && acl.departmentIds.length > 0;
+  const unitRestricted = Array.isArray(acl.unitIds) && acl.unitIds.length > 0;
+  if (departmentRestricted && unitRestricted) {
+    const sameAssignmentMatches = (scope.assignments || []).some(assignment =>
+      assignment.departmentId !== null && assignment.unitId !== null &&
+      acl.departmentIds!.includes(assignment.departmentId) &&
+      acl.unitIds!.includes(assignment.unitId)
+    );
+    if (!sameAssignmentMatches) return false;
+  } else if (departmentRestricted && !acl.departmentIds!.some(id => scope.departmentIds.includes(id))) {
+    return false;
+  } else if (unitRestricted && !acl.unitIds!.some(id => scope.unitIds.includes(id))) {
+    return false;
+  }
 
   return true;
 }
