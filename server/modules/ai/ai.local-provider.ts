@@ -306,8 +306,6 @@ export class LocalAIProvider {
           signal: controller.signal,
         });
 
-        clearTimeout(timeout);
-
         if (!resp.ok) {
           const errText = await resp.text().catch(() => '');
           throw new Error(`Ollama chat error: HTTP ${resp.status} - ${errText}`);
@@ -315,6 +313,7 @@ export class LocalAIProvider {
 
         this.offlineUntil = 0;
         const data = (await resp.json()) as { message?: { content?: string }; model?: string };
+        clearTimeout(timeout);
         const text = data.message?.content?.trim() || '';
 
         return {
@@ -377,8 +376,6 @@ export class LocalAIProvider {
           signal: controller.signal,
         });
 
-        clearTimeout(timeout);
-
         if (!resp.ok) {
           const errText = await resp.text().catch(() => '');
           throw new Error(`Ollama generate error: HTTP ${resp.status} - ${errText}`);
@@ -386,6 +383,7 @@ export class LocalAIProvider {
 
         this.offlineUntil = 0;
         const data = (await resp.json()) as { response?: string; model?: string };
+        clearTimeout(timeout);
         const text = data.response?.trim() || '';
 
         return {
@@ -433,14 +431,13 @@ export class LocalAIProvider {
           signal: controller.signal,
         });
 
-        clearTimeout(timeout);
-
         if (!resp.ok) {
           throw new Error(`Ollama embeddings error: HTTP ${resp.status}`);
         }
 
         this.offlineUntil = 0;
         const data = (await resp.json()) as { embedding?: number[] };
+        clearTimeout(timeout);
         return {
           embedding: data.embedding || [],
           model,
