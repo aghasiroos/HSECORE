@@ -163,6 +163,13 @@ export class AIController {
       return res.status(400).json({ success: false, message: 'عنوان و متن سند الزامی هستند.' });
     }
 
+    const normalizedCategory = typeof category === 'string' && category.trim()
+      ? category.trim().toUpperCase()
+      : 'GENERAL';
+    if (!this.getAllowedKnowledgeCategories(req.user).includes(normalizedCategory)) {
+      return res.status(403).json({ success: false, message: 'مجوز ایجاد سند در این دسته‌بندی را ندارید.' });
+    }
+
     let accessControl: ReturnType<AIController['validateKnowledgeAccessControl']>;
     try {
       accessControl = this.validateKnowledgeAccessControl(req.body.accessControl);
@@ -175,7 +182,7 @@ export class AIController {
         title,
         content,
         docType,
-        category,
+        category: normalizedCategory,
         summary,
         accessControl,
         uploadedBy: req.user?.username || req.user?.name || 'system',
