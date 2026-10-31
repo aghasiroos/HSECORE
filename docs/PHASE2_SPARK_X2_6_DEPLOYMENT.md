@@ -103,7 +103,9 @@ explicit administrator operation and should be performed once.
    `npm run test:ai-auth`,
    `npm run test:ai-routes`,
    `npm run test:ai-rag-db`,
-   and `npm run lint`.
+   `npm run test:ai-queue`,
+   `npm run lint`,
+   and `npm run build`.
 
 Do not enable multiple concurrent inference requests on the 8 GB host unless
 load testing demonstrates safe memory headroom. The existing HSECORE module
