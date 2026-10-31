@@ -1,5 +1,3 @@
-version: '3.8'
-
 # Optional CPU-only Local LLM runtime for HSECORE.
 # The Ollama API is reachable only by containers attached to the shared Docker bridge.
 # No host port is published; outbound internet is used only when pulling/updating images or models.
