@@ -2436,6 +2436,11 @@ step12_start_hsecore() {
 
   cd "${PROJECT_DIR}"
 
+  tui_run_task \
+    "Ensuring shared Docker network for HSECORE and optional AI runtime" \
+    "Verify Docker network permissions and DOCKER_NETWORK_NAME in .env." \
+    bash "${PROJECT_DIR}/scripts/ensure-ai-network.sh"
+
   local up_t0
   up_t0="$(date +%s)"
   prepare_uploads_storage || {
@@ -2775,7 +2780,7 @@ EOF
     tui_run_task \
       "Ensuring HSECORE container is active on internal port ${internal_port}" \
       "Check Docker container logs: docker compose -f docker-compose.server.yml logs hse-app" \
-      bash -c "docker compose -f '${PROJECT_DIR}/docker-compose.server.yml' up -d hse-app 2>/dev/null || true; sleep 2"
+      bash -c "bash '${PROJECT_DIR}/scripts/ensure-ai-network.sh' && docker compose -f '${PROJECT_DIR}/docker-compose.server.yml' up -d hse-app 2>/dev/null || true; sleep 2"
   fi
 
   # 5. UFW Firewall Configuration
@@ -2833,7 +2838,7 @@ step14_final_health_check() {
     tui_run_task \
       "Recovering HSECORE application container on port ${internal_port}" \
       "Inspect container logs with: docker compose -f docker-compose.server.yml logs hse-app" \
-      bash -c "docker compose -f '${PROJECT_DIR}/docker-compose.server.yml' up -d hse-app && sleep 3" || true
+      bash -c "bash '${PROJECT_DIR}/scripts/ensure-ai-network.sh' && docker compose -f '${PROJECT_DIR}/docker-compose.server.yml' up -d hse-app && sleep 3" || true
     cid="$(docker compose -f "${PROJECT_DIR}/docker-compose.server.yml" ps -q hse-app 2>/dev/null || true)"
     if [[ -n "${cid}" ]]; then
       container_stat="$(docker inspect --format='{{.State.Status}}' "${cid}" 2>/dev/null || echo 'not_found')"
@@ -4004,6 +4009,7 @@ run_system_update() {
     "[6/7] Restarting application container & reloading Nginx proxy" \
     "Check docker compose status and nginx configuration (nginx -t)." \
     bash -c "
+      bash '${PROJECT_DIR}/scripts/ensure-ai-network.sh' &&
       docker compose -f docker-compose.server.yml up -d --remove-orphans hse-app &&
       if systemctl list-unit-files 2>/dev/null | grep -q 'hsecore.service'; then
         systemctl restart hsecore 2>/dev/null || true
@@ -4089,7 +4095,7 @@ manage_ai_infrastructure() {
         echo -e "${BOLD}${CYAN}==================================================================${NC}"
         echo " 1) نصب زیرساخت هوش مصنوعی (Install / Deploy AI Infrastructure)"
         echo " 2) راه‌اندازی موتور Local LLM (Start AI Engine Container)"
-        echo " 3) دانلود و افزودن مدل جدید (Pull/Download Model - e.g. qwen2.5:1.7b)"
+        echo " 3) دانلود و افزودن مدل جدید (Pull/Download Model - e.g. qwen3:1.7b)"
         echo " 4) مشاهده مدل‌های نصب‌شده (List Installed Models in Volume)"
         echo " 5) تغییر مدل پیش‌فرض سامانه (Change Default Model in .env)"
         echo " 6) فعال‌سازی یا غیرفعال‌سازی هوش مصنوعی (Toggle AI Engine Enabled/Disabled)"
@@ -4108,13 +4114,13 @@ manage_ai_infrastructure() {
           1) bash "${setup_script}" ;;
           2) bash "${manage_script}" start ;;
           3)
-            read -r -p "Enter model tag [default: qwen2.5:1.7b]: " target_m
-            target_m="${target_m:-qwen2.5:1.7b}"
+            read -r -p "Enter model tag [default: qwen3:1.7b]: " target_m
+            target_m="${target_m:-qwen3:1.7b}"
             bash "${manage_script}" pull "${target_m}"
             ;;
           4) bash "${manage_script}" list ;;
           5)
-            read -r -p "Enter new default model name [e.g. qwen2.5:1.7b]: " def_m
+            read -r -p "Enter new default model name [e.g. qwen3:1.7b]: " def_m
             if [ -n "${def_m}" ]; then
               bash "${manage_script}" set-default "${def_m}"
             fi

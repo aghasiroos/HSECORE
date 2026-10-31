@@ -1,0 +1,103 @@
+name: HSECORE AI Runtime Tests
+
+on:
+  push:
+    branches:
+      - ai/phase2-local-llm-runtime
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'docker-compose.ai.yml'
+      - 'docker-compose.server.yml'
+      - 'docker-compose.yml'
+      - '.env.example'
+      - 'scripts/ensure-ai-network.sh'
+      - 'scripts/test-ai-runtime.sh'
+      - 'scripts/setup-local-ai.sh'
+      - 'install.sh'
+      - 'server/core/config.ts'
+
+permissions:
+  contents: read
+
+jobs:
+  local-llm-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      AI_OLLAMA_VERSION: '0.34.0'
+      AI_CPU_LIMIT: '2.0'
+      AI_MEMORY_LIMIT: '4096M'
+      AI_CPU_THREADS: '4'
+      AI_NUM_PARALLEL: '1'
+      AI_MAX_LOADED_MODELS: '1'
+      AI_MAX_QUEUE: '25'
+      DOCKER_NETWORK_NAME: 'hse-network'
+      SQL_USER: 'ci_hse_user'
+      SQL_PASSWORD: 'ci-only-password'
+      SQL_DB_NAME: 'hsecore_ci'
+      JWT_SECRET: 'ci-only-runtime-secret-with-at-least-32-characters'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate shell scripts
+        run: |
+          bash -n install.sh
+          bash -n scripts/ensure-ai-network.sh
+          bash -n scripts/setup-local-ai.sh
+          bash -n scripts/manage-ai.sh
+          bash -n scripts/test-ai-runtime.sh
+
+      - name: Prepare Compose environment
+        run: |
+          cat > .env <<'EOF'
+          SQL_USER=ci_hse_user
+          SQL_PASSWORD=ci-only-password
+          SQL_DB_NAME=hsecore_ci
+          JWT_SECRET=ci-only-runtime-secret-with-at-least-32-characters
+          DOCKER_NETWORK_NAME=hse-network
+          AI_OLLAMA_VERSION=0.34.0
+          AI_CPU_LIMIT=2.0
+          AI_MEMORY_LIMIT=4096M
+          AI_CPU_THREADS=4
+          AI_NUM_PARALLEL=1
+          AI_MAX_LOADED_MODELS=1
+          AI_MAX_QUEUE=25
+          EOF
+
+      - name: Validate HSECORE application Compose files
+        run: |
+          docker compose -f docker-compose.server.yml config --quiet
+          docker compose -f docker-compose.yml config --quiet
+          docker compose -f docker-compose.server.yml config --services | grep -qx hse-app
+          if docker compose -f docker-compose.server.yml config --services | grep -qx hse-ai-engine; then
+            echo 'The optional AI engine must not be a mandatory app Compose service.' >&2
+            exit 1
+          fi
+
+      - name: Create shared Docker network
+        run: bash scripts/ensure-ai-network.sh
+
+      - name: Provision optional Local LLM runtime (no model downloads)
+        run: |
+          docker compose -f docker-compose.ai.yml config --quiet
+          bash scripts/setup-local-ai.sh
+          model_count="$(docker exec hse-ai-engine ollama list | awk 'NR > 1 && NF {count++} END {print count+0}')"
+          test "${model_count}" -eq 0
+
+      - name: Verify idempotent runtime provisioning
+        run: |
+          bash scripts/setup-local-ai.sh
+          model_count="$(docker exec hse-ai-engine ollama list | awk 'NR > 1 && NF {count++} END {print count+0}')"
+          test "${model_count}" -eq 0
+
+      - name: Verify runtime survives a container restart
+        run: |
+          docker compose -f docker-compose.ai.yml restart hse-ai-engine
+          bash scripts/test-ai-runtime.sh
+
+      - name: Cleanup containers (preserve persistent model volume)
+        if: always()
+        run: docker compose -f docker-compose.ai.yml down --remove-orphans

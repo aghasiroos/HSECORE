@@ -82,7 +82,9 @@ cmd_start() {
   print_header
   check_docker
   echo -e "${BLUE}[*] Starting HSECORE Local AI Engine container...${NC}"
-  docker compose -f "${COMPOSE_FILE}" up -d hse-ai-engine
+  bash "${PROJECT_DIR}/scripts/ensure-ai-network.sh"
+  docker volume inspect hse_ai_models >/dev/null 2>&1 || docker volume create hse_ai_models >/dev/null
+  docker compose -f "${COMPOSE_FILE}" up -d --pull missing hse-ai-engine
   echo -e "${BLUE}[*] Waiting for engine healthcheck...${NC}"
   local attempts=0
   until docker exec "${CONTAINER_NAME}" ollama list >/dev/null 2>&1 || [ ${attempts} -ge 15 ]; do
@@ -117,7 +119,7 @@ cmd_restart() {
 cmd_pull() {
   local model="$1"
   if [ -z "${model}" ]; then
-    echo -e "${RED}[ERROR] Model name required. Example: ./scripts/manage-ai.sh pull qwen2.5:1.7b${NC}"
+    echo -e "${RED}[ERROR] Model name required. Example: ./scripts/manage-ai.sh pull qwen3:1.7b${NC}"
     exit 1
   fi
   print_header
@@ -143,7 +145,7 @@ cmd_list() {
 cmd_rm() {
   local model="$1"
   if [ -z "${model}" ]; then
-    echo -e "${RED}[ERROR] Model name required. Example: ./scripts/manage-ai.sh rm qwen2.5:1.7b${NC}"
+    echo -e "${RED}[ERROR] Model name required. Example: ./scripts/manage-ai.sh rm qwen3:1.7b${NC}"
     exit 1
   fi
   check_docker
@@ -153,7 +155,7 @@ cmd_rm() {
 }
 
 cmd_bench() {
-  local model="${1:-qwen2.5:1.7b}"
+  local model="${1:-qwen3:1.7b}"
   print_header
   check_docker
   if ! is_container_running; then
@@ -202,15 +204,15 @@ cmd_sysinfo() {
   echo ""
   echo -e "${BOLD}Recommended Local AI Models for this Machine:${NC}"
   if [ "${ram_mb}" -ge 12000 ] 2>/dev/null; then
-    echo -e "  ${GREEN}✓ Qwen 2.5 7B Q4_K_M${NC} (~5.0GB RAM) - High capacity & Deep HSE Reasoning"
-    echo -e "  ${GREEN}✓ Qwen 2.5 3B Q4_K_M${NC} (~2.6GB RAM) - Optimal Balance"
+    echo -e "  ${GREEN}✓ Qwen 3 7B Q4_K_M${NC} (~5.0GB RAM) - High capacity & Deep HSE Reasoning"
+    echo -e "  ${GREEN}✓ Qwen 3 3B Q4_K_M${NC} (~2.6GB RAM) - Optimal Balance"
     echo -e "  ${GREEN}✓ BGE-M3${NC} (~0.8GB RAM) - Persian RAG Vector Embeddings"
   elif [ "${ram_mb}" -ge 7000 ] 2>/dev/null; then
-    echo -e "  ${GREEN}✓ Qwen 2.5 1.7B Q4_K_M${NC} (~1.5GB RAM) - ${BOLD}PRIMARY RECOMMENDED${NC} (Safe, Fast on 8GB RAM)"
-    echo -e "  ${YELLOW}! Qwen 2.5 3B Q4_K_M${NC} (~2.6GB RAM) - Supported with single concurrency"
+    echo -e "  ${GREEN}✓ Qwen 3 1.7B Q4_K_M${NC} (~1.5GB RAM) - ${BOLD}PRIMARY RECOMMENDED${NC} (Safe, Fast on 8GB RAM)"
+    echo -e "  ${YELLOW}! Qwen 3 3B Q4_K_M${NC} (~2.6GB RAM) - Supported with single concurrency"
     echo -e "  ${GREEN}✓ BGE-M3${NC} (~0.8GB RAM) - Persian RAG Vector Embeddings"
   else
-    echo -e "  ${YELLOW}! Qwen 2.5 0.5B Q4_K_M${NC} (~0.6GB RAM) - Minimal CPU footprint"
+    echo -e "  ${YELLOW}! Qwen 3 0.5B Q4_K_M${NC} (~0.6GB RAM) - Minimal CPU footprint"
     echo -e "  ${YELLOW}! Low RAM detected. Run with strict concurrency limits.${NC}"
   fi
   echo -e "${BOLD}${CYAN}==================================================================${NC}"
@@ -223,7 +225,7 @@ cmd_logs() {
 cmd_set_default() {
   local model="$1"
   if [ -z "${model}" ]; then
-    echo -e "${RED}[ERROR] Model name required. Example: ./scripts/manage-ai.sh set-default qwen2.5:1.7b${NC}"
+    echo -e "${RED}[ERROR] Model name required. Example: ./scripts/manage-ai.sh set-default qwen3:1.7b${NC}"
     exit 1
   fi
   print_header
@@ -267,9 +269,11 @@ cmd_toggle() {
 cmd_update() {
   print_header
   check_docker
-  echo -e "${BLUE}[*] Updating Local AI Engine container image (ollama/ollama:latest)...${NC}"
-  docker pull ollama/ollama:latest
-  echo -e "${BLUE}[*] Recreating AI container with updated image...${NC}"
+  echo -e "${BLUE}[*] Updating the pinned Local AI Engine image...${NC}"
+  bash "${PROJECT_DIR}/scripts/ensure-ai-network.sh"
+  docker volume inspect hse_ai_models >/dev/null 2>&1 || docker volume create hse_ai_models >/dev/null
+  docker compose -f "${COMPOSE_FILE}" pull hse-ai-engine
+  echo -e "${BLUE}[*] Recreating AI container with the configured image version...${NC}"
   docker compose -f "${COMPOSE_FILE}" up -d --force-recreate hse-ai-engine
   echo -e "${GREEN}[✓] Local AI Engine updated and running.${NC}"
 }
@@ -284,7 +288,8 @@ cmd_uninstall() {
     return 0
   fi
   echo -e "${BLUE}[*] Stopping and removing hse-ai-engine container...${NC}"
-  docker compose -f "${COMPOSE_FILE}" down 2>/dev/null || true
+  docker compose -f "${COMPOSE_FILE}" stop hse-ai-engine 2>/dev/null || true
+  docker compose -f "${COMPOSE_FILE}" rm -f hse-ai-engine 2>/dev/null || true
   read -r -p "Do you ALSO want to delete the persistent models volume (hse_ai_models)? [y/N]: " del_vol
   if [[ "${del_vol}" =~ ^[Yy]$ ]]; then
     docker volume rm hse_ai_models 2>/dev/null || true
@@ -351,7 +356,7 @@ case "${1:-}" in
     echo "  start                Start the local AI engine container"
     echo "  stop                 Stop the local AI engine container"
     echo "  restart              Restart the local AI engine container"
-    echo "  pull <model>         Pull an LLM model into persistent volume (e.g. qwen2.5:1.7b)"
+    echo "  pull <model>         Pull an LLM model into persistent volume (e.g. qwen3:1.7b)"
     echo "  list                 List all installed models in persistent volume"
     echo "  rm <model>           Remove a model from persistent storage"
     echo "  set-default <model>  Change default AI model in .env"
