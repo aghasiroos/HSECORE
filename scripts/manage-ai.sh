@@ -220,6 +220,81 @@ cmd_logs() {
   docker logs -f --tail 100 "${CONTAINER_NAME}"
 }
 
+cmd_set_default() {
+  local model="$1"
+  if [ -z "${model}" ]; then
+    echo -e "${RED}[ERROR] Model name required. Example: ./scripts/manage-ai.sh set-default qwen2.5:1.7b${NC}"
+    exit 1
+  fi
+  print_header
+  echo -e "${BLUE}[*] Setting default AI chat model to '${model}' in .env...${NC}"
+  local env_file="${PROJECT_DIR}/.env"
+  if [ -f "${env_file}" ]; then
+    if grep -q "^AI_DEFAULT_CHAT_MODEL=" "${env_file}"; then
+      sed -i "s/^AI_DEFAULT_CHAT_MODEL=.*/AI_DEFAULT_CHAT_MODEL=${model}/" "${env_file}"
+    else
+      echo "AI_DEFAULT_CHAT_MODEL=${model}" >> "${env_file}"
+    fi
+    echo -e "${GREEN}[✓] Default model updated to '${model}' in ${env_file}.${NC}"
+  else
+    echo -e "${YELLOW}[!] .env file not found at ${env_file}. Creating with AI_DEFAULT_CHAT_MODEL=${model}${NC}"
+    echo "AI_DEFAULT_CHAT_MODEL=${model}" > "${env_file}"
+  fi
+}
+
+cmd_toggle() {
+  local env_file="${PROJECT_DIR}/.env"
+  local current="true"
+  if [ -f "${env_file}" ] && grep -q "^AI_ENGINE_ENABLED=" "${env_file}"; then
+    current="$(grep "^AI_ENGINE_ENABLED=" "${env_file}" | cut -d'=' -f2 | tr -d '[:space:]')"
+  fi
+  local new_val="false"
+  if [ "${current}" = "false" ]; then
+    new_val="true"
+  fi
+  print_header
+  echo -e "${BLUE}[*] Toggling AI_ENGINE_ENABLED from '${current}' to '${new_val}'...${NC}"
+  if [ -f "${env_file}" ]; then
+    if grep -q "^AI_ENGINE_ENABLED=" "${env_file}"; then
+      sed -i "s/^AI_ENGINE_ENABLED=.*/AI_ENGINE_ENABLED=${new_val}/" "${env_file}"
+    else
+      echo "AI_ENGINE_ENABLED=${new_val}" >> "${env_file}"
+    fi
+  fi
+  echo -e "${GREEN}[✓] AI Engine status set to: ${BOLD}${new_val}${NC}"
+}
+
+cmd_update() {
+  print_header
+  check_docker
+  echo -e "${BLUE}[*] Updating Local AI Engine container image (ollama/ollama:latest)...${NC}"
+  docker pull ollama/ollama:latest
+  echo -e "${BLUE}[*] Recreating AI container with updated image...${NC}"
+  docker compose -f "${COMPOSE_FILE}" up -d --force-recreate hse-ai-engine
+  echo -e "${GREEN}[✓] Local AI Engine updated and running.${NC}"
+}
+
+cmd_uninstall() {
+  print_header
+  check_docker
+  echo -e "${RED}${BOLD}[WARNING] You are about to remove the Local AI Infrastructure container.${NC}"
+  read -r -p "Do you want to proceed with stopping and removing the AI container? [y/N]: " confirm
+  if ! [[ "${confirm}" =~ ^[Yy]$ ]]; then
+    echo -e "${BLUE}Uninstallation cancelled.${NC}"
+    return 0
+  fi
+  echo -e "${BLUE}[*] Stopping and removing hse-ai-engine container...${NC}"
+  docker compose -f "${COMPOSE_FILE}" down 2>/dev/null || true
+  read -r -p "Do you ALSO want to delete the persistent models volume (hse_ai_models)? [y/N]: " del_vol
+  if [[ "${del_vol}" =~ ^[Yy]$ ]]; then
+    docker volume rm hse_ai_models 2>/dev/null || true
+    echo -e "${YELLOW}[✓] Persistent volume hse_ai_models deleted.${NC}"
+  else
+    echo -e "${GREEN}[✓] Preserved models volume hse_ai_models for future use.${NC}"
+  fi
+  echo -e "${GREEN}[✓] AI Infrastructure uninstallation complete.${NC}"
+}
+
 # Main Command Dispatcher
 case "${1:-}" in
   status)
@@ -255,6 +330,18 @@ case "${1:-}" in
   logs)
     cmd_logs
     ;;
+  set-default)
+    cmd_set_default "${2:-}"
+    ;;
+  toggle)
+    cmd_toggle
+    ;;
+  update)
+    cmd_update
+    ;;
+  uninstall)
+    cmd_uninstall
+    ;;
   *)
     print_header
     echo -e "Usage: ${BOLD}./scripts/manage-ai.sh <command> [args]${NC}"
@@ -267,6 +354,10 @@ case "${1:-}" in
     echo "  pull <model>         Pull an LLM model into persistent volume (e.g. qwen2.5:1.7b)"
     echo "  list                 List all installed models in persistent volume"
     echo "  rm <model>           Remove a model from persistent storage"
+    echo "  set-default <model>  Change default AI model in .env"
+    echo "  toggle               Toggle AI_ENGINE_ENABLED (true/false)"
+    echo "  update               Pull latest engine image and restart"
+    echo "  uninstall            Stop container and optionally wipe models volume"
     echo "  bench [model]        Run CPU inference benchmark test"
     echo "  embed [model]        Test vector embedding generation"
     echo "  sysinfo              Analyze VPS hardware specs and model sizing"

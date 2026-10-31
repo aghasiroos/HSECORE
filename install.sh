@@ -4084,37 +4084,55 @@ manage_ai_infrastructure() {
     menu|*)
       while true; do
         echo ""
-        echo -e "${BOLD}${CYAN}========================================${NC}"
-        echo -e "   ${BOLD}${BLUE}HSECORE AI${NC} ${GREEN}Local Engine Manager${NC}"
-        echo -e "${BOLD}${CYAN}========================================${NC}"
-        echo "1) Check AI Engine Status & Loaded Models"
-        echo "2) Deploy/Run Phase 2 AI Setup & Verification"
-        echo "3) Start AI Engine Container"
-        echo "4) Stop AI Engine Container"
-        echo "5) List Models in Persistent Storage"
-        echo "6) Pull/Download Model (e.g. qwen2.5:1.7b)"
-        echo "7) Run Inference Benchmark Test"
-        echo "8) System Hardware & RAM Suitability Analysis"
-        echo "9) Return to Main Menu"
+        echo -e "${BOLD}${CYAN}==================================================================${NC}"
+        echo -e "   ${BOLD}${BLUE}HSECORE AI${NC} ${GREEN}Local Engine & Infrastructure Manager${NC}"
+        echo -e "${BOLD}${CYAN}==================================================================${NC}"
+        echo " 1) نصب زیرساخت هوش مصنوعی (Install / Deploy AI Infrastructure)"
+        echo " 2) راه‌اندازی موتور Local LLM (Start AI Engine Container)"
+        echo " 3) دانلود و افزودن مدل جدید (Pull/Download Model - e.g. qwen2.5:1.7b)"
+        echo " 4) مشاهده مدل‌های نصب‌شده (List Installed Models in Volume)"
+        echo " 5) تغییر مدل پیش‌فرض سامانه (Change Default Model in .env)"
+        echo " 6) فعال‌سازی یا غیرفعال‌سازی هوش مصنوعی (Toggle AI Engine Enabled/Disabled)"
+        echo " 7) به‌روزرسانی موتور و ایمیج کانتینر (Update Engine Image & Recreate)"
+        echo " 8) بررسی سلامت سرویس و API داخلی (Health Check & Connectivity)"
+        echo " 9) بررسی منابع پردازنده و رم سرور (System Hardware & Sizing Analysis)"
+        echo "10) پایش لاگ‌ها و وضعیت زنده کانتینر (Container Logs & Status)"
+        echo "11) حذف مدل از حافظه پایدار (Remove Specific Model)"
+        echo "12) حذف کامل کانتینر و زیرساخت هوش مصنوعی (Uninstall AI Infrastructure)"
+        echo "13) بازگشت به منوی اصلی (Return to Main Menu)"
         echo ""
-        read -r -p "Select AI option [1-9]: " ai_choice
+        read -r -p "Select AI option [1-13]: " ai_choice
         ai_choice="$(echo "${ai_choice:-1}" | tr -d '[:space:]')"
 
         case "${ai_choice}" in
-          1) bash "${manage_script}" status ;;
-          2) bash "${setup_script}" ;;
-          3) bash "${manage_script}" start ;;
-          4) bash "${manage_script}" stop ;;
-          5) bash "${manage_script}" list ;;
-          6)
+          1) bash "${setup_script}" ;;
+          2) bash "${manage_script}" start ;;
+          3)
             read -r -p "Enter model tag [default: qwen2.5:1.7b]: " target_m
             target_m="${target_m:-qwen2.5:1.7b}"
             bash "${manage_script}" pull "${target_m}"
             ;;
-          7) bash "${manage_script}" bench ;;
-          8) bash "${manage_script}" sysinfo ;;
-          9) break ;;
-          *) echo -e "${RED}Invalid selection.${NC}" ;;
+          4) bash "${manage_script}" list ;;
+          5)
+            read -r -p "Enter new default model name [e.g. qwen2.5:1.7b]: " def_m
+            if [ -n "${def_m}" ]; then
+              bash "${manage_script}" set-default "${def_m}"
+            fi
+            ;;
+          6) bash "${manage_script}" toggle ;;
+          7) bash "${manage_script}" update ;;
+          8) bash "${manage_script}" status ;;
+          9) bash "${manage_script}" sysinfo ;;
+          10) bash "${manage_script}" logs ;;
+          11)
+            read -r -p "Enter model name to delete: " del_m
+            if [ -n "${del_m}" ]; then
+              bash "${manage_script}" rm "${del_m}"
+            fi
+            ;;
+          12) bash "${manage_script}" uninstall ;;
+          13) break ;;
+          *) echo -e "${RED}Invalid selection. Please choose a number between 1 and 13.${NC}" ;;
         esac
       done
       ;;

@@ -114,7 +114,7 @@ async function runPhase5Tests() {
   console.log('👉 [Test 4/5] Testing Semantic Cosine & Keyword Query...');
   try {
     const query = 'ضوابط کار در ارتفاع و لنیارد شوک گیر داربست';
-    const results = await aiRagService.queryRelevantChunks(query, { topK: 3, allowedCategories: ['STANDARDS'], userContext: { uid: 'test-admin-phase5', role: 'ADMIN' } });
+    const results = await aiRagService.queryRelevantChunks(query, { topK: 3, allowedCategories: ['STANDARDS'], userContext: { uid: 'test-admin-uid', role: 'ADMIN', permissions: ['*'] } });
     console.log(`   - Query: "${query}" returned ${results.length} matched chunks.`);
     results.forEach((r, idx) => {
       console.log(`     [Match ${idx + 1}] Score: ${(r.score * 100).toFixed(1)}% | Doc: ${r.docTitle} | Excerpt: ${r.chunkText.slice(0, 60)}...`);
@@ -139,7 +139,7 @@ async function runPhase5Tests() {
         assistantId: 'GENERAL_HSE',
         allowTools: true,
       },
-      { uid: 'test-admin-phase5', name: 'test_admin', role: 'ADMIN' }
+      { uid: 'test-admin-uid', name: 'test_admin', role: 'ADMIN', permissions: ['*'] }
     );
 
     console.log(`   - Response received from assistant: ${chatResponse.assistantId}`);
