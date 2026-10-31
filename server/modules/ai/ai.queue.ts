@@ -11,6 +11,7 @@ export interface AIQueueTask<T> {
   userId?: string | number;
   priority: number; // Higher number = higher priority
   timestamp: number;
+  timeoutMs?: number;
   execute: () => Promise<T>;
   resolve: (value: T) => void;
   reject: (reason?: any) => void;
@@ -19,7 +20,9 @@ export interface AIQueueTask<T> {
 export class AIRequestQueue {
   private activeCount = 0;
   private queue: AIQueueTask<any>[] = [];
-  private maxQueueLength = 25;
+  private get maxQueueLength() {
+    return config.aiEngine.maxQueueLength;
+  }
   private totalProcessed = 0;
   private totalErrors = 0;
 
@@ -70,6 +73,7 @@ export class AIRequestQueue {
         userId: options?.userId,
         priority,
         timestamp: queueEntryTime,
+        timeoutMs: options?.timeoutMs,
         execute: taskFn,
         resolve: (data) => resolve({ data, queueWaitMs: Date.now() - queueEntryTime }),
         reject,
@@ -93,7 +97,7 @@ export class AIRequestQueue {
 
       this.activeCount++;
       try {
-        const result = await this.executeWithTimeout(nextTask.execute);
+        const result = await this.executeWithTimeout(nextTask.execute, nextTask.timeoutMs);
         this.totalProcessed++;
         nextTask.resolve(result);
       } catch (err) {
