@@ -101,6 +101,15 @@ async function run() {
     assert.equal(indexCalls, 0);
     console.log('PASS malformed accessControl input is rejected before indexing');
 
+    const inaccessibleCategoryCreate = await request('/knowledge', {
+      method: 'POST',
+      role: 'SAFETY_OFFICER',
+      body: { title: 'Inaccessible category', content: 'Health document', category: 'HEALTH' },
+    });
+    assert.equal(inaccessibleCategoryCreate.status, 403);
+    assert.equal(indexCalls, 0);
+    console.log('PASS users cannot create documents in categories they cannot access');
+
     const safetyCreate = await request('/knowledge', {
       method: 'POST',
       role: 'SAFETY_OFFICER',
@@ -136,7 +145,7 @@ async function run() {
     assert.equal(deleteCalls, 1);
     console.log('PASS authorized HSE manager can delete an ACL-accessible document');
 
-    console.log('AI HTTP route authorization tests: 7/7 passed');
+    console.log('AI HTTP route authorization tests: 8/8 passed');
   } finally {
     aiRagService.indexDocument = originalIndex;
     aiRagService.canAccessDocument = originalCanAccess;
