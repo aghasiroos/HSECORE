@@ -120,6 +120,7 @@ export const ALL_SYSTEM_MODULES: SystemModuleConfig[] = [
   { key: 'heat', titleFa: 'پایش استرس گرمایی', titleEn: 'Thermal Heat Stress Monitor', groupId: 'dashboards', category: 'داشبوردها و تحلیل‌های آماری', enabled: true, descriptionFa: 'پایش آنلاین شاخص WBGT، استرس گرمایی محیط و توصیه‌های ایمنی' },
   { key: 'hse-ms', titleFa: 'پایش نرخ رویدادها (TRIR)', titleEn: 'TRIR Incident Rate', groupId: 'dashboards', category: 'داشبوردها و تحلیل‌های آماری', enabled: true, descriptionFa: 'محاسبه استاندارد نرخ رویدادهای قابل ثبت TRIR و ساعات کارکرد' },
   { key: 'reports', titleFa: 'گزارشات و تحلیل‌های آماری', titleEn: 'Statistical Reports & BI', groupId: 'dashboards', category: 'داشبوردها و تحلیل‌های آماری', enabled: true, descriptionFa: 'گزارش‌های مدیریتی، نمودارهای تحلیلی و خروجی‌های جامع سیستم' },
+  { key: 'ai-assistant', titleFa: 'هوش مصنوعی HSECORE', titleEn: 'HSECORE AI Assistant', groupId: 'dashboards', category: 'داشبوردها و تحلیل‌های آماری', enabled: true, descriptionFa: 'دستیار مستقل هوش مصنوعی محلی با ۱۰ مشاور تخصصی و استخراج داده‌های زنده سازمان' },
 
   // 2. Specialized HSE Departments
   { key: 'safety-unit', titleFa: 'واحد ایمنی و بازرسی‌ها', titleEn: 'Safety Operations Department', groupId: 'departments', category: 'دپارتمان‌های تخصصی HSE', enabled: true, descriptionFa: 'مدیریت نظارت بر ایمنی عملیاتی، چک‌لیست‌های تخصصی، ممیزی‌ها و گشت‌های ایمنی' },

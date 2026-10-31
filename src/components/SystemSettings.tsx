@@ -57,7 +57,8 @@ import {
   UserCog,
   User as UserIcon,
   Bell,
-  Zap
+  Zap,
+  Bot
 } from 'lucide-react';
 import { UserProfile } from '../types';
 import UserManagement from './UserManagement';
@@ -66,6 +67,7 @@ import OrganizationMgmt from './OrganizationMgmt';
 import { SystemLogoManagement } from './SystemLogoManagement';
 import ApiManagementTab from './system-settings/ApiManagementTab';
 import BackupRestoreTab from './system-settings/BackupRestoreTab';
+import AiManagementTab from './system-settings/AiManagementTab';
 import { GlobalAuditLogSystem } from './GlobalAuditLogSystem';
 import { SystemNotificationsTab } from './system-settings/SystemNotificationsTab';
 import { hasPermission, isUserAdmin } from '../utils/authHelper';
@@ -1389,6 +1391,7 @@ export default function SystemSettings({ language, currentUser, onUserUpdateTrig
   const canAccessUiConfig = isAdmin || hasPermission(currentUser, 'UI Config & Branding', 'view');
   const canAccessApi = isAdmin || hasPermission(currentUser, 'API & Webhooks', 'view');
   const canAccessBackup = isAdmin || hasPermission(currentUser, 'Database Backup', 'view');
+  const canAccessAi = isAdmin || hasPermission(currentUser, 'Audit Logs', 'view');
 
   // Users with ONLY Notifications permission must use the dedicated Alerts & Notifications shortcut, not System Settings
   const canAccessSystemSettingsModule =
@@ -1398,10 +1401,11 @@ export default function SystemSettings({ language, currentUser, onUserUpdateTrig
     canAccessAudit ||
     canAccessUiConfig ||
     canAccessApi ||
-    canAccessBackup;
+    canAccessBackup ||
+    canAccessAi;
 
   const allowedSubTabs = React.useMemo(() => {
-    const list: Array<'org_structure' | 'personnel' | 'users' | 'notifications' | 'audit' | 'ui_config' | 'integration' | 'automation' | 'backup'> = [];
+    const list: Array<'org_structure' | 'personnel' | 'users' | 'notifications' | 'audit' | 'ui_config' | 'integration' | 'automation' | 'backup' | 'ai'> = [];
     if (canAccessOrgStructure) list.push('org_structure');
     if (canAccessPersonnel) list.push('personnel');
     if (canAccessUsers) list.push('users');
@@ -1413,6 +1417,7 @@ export default function SystemSettings({ language, currentUser, onUserUpdateTrig
       list.push('integration');
     }
     if (canAccessBackup) list.push('backup');
+    if (canAccessAi) list.push('ai');
     return list;
   }, [
     canAccessOrgStructure,
@@ -1423,6 +1428,7 @@ export default function SystemSettings({ language, currentUser, onUserUpdateTrig
     canAccessUiConfig,
     canAccessApi,
     canAccessBackup,
+    canAccessAi,
   ]);
 
   const [isFullscreenFormOpen, setIsFullscreenFormOpen] = useState(false);
@@ -1435,8 +1441,8 @@ export default function SystemSettings({ language, currentUser, onUserUpdateTrig
     return () => window.removeEventListener('fullscreenFormToggle', handleToggle);
   }, []);
 
-  // Active section: 'org_structure' | 'personnel' | 'users' | 'notifications' | 'audit' | 'ui_config' | 'integration' | 'automation' | 'backup'
-  const [activeSubTab, setActiveSubTab] = useState<'org_structure' | 'personnel' | 'users' | 'notifications' | 'audit' | 'ui_config' | 'integration' | 'automation' | 'backup'>(() => {
+  // Active section
+  const [activeSubTab, setActiveSubTab] = useState<'org_structure' | 'personnel' | 'users' | 'notifications' | 'audit' | 'ui_config' | 'integration' | 'automation' | 'backup' | 'ai'>(() => {
     try {
       const saved = sessionStorage.getItem('hse_system_settings_active_subtab');
       if (saved && allowedSubTabs.includes(saved as any)) {
@@ -1601,8 +1607,24 @@ export default function SystemSettings({ language, currentUser, onUserUpdateTrig
                 <span>{isFa ? 'پشتیبان‌گیری و بازیابی' : 'Backup & Restore'}</span>
               </button>
             )}
+            {canAccessAi && (
+              <button
+                onClick={() => setActiveSubTab('ai')}
+                className={`px-4 py-2 text-xs font-black rounded-lg cursor-pointer transition flex items-center gap-1.5 ${
+                  activeSubTab === 'ai' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-900'
+                }`}
+              >
+                <Bot className="w-4 h-4 text-indigo-500" />
+                <span>{isFa ? 'مدیریت هوش مصنوعی' : 'AI Management'}</span>
+              </button>
+            )}
           </div>
         </div>
+      )}
+
+      {/* SECTION 0: AI Management UI */}
+      {activeSubTab === 'ai' && canAccessAi && (
+        <AiManagementTab language={language} currentUser={currentUser} />
       )}
 
       {/* SECTION 1: Backup & Restore UI */}

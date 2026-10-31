@@ -234,6 +234,7 @@ const SystemSettings = lazyWithRetry(() => import('./components/SystemSettings')
 const ComprehensiveNonConformanceModule = lazyWithRetry(() => import('./components/non-conformance/ComprehensiveNonConformanceModule').then(m => ({ default: m.ComprehensiveNonConformanceModule })), 'non-conformances');
 const InstructionsDocumentsModule = lazyWithRetry(() => import('./components/InstructionsDocumentsModule'), 'documents');
 const SystemNotificationsTab = lazyWithRetry(() => import('./components/system-settings/SystemNotificationsTab'), 'notifications');
+const AiAssistantApp = lazyWithRetry(() => import('./modules/ai/AiAssistantApp'), 'ai-assistant');
 
 function ModuleLoadingFallback({ isFa }: { isFa: boolean }) {
   return (
@@ -1379,6 +1380,13 @@ export default function App() {
                 currentUser={currentUser}
                 language={language}
                 onUserUpdateTrigger={() => {}}
+              />
+            )}
+
+            {activeTab === 'ai-assistant' && (
+              <AiAssistantApp 
+                currentUser={currentUser}
+                language={language}
               />
             )}
  </div>

@@ -40,7 +40,8 @@ import {
   Star,
   BookOpen,
   ChevronsUpDown,
-  Bell
+  Bell,
+  Bot
 } from 'lucide-react';
 import { UserProfile } from '../types';
 import {
@@ -76,7 +77,8 @@ export type MainTabKey =
   | 'health-env'
   | 'non-conformances'
   | 'documents'
-  | 'notifications';
+  | 'notifications'
+  | 'ai-assistant';
 
 export interface TabItemConfig {
   key: MainTabKey;
@@ -276,6 +278,7 @@ const MODULE_META: Record<MainTabKey, { icon: any; tone: ToneKey }> = {
   'pending-documents': { icon: Inbox, tone: 'indigo' },
   'process-management': { icon: Workflow, tone: 'violet' },
   notifications: { icon: Bell, tone: 'amber' },
+  'ai-assistant': { icon: Bot, tone: 'indigo' },
   system: { icon: Settings2, tone: 'slate' },
   'user-mgmt': { icon: UserCog, tone: 'slate' },
   profile: { icon: User, tone: 'slate' }

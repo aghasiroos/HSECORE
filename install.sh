@@ -4063,6 +4063,64 @@ run_system_update() {
   return 0
 }
 
+# ------------------------------------------------------------------------------
+# Local AI Infrastructure Management (Phase 2 Integration)
+# Independent management of Local LLM container, persistent models, and health
+# ------------------------------------------------------------------------------
+manage_ai_infrastructure() {
+  local action="${1:-menu}"
+  local manage_script="${PROJECT_DIR}/scripts/manage-ai.sh"
+  local setup_script="${PROJECT_DIR}/scripts/setup-local-ai.sh"
+
+  chmod +x "${manage_script}" "${setup_script}" 2>/dev/null || true
+
+  case "${action}" in
+    setup)
+      bash "${setup_script}"
+      ;;
+    status)
+      bash "${manage_script}" status
+      ;;
+    menu|*)
+      while true; do
+        echo ""
+        echo -e "${BOLD}${CYAN}========================================${NC}"
+        echo -e "   ${BOLD}${BLUE}HSECORE AI${NC} ${GREEN}Local Engine Manager${NC}"
+        echo -e "${BOLD}${CYAN}========================================${NC}"
+        echo "1) Check AI Engine Status & Loaded Models"
+        echo "2) Deploy/Run Phase 2 AI Setup & Verification"
+        echo "3) Start AI Engine Container"
+        echo "4) Stop AI Engine Container"
+        echo "5) List Models in Persistent Storage"
+        echo "6) Pull/Download Model (e.g. qwen2.5:1.7b)"
+        echo "7) Run Inference Benchmark Test"
+        echo "8) System Hardware & RAM Suitability Analysis"
+        echo "9) Return to Main Menu"
+        echo ""
+        read -r -p "Select AI option [1-9]: " ai_choice
+        ai_choice="$(echo "${ai_choice:-1}" | tr -d '[:space:]')"
+
+        case "${ai_choice}" in
+          1) bash "${manage_script}" status ;;
+          2) bash "${setup_script}" ;;
+          3) bash "${manage_script}" start ;;
+          4) bash "${manage_script}" stop ;;
+          5) bash "${manage_script}" list ;;
+          6)
+            read -r -p "Enter model tag [default: qwen2.5:1.7b]: " target_m
+            target_m="${target_m:-qwen2.5:1.7b}"
+            bash "${manage_script}" pull "${target_m}"
+            ;;
+          7) bash "${manage_script}" bench ;;
+          8) bash "${manage_script}" sysinfo ;;
+          9) break ;;
+          *) echo -e "${RED}Invalid selection.${NC}" ;;
+        esac
+      done
+      ;;
+  esac
+}
+
 # ==============================================================================
 # Main Entry Point & Router
 # ==============================================================================
@@ -4148,6 +4206,18 @@ main() {
         echo "Installer status: Step ${cur_st}/15 completed."
         exit 0
         ;;
+      --ai-setup|--setup-ai)
+        manage_ai_infrastructure "setup"
+        exit 0
+        ;;
+      --ai-status)
+        manage_ai_infrastructure "status"
+        exit 0
+        ;;
+      --ai|--ai-manage|--manage-ai)
+        manage_ai_infrastructure "menu"
+        exit 0
+        ;;
       --uninstall)
         safe_uninstall
         exit 0
@@ -4160,7 +4230,7 @@ main() {
         echo "Usage: sudo ./install.sh [OPTIONS]"
         echo ""
         echo "Operations:"
-        echo "  (no args)      Interactive Manager Menu (Install, Update, Backup, Restore, Health, Logs)"
+        echo "  (no args)      Interactive Manager Menu (Install, Update, Backup, Restore, Health, Logs, AI)"
         echo "  --install      Run full fresh installation from step 1 to 15"
         echo "  --update       Run system update & upgrade preserving database data"
         echo "  --backup       Create an instant full backup (database + uploads + .env)"
@@ -4169,6 +4239,9 @@ main() {
         echo "  --backup-run   Unattended scheduled backup (used by cron)"
         echo "  --restore [file]  Restore from a full archive or legacy .sql/.sql.gz dump"
         echo "  --health       Run full system and container health diagnostics"
+        echo "  --ai-setup     Deploy and verify Phase 2 Local AI infrastructure"
+        echo "  --ai-status    Show Local AI engine and loaded model status"
+        echo "  --ai-manage    Interactive Local AI Infrastructure Manager"
         echo "  --logs         View installer, application, and web server logs"
         echo "  --resume       Resume installation from the next incomplete step"
         echo "  --step <1-15>  Execute strictly the specified step only"
@@ -4201,10 +4274,11 @@ main() {
         echo "5) Check System Health"
         echo "6) View Update/Backup Logs"
         echo "7) Backup Schedule Settings"
-        echo "8) Exit"
+        echo "8) Local AI Infrastructure (HSECORE AI)"
+        echo "9) Exit"
         echo ""
 
-        read -r -p "Select option [1-8]: " menu_choice
+        read -r -p "Select option [1-9]: " menu_choice
         menu_choice="$(echo "${menu_choice:-1}" | tr -d '[:space:]')"
 
         case "${menu_choice}" in
@@ -4231,11 +4305,14 @@ main() {
             configure_backup_schedule || log_warn "Backup schedule was not changed."
             ;;
           8)
+            manage_ai_infrastructure "menu"
+            ;;
+          9)
             echo -e "${BLUE}Exiting HSECORE Installation Manager.${NC}"
             exit 0
             ;;
           *)
-            echo -e "${RED}Invalid selection. Please choose a number between 1 and 8.${NC}"
+            echo -e "${RED}Invalid selection. Please choose a number between 1 and 9.${NC}"
             ;;
         esac
       done

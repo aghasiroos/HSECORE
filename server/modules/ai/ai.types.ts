@@ -1,0 +1,79 @@
+/**
+ * HSECORE Enterprise Local AI - Core Type Definitions
+ */
+
+export type AIAssistantId =
+  | 'PTW_SHERPA'
+  | 'INCIDENT_ANALYSIS'
+  | 'RISK_ASSESSMENT'
+  | 'OCCUPATIONAL_HEALTH'
+  | 'NUTRITION_LIFESTYLE'
+  | 'ENVIRONMENT_WASTE'
+  | 'INSPECTION_5S'
+  | 'TRAINING_COMPLIANCE'
+  | 'MANAGEMENT_ANALYTICS'
+  | 'GENERAL_HSE';
+
+export interface AIAssistantMetadata {
+  id: AIAssistantId;
+  name: string;
+  nameFa: string;
+  title: string;
+  description: string;
+  systemPrompt: string;
+  allowedRoles: string[];
+  associatedModule: string;
+  tools: string[];
+  icon: string;
+}
+
+export interface AIChatMessage {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  timestamp?: string;
+  citations?: string[];
+  toolsUsed?: string[];
+}
+
+export interface AIChatRequest {
+  message: string;
+  assistantId?: AIAssistantId;
+  history?: Array<{ role: 'user' | 'assistant'; content: string }>;
+  contextModule?: string;
+  allowTools?: boolean;
+}
+
+export interface AIChatResponse {
+  success: boolean;
+  reply: string;
+  assistantId: AIAssistantId;
+  toolsUsed: string[];
+  citations: string[];
+  durationMs: number;
+  model: string;
+  queueWaitMs?: number;
+}
+
+export interface AIToolResult {
+  toolName: string;
+  titleFa: string;
+  summary: string;
+  data: any;
+  timestamp: string;
+}
+
+export interface AIAuditRecord {
+  userId?: number | string;
+  userUid?: string;
+  userName?: string;
+  role?: string;
+  assistantId: AIAssistantId;
+  promptLength: number;
+  responseLength: number;
+  toolsUsed: string[];
+  durationMs: number;
+  model: string;
+  success: boolean;
+  errorMessage?: string;
+  timestamp: string;
+}

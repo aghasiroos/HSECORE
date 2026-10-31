@@ -997,3 +997,86 @@ export const automationExecutionLogs = pgTable(
   ]
 );
 
+// ==========================================
+// 15. Local AI Knowledge Base & RAG Engine
+// ==========================================
+export const aiKnowledgeDocs = pgTable(
+  'ai_knowledge_docs',
+  {
+    id: serial('id').primaryKey(),
+    title: text('title').notNull(),
+    docType: text('doc_type').default('REGULATION').notNull(), // 'PDF' | 'DOCX' | 'TXT' | 'INSTRUCTION' | 'REGULATION'
+    category: text('category').default('GENERAL').notNull(), // 'PTW' | 'HEALTH' | 'ENVIRONMENT' | 'SAFETY' | 'GENERAL'
+    content: text('content').notNull(),
+    summary: text('summary'),
+    fileSize: integer('file_size').default(0).notNull(),
+    chunkCount: integer('chunk_count').default(0).notNull(),
+    status: text('status').default('INDEXED').notNull(), // 'PENDING' | 'INDEXED' | 'FAILED'
+    uploadedBy: text('uploaded_by'),
+    metadata: jsonb('metadata'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_ai_docs_category').on(table.category),
+    index('idx_ai_docs_status').on(table.status),
+    index('idx_ai_docs_created').on(table.createdAt),
+  ]
+);
+
+export const aiKnowledgeChunks = pgTable(
+  'ai_knowledge_chunks',
+  {
+    id: serial('id').primaryKey(),
+    docId: integer('doc_id').references(() => aiKnowledgeDocs.id, { onDelete: 'cascade' }).notNull(),
+    chunkIndex: integer('chunk_index').notNull(),
+    chunkText: text('chunk_text').notNull(),
+    tokenCount: integer('token_count').default(0).notNull(),
+    embedding: jsonb('embedding'), // Dense vector representation (array of floats from BGE-M3)
+    metadata: jsonb('metadata'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_ai_chunks_doc').on(table.docId),
+    index('idx_ai_chunks_index').on(table.docId, table.chunkIndex),
+  ]
+);
+
+export const aiChatSessions = pgTable(
+  'ai_chat_sessions',
+  {
+    id: text('id').primaryKey(),
+    userId: integer('user_id'),
+    userUid: text('user_uid'),
+    title: text('title').notNull(),
+    assistantId: text('assistant_id').default('GENERAL_HSE').notNull(),
+    metadata: jsonb('metadata'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_ai_sessions_user').on(table.userId),
+    index('idx_ai_sessions_created').on(table.createdAt),
+  ]
+);
+
+export const aiChatMessages = pgTable(
+  'ai_chat_messages',
+  {
+    id: text('id').primaryKey(),
+    sessionId: text('session_id').references(() => aiChatSessions.id, { onDelete: 'cascade' }).notNull(),
+    role: text('role').notNull(), // 'user' | 'assistant' | 'system'
+    content: text('content').notNull(),
+    toolsUsed: jsonb('tools_used'),
+    citations: jsonb('citations'),
+    durationMs: integer('duration_ms'),
+    model: text('model'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_ai_msgs_session').on(table.sessionId),
+    index('idx_ai_msgs_created').on(table.createdAt),
+  ]
+);
+
+
