@@ -27,7 +27,7 @@ jobs:
     timeout-minutes: 25
     env:
       AI_OLLAMA_VERSION: '0.34.0'
-      AI_CPU_LIMIT: '4.0'
+      AI_CPU_LIMIT: '2.0'
       AI_MEMORY_LIMIT: '4096M'
       AI_CPU_THREADS: '4'
       AI_NUM_PARALLEL: '1'
@@ -59,7 +59,7 @@ jobs:
           JWT_SECRET=ci-only-runtime-secret-with-at-least-32-characters
           DOCKER_NETWORK_NAME=hse-network
           AI_OLLAMA_VERSION=0.34.0
-          AI_CPU_LIMIT=4.0
+          AI_CPU_LIMIT=2.0
           AI_MEMORY_LIMIT=4096M
           AI_CPU_THREADS=4
           AI_NUM_PARALLEL=1
