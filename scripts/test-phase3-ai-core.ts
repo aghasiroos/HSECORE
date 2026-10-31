@@ -64,7 +64,7 @@ async function runPhase3Tests() {
       assistantId: 'MANAGEMENT_ANALYTICS',
       allowTools: true,
     },
-    { id: 1, name: 'مدیر ارشد HSE', role: 'ADMIN' }
+    { uid: 'test-admin-phase3', id: 1, name: 'مدیر ارشد HSE', role: 'ADMIN' }
   );
 
   console.log(`  - Response Success : ${chatResponse.success}`);
