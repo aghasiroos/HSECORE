@@ -81,6 +81,21 @@ export class AIRagService {
     accessControl?: KnowledgeDocumentAccessControl;
   }): Promise<{ docId: number; id: number; chunkCount: number }> {
     const { title, content, docType = 'REGULATION', category = 'GENERAL', uploadedBy, summary, accessControl } = params;
+    if (typeof title !== 'string' || !title.trim() || title.trim().length > 200) {
+      throw new Error('عنوان سند باید بین ۱ تا ۲۰۰ نویسه باشد.');
+    }
+    if (typeof content !== 'string' || !content.trim() || Buffer.byteLength(content, 'utf8') > 256 * 1024) {
+      throw new Error('متن سند خالی یا بزرگ‌تر از سقف مجاز ۲۵۶ کیلوبایت است.');
+    }
+    if (summary !== undefined && (typeof summary !== 'string' || summary.length > 2000)) {
+      throw new Error('خلاصه سند نباید بیش از ۲۰۰۰ نویسه باشد.');
+    }
+
+    // Validate and chunk before inserting the header so rejected documents leave no PENDING row.
+    const chunks = textChunker.chunkText(content, { maxChunkSize: 650, overlapSize: 100 });
+    if (chunks.length > 500) {
+      throw new Error('تعداد بخش‌های سند از سقف مجاز ۵۰۰ بیشتر است.');
+    }
 
     // 1. Create Document Header in DB
     const [doc] = await db
@@ -101,9 +116,7 @@ export class AIRagService {
 
     const docId = doc.id;
 
-    // 2. Chunk text
-    const chunks = textChunker.chunkText(content, { maxChunkSize: 650, overlapSize: 100 });
-
+    // 2. Persist prevalidated chunks.
     if (chunks.length === 0) {
       await db.update(schema.aiKnowledgeDocs).set({ status: 'INDEXED', chunkCount: 0 }).where(eq(schema.aiKnowledgeDocs.id, docId));
       return { docId, id: docId, chunkCount: 0 };

@@ -46,10 +46,25 @@ export class AIController {
       return res.status(400).json({ success: false, message: 'نام مدل الزامی است.' });
     }
 
+    const startedAt = Date.now();
     try {
       const result = await aiService.pullModel(modelName);
-      return res.json(result);
+      aiAuditService.log({
+        userId: req.user?.id, userUid: req.user?.uid,
+        userName: req.user?.name || req.user?.username, role: req.user?.role,
+        assistantId: 'GENERAL_HSE', promptLength: modelName.length, responseLength: 0,
+        toolsUsed: [], durationMs: Date.now() - startedAt,
+        model: 'ollama-model-pull', success: result.success, timestamp: new Date().toISOString(),
+      });
+      return res.status(result.success ? 200 : 400).json(result);
     } catch (err: any) {
+      aiAuditService.log({
+        userId: req.user?.id, userUid: req.user?.uid,
+        userName: req.user?.name || req.user?.username, role: req.user?.role,
+        assistantId: 'GENERAL_HSE', promptLength: modelName.length, responseLength: 0,
+        toolsUsed: [], durationMs: Date.now() - startedAt,
+        model: 'ollama-model-pull', success: false, timestamp: new Date().toISOString(),
+      });
       return res.status(500).json({ success: false, message: err.message || 'خطا در شروع بارگیری مدل' });
     }
   }
@@ -60,10 +75,25 @@ export class AIController {
       return res.status(400).json({ success: false, message: 'نام مدل مشخص نشده است.' });
     }
 
+    const startedAt = Date.now();
     try {
       const result = await aiService.deleteModel(modelName);
-      return res.json(result);
+      aiAuditService.log({
+        userId: req.user?.id, userUid: req.user?.uid,
+        userName: req.user?.name || req.user?.username, role: req.user?.role,
+        assistantId: 'GENERAL_HSE', promptLength: modelName.length, responseLength: 0,
+        toolsUsed: [], durationMs: Date.now() - startedAt,
+        model: 'ollama-model-delete', success: result.success, timestamp: new Date().toISOString(),
+      });
+      return res.status(result.success ? 200 : 400).json(result);
     } catch (err: any) {
+      aiAuditService.log({
+        userId: req.user?.id, userUid: req.user?.uid,
+        userName: req.user?.name || req.user?.username, role: req.user?.role,
+        assistantId: 'GENERAL_HSE', promptLength: modelName.length, responseLength: 0,
+        toolsUsed: [], durationMs: Date.now() - startedAt,
+        model: 'ollama-model-delete', success: false, timestamp: new Date().toISOString(),
+      });
       return res.status(500).json({ success: false, message: err.message || 'خطا در حذف مدل' });
     }
   }
@@ -163,10 +193,18 @@ export class AIController {
 
   async createKnowledgeDoc(req: Request, res: Response) {
     const { title, content, docType, category, summary } = req.body;
-    if (!title || !content) {
-      return res.status(400).json({ success: false, message: 'عنوان و متن سند الزامی هستند.' });
+    if (typeof title !== 'string' || typeof content !== 'string' || !title.trim() || !content.trim()) {
+      return res.status(400).json({ success: false, message: 'عنوان و متن معتبر سند الزامی هستند.' });
     }
-
+    if (title.trim().length > 200 || Buffer.byteLength(content, 'utf8') > 256 * 1024) {
+      return res.status(413).json({ success: false, message: 'حداکثر طول عنوان ۲۰۰ نویسه و حجم متن سند ۲۵۶ کیلوبایت است.' });
+    }
+    if (summary !== undefined && (typeof summary !== 'string' || summary.length > 2000)) {
+      return res.status(400).json({ success: false, message: 'خلاصه سند نامعتبر یا بیش از حد مجاز است.' });
+    }
+    if (docType !== undefined && (typeof docType !== 'string' || docType.length > 64)) {
+      return res.status(400).json({ success: false, message: 'نوع سند نامعتبر است.' });
+    }
     const normalizedCategory = typeof category === 'string' && category.trim()
       ? category.trim().toUpperCase()
       : 'GENERAL';
@@ -181,9 +219,18 @@ export class AIController {
       return res.status(400).json({ success: false, message: err.message || 'ساختار سطح دسترسی سند نامعتبر است.' });
     }
 
+    if (req.body.accessControl !== undefined) {
+      const role = String(req.user?.role || '').trim().toUpperCase();
+      const canManageAcl = role === 'ADMIN' || role === 'ADMINISTRATOR' ||
+        checkUserHasPermission(req.user, 'documents:manage_acl');
+      if (!canManageAcl) {
+        return res.status(403).json({ success: false, message: 'تعریف سطح دسترسی اختصاصی سند فقط برای مدیر مجاز است.' });
+      }
+    }
+
     try {
       const result = await aiRagService.indexDocument({
-        title,
+        title: title.trim(),
         content,
         docType,
         category: normalizedCategory,
@@ -222,8 +269,8 @@ export class AIController {
 
   async queryKnowledge(req: Request, res: Response) {
     const { query, category, topK } = req.body;
-    if (!query) {
-      return res.status(400).json({ success: false, message: 'عبارت جستجو الزامی است.' });
+    if (typeof query !== 'string' || !query.trim() || query.length > 4000) {
+      return res.status(400).json({ success: false, message: 'عبارت جستجو الزامی است و نباید بیش از ۴۰۰۰ نویسه باشد.' });
     }
 
     try {
@@ -244,11 +291,41 @@ export class AIController {
 
   async generateBPMN(req: Request, res: Response) {
     const { description, category, priority } = req.body;
-    if (!description) {
-      return res.status(400).json({ success: false, message: 'توضیحات فرآیند الزامی است.' });
+    if (typeof description !== 'string' || !description.trim() || description.length > 8000) {
+      return res.status(400).json({ success: false, message: 'شرح فرآیند الزامی است و نباید بیش از ۸۰۰۰ نویسه باشد.' });
     }
-    const generated = await aiService.generateBPMN(description, category, priority);
-    return res.json({ success: true, data: generated });
+    if (category !== undefined && (typeof category !== 'string' || category.length > 64)) {
+      return res.status(400).json({ success: false, message: 'دسته‌بندی فرآیند نامعتبر است.' });
+    }
+    if (priority !== undefined && (typeof priority !== 'string' || priority.length > 32)) {
+      return res.status(400).json({ success: false, message: 'اولویت فرآیند نامعتبر است.' });
+    }
+
+    const startedAt = Date.now();
+    try {
+      const queued = await aiRequestQueue.enqueue(
+        () => aiService.generateBPMN(description.trim(), category, priority),
+        { userId: req.user?.id, role: req.user?.role }
+      );
+      const generated = queued.data;
+      aiAuditService.log({
+        userId: req.user?.id,
+        userUid: req.user?.uid,
+        userName: req.user?.name || req.user?.username,
+        role: req.user?.role,
+        assistantId: 'GENERAL_HSE',
+        promptLength: description.length,
+        responseLength: JSON.stringify(generated).length,
+        toolsUsed: [],
+        durationMs: Date.now() - startedAt,
+        model: 'hsecore-bpmn-generator',
+        success: true,
+        timestamp: new Date().toISOString(),
+      });
+      return res.json({ success: true, data: generated, queueWaitMs: queued.queueWaitMs });
+    } catch (err: any) {
+      return res.status(503).json({ success: false, message: err.message || 'سرویس تولید فرآیند موقتاً در دسترس نیست.' });
+    }
   }
 }
 

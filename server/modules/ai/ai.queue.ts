@@ -11,7 +11,9 @@ export interface AIQueueTask<T> {
   userId?: string | number;
   priority: number; // Higher number = higher priority
   timestamp: number;
-  execute: () => Promise<T>;
+  timeoutMs?: number;
+  queueTimer?: NodeJS.Timeout;
+  execute: (remainingMs: number) => Promise<T>;
   resolve: (value: T) => void;
   reject: (reason?: any) => void;
 }
@@ -19,7 +21,9 @@ export interface AIQueueTask<T> {
 export class AIRequestQueue {
   private activeCount = 0;
   private queue: AIQueueTask<any>[] = [];
-  private maxQueueLength = 25;
+  private get maxQueueLength() {
+    return config.aiEngine.maxQueueLength;
+  }
   private totalProcessed = 0;
   private totalErrors = 0;
 
@@ -34,10 +38,11 @@ export class AIRequestQueue {
   }
 
   async enqueue<T>(
-    taskFn: () => Promise<T>,
+    taskFn: (remainingMs: number) => Promise<T>,
     options?: { userId?: string | number; role?: string; timeoutMs?: number }
   ): Promise<{ data: T; queueWaitMs: number }> {
     const queueEntryTime = Date.now();
+    const timeoutLimit = options?.timeoutMs || config.aiEngine.timeoutMs || 60000;
     const maxConcurrency = config.aiEngine.maxConcurrency || 1;
     const isHighPriority = options?.role === 'ADMIN' || options?.role === 'ADMINISTRATOR' || options?.role === 'HSE_MANAGER';
     const priority = isHighPriority ? 10 : 1;
@@ -51,7 +56,7 @@ export class AIRequestQueue {
     if (this.activeCount < maxConcurrency) {
       this.activeCount++;
       try {
-        const result = await this.executeWithTimeout(taskFn, options?.timeoutMs);
+        const result = await this.executeWithTimeout(() => taskFn(timeoutLimit), timeoutLimit);
         this.totalProcessed++;
         return { data: result, queueWaitMs: Date.now() - queueEntryTime };
       } catch (err) {
@@ -70,10 +75,20 @@ export class AIRequestQueue {
         userId: options?.userId,
         priority,
         timestamp: queueEntryTime,
+        timeoutMs: timeoutLimit,
         execute: taskFn,
         resolve: (data) => resolve({ data, queueWaitMs: Date.now() - queueEntryTime }),
         reject,
       };
+
+      // The request deadline includes time spent waiting, not only inference time.
+      task.queueTimer = setTimeout(() => {
+        const queuedIndex = this.queue.indexOf(task);
+        if (queuedIndex !== -1) {
+          this.queue.splice(queuedIndex, 1);
+          reject(new Error(`مهلت انتظار در صف هوش مصنوعی (${Math.round(timeoutLimit / 1000)} ثانیه) به پایان رسید.`));
+        }
+      }, timeoutLimit);
 
       // Insert by priority descending, then timestamp ascending
       const insertIndex = this.queue.findIndex(q => q.priority < priority);
@@ -90,10 +105,19 @@ export class AIRequestQueue {
     if (this.activeCount < maxConcurrency && this.queue.length > 0) {
       const nextTask = this.queue.shift();
       if (!nextTask) return;
+      if (nextTask.queueTimer) clearTimeout(nextTask.queueTimer);
+
+      const remainingMs = (nextTask.timeoutMs || config.aiEngine.timeoutMs) - (Date.now() - nextTask.timestamp);
+      if (remainingMs <= 0) {
+        this.totalErrors++;
+        nextTask.reject(new Error('مهلت درخواست هوش مصنوعی پیش از شروع پردازش به پایان رسید.'));
+        this.processNext();
+        return;
+      }
 
       this.activeCount++;
       try {
-        const result = await this.executeWithTimeout(nextTask.execute);
+        const result = await this.executeWithTimeout(() => nextTask.execute(remainingMs), remainingMs);
         this.totalProcessed++;
         nextTask.resolve(result);
       } catch (err) {

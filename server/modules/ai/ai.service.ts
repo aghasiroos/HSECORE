@@ -8,6 +8,7 @@ let cachedApiKey: string = '';
 let cloudApiUnavailable = false;
 
 function getAIClient(): GoogleGenAI | null {
+  if (!config.aiEngine.allowCloudFallback) return null;
   const apiKey = (process.env.GEMINI_API_KEY || config.geminiApiKey || '').trim();
   if (!apiKey || apiKey === 'MY_GEMINI_API_KEY' || apiKey === 'YOUR_API_KEY') {
     return null;
@@ -53,23 +54,17 @@ export class AIService {
    * Check if any AI provider is available (Local Ollama, Cloud Gemini, or Built-in HSECORE Expert Engine)
    */
   isConfigured(): boolean {
-    return true;
+    // This indicates that the local provider is enabled, not that a model is installed.
+    return config.aiEngine.enabled;
   }
 
   /**
    * Health and status inspection of the AI engine
    */
   async getStatus(): Promise<OllamaHealthStatus> {
-    const status = await localAIProvider.checkHealth();
-    if (!status.isAvailable) {
-      return {
-        ...status,
-        isAvailable: true,
-        version: 'HSECORE Hybrid Expert Engine (RAG + Real-Time DB)',
-        error: undefined,
-      };
-    }
-    return status;
+    // Preserve the real Ollama health result. The built-in deterministic fallback
+    // is not an inference engine and must not make the local engine look healthy.
+    return localAIProvider.checkHealth();
   }
 
   /**
@@ -102,6 +97,7 @@ export class AIService {
     message: string,
     history?: Array<{ role: string; content: string }>
   ): Promise<{ text: string; model: string } | null> {
+    if (!config.aiEngine.allowCloudFallback) return null;
     const ai = getAIClient();
     if (!ai) return null;
 
@@ -180,10 +176,10 @@ export class AIService {
       }
     }
 
-    // 2. Fallback to Cloud Gemini if configured
-    const cloudRes = await this.generateGroundedChatResponse(systemInstruction, message, history);
-    if (cloudRes?.text) {
-      return cloudRes.text;
+    // 2. Cloud fallback is disabled by default; enable only with explicit approval.
+    if (config.aiEngine.allowCloudFallback) {
+      const cloudRes = await this.generateGroundedChatResponse(systemInstruction, message, history);
+      if (cloudRes?.text) return cloudRes.text;
     }
 
     // 3. Built-in HSE Expert response
@@ -223,8 +219,8 @@ Return ONLY valid JSON matching this schema:
       }
     }
 
-    // 2. Try Cloud AI if configured
-    const ai = getAIClient();
+    // 2. Cloud generation is opt-in to keep HSECORE organizational data local.
+    const ai = config.aiEngine.allowCloudFallback ? getAIClient() : null;
     if (ai) {
       try {
         const response = await ai.models.generateContent({

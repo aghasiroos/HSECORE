@@ -16,7 +16,8 @@
     "test:ai-acl": "tsx scripts/test-ai-acl.ts",
     "test:ai-auth": "tsx scripts/test-ai-auth.ts",
     "test:ai-rag-db": "tsx scripts/test-ai-rag-db.ts",
-    "test:ai-routes": "tsx scripts/test-ai-routes.ts"
+    "test:ai-routes": "tsx scripts/test-ai-routes.ts",
+    "test:ai-queue": "tsx scripts/test-ai-queue.ts"
   },
   "dependencies": {
     "@bpmn-io/properties-panel": "^3.48.0",
@@ -24,7 +25,7 @@
     "@codemirror/streamparser": "^6.0.0",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
-    "@google/genai": "^2.32.0",
+    "@google/genai": "^2.20.0",
     "@hello-pangea/dnd": "^18.0.1",
     "@mui/icons-material": "^9.2.0",
     "@mui/material": "^9.2.0",
