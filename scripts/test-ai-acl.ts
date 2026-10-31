@@ -24,6 +24,12 @@ test('missing authenticated user is denied', () => {
   assert.equal(canAccessKnowledgeDocument({ accessControl: {} }, undefined, scope), false);
 });
 
+test('malformed top-level metadata fails closed', () => {
+  assert.equal(canAccessKnowledgeDocument(null, user, scope), false);
+  assert.equal(canAccessKnowledgeDocument('invalid', user, scope), false);
+  assert.equal(canAccessKnowledgeDocument([], user, scope), false);
+});
+
 test('explicit role allow-list grants matching role', () => {
   assert.equal(canAccessKnowledgeDocument({ accessControl: { allowedRoles: ['SAFETY_OFFICER'] } }, user, scope), true);
 });
@@ -73,7 +79,6 @@ test('global administrator bypasses document ACL restrictions', () => {
   }, admin, { departmentIds: [], unitIds: [] }), true);
 });
 
-
 test('department and unit restrictions cannot be combined across separate assignments', () => {
   assert.equal(canAccessKnowledgeDocument({
     accessControl: { departmentIds: [10], unitIds: [202] },
@@ -87,4 +92,4 @@ test('malformed ACL metadata fails closed', () => {
   assert.equal(canAccessKnowledgeDocument({ accessControl: 'invalid' }, user, scope), false);
   assert.equal(canAccessKnowledgeDocument({ accessControl: [] }, user, scope), false);
 });
-console.log('AI document ACL tests: ' + passed + '/13 passed');
+console.log('AI document ACL tests: ' + passed + '/14 passed');
