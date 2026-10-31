@@ -4,7 +4,7 @@
  */
 
 import { db, schema } from '../../core/db.ts';
-import { desc, eq, and, sql } from 'drizzle-orm';
+import { desc, eq, and, inArray } from 'drizzle-orm';
 import { textChunker } from './ai.chunker.ts';
 import { localAIProvider } from './ai.local-provider.ts';
 import { logger } from '../../core/logger.ts';
@@ -148,10 +148,13 @@ export class AIRagService {
    */
   async queryRelevantChunks(
     query: string,
-    options?: { topK?: number; minScore?: number; category?: string }
+    options?: { topK?: number; minScore?: number; category?: string; allowedCategories?: string[] }
   ): Promise<RelevantChunkResult[]> {
     const topK = options?.topK || 4;
-    const minScore = options?.minScore || 0.45;
+    const minScore = options?.minScore ?? 0.45;
+    const allowedCategories = options?.allowedCategories || [];
+    if (allowedCategories.length === 0) return [];
+    if (options?.category && options.category !== 'ALL' && !allowedCategories.includes(options.category)) return [];
 
     // 1. Fetch chunks with document info
     let chunkRows = await db
@@ -167,7 +170,7 @@ export class AIRagService {
       })
       .from(schema.aiKnowledgeChunks)
       .innerJoin(schema.aiKnowledgeDocs, eq(schema.aiKnowledgeChunks.docId, schema.aiKnowledgeDocs.id))
-      .where(eq(schema.aiKnowledgeDocs.status, 'INDEXED'))
+      .where(and(eq(schema.aiKnowledgeDocs.status, 'INDEXED'), inArray(schema.aiKnowledgeDocs.category, allowedCategories)))
       .limit(200);
 
     if (options?.category && options.category !== 'ALL') {
@@ -222,7 +225,8 @@ export class AIRagService {
   /**
    * List all documents in the Knowledge Base
    */
-  async listDocuments() {
+  async listDocuments(allowedCategories: string[] = []) {
+    if (allowedCategories.length === 0) return [];
     return await db
       .select({
         id: schema.aiKnowledgeDocs.id,
@@ -235,6 +239,7 @@ export class AIRagService {
         createdAt: schema.aiKnowledgeDocs.createdAt,
       })
       .from(schema.aiKnowledgeDocs)
+      .where(inArray(schema.aiKnowledgeDocs.category, allowedCategories))
       .orderBy(desc(schema.aiKnowledgeDocs.createdAt));
   }
 
