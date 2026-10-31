@@ -461,10 +461,11 @@ export class AIOrchestrator {
 
     try {
       const queueResult = await aiRequestQueue.enqueue(
-        async () => {
+        async (remainingMs) => {
           return await localAIProvider.chat(messages, {
             temperature: 0.3,
             max_tokens: 1500,
+            timeoutMs: remainingMs,
           });
         },
         {
