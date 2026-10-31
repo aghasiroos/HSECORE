@@ -5,7 +5,7 @@ import { requireAuth, requireRole } from '../../core/middleware/auth.ts';
 const router = Router();
 
 // Engine & Queue health/status (accessible internally & by UI)
-router.get('/status', (req, res, next) => {
+router.get('/status', requireAuth, (req, res, next) => {
   aiController.getStatus(req, res).catch(next);
 });
 
