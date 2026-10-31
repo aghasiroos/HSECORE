@@ -4009,7 +4009,7 @@ run_system_update() {
     "[6/7] Restarting application container & reloading Nginx proxy" \
     "Check docker compose status and nginx configuration (nginx -t)." \
     bash -c "
-      bash "${PROJECT_DIR}/scripts/ensure-ai-network.sh" &&
+      bash '${PROJECT_DIR}/scripts/ensure-ai-network.sh' &&
       docker compose -f docker-compose.server.yml up -d --remove-orphans hse-app &&
       if systemctl list-unit-files 2>/dev/null | grep -q 'hsecore.service'; then
         systemctl restart hsecore 2>/dev/null || true
