@@ -80,29 +80,36 @@ async function runPhase7Tests() {
     permissions: ['*'],
   };
 
-  // Operator attempts to access Management Analytics assistant (restricted)
+  // Unauthenticated request is blocked, and operator without permissions is isolated from sensitive tools
   let operatorBlocked = false;
   try {
     await aiOrchestrator.processChat(
       {
         message: 'تحلیل شاخص TRIR و حوادث را ارائه بده.',
-        assistantId: 'MANAGEMENT_ANALYTICS',
+        assistantId: 'GENERAL_HSE',
       },
-      operatorUser
+      undefined
     );
   } catch (err: any) {
-    if (err.message && err.message.includes('مجوز')) {
-      operatorBlocked = true;
+    if (err.message && err.message.includes('احراز هویت')) {
+      const opResp = await aiOrchestrator.processChat(
+        {
+          message: 'تحلیل شاخص TRIR و معاینات طب کار را ارائه بده.',
+          assistantId: 'GENERAL_HSE',
+        },
+        operatorUser
+      );
+      operatorBlocked = opResp.toolsUsed.length === 0;
     }
   }
 
-  // Admin attempts access to Management Analytics (allowed)
+  // Admin attempts access to GENERAL_HSE with full tools (allowed)
   let adminAllowed = false;
   try {
     const adminResp = await aiOrchestrator.processChat(
       {
         message: 'گزارش ایمنی را خلاصه کن.',
-        assistantId: 'MANAGEMENT_ANALYTICS',
+        assistantId: 'GENERAL_HSE',
       },
       adminUser
     );

@@ -8,43 +8,15 @@ import {
   Check,
   RefreshCw,
   Sparkles,
-  ShieldAlert,
-  AlertTriangle,
-  Sliders,
-  Activity,
-  Heart,
-  Leaf,
-  CheckSquare,
   BookOpen,
-  BarChart2,
-  HelpCircle,
-  Clock,
-  Cpu,
   Database,
-  ChevronDown,
-  ChevronUp,
   MessageSquare,
-  Zap,
-  Info,
   Download,
-  Search
+  Search,
+  Scale,
 } from 'lucide-react';
 import { UserProfile } from '../../types';
 import { authFetch } from '../../services/apiDatabaseClient';
-
-export interface AIAssistant {
-  id: string;
-  name: string;
-  nameFa: string;
-  title: string;
-  description: string;
-  associatedModule: string;
-  tools: string[];
-  icon: any;
-  color: string;
-  bgLight: string;
-  promptSuggestions: string[];
-}
 
 export interface ChatMessage {
   id: string;
@@ -60,197 +32,34 @@ export interface ChatMessage {
 export interface ChatSession {
   id: string;
   title: string;
-  assistantId: string;
   createdAt: string;
   messages: ChatMessage[];
 }
 
-const ASSISTANTS: AIAssistant[] = [
-  {
-    id: 'PTW_SHERPA',
-    name: 'PTW & SHERPA',
-    nameFa: 'پروانه‌های کار و ایمنی فرآیند',
-    title: 'متخصص صدور پروانه‌های کار گرم، سرد، فضای بسته و SHERPA',
-    description: 'تحلیل همزمانی پروانه‌های کار (Clash)، کنترل تدابیر ایمنی و پیشگیری از خطای انسانی.',
-    associatedModule: 'ptw',
-    tools: ['ptw_summary'],
-    icon: ShieldAlert,
-    color: 'text-amber-600 dark:text-amber-400',
-    bgLight: 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800',
-    promptSuggestions: [
-      'وضعیت پروانه‌های کار فعال در کارگاه را گزارش کن.',
-      'آیا تداخلی بین کارهای گرم و فضای بسته امروز وجود دارد؟',
-      'الزامات ایمنی ورود به مخازن هیدروکربوری بر اساس OSHA چیست؟',
-    ],
-  },
-  {
-    id: 'INCIDENT_ANALYSIS',
-    name: 'Incident RCA & CAPA',
-    nameFa: 'تحلیل حوادث و اقدامات اصلاحی',
-    title: 'متخصص ریشه‌یابی رویدادها (RCA)، شبه‌حوادث و تدوین CAPA',
-    description: 'تجزیه و تحلیل حوادث شغلی با متد ۵ چرا، اقدامات اصلاحی و درس‌آموزی از حوادث.',
-    associatedModule: 'incidents',
-    tools: ['incidents_summary'],
-    icon: AlertTriangle,
-    color: 'text-red-600 dark:text-red-400',
-    bgLight: 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800',
-    promptSuggestions: [
-      'خلاصه حوادث و شبه‌حوادث ثبت‌شده در ماه اخیر چیست؟',
-      'برای حادثه سقوط از ارتفاع، یک تحلیل علت ریشه‌ای ۵ چرا پیشنهاد بده.',
-      'چند روز کاری به دلیل حوادث شغلی از دست رفته است؟',
-    ],
-  },
-  {
-    id: 'RISK_ASSESSMENT',
-    name: 'Risk & Hazard Assessment',
-    nameFa: 'ارزیابی ریسک و مخاطرات شغلی',
-    title: 'متخصص شناسایی خطرات (HAZID)، ارزیابی ریسک و JSA',
-    description: 'محاسبه سطوح ریسک در ماتریس ۵×۵ و اعمال سلسله‌مراتب تدابیر کنترلی.',
-    associatedModule: 'risks',
-    tools: ['risk_assessment_summary'],
-    icon: Sliders,
-    color: 'text-orange-600 dark:text-orange-400',
-    bgLight: 'bg-orange-50 dark:bg-orange-950/30 border-orange-200 dark:border-orange-800',
-    promptSuggestions: [
-      'چند مورد ریسک در وضعیت بحرانی و بالا در سامانه ثبت شده است؟',
-      'یک کاربرگ JSA برای عملیات جوشکاری در فضای محصور تدوین کن.',
-      'اقدامات کنترلی برتر برای مهار خطرات ناشی از گاز H2S چیست؟',
-    ],
-  },
-  {
-    id: 'OCCUPATIONAL_HEALTH',
-    name: 'Occupational Health',
-    nameFa: 'سلامت شغلی و طب کار',
-    title: 'متخصص بهداشت حرفه‌ای، معاینات ادواری و بیماری‌های شغلی',
-    description: 'تحلیل صلاحیت و تناسب شغلی (Fit/Unfit)، آلاینده‌های زیان‌آور و پرونده سلامت.',
-    associatedModule: 'health',
-    tools: ['health_medical_summary'],
-    icon: Activity,
-    color: 'text-teal-600 dark:text-teal-400',
-    bgLight: 'bg-teal-50 dark:bg-teal-950/30 border-teal-200 dark:border-teal-800',
-    promptSuggestions: [
-      'آمار تناسب شغلی (Fit, Conditional, Unfit) در آخرین معاینات چگونه است؟',
-      'پروتکل مراقبت در مواجهه با سر و صدای بالاتر از ۸۵ دسی‌بل چیست؟',
-      'شاخص‌های ارزیابی اسپیرومتری در محیط‌های دارای گرد و غبار سیلیس را توضیح بده.',
-    ],
-  },
-  {
-    id: 'NUTRITION_LIFESTYLE',
-    name: 'Nutrition & Chronic Conditions',
-    nameFa: 'کارشناس تغذیه و بیماران پرخطر',
-    title: 'متخصص ارزیابی BMI، چاقی، فشار خون، دیابت و رژیم‌درمانی سازمانی',
-    description: 'شناسایی و پایش هوشمند کارکنان دارای اضافه‌وزن، چاقی درجات ۱ تا ۳، فشار و قند خون بالا.',
-    associatedModule: 'nutrition',
-    tools: ['nutrition_high_risk_summary', 'health_medical_summary'],
-    icon: Heart,
-    color: 'text-rose-600 dark:text-rose-400',
-    bgLight: 'bg-rose-50 dark:bg-rose-950/30 border-rose-200 dark:border-rose-800',
-    promptSuggestions: [
-      'آمار پرسنل دارای اضافه‌وزن و چاقی درجات مختلف در سامانه چیست؟',
-      'چه تعداد از کارکنان دارای فشار خون و قند خون غیرطبیعی شناسایی شده‌اند؟',
-      'یک رژیم غذایی سالم برای پرسنل شیفت شب در واحدهای صنعتی پیشنهاد بده.',
-    ],
-  },
-  {
-    id: 'ENVIRONMENT_WASTE',
-    name: 'Environmental Management',
-    nameFa: 'مدیریت و پایش محیط زیست',
-    title: 'متخصص پایش پساب، هوا، پسماندهای ویژه و استانداردهای ISO 14001',
-    description: 'کنترل آلاینده‌های محیط زیست، تفکیک پسماند و تطابق با الزامات سازمان محیط زیست.',
-    associatedModule: 'environment',
-    tools: [],
-    icon: Leaf,
-    color: 'text-emerald-600 dark:text-emerald-400',
-    bgLight: 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800',
-    promptSuggestions: [
-      'حدود مجاز آلاینده‌های پساب صنعتی بر اساس ضوابط سازمان حفاظت محیط زیست چیست؟',
-      'روش‌های اصولی نگهداری و امحای لجن‌های هیدروکربوری کدامند؟',
-      'الزامات ممیزی سیستم مدیریت زیست‌محیطی ISO 14001:2015 را مرور کن.',
-    ],
-  },
-  {
-    id: 'INSPECTION_5S',
-    name: '5S & Workplace Inspection',
-    nameFa: 'نظام آراستگی ۵S و بازرسی‌ها',
-    title: 'متخصص ممیزی نظام آراستگی، چک‌لیست‌های دوره‌ای و عدم انطباق‌ها',
-    description: 'پایش اصول ساماندهی، نظم، پاکیزگی و ردیابی عدم انطباق‌های کارگاهی.',
-    associatedModule: '5s',
-    tools: ['five_s_inspections_summary'],
-    icon: CheckSquare,
-    color: 'text-blue-600 dark:text-blue-400',
-    bgLight: 'bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800',
-    promptSuggestions: [
-      'چند ممیزی ۵S و بازرسی ایمنی در سامانه ثبت شده است؟',
-      'چک‌لیست ممیزی ۵S برای انبار قطعات یدکی پتروشیمی را ارائه کن.',
-      'روش استاندارد برچسب‌گذاری قرمز (Red Tag) در تفکیک اقلام غیرضروری چیست؟',
-    ],
-  },
-  {
-    id: 'TRAINING_COMPLIANCE',
-    name: 'Training & Competency',
-    nameFa: 'آموزش‌های ایمنی و شایستگی',
-    title: 'متخصص ماتریس صلاحیت HSE، دوره‌های ایمنی و اثربخشی آموزش',
-    description: 'تحلیل نیازسنجی آموزشی، سرانه ساعات آموزش و دوره‌های الزام‌آور قانونی.',
-    associatedModule: 'training',
-    tools: [],
-    icon: BookOpen,
-    color: 'text-purple-600 dark:text-purple-400',
-    bgLight: 'bg-purple-50 dark:bg-purple-950/30 border-purple-200 dark:border-purple-800',
-    promptSuggestions: [
-      'دوره‌های آموزشی بدو استخدام الزامی برای کارگران فنی چیست؟',
-      'مدل کرک‌پاتریک برای ارزیابی اثربخشی دوره‌های HSE را تشریح کن.',
-      'سرانه استاندارد ساعات آموزش سالیانه HSE در صنایع پرخطر چقدر است؟',
-    ],
-  },
-  {
-    id: 'MANAGEMENT_ANALYTICS',
-    name: 'Executive Analytics',
-    nameFa: 'داشبورد هوشمند مدیریت و KPI',
-    title: 'متخصص تحلیل عملکرد کلان، شاخص‌های TRIR و گزارش‌های مدیریتی',
-    description: 'تحلیل شاخص‌های ضریب تکرار حادثه، ساعات کارکرد و ارائه راهکارهای استراتژیک.',
-    associatedModule: 'dashboard',
-    tools: ['kpi_management_summary', 'incidents_summary', 'ptw_summary'],
-    icon: BarChart2,
-    color: 'text-sky-600 dark:text-sky-400',
-    bgLight: 'bg-sky-50 dark:bg-sky-950/30 border-sky-200 dark:border-sky-800',
-    promptSuggestions: [
-      'وضعیت کلی شاخص‌های کلیدی عملکرد HSE سازمان را تحلیل کن.',
-      'آخرین نرخ TRIR و ساعات کارکرد ثبت‌شده را گزارش کن.',
-      'مهم‌ترین نقاط آسیب‌پذیر ایمنی سازمان در حال حاضر کجاست؟',
-    ],
-  },
-  {
-    id: 'GENERAL_HSE',
-    name: 'General HSE Consultant',
-    nameFa: 'مشاور جامع HSE و مراجع قانونی',
-    title: 'دستیار عمومی و پاسخگوی کلیه سوالات ایمنی، بهداشت و محیط زیست',
-    description: 'پاسخگویی علمی به استانداردهای ملی وزارت کار، بهداشت و مراجع بین‌المللی.',
-    associatedModule: 'all',
-    tools: [],
-    icon: HelpCircle,
-    color: 'text-indigo-600 dark:text-indigo-400',
-    bgLight: 'bg-indigo-50 dark:bg-indigo-950/30 border-indigo-200 dark:border-indigo-800',
-    promptSuggestions: [
-      'وظایف قانونی مسئول ایمنی کارگاه طبق آیین‌نامه حفاظت فنی وزارت کار چیست؟',
-      'روش صحیح انتخاب تجهیزات حفاظت فردی برای کار با مواد شیمیایی خورنده چیست؟',
-      'استاندارد روشنایی محیط کار در واحدهای اداری و کارگاهی چقدر است؟',
-    ],
-  },
-];
+const COMPREHENSIVE_LEGAL_ASSISTANT = {
+  id: 'GENERAL_HSE',
+  nameFa: 'مشاور جامع HSE و مراجع قانونی',
+  title: 'مرجع تخصصی قوانین کار، آیین‌نامه‌های شورای عالی حفاظت فنی، وزارت بهداشت و پایش یکپارچه ماژول‌ها',
+  description:
+    'پاسخگویی مستند به فصل چهارم قانون کار، آیین‌نامه‌های حفاظت فنی، حدود مجاز مواجهه شغلی (OEL)، استانداردهای ISO 45001 / ISO 14001 / OSHA و استخراج برخط داده‌های تمامی ماژول‌های سامانه HSECORE.',
+  promptSuggestions: [
+    'از ماژول شاخص استرس گرمایی دمای هوا، رطوبت و شاخص WBGT فعلی را به همراه الزامات قانونی گزارش کن.',
+    'وظایف قانونی کارفرما و مسئول ایمنی طبق فصل چهارم قانون کار و آیین‌نامه شورای عالی حفاظت فنی چیست؟',
+    'وضعیت پروانه‌های کار فعال، حوادث ثبت‌شده و اخطارهای ایمنی در سامانه چگونه است؟',
+    'الزامات قانونی معاینات ادواری طب کار (ماده ۹۲ قانون کار) و آمار تناسب شغلی پرسنل در سامانه چیست؟',
+  ],
+};
 
 interface AiAssistantAppProps {
   currentUser?: UserProfile | null;
   language?: 'fa' | 'en';
 }
 
-export default function AiAssistantApp({ currentUser, language = 'fa' }: AiAssistantAppProps) {
-  const isFa = language === 'fa';
-  const [selectedAssistantId, setSelectedAssistantId] = useState<string>('GENERAL_HSE');
+export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps) {
   const [inputMessage, setInputMessage] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [allowTools, setAllowTools] = useState<boolean>(true);
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [expandedCitation, setExpandedCitation] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(false);
 
   // Sessions state stored in localStorage
@@ -262,8 +71,7 @@ export default function AiAssistantApp({ currentUser, language = 'fa' }: AiAssis
     return [
       {
         id: 'session-default',
-        title: 'گفتگوی عمومی HSE',
-        assistantId: 'GENERAL_HSE',
+        title: 'مشاوره جامع HSE و مراجع قانونی',
         createdAt: new Date().toISOString(),
         messages: [],
       },
@@ -277,26 +85,24 @@ export default function AiAssistantApp({ currentUser, language = 'fa' }: AiAssis
   const [searchSessionQuery, setSearchSessionQuery] = useState<string>('');
 
   const activeSession = sessions.find(s => s.id === activeSessionId) || sessions[0];
-  const activeAssistant = ASSISTANTS.find(a => a.id === selectedAssistantId) || ASSISTANTS[0];
-
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const handleExportSession = () => {
     if (!activeSession || activeSession.messages.length === 0) return;
     let report = `گزارش استنتاج هوش مصنوعی HSECORE AI\n`;
     report += `عنوان گفتگو: ${activeSession.title}\n`;
-    report += `دستیار تخصصی: ${activeAssistant.nameFa} (${activeAssistant.title})\n`;
+    report += `مرجع پاسخگویی: ${COMPREHENSIVE_LEGAL_ASSISTANT.nameFa} (${COMPREHENSIVE_LEGAL_ASSISTANT.title})\n`;
     report += `تاریخ ثبت گزارش: ${new Date().toLocaleDateString('fa-IR')} ${new Date().toLocaleTimeString('fa-IR')}\n`;
     report += `========================================================\n\n`;
 
     activeSession.messages.forEach((m, idx) => {
-      const sender = m.role === 'user' ? 'کاربر' : `دستیار هوشمند (${activeAssistant.nameFa})`;
+      const sender = m.role === 'user' ? 'کاربر' : COMPREHENSIVE_LEGAL_ASSISTANT.nameFa;
       report += `[${idx + 1}] ${sender} - ${m.timestamp}\n`;
       if (m.toolsUsed && m.toolsUsed.length > 0) {
         report += `منابع داده سامانه‌ای: ${m.toolsUsed.join('، ')}\n`;
       }
       if (m.citations && m.citations.length > 0) {
-        report += `اسناد و استانداردهای مرجع: ${m.citations.join('، ')}\n`;
+        report += `مراجع قانونی و اسناد مرجع: ${m.citations.join('، ')}\n`;
       }
       report += `${m.content}\n\n--------------------------------------------------------\n\n`;
     });
@@ -305,7 +111,7 @@ export default function AiAssistantApp({ currentUser, language = 'fa' }: AiAssis
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `HSECORE_AI_Report_${Date.now()}.txt`;
+    link.download = `HSECORE_AI_Legal_Report_${Date.now()}.txt`;
     link.click();
     URL.revokeObjectURL(url);
   };
@@ -320,15 +126,10 @@ export default function AiAssistantApp({ currentUser, language = 'fa' }: AiAssis
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [activeSession?.messages, isLoading]);
 
-  const handleSelectAssistant = (assistantId: string) => {
-    setSelectedAssistantId(assistantId);
-  };
-
   const handleNewSession = () => {
     const newSession: ChatSession = {
       id: `session-${Date.now()}`,
-      title: `گفتگو با ${activeAssistant.nameFa}`,
-      assistantId: selectedAssistantId,
+      title: 'مشاوره جدید HSE و مراجع قانونی',
       createdAt: new Date().toISOString(),
       messages: [],
     };
@@ -342,8 +143,7 @@ export default function AiAssistantApp({ currentUser, language = 'fa' }: AiAssis
       setSessions([
         {
           id: `session-${Date.now()}`,
-          title: 'گفتگوی جدید',
-          assistantId: selectedAssistantId,
+          title: 'مشاوره جامع HSE و مراجع قانونی',
           createdAt: new Date().toISOString(),
           messages: [],
         },
@@ -376,11 +176,10 @@ export default function AiAssistantApp({ currentUser, language = 'fa' }: AiAssis
       timestamp: new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }),
     };
 
-    // Update active session with user message
     const updatedMessages = [...(activeSession?.messages || []), userMsg];
     let sessionTitle = activeSession.title;
     if (activeSession.messages.length === 0) {
-      sessionTitle = text.slice(0, 30);
+      sessionTitle = text.slice(0, 35);
     }
 
     setSessions(prev =>
@@ -400,7 +199,7 @@ export default function AiAssistantApp({ currentUser, language = 'fa' }: AiAssis
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: text,
-          assistantId: selectedAssistantId,
+          assistantId: 'GENERAL_HSE',
           history: historyPayload,
           allowTools,
         }),
@@ -443,11 +242,11 @@ export default function AiAssistantApp({ currentUser, language = 'fa' }: AiAssis
           )
         );
       }
-    } catch (err: any) {
+    } catch {
       const networkErrorMsg: ChatMessage = {
         id: `msg-${Date.now()}`,
         role: 'assistant',
-        content: 'خطا در ارتباط با سرور هوش مصنوعی سامانه. لطفاً وضعیت سرویس local ai را بررسی فرمایید.',
+        content: 'خطا در ارتباط با سرور هوش مصنوعی سامانه. لطفاً اتصال شبکه را بررسی فرمایید.',
         timestamp: new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }),
       };
       setSessions(prev =>
@@ -467,11 +266,9 @@ export default function AiAssistantApp({ currentUser, language = 'fa' }: AiAssis
     }
   };
 
-  const ActiveIcon = activeAssistant.icon;
-
   return (
     <div className="flex h-[calc(100vh-140px)] min-h-[550px] bg-slate-50 dark:bg-slate-950 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden" dir="rtl">
-      {/* ─── SIDEBAR: Chat Sessions & Assistants ─── */}
+      {/* ─── SIDEBAR: Chat Sessions ─── */}
       <aside className={`w-80 flex-shrink-0 bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 flex flex-col transition-all duration-300 z-20 ${sidebarOpen ? 'fixed inset-y-0 start-0 z-50 md:static' : 'hidden md:flex'}`}>
         {/* Sidebar Header */}
         <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
@@ -480,8 +277,8 @@ export default function AiAssistantApp({ currentUser, language = 'fa' }: AiAssis
               <Bot className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-sm font-black text-slate-800 dark:text-slate-100">هوش مصنوعی HSE</h2>
-              <p className="text-[10px] text-slate-400">موتور آفلاین Local LLM</p>
+              <h2 className="text-sm font-black text-slate-800 dark:text-slate-100">هوش مصنوعی HSECORE</h2>
+              <p className="text-[10px] text-slate-400">مشاور جامع HSE و مراجع قانونی</p>
             </div>
           </div>
           <button
@@ -494,7 +291,7 @@ export default function AiAssistantApp({ currentUser, language = 'fa' }: AiAssis
           </button>
         </div>
 
-        {/* Sessions Search & List */}
+        {/* Sessions Search */}
         <div className="p-3 border-b border-slate-100 dark:border-slate-800">
           <div className="relative">
             <Search className="w-3.5 h-3.5 absolute start-2.5 top-2.5 text-slate-400" />
@@ -520,7 +317,6 @@ export default function AiAssistantApp({ currentUser, language = 'fa' }: AiAssis
                   key={s.id}
                   onClick={() => {
                     setActiveSessionId(s.id);
-                    setSelectedAssistantId(s.assistantId);
                     setSidebarOpen(false);
                   }}
                   className={`group flex items-center justify-between p-2.5 rounded-xl text-xs font-bold transition cursor-pointer ${
@@ -545,15 +341,15 @@ export default function AiAssistantApp({ currentUser, language = 'fa' }: AiAssis
             })}
         </div>
 
-        {/* Local Engine Status Mini Card */}
+        {/* Legal & RAG Status Footer */}
         <div className="p-3 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
           <div className="flex items-center justify-between text-[11px] font-bold text-slate-500">
             <span className="flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-              موتور محلی: Qwen 2.5 (1.7B)
+              موتور استنتاج قوانین و ماژول‌ها
             </span>
             <span className="text-[10px] bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 px-1.5 py-0.5 rounded-md font-mono">
-              CPU Safe
+              RAG + DB
             </span>
           </div>
         </div>
@@ -561,44 +357,24 @@ export default function AiAssistantApp({ currentUser, language = 'fa' }: AiAssis
 
       {/* ─── MAIN CHAT AREA ─── */}
       <main className="flex-1 flex flex-col bg-white dark:bg-slate-900 min-w-0">
-        {/* Assistant Carousel / Bar */}
-        <div className="p-3 border-b border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/70">
-          <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
-            {ASSISTANTS.map(ast => {
-              const IconComp = ast.icon;
-              const isSelected = ast.id === selectedAssistantId;
-              return (
-                <button
-                  key={ast.id}
-                  onClick={() => handleSelectAssistant(ast.id)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition cursor-pointer ${
-                    isSelected
-                      ? 'bg-indigo-600 text-white shadow-xs'
-                      : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:border-indigo-300'
-                  }`}
-                >
-                  <IconComp className={`w-3.5 h-3.5 ${isSelected ? 'text-white' : ast.color}`} />
-                  <span>{ast.nameFa}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Selected Assistant Header Info */}
-        <div className="px-5 py-3 border-b border-slate-100 dark:border-slate-800/80 flex items-center justify-between bg-white dark:bg-slate-900">
+        {/* Comprehensive Legal Consultant Header */}
+        <div className="px-5 py-3.5 border-b border-slate-100 dark:border-slate-800/80 flex items-center justify-between bg-white dark:bg-slate-900">
           <div className="flex items-center gap-3">
-            <div className={`p-2 rounded-2xl border ${activeAssistant.bgLight}`}>
-              <ActiveIcon className={`w-5 h-5 ${activeAssistant.color}`} />
+            <div className="p-2.5 rounded-2xl border bg-indigo-50 dark:bg-indigo-950/30 border-indigo-200 dark:border-indigo-800">
+              <Scale className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <h3 className="text-sm font-black text-slate-800 dark:text-slate-100">{activeAssistant.nameFa}</h3>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-500">
-                  {activeAssistant.title}
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-sm font-black text-slate-800 dark:text-slate-100">
+                  {COMPREHENSIVE_LEGAL_ASSISTANT.nameFa}
+                </h3>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/60">
+                  {COMPREHENSIVE_LEGAL_ASSISTANT.title}
                 </span>
               </div>
-              <p className="text-xs text-slate-400 mt-0.5 line-clamp-1">{activeAssistant.description}</p>
+              <p className="text-xs text-slate-400 mt-0.5 line-clamp-1">
+                {COMPREHENSIVE_LEGAL_ASSISTANT.description}
+              </p>
             </div>
           </div>
 
@@ -620,10 +396,10 @@ export default function AiAssistantApp({ currentUser, language = 'fa' }: AiAssis
                   ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
                   : 'bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700'
               }`}
-              title="اتصال خودکار به داده‌های زنده ماژول‌ها جهت پاسخ مستند"
+              title="اتصال خودکار به داده‌های زنده تمامی ماژول‌های سامانه جهت پاسخ مستند"
             >
               <Database className="w-3.5 h-3.5" />
-              <span>استخراج داده‌های زنده: {allowTools ? 'فعال' : 'غیرفعال'}</span>
+              <span>جستجو در تمام ماژول‌ها: {allowTools ? 'فعال' : 'غیرفعال'}</span>
             </button>
           </div>
         </div>
@@ -631,32 +407,32 @@ export default function AiAssistantApp({ currentUser, language = 'fa' }: AiAssis
         {/* Messages Stream Container */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 custom-scrollbar">
           {activeSession.messages.length === 0 ? (
-            /* Welcome / Empty State with Suggestions */
+            /* Welcome / Empty State with Legal & System Suggestions */
             <div className="max-w-2xl mx-auto py-8 text-center space-y-6">
               <div className="w-16 h-16 mx-auto rounded-3xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 flex items-center justify-center text-indigo-600 dark:text-indigo-400 shadow-sm">
-                <ActiveIcon className="w-8 h-8" />
+                <Scale className="w-8 h-8" />
               </div>
               <div className="space-y-2">
                 <h4 className="text-lg font-black text-slate-800 dark:text-slate-100">
-                  گفتگو با {activeAssistant.nameFa}
+                  {COMPREHENSIVE_LEGAL_ASSISTANT.nameFa}
                 </h4>
                 <p className="text-xs text-slate-500 max-w-lg mx-auto leading-relaxed">
-                  {activeAssistant.description} آماده پاسخ‌گویی به استناد آمار زنده سیستم و استانداردهای OSHA، ISO و مقررات ملی.
+                  {COMPREHENSIVE_LEGAL_ASSISTANT.description}
                 </p>
               </div>
 
               {/* Suggestions Chips */}
               <div className="space-y-2 pt-2">
-                <div className="text-xs font-bold text-slate-400">پرسش‌های پیشنهادی برای شروع:</div>
+                <div className="text-xs font-bold text-slate-400">پرسش‌های پیشنهادی (قوانین و داده‌های زنده ماژول‌ها):</div>
                 <div className="flex flex-col gap-2 max-w-xl mx-auto">
-                  {activeAssistant.promptSuggestions.map((sug, idx) => (
+                  {COMPREHENSIVE_LEGAL_ASSISTANT.promptSuggestions.map((sug, idx) => (
                     <button
                       key={idx}
                       onClick={() => handleSendMessage(sug)}
                       className="text-right p-3 bg-slate-50 hover:bg-indigo-50 dark:bg-slate-800/40 dark:hover:bg-indigo-950/30 border border-slate-200 dark:border-slate-800 hover:border-indigo-300 rounded-2xl text-xs font-bold text-slate-700 dark:text-slate-200 transition cursor-pointer flex items-center justify-between group"
                     >
                       <span>{sug}</span>
-                      <Sparkles className="w-3.5 h-3.5 text-indigo-500 opacity-0 group-hover:opacity-100 transition" />
+                      <Sparkles className="w-3.5 h-3.5 text-indigo-500 opacity-0 group-hover:opacity-100 transition shrink-0 ms-2" />
                     </button>
                   ))}
                 </div>
@@ -674,7 +450,7 @@ export default function AiAssistantApp({ currentUser, language = 'fa' }: AiAssis
                       ? 'bg-slate-800 dark:bg-slate-700'
                       : 'bg-indigo-600'
                   }`}>
-                    {isUser ? 'شما' : <Bot className="w-4 h-4" />}
+                    {isUser ? 'شما' : <Scale className="w-4 h-4" />}
                   </div>
 
                   {/* Message Bubble */}
@@ -690,7 +466,7 @@ export default function AiAssistantApp({ currentUser, language = 'fa' }: AiAssis
                       <div className="pt-2 border-t border-slate-200/60 dark:border-slate-700/60 flex flex-wrap items-center gap-1.5">
                         <span className="text-[10px] font-bold text-slate-400 flex items-center gap-1">
                           <Database className="w-3 h-3 text-indigo-500" />
-                          منابع داده:
+                          منابع داده ماژول‌ها:
                         </span>
                         {msg.toolsUsed.map((tool, i) => (
                           <span
@@ -707,7 +483,7 @@ export default function AiAssistantApp({ currentUser, language = 'fa' }: AiAssis
                       <div className="pt-1.5 flex flex-wrap items-center gap-1.5">
                         <span className="text-[10px] font-bold text-slate-400 flex items-center gap-1">
                           <BookOpen className="w-3 h-3 text-emerald-500" />
-                          اسناد مرجع:
+                          مراجع قانونی و اسناد:
                         </span>
                         {msg.citations.map((c, i) => (
                           <span
@@ -748,11 +524,11 @@ export default function AiAssistantApp({ currentUser, language = 'fa' }: AiAssis
           {isLoading && (
             <div className="flex gap-3 justify-start">
               <div className="w-8 h-8 rounded-xl bg-indigo-600 flex items-center justify-center shrink-0 text-white font-bold text-xs">
-                <Bot className="w-4 h-4 animate-spin" />
+                <Scale className="w-4 h-4 animate-spin" />
               </div>
               <div className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700 rounded-2xl rounded-tl-xs p-4 flex items-center gap-2 text-xs text-slate-500">
                 <RefreshCw className="w-3.5 h-3.5 animate-spin text-indigo-500" />
-                <span>دستیار در حال استخراج داده‌های زنده و استنتاج پاسخ می‌باشد...</span>
+                <span>در حال بررسی مراجع قانونی و استخراج داده‌های زنده ماژول‌ها...</span>
               </div>
             </div>
           )}
@@ -767,7 +543,7 @@ export default function AiAssistantApp({ currentUser, language = 'fa' }: AiAssis
               value={inputMessage}
               onChange={e => setInputMessage(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={`پرسش خود را از ${activeAssistant.nameFa} بپرسید... (Shift+Enter برای خط جدید)`}
+              placeholder={`پرسش خود را از ${COMPREHENSIVE_LEGAL_ASSISTANT.nameFa} بپرسید... (Shift+Enter برای خط جدید)`}
               rows={2}
               maxLength={3500}
               className="flex-1 bg-transparent border-0 outline-hidden resize-none text-xs text-slate-800 dark:text-slate-100 placeholder:text-slate-400 p-1 font-medium"

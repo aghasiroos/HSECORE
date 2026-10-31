@@ -46,22 +46,22 @@ async function runPhase3Tests() {
   console.log(`  - KPI Tool: ${kpiRes.titleFa}`);
   console.log('  -> [PASS] All 5 domain tools executed safely and returned structured summaries.\n');
 
-  // Test 3: Orchestrator & 10 Assistants
-  console.log('[Test 3] Testing 10 Specialized Assistants:');
+  // Test 3: Orchestrator & Unified Legal Consultant Assistant
+  console.log('[Test 3] Testing Unified Comprehensive HSE & Legal Consultant:');
   const assistantsList = aiOrchestrator.listAssistants({ uid: 'test-admin', role: 'ADMIN', permissions: ['*'] });
   console.log(`  - Total Assistants Configured: ${assistantsList.length}`);
-  if (assistantsList.length !== 10) throw new Error(`Expected 10 assistants, got ${assistantsList.length}`);
+  if (assistantsList.length !== 1) throw new Error(`Expected 1 unified assistant, got ${assistantsList.length}`);
   for (const a of assistantsList) {
     console.log(`    • [${a.id}] ${a.nameFa} (${a.associatedModule})`);
   }
-  console.log('  -> [PASS] 10 Assistants verified with full metadata.\n');
+  console.log('  -> [PASS] Unified Comprehensive Legal Consultant verified.\n');
 
   // Test 4: Chat Orchestration with Tool Grounding & Fallback
   console.log('[Test 4] Testing Chat Orchestration with Autonomous Tool Grounding:');
   const chatResponse = await aiOrchestrator.processChat(
     {
       message: 'گزارش پروانه‌های کار و حوادث فعال امروز را خلاصه کن.',
-      assistantId: 'MANAGEMENT_ANALYTICS',
+      assistantId: 'GENERAL_HSE',
       allowTools: true,
     },
     { uid: 'test-admin-uid', id: 1, name: 'مدیر ارشد HSE', role: 'ADMIN', permissions: ['*'] }

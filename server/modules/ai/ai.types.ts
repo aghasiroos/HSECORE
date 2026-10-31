@@ -2,17 +2,7 @@
  * HSECORE Enterprise Local AI - Core Type Definitions
  */
 
-export type AIAssistantId =
-  | 'PTW_SHERPA'
-  | 'INCIDENT_ANALYSIS'
-  | 'RISK_ASSESSMENT'
-  | 'OCCUPATIONAL_HEALTH'
-  | 'NUTRITION_LIFESTYLE'
-  | 'ENVIRONMENT_WASTE'
-  | 'INSPECTION_5S'
-  | 'TRAINING_COMPLIANCE'
-  | 'MANAGEMENT_ANALYTICS'
-  | 'GENERAL_HSE';
+export type AIAssistantId = 'GENERAL_HSE';
 
 export interface AIAssistantMetadata {
   id: AIAssistantId;
