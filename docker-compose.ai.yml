@@ -6,7 +6,7 @@ version: '3.8'
 
 services:
   hse-ai-engine:
-    image: ollama/ollama:${AI_OLLAMA_VERSION:-0.40.13}
+    image: ollama/ollama:${AI_OLLAMA_VERSION:-0.34.0}
     container_name: hse-ai-engine
     restart: unless-stopped
     init: true
