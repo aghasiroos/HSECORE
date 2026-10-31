@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { aiService } from './ai.service.ts';
 import { aiOrchestrator } from './ai.orchestrator.ts';
 import { aiRequestQueue } from './ai.queue.ts';
-import { aiAuditService } from './ai.audit.ts';
+import { aiAuditService, normalizeAILogLimit } from './ai.audit.ts';
 import { aiRagService } from './ai.rag.service.ts';
 import { checkUserHasPermission, type UserContext } from '../../core/middleware/auth.ts';
 
@@ -106,10 +106,7 @@ export class AIController {
 
   async getAuditLogs(req: Request, res: Response) {
     try {
-      const requestedLimit = Number(req.query.limit);
-      const limit = Number.isFinite(requestedLimit) && requestedLimit > 0
-        ? Math.min(Math.trunc(requestedLimit), 200)
-        : 50;
+      const limit = normalizeAILogLimit(req.query.limit);
       const logs = aiAuditService.getRecentLogs(limit);
       const analytics = aiAuditService.getAnalyticsSummary();
       return res.json({ success: true, data: { logs, analytics } });
