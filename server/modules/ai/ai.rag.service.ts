@@ -8,7 +8,7 @@ import { desc, eq, and, inArray } from 'drizzle-orm';
 import { textChunker } from './ai.chunker.ts';
 import { localAIProvider } from './ai.local-provider.ts';
 import { logger } from '../../core/logger.ts';
-import { type UserContext } from '../../core/middleware/auth.ts';
+import { isGlobalAdminUser, type UserContext } from '../../core/middleware/auth.ts';
 import { canAccessKnowledgeDocument, type KnowledgeDocumentAccessControl } from './ai.acl.ts';
 
 export interface RelevantChunkResult {
