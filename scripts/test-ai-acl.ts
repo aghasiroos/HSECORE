@@ -8,7 +8,7 @@ const user: UserContext = {
   permissions: ['ptw:read', 'safety:read'],
 };
 
-const scope = { departmentIds: [10], unitIds: [101] };
+const scope = { departmentIds: [10, 20], unitIds: [101, 202], assignments: [{ departmentId: 10, unitId: 101 }, { departmentId: 20, unitId: 202 }] };
 let passed = 0;
 function test(name: string, fn: () => void) {
   fn();
@@ -73,4 +73,10 @@ test('global administrator bypasses document ACL restrictions', () => {
   }, admin, { departmentIds: [], unitIds: [] }), true);
 });
 
-console.log('AI document ACL tests: ' + passed + '/11 passed');
+
+test('department and unit restrictions cannot be combined across separate assignments', () => {
+  assert.equal(canAccessKnowledgeDocument({
+    accessControl: { departmentIds: [10], unitIds: [202] },
+  }, user, scope), false);
+});
+console.log('AI document ACL tests: ' + passed + '/12 passed');
