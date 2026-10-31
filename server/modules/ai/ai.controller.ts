@@ -106,7 +106,10 @@ export class AIController {
 
   async getAuditLogs(req: Request, res: Response) {
     try {
-      const limit = Number(req.query.limit) || 50;
+      const requestedLimit = Number(req.query.limit);
+      const limit = Number.isFinite(requestedLimit) && requestedLimit > 0
+        ? Math.min(Math.trunc(requestedLimit), 200)
+        : 50;
       const logs = aiAuditService.getRecentLogs(limit);
       const analytics = aiAuditService.getAnalyticsSummary();
       return res.json({ success: true, data: { logs, analytics } });
