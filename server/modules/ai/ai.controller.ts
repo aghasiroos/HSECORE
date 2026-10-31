@@ -283,7 +283,7 @@ export class AIController {
         userUid: req.user?.uid,
         userName: req.user?.name || req.user?.username,
         role: req.user?.role,
-        assistantId: 'bpmn-generator',
+        assistantId: 'GENERAL_HSE',
         promptLength: description.length,
         responseLength: JSON.stringify(generated).length,
         toolsUsed: [],
