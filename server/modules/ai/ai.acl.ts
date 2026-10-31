@@ -37,6 +37,10 @@ export function canAccessKnowledgeDocument(
 
   // Backward compatibility: documents indexed before document ACL existed.
   if (!acl || typeof acl !== 'object') return true;
+  const validStringList = (value: unknown) => value === undefined || (Array.isArray(value) && value.every(item => typeof item === 'string' && item.trim().length > 0));
+  const validIdList = (value: unknown) => value === undefined || (Array.isArray(value) && value.every(item => Number.isInteger(item) && item > 0));
+  if (!validStringList(acl.allowedRoles) || !validStringList(acl.requiredPermissions) ||
+      !validStringList(acl.userUids) || !validIdList(acl.departmentIds) || !validIdList(acl.unitIds)) return false;
   if (isGlobalAdminUser(user)) return true;
 
   if (Array.isArray(acl.userUids) && acl.userUids.length > 0 &&
