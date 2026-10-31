@@ -98,28 +98,28 @@ export class LocalAIProvider {
     }
 
     return new Promise<T>((resolve, reject) => {
-      const queuedTask = {
-        timer: undefined as NodeJS.Timeout | undefined,
+      const queuedTask: { run: () => void; reject: (err: any) => void; timer?: NodeJS.Timeout } = {
         reject,
-        run: async () => {
-          if (queuedTask.timer) clearTimeout(queuedTask.timer);
-          const remainingMs = timeoutMs - (Date.now() - queuedAt);
-          if (remainingMs <= 0) {
-            reject(new Error('مهلت انتظار درخواست در صف موتور محلی هوش مصنوعی به پایان رسید.'));
-            this.processQueue();
-            return;
-          }
-          this.activeCount++;
-          try {
-            const res = await task(remainingMs);
-            resolve(res);
-          } catch (err) {
-            reject(err);
-          } finally {
-            this.activeCount--;
-            this.processQueue();
-          }
-        },
+        run: () => undefined,
+      };
+      queuedTask.run = async () => {
+        if (queuedTask.timer) clearTimeout(queuedTask.timer);
+        const remainingMs = timeoutMs - (Date.now() - queuedAt);
+        if (remainingMs <= 0) {
+          reject(new Error('مهلت انتظار درخواست در صف موتور محلی هوش مصنوعی به پایان رسید.'));
+          this.processQueue();
+          return;
+        }
+        this.activeCount++;
+        try {
+          const res = await task(remainingMs);
+          resolve(res);
+        } catch (err) {
+          reject(err);
+        } finally {
+          this.activeCount--;
+          this.processQueue();
+        }
       };
 
       queuedTask.timer = setTimeout(() => {
@@ -432,7 +432,7 @@ export class LocalAIProvider {
       throw new Error('Local AI engine is offline');
     }
 
-    return this.enqueue(async () => {
+    return this.enqueue(async (remainingMs) => {
       if (Date.now() < this.offlineUntil) {
         throw new Error('Local AI engine is offline');
       }
