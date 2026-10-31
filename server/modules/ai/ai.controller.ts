@@ -135,7 +135,8 @@ export class AIController {
   }
 
   private validateKnowledgeAccessControl(input: any) {
-    if (input === undefined || input === null) return undefined;
+    if (input === undefined) return undefined;
+    if (input === null) throw new Error('ساختار سطح دسترسی سند نامعتبر است.');
     if (typeof input !== 'object' || Array.isArray(input)) throw new Error('ساختار سطح دسترسی سند نامعتبر است.');
     const strings = (value: any, field: string): string[] | undefined => {
       if (value === undefined) return undefined;
