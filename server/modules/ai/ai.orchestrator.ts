@@ -470,7 +470,7 @@ export class AIOrchestrator {
         {
           userId: userContext?.id,
           role: userContext?.role,
-          timeoutMs: config.aiEngine.timeoutMs || 60000,
+          timeoutMs: (config.aiEngine.timeoutMs || 180000) + 5000,
         }
       );
 
