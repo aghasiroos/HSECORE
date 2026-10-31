@@ -48,7 +48,7 @@ echo "[AI Runtime Test] PASS: no host-published Ollama ports."
 
 echo "[AI Runtime Test] Checking shared network membership..."
 network_json="$(docker inspect --format '{{json .NetworkSettings.Networks}}' "${CONTAINER_NAME}")"
-grep -Fq "\" ${NETWORK_NAME}\"" <<< "${network_json}" || grep -Fq "${NETWORK_NAME}" <<< "${network_json}" || fail "container is not attached to '${NETWORK_NAME}'"
+python3 -c 'import json,sys; d=json.loads(sys.argv[1]); n=sys.argv[2]; assert n in d, f"container is not attached to {n}"' "${network_json}" "${NETWORK_NAME}" || fail "container is not attached to '${NETWORK_NAME}'"
 echo "[AI Runtime Test] PASS: container is attached to '${NETWORK_NAME}'."
 
 echo "[AI Runtime Test] Checking persistent model volume..."
