@@ -46,7 +46,7 @@ export function canAccessKnowledgeDocument(
     const roleAllowed = acl.allowedRoles.some(role =>
       role === '*' ||
       role.toUpperCase() === String(user.role || '').toUpperCase() ||
-      normalizeRoleToCanonical(role) === userRole
+      normalizeRoleToCanonical(role) !== 'CUSTOM_ROLE' && normalizeRoleToCanonical(role) === userRole
     );
     if (!roleAllowed) return false;
   }
