@@ -46,6 +46,7 @@ export interface LocalChatOptions {
   max_tokens?: number;
   system?: string;
   stream?: boolean;
+  timeoutMs?: number;
 }
 
 type QueueTask<T> = () => Promise<T>;
@@ -281,7 +282,7 @@ export class LocalAIProvider {
 
       const startTime = Date.now();
       const model = options?.model || config.aiEngine.defaultChatModel;
-      const timeoutMs = config.aiEngine.timeoutMs || 180000;
+      const timeoutMs = options?.timeoutMs || config.aiEngine.timeoutMs || 180000;
 
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), timeoutMs);
