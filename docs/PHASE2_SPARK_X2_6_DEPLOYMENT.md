@@ -3,7 +3,7 @@
 ## Scope
 
 This change prepares the existing Ollama-backed AI path for CPU-only deployment of
-`SparkLLM/Spark-X2.6-4B:q4_k_m` on the 8 GB RAM / 16 vCPU HSECORE VPS.
+`SparkLLM/Spark-X2.6-4B:q4_k_m` on the CPU-only HSECORE VPS. The inspected host reported approximately 11 GiB RAM and 6 visible CPUs; the active Ollama container had a 4 GiB memory limit at the time of audit. Re-check actual host and container limits before deployment.
 It does not change the production default chat model, database schema, RAG
 embedding model, business modules, or the `main` branch.
 
@@ -58,9 +58,13 @@ point, not a guarantee that the whole 8 GB host has sufficient headroom.
    AI_CPU_LIMIT=6.0
    AI_MEMORY_LIMIT=4608M
    AI_CLOUD_FALLBACK_ENABLED=false
+   AI_ALLOWED_MODELS=SparkLLM/Spark-X2.6-4B:q4_k_m
+   AI_MODEL_PULL_TIMEOUT_MS=1800000
    ```
 
-4. Recreate the AI and app services, then check status:
+4. If using the HSECORE administrator API to download a model, `AI_ALLOWED_MODELS` must contain the exact Ollama model reference before the pull request is accepted. The API refuses unlisted model references, prevents concurrent pulls, applies a bounded timeout, and protects the configured chat/embedding models from deletion. A manual `ollama pull` from an authorized server shell bypasses the application API allowlist and must therefore be treated as a privileged server operation.
+
+5. Recreate the AI and app services, then check status:
 
    ```bash
    docker compose -f docker-compose.server.yml up -d --force-recreate hse-ai-engine hse-app
@@ -78,7 +82,7 @@ explicit administrator operation and should be performed once.
   Keep it false for the default local-only deployment.
 - The `GEMINI_API_KEY` may remain in an existing `.env`, but is not used for
   chat/BPMN fallback while cloud fallback is disabled.
-- Wildcard Ollama CORS is removed. The application reaches Ollama over the
+- Remove any `OLLAMA_ORIGINS=*` entry from the deployment `.env`; wildcard CORS is not required for backend-to-backend Docker communication. Wildcard Ollama CORS is removed from Compose. The application reaches Ollama over the
   private Docker network; the host-published port remains bound to 127.0.0.1
   unless an operator deliberately overrides it.
 - Keep Ollama out of public reverse-proxy routes and firewall inbound access
@@ -91,7 +95,9 @@ explicit administrator operation and should be performed once.
 3. Authenticated AI chat returns the selected local model name.
 4. Disconnect/stop Ollama: HSECORE must not send prompts or retrieved records to
    Gemini while cloud fallback is false; the built-in deterministic fallback
-   may respond instead.
+   may respond instead. The AI status must separately report engine reachability,
+   chat-model installation and local inference readiness; a healthy empty Ollama
+   inventory is not an inference-ready state.
 5. A user without the relevant HSECORE permission cannot retrieve restricted
    RAG documents or invoke restricted module tools.
 6. Queue saturation is rejected with a controlled Persian error; expired tasks
