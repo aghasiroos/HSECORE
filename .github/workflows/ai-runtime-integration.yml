@@ -80,14 +80,18 @@ jobs:
       - name: Create shared Docker network
         run: bash scripts/ensure-ai-network.sh
 
-      - name: Pull and start pinned Ollama runtime
+      - name: Provision optional Local LLM runtime (no model downloads)
         run: |
           docker compose -f docker-compose.ai.yml config --quiet
-          docker compose -f docker-compose.ai.yml pull hse-ai-engine
-          docker compose -f docker-compose.ai.yml up -d hse-ai-engine
+          bash scripts/setup-local-ai.sh
+          model_count="$(docker exec hse-ai-engine ollama list | awk 'NR > 1 && NF {count++} END {print count+0}')"
+          test "${model_count}" -eq 0
 
-      - name: Verify runtime, health, limits, volume and private API reachability
-        run: bash scripts/test-ai-runtime.sh
+      - name: Verify idempotent runtime provisioning
+        run: |
+          bash scripts/setup-local-ai.sh
+          model_count="$(docker exec hse-ai-engine ollama list | awk 'NR > 1 && NF {count++} END {print count+0}')"
+          test "${model_count}" -eq 0
 
       - name: Verify runtime survives a container restart
         run: |
