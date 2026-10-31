@@ -49,11 +49,11 @@ export interface LocalChatOptions {
   timeoutMs?: number;
 }
 
-type QueueTask<T> = () => Promise<T>;
+type QueueTask<T> = (remainingMs: number) => Promise<T>;
 
 export class LocalAIProvider {
   private activeCount = 0;
-  private queue: Array<{ run: () => void; reject: (err: any) => void }> = [];
+  private queue: Array<{ run: () => void; reject: (err: any) => void; timer?: NodeJS.Timeout }> = [];
   private offlineUntil = 0;
   private readonly offlineCooldownMs = 60_000;
 
@@ -80,12 +80,13 @@ export class LocalAIProvider {
    * Concurrency-guarded execution queue
    * Enforces maxConcurrency limit (1 on 8GB RAM VPS) to prevent OOM
    */
-  private async enqueue<T>(task: QueueTask<T>): Promise<T> {
+  private async enqueue<T>(task: QueueTask<T>, timeoutMs = config.aiEngine.timeoutMs || 180000): Promise<T> {
+    const queuedAt = Date.now();
     const max = config.aiEngine.maxConcurrency || 1;
     if (this.activeCount < max) {
       this.activeCount++;
       try {
-        return await task();
+        return await task(timeoutMs);
       } finally {
         this.activeCount--;
         this.processQueue();
@@ -97,11 +98,20 @@ export class LocalAIProvider {
     }
 
     return new Promise<T>((resolve, reject) => {
-      this.queue.push({
+      const queuedTask = {
+        timer: undefined as NodeJS.Timeout | undefined,
+        reject,
         run: async () => {
+          if (queuedTask.timer) clearTimeout(queuedTask.timer);
+          const remainingMs = timeoutMs - (Date.now() - queuedAt);
+          if (remainingMs <= 0) {
+            reject(new Error('مهلت انتظار درخواست در صف موتور محلی هوش مصنوعی به پایان رسید.'));
+            this.processQueue();
+            return;
+          }
           this.activeCount++;
           try {
-            const res = await task();
+            const res = await task(remainingMs);
             resolve(res);
           } catch (err) {
             reject(err);
@@ -110,8 +120,16 @@ export class LocalAIProvider {
             this.processQueue();
           }
         },
-        reject,
-      });
+      };
+
+      queuedTask.timer = setTimeout(() => {
+        const queuedIndex = this.queue.indexOf(queuedTask);
+        if (queuedIndex !== -1) {
+          this.queue.splice(queuedIndex, 1);
+          reject(new Error('مهلت انتظار درخواست در صف موتور محلی هوش مصنوعی به پایان رسید.'));
+        }
+      }, timeoutMs);
+      this.queue.push(queuedTask);
     });
   }
 
@@ -275,14 +293,14 @@ export class LocalAIProvider {
       throw new Error('Local AI engine is offline');
     }
 
-    return this.enqueue(async () => {
+    return this.enqueue(async (remainingMs) => {
       if (Date.now() < this.offlineUntil) {
         throw new Error('Local AI engine is offline');
       }
 
       const startTime = Date.now();
       const model = options?.model || config.aiEngine.defaultChatModel;
-      const timeoutMs = options?.timeoutMs || config.aiEngine.timeoutMs || 180000;
+      const timeoutMs = Math.min(options?.timeoutMs || config.aiEngine.timeoutMs || 180000, remainingMs);
 
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -330,7 +348,7 @@ export class LocalAIProvider {
         }
         throw err;
       }
-    });
+    }, options?.timeoutMs || config.aiEngine.timeoutMs || 180000);
   }
 
   /**
@@ -351,7 +369,7 @@ export class LocalAIProvider {
 
       const startTime = Date.now();
       const model = options?.model || config.aiEngine.defaultChatModel;
-      const timeoutMs = config.aiEngine.timeoutMs || 180000;
+      const timeoutMs = remainingMs;
 
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -400,7 +418,7 @@ export class LocalAIProvider {
         }
         throw err;
       }
-    });
+    }, config.aiEngine.timeoutMs || 180000);
   }
 
   /**
@@ -422,7 +440,7 @@ export class LocalAIProvider {
       const startTime = Date.now();
       const model = modelName || config.aiEngine.defaultEmbedModel;
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 30000);
+      const timeout = setTimeout(() => controller.abort(), Math.min(30000, remainingMs));
 
       try {
         const resp = await fetch(`${this.baseUrl}/api/embeddings`, {
@@ -449,7 +467,7 @@ export class LocalAIProvider {
         this.markOfflineIfNetworkError(err);
         throw err;
       }
-    });
+    }, 30000);
   }
 }
 
