@@ -13,7 +13,7 @@ export interface AIQueueTask<T> {
   timestamp: number;
   timeoutMs?: number;
   queueTimer?: NodeJS.Timeout;
-  execute: () => Promise<T>;
+  execute: (remainingMs: number) => Promise<T>;
   resolve: (value: T) => void;
   reject: (reason?: any) => void;
 }
@@ -38,7 +38,7 @@ export class AIRequestQueue {
   }
 
   async enqueue<T>(
-    taskFn: () => Promise<T>,
+    taskFn: (remainingMs: number) => Promise<T>,
     options?: { userId?: string | number; role?: string; timeoutMs?: number }
   ): Promise<{ data: T; queueWaitMs: number }> {
     const queueEntryTime = Date.now();
@@ -56,7 +56,7 @@ export class AIRequestQueue {
     if (this.activeCount < maxConcurrency) {
       this.activeCount++;
       try {
-        const result = await this.executeWithTimeout(taskFn, timeoutLimit);
+        const result = await this.executeWithTimeout(() => taskFn(timeoutLimit), timeoutLimit);
         this.totalProcessed++;
         return { data: result, queueWaitMs: Date.now() - queueEntryTime };
       } catch (err) {
@@ -117,7 +117,7 @@ export class AIRequestQueue {
 
       this.activeCount++;
       try {
-        const result = await this.executeWithTimeout(nextTask.execute, remainingMs);
+        const result = await this.executeWithTimeout(() => nextTask.execute(remainingMs), remainingMs);
         this.totalProcessed++;
         nextTask.resolve(result);
       } catch (err) {
