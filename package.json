@@ -16,7 +16,8 @@
     "test:ai-acl": "tsx scripts/test-ai-acl.ts",
     "test:ai-auth": "tsx scripts/test-ai-auth.ts",
     "test:ai-rag-db": "tsx scripts/test-ai-rag-db.ts",
-    "test:ai-routes": "tsx scripts/test-ai-routes.ts"
+    "test:ai-routes": "tsx scripts/test-ai-routes.ts",
+    "test:ai-queue": "tsx scripts/test-ai-queue.ts"
   },
   "dependencies": {
     "@bpmn-io/properties-panel": "^3.48.0",
