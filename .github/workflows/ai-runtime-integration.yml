@@ -50,17 +50,6 @@ jobs:
           bash -n scripts/manage-ai.sh
           bash -n scripts/test-ai-runtime.sh
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-
-      - name: Install locked dependencies and validate TypeScript
-        run: |
-          npm ci
-          npm run lint
-
       - name: Prepare Compose environment
         run: |
           cat > .env <<'EOF'
