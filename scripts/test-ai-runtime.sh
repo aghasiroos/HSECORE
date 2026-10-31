@@ -57,12 +57,44 @@ volume_mount="$(docker inspect --format '{{range .Mounts}}{{if eq .Name "hse_ai_
 docker volume inspect hse_ai_models >/dev/null 2>&1 || fail "persistent volume hse_ai_models is missing"
 echo "[AI Runtime Test] PASS: persistent model volume is attached."
 
-echo "[AI Runtime Test] Checking CPU and memory limits..."
+read_dotenv_value() {
+  local key="$1"
+  local fallback="$2"
+  local raw=""
+  if [[ -f .env ]]; then
+    raw="$(grep -E "^[[:space:]]*${key}=" .env | tail -n 1 | cut -d'=' -f2- || true)"
+  fi
+  raw="${raw%
+echo "[AI Runtime Test] Checking cross-container API access..."
+api_response="$(docker run --rm --pull=missing --network "${NETWORK_NAME}" "${PEER_IMAGE}" \
+  --retry 20 --retry-delay 1 --retry-connrefused --connect-timeout 2 --max-time 5 \
+  --fail --silent --show-error "http://${CONTAINER_NAME}:11434/api/version")" || fail "peer container could not reach Ollama API through Docker DNS/network"
+python3 -c 'import json,sys; d=json.loads(sys.argv[1]); assert isinstance(d.get("version"), str) and d["version"], "missing Ollama version"' "${api_response}" || fail "Ollama API returned invalid version JSON"
+echo "[AI Runtime Test] PASS: Ollama API is reachable from another container; version JSON is valid."
+
+echo "[AI Runtime Test] All Local LLM runtime checks passed."
+\\r'}"
+  raw="${raw#\"}"
+  raw="${raw%\"}"
+  raw="${raw#\\'}"
+  raw="${raw%\\'}"
+  printf '%s' "${raw:-${fallback}}"
+}
+
+echo "[AI Runtime Test] Checking pinned Ollama image and CPU/memory limits..."
+expected_image_version="${AI_OLLAMA_VERSION:-$(read_dotenv_value AI_OLLAMA_VERSION 0.34.0)}"
+actual_image="$(docker inspect --format '{{.Config.Image}}' "${CONTAINER_NAME}")"
+[[ "${actual_image}" == "ollama/ollama:${expected_image_version}" ]] || fail "unexpected Ollama image: ${actual_image}; expected ollama/ollama:${expected_image_version}"
+
+cpu_limit="${AI_CPU_LIMIT:-$(read_dotenv_value AI_CPU_LIMIT 4.0)}"
+memory_limit="${AI_MEMORY_LIMIT:-$(read_dotenv_value AI_MEMORY_LIMIT 4096M)}"
+expected_nano_cpus="$(python3 -c 'import sys; print(round(float(sys.argv[1]) * 1_000_000_000))' "${cpu_limit}")" || fail "invalid AI_CPU_LIMIT: ${cpu_limit}"
+expected_memory_bytes="$(python3 -c 'import re,sys; s=sys.argv[1].strip().upper(); m=re.fullmatch(r"([0-9]+(?:\\.[0-9]+)?)(B|K|KB|M|MB|G|GB)?", s); assert m, "invalid memory limit"; n=float(m.group(1)); u=m.group(2) or "B"; print(int(n * {"B":1,"K":1024,"KB":1024,"M":1024**2,"MB":1024**2,"G":1024**3,"GB":1024**3}[u]))' "${memory_limit}")" || fail "invalid AI_MEMORY_LIMIT: ${memory_limit}"
 nano_cpus="$(docker inspect --format '{{.HostConfig.NanoCpus}}' "${CONTAINER_NAME}")"
 memory_bytes="$(docker inspect --format '{{.HostConfig.Memory}}' "${CONTAINER_NAME}")"
-[[ "${nano_cpus}" =~ ^[0-9]+$ ]] && (( nano_cpus > 0 )) || fail "CPU limit was not applied by Docker Compose"
-[[ "${memory_bytes}" =~ ^[0-9]+$ ]] && (( memory_bytes > 0 )) || fail "memory limit was not applied by Docker Compose"
-echo "[AI Runtime Test] PASS: Docker reports CPU limit ${nano_cpus} NanoCPUs and memory limit ${memory_bytes} bytes."
+[[ "${nano_cpus}" == "${expected_nano_cpus}" ]] || fail "CPU limit mismatch: got ${nano_cpus}, expected ${expected_nano_cpus}"
+[[ "${memory_bytes}" == "${expected_memory_bytes}" ]] || fail "memory limit mismatch: got ${memory_bytes}, expected ${expected_memory_bytes}"
+echo "[AI Runtime Test] PASS: pinned image ${actual_image}; CPU ${nano_cpus} NanoCPUs; memory ${memory_bytes} bytes."
 
 echo "[AI Runtime Test] Checking cross-container API access..."
 api_response="$(docker run --rm --pull=missing --network "${NETWORK_NAME}" "${PEER_IMAGE}" \
