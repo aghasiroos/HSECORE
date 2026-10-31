@@ -25,9 +25,12 @@ import {
   ChevronUp,
   MessageSquare,
   Zap,
-  Info
+  Info,
+  Download,
+  Search
 } from 'lucide-react';
 import { UserProfile } from '../../types';
+import { authFetch } from '../../services/apiDatabaseClient';
 
 export interface AIAssistant {
   id: string;
@@ -271,10 +274,41 @@ export default function AiAssistantApp({ currentUser, language = 'fa' }: AiAssis
     return sessions[0]?.id || 'session-default';
   });
 
+  const [searchSessionQuery, setSearchSessionQuery] = useState<string>('');
+
   const activeSession = sessions.find(s => s.id === activeSessionId) || sessions[0];
   const activeAssistant = ASSISTANTS.find(a => a.id === selectedAssistantId) || ASSISTANTS[0];
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const handleExportSession = () => {
+    if (!activeSession || activeSession.messages.length === 0) return;
+    let report = `گزارش استنتاج هوش مصنوعی HSECORE AI\n`;
+    report += `عنوان گفتگو: ${activeSession.title}\n`;
+    report += `دستیار تخصصی: ${activeAssistant.nameFa} (${activeAssistant.title})\n`;
+    report += `تاریخ ثبت گزارش: ${new Date().toLocaleDateString('fa-IR')} ${new Date().toLocaleTimeString('fa-IR')}\n`;
+    report += `========================================================\n\n`;
+
+    activeSession.messages.forEach((m, idx) => {
+      const sender = m.role === 'user' ? 'کاربر' : `دستیار هوشمند (${activeAssistant.nameFa})`;
+      report += `[${idx + 1}] ${sender} - ${m.timestamp}\n`;
+      if (m.toolsUsed && m.toolsUsed.length > 0) {
+        report += `منابع داده سامانه‌ای: ${m.toolsUsed.join('، ')}\n`;
+      }
+      if (m.citations && m.citations.length > 0) {
+        report += `اسناد و استانداردهای مرجع: ${m.citations.join('، ')}\n`;
+      }
+      report += `${m.content}\n\n--------------------------------------------------------\n\n`;
+    });
+
+    const blob = new Blob([report], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `HSECORE_AI_Report_${Date.now()}.txt`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
 
   useEffect(() => {
     try {
@@ -361,7 +395,7 @@ export default function AiAssistantApp({ currentUser, language = 'fa' }: AiAssis
         content: m.content,
       }));
 
-      const res = await fetch('/api/v1/ai/chat', {
+      const res = await authFetch('/api/v1/ai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -374,7 +408,7 @@ export default function AiAssistantApp({ currentUser, language = 'fa' }: AiAssis
 
       const data = await res.json();
 
-      if (data.success) {
+      if (data.success && data.reply) {
         const assistantMsg: ChatMessage = {
           id: `msg-${Date.now()}`,
           role: 'assistant',
@@ -392,10 +426,15 @@ export default function AiAssistantApp({ currentUser, language = 'fa' }: AiAssis
           )
         );
       } else {
+        const errText =
+          data?.message ||
+          data?.error?.message ||
+          (typeof data?.error === 'string' ? data.error : null) ||
+          'پاسخی از موتور هوش مصنوعی دریافت نشد.';
         const errorMsg: ChatMessage = {
           id: `msg-${Date.now()}`,
           role: 'assistant',
-          content: data.message || 'پاسخی از موتور هوش مصنوعی دریافت نشد.',
+          content: errText,
           timestamp: new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }),
         };
         setSessions(prev =>
@@ -455,39 +494,55 @@ export default function AiAssistantApp({ currentUser, language = 'fa' }: AiAssis
           </button>
         </div>
 
+        {/* Sessions Search & List */}
+        <div className="p-3 border-b border-slate-100 dark:border-slate-800">
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 absolute start-2.5 top-2.5 text-slate-400" />
+            <input
+              type="text"
+              value={searchSessionQuery}
+              onChange={e => setSearchSessionQuery(e.target.value)}
+              placeholder="جستجو در گفتگوها..."
+              className="w-full ps-8 pe-3 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 placeholder-slate-400 focus:outline-hidden focus:border-indigo-500"
+            />
+          </div>
+        </div>
+
         {/* Sessions List */}
         <div className="flex-1 overflow-y-auto p-3 space-y-1 custom-scrollbar">
           <div className="text-[11px] font-bold text-slate-400 px-2 py-1">تاریخچه گفتگوها</div>
-          {sessions.map(s => {
-            const isSelected = s.id === activeSession.id;
-            return (
-              <div
-                key={s.id}
-                onClick={() => {
-                  setActiveSessionId(s.id);
-                  setSelectedAssistantId(s.assistantId);
-                  setSidebarOpen(false);
-                }}
-                className={`group flex items-center justify-between p-2.5 rounded-xl text-xs font-bold transition cursor-pointer ${
-                  isSelected
-                    ? 'bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200/80 dark:border-indigo-800/60'
-                    : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/60'
-                }`}
-              >
-                <div className="flex items-center gap-2 truncate flex-1">
-                  <MessageSquare className="w-4 h-4 shrink-0 text-slate-400" />
-                  <span className="truncate">{s.title}</span>
-                </div>
-                <button
-                  onClick={e => handleDeleteSession(s.id, e)}
-                  className="opacity-0 group-hover:opacity-100 p-1 hover:text-red-500 rounded-md transition"
-                  title="حذف گفتگو"
+          {sessions
+            .filter(s => !searchSessionQuery || s.title.toLowerCase().includes(searchSessionQuery.toLowerCase()))
+            .map(s => {
+              const isSelected = s.id === activeSession.id;
+              return (
+                <div
+                  key={s.id}
+                  onClick={() => {
+                    setActiveSessionId(s.id);
+                    setSelectedAssistantId(s.assistantId);
+                    setSidebarOpen(false);
+                  }}
+                  className={`group flex items-center justify-between p-2.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                    isSelected
+                      ? 'bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200/80 dark:border-indigo-800/60'
+                      : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/60'
+                  }`}
                 >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            );
-          })}
+                  <div className="flex items-center gap-2 truncate flex-1">
+                    <MessageSquare className="w-4 h-4 shrink-0 text-slate-400" />
+                    <span className="truncate">{s.title}</span>
+                  </div>
+                  <button
+                    onClick={e => handleDeleteSession(s.id, e)}
+                    className="opacity-0 group-hover:opacity-100 p-1 hover:text-red-500 rounded-md transition"
+                    title="حذف گفتگو"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              );
+            })}
         </div>
 
         {/* Local Engine Status Mini Card */}
@@ -548,6 +603,16 @@ export default function AiAssistantApp({ currentUser, language = 'fa' }: AiAssis
           </div>
 
           <div className="flex items-center gap-2">
+            {activeSession.messages.length > 0 && (
+              <button
+                onClick={handleExportSession}
+                className="px-2.5 py-1 rounded-xl text-xs font-bold flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition cursor-pointer border border-slate-200 dark:border-slate-700"
+                title="دریافت فایل متنی گزارش گفتگو"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>دریافت گزارش</span>
+              </button>
+            )}
             <button
               onClick={() => setAllowTools(!allowTools)}
               className={`px-2.5 py-1 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer border ${

@@ -1,59 +1,193 @@
 /**
- * HSECORE Safe Read-Only Domain Tools for Local AI
- * Provides structured, audited real-data summaries to ground AI reasoning.
- * Strictly read-only; no raw SQL execution or data mutation.
+ * HSECORE Safe Read-Only Domain Tools for AI Assistant
+ * Provides structured, real-time data across ALL HSECORE modules to ground AI responses.
+ * Strictly read-only; no raw SQL mutation.
  */
 
 import { db, schema } from '../../core/db.ts';
-import { desc, eq, and, sql } from 'drizzle-orm';
+import { desc } from 'drizzle-orm';
 import { ptwRepository } from '../ptw/ptw.repository.ts';
 import { incidentRepository } from '../incidents/incident.repository.ts';
+import { weatherService } from '../../weather/service.ts';
 import { AIToolResult } from './ai.types.ts';
 import { logger } from '../../core/logger.ts';
 
-export class AIToolsRegistry {
-  /**
-   * Tool: PTW & Work Permits Real-Time Status
-   */
-  async getPTWSummary(): Promise<AIToolResult> {
-    try {
-      const permits = await ptwRepository.findAll();
-      const total = permits.length;
-      const active = permits.filter((p: any) => p.status === 'IN_PROGRESS' || p.status === 'APPROVED' || p.status === 'ACTIVE').length;
-      const hotWork = permits.filter((p: any) => p.permitType === 'HOT_WORK').length;
-      const coldWork = permits.filter((p: any) => p.permitType === 'COLD_WORK').length;
-      const confinedSpace = permits.filter((p: any) => p.permitType === 'CONFINED_SPACE').length;
-      const closed = permits.filter((p: any) => p.status === 'CLOSED' || p.isClosed).length;
+/**
+ * Normalize Persian/Arabic characters, digits, and spacing for colloquial & cross-script matching
+ */
+export function normalizePersianText(input: string): string {
+  if (!input) return '';
+  return String(input)
+    .replace(/[\u064A\u0649\u0626]/g, 'ی') // ي ى ئ -> ی
+    .replace(/\u0643/g, 'ک') // ك -> ک
+    .replace(/\u0629/g, 'ه') // ة -> ه
+    .replace(/\u0624/g, 'و') // ؤ -> و
+    .replace(/[\u0622\u0623\u0625]/g, 'ا') // آ أ إ -> ا
+    .replace(/[\u200B-\u200D\uFEFF]/g, ' ') // zero-width spaces -> space
+    .replace(/[۰-۹]/g, d => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
+    .replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
-      const recentActive = permits
-        .filter((p: any) => !p.isClosed && p.status !== 'CLOSED')
-        .slice(0, 5)
-        .map((p: any) => ({
-          permitNumber: p.permitNumber,
-          title: p.title,
-          type: p.permitType,
-          location: p.location,
-          applicant: p.applicantName,
-        }));
+export class AIToolsRegistry {
+  private async loadSettingsMap(): Promise<Map<string, any>> {
+    const map = new Map<string, any>();
+    try {
+      const rows = await db.select().from(schema.systemSettings).catch(() => []);
+      for (const r of rows) {
+        if (r && r.key) {
+          let val = r.value;
+          if (typeof val === 'string') {
+            try {
+              val = JSON.parse(val);
+            } catch {}
+          }
+          map.set(r.key, val);
+          map.set(r.key.toLowerCase(), val);
+        }
+      }
+    } catch {}
+    return map;
+  }
+
+  /**
+   * Tool 1: Live Heat Stress Monitor & Meteorological Telemetry (دما، رطوبت، WBGT، استرس گرمایی)
+   */
+  async getHeatStressAndWeatherSummary(): Promise<AIToolResult> {
+    try {
+      const settingsMap = await this.loadSettingsMap();
+      let heatLat = 30.471003;
+      let heatLon = 49.090324;
+      let heatLocName = 'منطقه ویژه صنعتی بندر امام خمینی (پتروشیمی)';
+
+      const heatConfig = settingsMap.get('hse_heat_monitor_config');
+      if (heatConfig) {
+        if (heatConfig.lat && heatConfig.lon) {
+          heatLat = Number(heatConfig.lat);
+          heatLon = Number(heatConfig.lon);
+        }
+        if (heatConfig.locationName) heatLocName = heatConfig.locationName;
+      }
+
+      const weather = await weatherService.getWeather(
+        { lat: heatLat, lon: heatLon, query: heatLocName },
+        undefined,
+        false
+      );
+
+      const riskLabelsFa: Record<string, string> = {
+        Normal: 'عادی و ایمن (سبز)',
+        Caution: 'احتیاط (زرد)',
+        'Extreme Caution': 'احتیاط شدید (نارنجی)',
+        Danger: 'خطر استرس گرمایی (قرمز)',
+        'Extreme Danger': 'خطر بسیار شدید / بحرانی (بنفش)',
+      };
+      const riskFa = riskLabelsFa[weather.cat || 'Normal'] || weather.cat || 'عادی';
+
+      const summaryLines = [
+        `ایستگاه پایش: ${weather.locationName || heatLocName}`,
+        `• دمای فعلی هوا (Air Temp): ${weather.tempC}°C`,
+        `• رطوبت نسبی هوا (Humidity): ${weather.hum}%`,
+        `• شاخص دمای تر گوی‌سان در آفتاب (WBGT Outdoor): ${weather.wbgt ?? '-'}°C`,
+        `• شاخص دمای تر گوی‌سان در سایه (WBGT Shade): ${weather.wbgtShade ?? '-'}°C`,
+        `• شاخص گرما (Heat Index): ${weather.hiDisplay || weather.hi || weather.tempC}°C`,
+        `• دمای گوی‌سان (Globe Temp): ${weather.globeTemp ?? '-'}°C | دمای تر طبیعی (Wet Bulb): ${weather.wetBulb ?? '-'}°C | نقطه شبنم: ${weather.dewPoint ?? '-'}°C`,
+        `• سرعت باد: ${weather.wind ?? 0} km/h | فشار هوا: ${weather.pressure ?? '-'} hPa`,
+        `• وضعیت تنش حرارتی: ${riskFa}${weather.subLevel ? ` (سطح ${weather.subLevel})` : ''}`,
+      ];
 
       return {
-        toolName: 'ptw_summary',
-        titleFa: 'خلاصه پروانه‌های کار (PTW)',
-        summary: `مجموع ${total} پروانه کار ثبت شده است که ${active} فقره از آنها هم‌اکنون فعال/در حال اجرا هستند (${hotWork} کار گرم، ${coldWork} کار سرد، ${confinedSpace} فضای بسته).`,
+        toolName: 'heat_weather_summary',
+        titleFa: 'ماژول پایش شاخص استرس گرمایی و هواشناسی (WBGT)',
+        summary: summaryLines.join('\n'),
         data: {
-          totalPermits: total,
-          activePermits: active,
-          closedPermits: closed,
-          byType: { hotWork, coldWork, confinedSpace },
-          recentActive,
+          location: weather.locationName || heatLocName,
+          coordinates: { lat: heatLat, lon: heatLon },
+          tempC: weather.tempC,
+          humidityPercent: weather.hum,
+          wbgt: weather.wbgt,
+          wbgtShade: weather.wbgtShade,
+          heatIndex: weather.hi,
+          globeTemp: weather.globeTemp,
+          wetBulb: weather.wetBulb,
+          dewPoint: weather.dewPoint,
+          windKmh: weather.wind,
+          pressureHpa: weather.pressure,
+          category: weather.cat,
+          categoryFa: riskFa,
+          provider: weather.provider,
+          observedAt: weather.observedAt,
         },
         timestamp: new Date().toISOString(),
       };
     } catch (err: any) {
-      logger.error('[AITools] getPTWSummary error', { error: err.message });
+      logger.debug('[AITools] getHeatStressAndWeatherSummary fallback', { error: err.message });
+      return {
+        toolName: 'heat_weather_summary',
+        titleFa: 'ماژول پایش شاخص استرس گرمایی و هواشناسی (WBGT)',
+        summary: 'ایستگاه هواشناسی برخط در این لحظه پاسخگو نیست؛ لطفاً تنظیمات مختصات ایستگاه در ماژول استرس گرمایی را بررسی فرمایید.',
+        data: {},
+        timestamp: new Date().toISOString(),
+      };
+    }
+  }
+
+  /**
+   * Tool 2: PTW & Work Permits Real-Time Status (پروانه‌های کار و ممیزی PTW)
+   */
+  async getPTWSummary(): Promise<AIToolResult> {
+    try {
+      const [permits, settingsMap] = await Promise.all([
+        ptwRepository.findAll(),
+        this.loadSettingsMap(),
+      ]);
+      const total = permits.length;
+      const active = permits.filter((p: any) => ['IN_PROGRESS', 'APPROVED', 'ACTIVE', 'ISSUED'].includes(String(p.status || '').toUpperCase())).length;
+      const pending = permits.filter((p: any) => ['PENDING', 'DRAFT', 'PENDING_APPROVAL'].includes(String(p.status || '').toUpperCase())).length;
+      const closed = permits.filter((p: any) => String(p.status || '').toUpperCase() === 'CLOSED' || p.isClosed).length;
+
+      const countType = (match: (t: string) => boolean) =>
+        permits.filter((p: any) => match(String(p.permitType || p.type || '').toUpperCase())).length;
+
+      const hotWork = countType(t => t.includes('HOT') || t.includes('گرم'));
+      const coldWork = countType(t => t.includes('COLD') || t.includes('سرد'));
+      const confinedSpace = countType(t => t.includes('CONFINED') || t.includes('بسته'));
+      const heightWork = countType(t => t.includes('HEIGHT') || t.includes('ارتفاع'));
+      const excavation = countType(t => t.includes('EXCAVATION') || t.includes('حفاری'));
+      const electrical = countType(t => t.includes('ELECTR') || t.includes('برق'));
+
+      const audits: any[] = Array.isArray(settingsMap.get('hse_ptw_audit_records_v2'))
+        ? settingsMap.get('hse_ptw_audit_records_v2')
+        : [];
+
+      const recentPermits = permits.slice(0, 5).map((p: any) => `${p.permitNumber || p.id}: ${p.title || p.permitType} (${p.location || 'بدون مکان'} - وضعیت: ${p.status})`);
+
       return {
         toolName: 'ptw_summary',
-        titleFa: 'خلاصه پروانه‌های کار (PTW)',
+        titleFa: 'ماژول پروانه‌های کار (PTW) و ممیزی مجوزها',
+        summary: [
+          `• کل پروانه‌های کار ثبت‌شده: ${total} فقره (${active} فعال/در حال اجرا، ${pending} در انتظار تایید، ${closed} مختومه)`,
+          `• تفکیک نوع مجوزها: ${hotWork} کار گرم، ${coldWork} کار سرد، ${confinedSpace} فضای بسته، ${heightWork} کار در ارتفاع، ${excavation} حفاری، ${electrical} برق`,
+          `• تعداد ممیزی‌های ثبت‌شده پروانه کار: ${audits.length} مورد`,
+          recentPermits.length > 0 ? `• آخرین مجوزها: ${recentPermits.join(' | ')}` : '',
+        ].filter(Boolean).join('\n'),
+        data: {
+          totalPermits: total,
+          activePermits: active,
+          pendingPermits: pending,
+          closedPermits: closed,
+          byType: { hotWork, coldWork, confinedSpace, heightWork, excavation, electrical },
+          totalAudits: audits.length,
+          recentPermits,
+        },
+        timestamp: new Date().toISOString(),
+      };
+    } catch (err: any) {
+      return {
+        toolName: 'ptw_summary',
+        titleFa: 'ماژول پروانه‌های کار (PTW)',
         summary: 'اطلاعات پروانه‌های کار در دسترس نیست.',
         data: {},
         timestamp: new Date().toISOString(),
@@ -62,51 +196,36 @@ export class AIToolsRegistry {
   }
 
   /**
-   * Tool: Incidents, Near Misses & CAPA Real-Time Summary
+   * Tool 3: Incidents, Near Misses & CAPA Real-Time Summary (حوادث و شبه‌حوادث)
    */
   async getIncidentSummary(): Promise<AIToolResult> {
     try {
       const incidents = await incidentRepository.findAll();
       const total = incidents.length;
-      const nearMisses = incidents.filter((i: any) => i.incidentType === 'NEAR_MISS').length;
-      const accidents = incidents.filter((i: any) => i.incidentType !== 'NEAR_MISS').length;
-      const investigating = incidents.filter((i: any) => i.status === 'INVESTIGATING' || i.status === 'REPORTED').length;
-      const closed = incidents.filter((i: any) => i.status === 'CLOSED').length;
+      const nearMisses = incidents.filter((i: any) => String(i.incidentType || i.type || '').toUpperCase().includes('NEAR')).length;
+      const accidents = total - nearMisses;
+      const openCases = incidents.filter((i: any) => !['CLOSED', 'RESOLVED', 'COMPLETED'].includes(String(i.status || '').toUpperCase())).length;
+      const closed = total - openCases;
+      const totalLostDays = incidents.reduce((sum: number, inc: any) => sum + Number(inc.lostWorkDays || inc.lostDays || 0), 0);
 
-      let totalLostDays = 0;
-      for (const inc of incidents) {
-        totalLostDays += Number(inc.lostWorkDays || 0);
-      }
-
-      const recentIncidents = incidents.slice(0, 5).map((i: any) => ({
-        incidentNumber: i.incidentNumber,
-        title: i.title,
-        severity: i.severity,
-        type: i.incidentType,
-        date: i.incidentDate,
-        status: i.status,
-      }));
+      const recentList = incidents.slice(0, 5).map((i: any) => `${i.incidentNumber || i.id}: ${i.title || i.description?.slice(0, 40)} (${i.location || ''} - شدت: ${i.severity || 'عادی'})`);
 
       return {
         toolName: 'incidents_summary',
-        titleFa: 'آمار حوادث، شبه‌حوادث و اقدامات اصلاحی',
-        summary: `مجموع ${total} رویداد ایمنی ثبت شده است شامل ${nearMisses} شبه‌حادثه (Near Miss) و ${accidents} حادثه. ${investigating} پرونده در دست بررسی و روزهای کاری از دست رفته ${totalLostDays} روز است.`,
-        data: {
-          totalIncidents: total,
-          nearMisses,
-          accidents,
-          investigating,
-          closed,
-          totalLostDays,
-          recentIncidents,
-        },
+        titleFa: 'ماژول گزارش‌دهی و تحلیل حوادث و شبه‌حوادث',
+        summary: [
+          `• کل رویدادهای ثبت‌شده: ${total} مورد (${accidents} حادثه و ${nearMisses} شبه‌حادثه / Near Miss)`,
+          `• وضعیت پیگیری: ${openCases} پرونده باز/در حال بررسی و ${closed} پرونده مختومه`,
+          `• مجموع روزهای کاری از دست رفته (LTI Lost Days): ${totalLostDays} روز`,
+          recentList.length > 0 ? `• آخرین رویدادها: ${recentList.join(' | ')}` : '',
+        ].filter(Boolean).join('\n'),
+        data: { totalIncidents: total, nearMisses, accidents, openCases, closed, totalLostDays, recentList },
         timestamp: new Date().toISOString(),
       };
-    } catch (err: any) {
-      logger.error('[AITools] getIncidentSummary error', { error: err.message });
+    } catch {
       return {
         toolName: 'incidents_summary',
-        titleFa: 'آمار حوادث و رویدادها',
+        titleFa: 'ماژول حوادث و شبه‌حوادث',
         summary: 'اطلاعات حوادث در دسترس نیست.',
         data: {},
         timestamp: new Date().toISOString(),
@@ -115,48 +234,53 @@ export class AIToolsRegistry {
   }
 
   /**
-   * Tool: Occupational Health & Periodic Medical Exams Summary
+   * Tool 4: Occupational Health & Periodic Medical Exams Summary (بهداشت حرفه‌ای و طب کار)
    */
   async getHealthAndExamsSummary(): Promise<AIToolResult> {
     try {
-      const exams = await db.select().from(schema.periodicMedicalExams).catch(() => []);
-      const totalExams = exams.length;
+      const [exams, audio, spiro, opto, diseases, settingsMap] = await Promise.all([
+        db.select().from(schema.periodicMedicalExams).catch(() => []),
+        db.select().from(schema.audiometryRecords).catch(() => []),
+        db.select().from(schema.spirometryRecords).catch(() => []),
+        db.select().from(schema.optometryRecords).catch(() => []),
+        db.select().from(schema.occupationalDiseaseDiagnoses).catch(() => []),
+        this.loadSettingsMap(),
+      ]);
+
+      const extraExams = Array.isArray(settingsMap.get('hse_medical_exams_v4')) ? settingsMap.get('hse_medical_exams_v4') : [];
+      const allExams = exams.length > 0 ? exams : extraExams;
+      const totalExams = allExams.length;
 
       let fit = 0;
       let conditional = 0;
       let unfit = 0;
 
-      for (const e of exams) {
-        const status = String((e as any).fitnessStatus || (e as any).fitnessOutcome || '').toUpperCase();
-        const finalOp = String((e as any).finalOpinion || (e as any).opinion || '');
-
-        if (status.includes('FIT') && !status.includes('UNFIT') && !status.includes('CONDITIONAL') || finalOp.includes('بلامانع') || finalOp.includes('مناسب')) {
-          fit++;
-        } else if (status.includes('CONDITIONAL') || finalOp.includes('مشروط')) {
-          conditional++;
-        } else if (status.includes('UNFIT') || finalOp.includes('عدم صلاحیت') || finalOp.includes('نامناسب')) {
+      for (const e of allExams) {
+        const status = String((e as any).fitnessStatus || (e as any).doctorVerdict || (e as any).final_opinion || '').toUpperCase();
+        if (status.includes('UNFIT') || status.includes('عدم صلاحیت') || status.includes('نامناسب')) {
           unfit++;
+        } else if (status.includes('CONDITIONAL') || status.includes('مشروط') || (e as any).restrictions) {
+          conditional++;
+        } else {
+          fit++;
         }
       }
 
       return {
         toolName: 'health_medical_summary',
-        titleFa: 'پایش سلامت شغلی و معاینات ادواری',
-        summary: `مجموع ${totalExams} پرونده معاینات طب کار ثبت شده است. نتایج نهایی: ${fit} نفر تناسب کامل (Fit)، ${conditional} نفر مشروط، و ${unfit} نفر عدم تناسب شغلی.`,
-        data: {
-          totalExams,
-          fit,
-          conditional,
-          unfit,
-          fitnessPercentage: totalExams > 0 ? Math.round((fit / totalExams) * 100) : 0,
-        },
+        titleFa: 'ماژول بهداشت حرفه‌ای و معاینات طب کار',
+        summary: [
+          `• کل پرونده‌های معاینات طب کار: ${totalExams} پرونده`,
+          `• وضعیت تناسب شغلی: ${fit} نفر بلامانع (Fit)، ${conditional} نفر مشروط (Conditional)، ${unfit} نفر عدم صلاحیت (Unfit)`,
+          `• رکوردهای پاراکلینیکی: ${audio.length} ادیومتری (شنوایی‌سنجی)، ${spiro.length} اسپیرومتری (تنفس)، ${opto.length} اپتومتری (بینایی‌سنجی) و ${diseases.length} تشخیص بیماری شغلی`,
+        ].join('\n'),
+        data: { totalExams, fit, conditional, unfit, audiometryCount: audio.length, spirometryCount: spiro.length, optometryCount: opto.length, diseasesCount: diseases.length },
         timestamp: new Date().toISOString(),
       };
-    } catch (err: any) {
-      logger.error('[AITools] getHealthAndExamsSummary error', { error: err.message });
+    } catch {
       return {
         toolName: 'health_medical_summary',
-        titleFa: 'پایش سلامت شغلی',
+        titleFa: 'ماژول بهداشت حرفه‌ای و طب کار',
         summary: 'اطلاعات معاینات طب کار در دسترس نیست.',
         data: {},
         timestamp: new Date().toISOString(),
@@ -165,11 +289,12 @@ export class AIToolsRegistry {
   }
 
   /**
-   * Tool: Nutrition, BMI & High-Risk Chronic Conditions Summary
+   * Tool 5: Nutrition, BMI & High-Risk Chronic Conditions Summary (تغذیه، BMI و بیماران پرخطر)
    */
   async getNutritionHighRiskSummary(): Promise<AIToolResult> {
     try {
       const exams = await db.select().from(schema.periodicMedicalExams).catch(() => []);
+      let normalBmi = 0;
       let overweight = 0;
       let obeseGrade1 = 0;
       let obeseGrade2 = 0;
@@ -178,45 +303,37 @@ export class AIToolsRegistry {
       let highBloodSugar = 0;
 
       for (const exam of exams) {
-        const extra = (exam as any).extraData || {};
-        const general = (exam as any).generalHealth || {};
-        const labs = (exam as any).laboratory || {};
-
-        const bmi = Number(extra.bmi || general.bmi || (exam as any).bmi || 0);
-        if (bmi >= 25 && bmi < 30) overweight++;
+        const raw = ((exam as any).rawData || (exam as any).extraData || {}) as Record<string, any>;
+        const bmi = Number((exam as any).bmi || raw.bmi || 0);
+        if (bmi > 0 && bmi < 25) normalBmi++;
+        else if (bmi >= 25 && bmi < 30) overweight++;
         else if (bmi >= 30 && bmi < 35) obeseGrade1++;
         else if (bmi >= 35 && bmi < 40) obeseGrade2++;
         else if (bmi >= 40) obeseGrade3++;
 
-        const bpSystolic = Number(extra.bloodPressureSystolic || general.bloodPressureSystolic || 0);
-        const bpDiastolic = Number(extra.bloodPressureDiastolic || general.bloodPressureDiastolic || 0);
-        if (bpSystolic >= 140 || bpDiastolic >= 90) highBloodPressure++;
+        const sys = Number((exam as any).systolicBp || raw.bloodPressureSystolic || 0);
+        const dia = Number((exam as any).diastolicBp || raw.bloodPressureDiastolic || 0);
+        if (sys >= 140 || dia >= 90) highBloodPressure++;
 
-        const fbs = Number(extra.fbs || labs.fbs || 0);
+        const fbs = Number(raw.fbs || 0);
         if (fbs >= 126) highBloodSugar++;
       }
 
-      const totalHighRisk = overweight + obeseGrade1 + obeseGrade2 + obeseGrade3 + highBloodPressure + highBloodSugar;
-
       return {
         toolName: 'nutrition_high_risk_summary',
-        titleFa: 'بیماران پرخطر تغذیه، چاقی و بیماری‌های مزمن',
-        summary: `بر اساس آخرین معاینات ادواری: ${overweight} نفر اضافه‌وزن، ${obeseGrade1 + obeseGrade2 + obeseGrade3} نفر چاقی (درجات ۱ تا ۳)، ${highBloodPressure} نفر فشار خون بالا و ${highBloodSugar} نفر قند خون ناشتای غیرطبیعی (دیابت/پیش‌دیابت) دارند.`,
-        data: {
-          overweight,
-          obesity: { grade1: obeseGrade1, grade2: obeseGrade2, grade3: obeseGrade3 },
-          highBloodPressure,
-          highBloodSugar,
-          totalIndicators: totalHighRisk,
-        },
+        titleFa: 'ماژول تغذیه، شاخص توده بدنی (BMI) و بیماران پرخطر',
+        summary: [
+          `• وضعیت وزن و BMI در پرونده‌های سلامت: ${normalBmi} نفر وزن نرمال، ${overweight} نفر اضافه‌وزن (BMI 25-29.9)، ${obeseGrade1} نفر چاقی درجه ۱، ${obeseGrade2} نفر چاقی درجه ۲ و ${obeseGrade3} نفر چاقی مفرط (BMI ≥ 40)`,
+          `• شاخص‌های متابولیک پرخطر: ${highBloodPressure} نفر دارای فشار خون بالا (≥140/90) و ${highBloodSugar} نفر دارای قند خون ناشتای بالا (FBS ≥ 126)`,
+        ].join('\n'),
+        data: { normalBmi, overweight, obeseGrade1, obeseGrade2, obeseGrade3, highBloodPressure, highBloodSugar },
         timestamp: new Date().toISOString(),
       };
-    } catch (err: any) {
-      logger.error('[AITools] getNutritionHighRiskSummary error', { error: err.message });
+    } catch {
       return {
         toolName: 'nutrition_high_risk_summary',
-        titleFa: 'بیماران پرخطر تغذیه',
-        summary: 'اطلاعات تغذیه در دسترس نیست.',
+        titleFa: 'ماژول تغذیه و بیماران پرخطر',
+        summary: 'اطلاعات پایش تغذیه در دسترس نیست.',
         data: {},
         timestamp: new Date().toISOString(),
       };
@@ -224,32 +341,32 @@ export class AIToolsRegistry {
   }
 
   /**
-   * Tool: Risk Assessment & Hazard Identification
+   * Tool 6: Risk Assessment & Hazard Identification (ارزیابی ریسک و مخاطرات)
    */
   async getRiskAssessmentsSummary(): Promise<AIToolResult> {
     try {
       const risks = await db.select().from(schema.riskAssessments).catch(() => []);
       const total = risks.length;
-      const highRisks = risks.filter((r: any) => String(r.riskLevel).toUpperCase() === 'HIGH' || String(r.riskLevel).toUpperCase() === 'EXTREME').length;
-      const mediumRisks = risks.filter((r: any) => String(r.riskLevel).toUpperCase() === 'MEDIUM').length;
-      const lowRisks = risks.filter((r: any) => String(r.riskLevel).toUpperCase() === 'LOW').length;
+      const highRisks = risks.filter((r: any) => ['HIGH', 'EXTREME', 'CRITICAL'].includes(String(r.initialRiskLevel || r.riskLevel || '').toUpperCase())).length;
+      const mediumRisks = risks.filter((r: any) => String(r.initialRiskLevel || r.riskLevel || '').toUpperCase() === 'MEDIUM').length;
+      const lowRisks = Math.max(0, total - highRisks - mediumRisks);
+
+      const topHazards = risks.slice(0, 5).map((r: any) => `${r.activityTitle}: ${r.hazardDescription} (سطح ریسک: ${r.initialRiskLevel || 'متوسط'})`);
 
       return {
         toolName: 'risk_assessment_summary',
-        titleFa: 'ارزیابی ریسک‌ها و مخاطرات شغلی',
-        summary: `مجموع ${total} رکورد ارزیابی ریسک ثبت شده است که ${highRisks} مورد در وضعیت ریسک بالا/بحرانی، ${mediumRisks} متوسط و ${lowRisks} مورد در وضعیت کنترل‌شده قرار دارند.`,
-        data: {
-          totalRisks: total,
-          highRisks,
-          mediumRisks,
-          lowRisks,
-        },
+        titleFa: 'ماژول ارزیابی ریسک و شناسایی مخاطرات (JSA / HAZID)',
+        summary: [
+          `• کل ارزیابی‌های ریسک ثبت‌شده: ${total} مورد (${highRisks} ریسک بالا/بحرانی، ${mediumRisks} ریسک متوسط، ${lowRisks} ریسک پایین/کنترل‌شده)`,
+          topHazards.length > 0 ? `• نمونه مخاطرات ثبت‌شده: ${topHazards.join(' | ')}` : '',
+        ].filter(Boolean).join('\n'),
+        data: { totalRisks: total, highRisks, mediumRisks, lowRisks, topHazards },
         timestamp: new Date().toISOString(),
       };
-    } catch (err: any) {
+    } catch {
       return {
         toolName: 'risk_assessment_summary',
-        titleFa: 'ارزیابی ریسک‌ها',
+        titleFa: 'ماژول ارزیابی ریسک',
         summary: 'اطلاعات ارزیابی ریسک در دسترس نیست.',
         data: {},
         timestamp: new Date().toISOString(),
@@ -258,28 +375,37 @@ export class AIToolsRegistry {
   }
 
   /**
-   * Tool: 5S System & Safety Inspections
+   * Tool 7: 5S System & Safety Inspections (نظام آراستگی ۵S و بازرسی‌های ایمنی)
    */
   async get5SAndInspectionsSummary(): Promise<AIToolResult> {
     try {
-      const fiveSRows = await db.select().from(schema.fiveSAudits).catch(() => []);
-      const inspections = await db.select().from(schema.safetyInspections).catch(() => []);
+      const [fiveSRows, inspections, settingsMap] = await Promise.all([
+        db.select().from(schema.fiveSAudits).catch(() => []),
+        db.select().from(schema.safetyInspections).catch(() => []),
+        this.loadSettingsMap(),
+      ]);
+
+      const settingFiveS: any[] = Array.isArray(settingsMap.get('hse_5s_inspections_v3')) ? settingsMap.get('hse_5s_inspections_v3') : [];
+      const settingInsp: any[] = Array.isArray(settingsMap.get('hse_safety_dept_inspections_v1')) ? settingsMap.get('hse_safety_dept_inspections_v1') : [];
+
+      const totalFiveS = Math.max(fiveSRows.length, settingFiveS.length);
+      const totalInsp = Math.max(inspections.length, settingInsp.length);
+      const avgFiveS = fiveSRows.length > 0
+        ? Math.round((fiveSRows as any[]).reduce((s: number, r: any) => s + Number(r.totalScore || 0), 0) / fiveSRows.length)
+        : 0;
 
       return {
         toolName: 'five_s_inspections_summary',
-        titleFa: 'نظام آراستگی ۵S و بازرسی‌های ایمنی',
-        summary: `مجموع ${fiveSRows.length} ممیزی ۵S و ${inspections.length} بازرسی ایمنی و بهداشت در سازمان ثبت و پایش شده است.`,
-        data: {
-          totalFiveSAudits: fiveSRows.length,
-          totalInspections: inspections.length,
-        },
+        titleFa: 'ماژول نظام آراستگی ۵S و بازرسی‌های فنی ایمنی',
+        summary: `• مجموع ممیزی‌های نظام آراستگی ۵S: ${totalFiveS} مورد (میانگین امتیاز: ${avgFiveS}%)\n• مجموع بازرسی‌های فنی و چک‌لیست‌های ایمنی (تجهیزات، داربست، جرثقیل، برق و حفاری): ${totalInsp} مورد`,
+        data: { totalFiveSAudits: totalFiveS, averageFiveSScore: avgFiveS, totalInspections: totalInsp },
         timestamp: new Date().toISOString(),
       };
-    } catch (err: any) {
+    } catch {
       return {
         toolName: 'five_s_inspections_summary',
-        titleFa: 'نظام آراستگی ۵S و بازرسی‌ها',
-        summary: 'اطلاعات ۵S در دسترس نیست.',
+        titleFa: 'ماژول ۵S و بازرسی‌های ایمنی',
+        summary: 'اطلاعات بازرسی و ۵S در دسترس نیست.',
         data: {},
         timestamp: new Date().toISOString(),
       };
@@ -287,33 +413,423 @@ export class AIToolsRegistry {
   }
 
   /**
-   * Tool: Management KPI & TRIR Summary
+   * Tool 8: Fire Department, Extinguishers & Vehicles (آتش‌نشانی و تجهیزات اطفاء حریق)
+   */
+  async getFireSafetySummary(): Promise<AIToolResult> {
+    try {
+      const [fireEq, settingsMap] = await Promise.all([
+        db.select().from(schema.fireEquipment).catch(() => []),
+        this.loadSettingsMap(),
+      ]);
+      const vehicles: any[] = Array.isArray(settingsMap.get('hse_fire_vehicles_v1')) ? settingsMap.get('hse_fire_vehicles_v1') : [];
+      const serviceable = fireEq.filter((f: any) => ['SERVICEABLE', 'OPERATIONAL', 'GOOD', 'ACTIVE'].includes(String(f.status || '').toUpperCase())).length;
+      const needsAttention = Math.max(0, fireEq.length - serviceable);
+
+      const co2 = fireEq.filter((f: any) => String(f.equipmentType || '').toUpperCase().includes('CO2')).length;
+      const powder = fireEq.filter((f: any) => String(f.equipmentType || '').toUpperCase().includes('POWDER')).length;
+      const foam = fireEq.filter((f: any) => String(f.equipmentType || '').toUpperCase().includes('FOAM')).length;
+      const hydrants = fireEq.filter((f: any) => String(f.equipmentType || '').toUpperCase().includes('HYDRANT')).length;
+
+      return {
+        toolName: 'fire_safety_summary',
+        titleFa: 'ماژول آتش‌نشانی، تجهیزات اطفاء حریق و خودروهای عملیاتی',
+        summary: [
+          `• کل تجهیزات اطفاء حریق ثبت‌شده: ${fireEq.length} دستگاه (${serviceable} عملیاتی/آماده به کار، ${needsAttention} نیازمند شارژ یا بازرسی)`,
+          `• تفکیک تجهیزات: ${powder} کپسول پودر و گاز، ${co2} کپسول CO2، ${foam} فوم، ${hydrants} هیدرانت`,
+          `• خودروهای عملیاتی آتش‌نشانی و امداد: ${vehicles.length} دستگاه`,
+        ].join('\n'),
+        data: { totalEquipment: fireEq.length, serviceable, needsAttention, byType: { co2, powder, foam, hydrants }, vehiclesCount: vehicles.length },
+        timestamp: new Date().toISOString(),
+      };
+    } catch {
+      return {
+        toolName: 'fire_safety_summary',
+        titleFa: 'ماژول آتش‌نشانی',
+        summary: 'اطلاعات تجهیزات آتش‌نشانی در دسترس نیست.',
+        data: {},
+        timestamp: new Date().toISOString(),
+      };
+    }
+  }
+
+  /**
+   * Tool 9: Safety Warnings, Anomalies & Non-Conformances (اخطارهای ایمنی، تخلفات و عدم انطباق‌ها)
+   */
+  async getWarningsAndAnomaliesSummary(): Promise<AIToolResult> {
+    try {
+      const [warnings, ncs] = await Promise.all([
+        db.select().from(schema.safetyWarnings).orderBy(desc(schema.safetyWarnings.createdAt)).catch(() => []),
+        db.select().from(schema.nonConformances).orderBy(desc(schema.nonConformances.createdAt)).catch(() => []),
+      ]);
+
+      const activeWarnings = warnings.filter((w: any) => !['CLOSED', 'RESOLVED', 'REVOKED'].includes(String(w.status || '').toUpperCase())).length;
+      const openNcs = ncs.filter((n: any) => !['CLOSED', 'RESOLVED'].includes(String(n.status || '').toUpperCase())).length;
+      const recentWarnings = warnings.slice(0, 4).map((w: any) => `${w.personnelName || w.name || 'پرسنل'}: ${w.reason || w.category} (${w.warningDate || ''})`);
+
+      return {
+        toolName: 'warnings_anomalies_summary',
+        titleFa: 'ماژول اخطارهای ایمنی، تخلفات و عدم انطباق‌ها (NC)',
+        summary: [
+          `• کل اخطارها و تخلفات ایمنی ثبت‌شده: ${warnings.length} مورد (${activeWarnings} اخطار فعال)`,
+          `• کل پرونده‌های عدم انطباق (Non-Conformance): ${ncs.length} مورد (${openNcs} پرونده باز در جریان اقدام اصلاحی)`,
+          recentWarnings.length > 0 ? `• آخرین اخطارهای ثبت‌شده: ${recentWarnings.join(' | ')}` : '',
+        ].filter(Boolean).join('\n'),
+        data: { totalWarnings: warnings.length, activeWarnings, totalNonConformances: ncs.length, openNonConformances: openNcs, recentWarnings },
+        timestamp: new Date().toISOString(),
+      };
+    } catch {
+      return {
+        toolName: 'warnings_anomalies_summary',
+        titleFa: 'ماژول اخطارها و عدم انطباق‌ها',
+        summary: 'اطلاعات اخطارها و عدم انطباق‌ها در دسترس نیست.',
+        data: {},
+        timestamp: new Date().toISOString(),
+      };
+    }
+  }
+
+  /**
+   * Tool 10: HSE Training & Competency Summary (آموزش‌های ایمنی و ماتریس صلاحیت)
+   */
+  async getTrainingSummary(): Promise<AIToolResult> {
+    try {
+      const [courses, attendances, settingsMap] = await Promise.all([
+        db.select().from(schema.hseTrainings).catch(() => []),
+        db.select().from(schema.trainingAttendances).catch(() => []),
+        this.loadSettingsMap(),
+      ]);
+      const settingCourses: any[] = Array.isArray(settingsMap.get('hse_training_courses_v2')) ? settingsMap.get('hse_training_courses_v2') : [];
+      const totalCourses = Math.max(courses.length, new Set(settingCourses.map((c: any) => c.courseCode || c.title)).size);
+      const totalAttendances = Math.max(attendances.length, settingCourses.length);
+      const totalHours = (courses as any[]).reduce((s: number, c: any) => s + Number(c.durationHours || 0), 0) + settingCourses.reduce((s: number, c: any) => s + Number(c.hours || 0), 0);
+      const courseNames = courses.slice(0, 5).map((c: any) => c.courseTitle);
+
+      return {
+        toolName: 'training_summary',
+        titleFa: 'ماژول آموزش‌های ایمنی و ماتریس شایستگی کارکنان',
+        summary: [
+          `• کل دوره‌های آموزشی تعریف‌شده: ${totalCourses} دوره | مجموع حضور در دوره‌ها: ${totalAttendances} نفر-دوره`,
+          `• مجموع ساعات آموزشی ثبت‌شده: ${totalHours} ساعت`,
+          courseNames.length > 0 ? `• عناوین دوره‌های فعال: ${courseNames.join('، ')}` : '',
+        ].filter(Boolean).join('\n'),
+        data: { totalCourses, totalAttendances, totalHours, courseNames },
+        timestamp: new Date().toISOString(),
+      };
+    } catch {
+      return {
+        toolName: 'training_summary',
+        titleFa: 'ماژول آموزش‌های ایمنی',
+        summary: 'اطلاعات آموزش در دسترس نیست.',
+        data: {},
+        timestamp: new Date().toISOString(),
+      };
+    }
+  }
+
+  /**
+   * Tool 11: PPE Management Summary (تجهیزات حفاظت فردی)
+   */
+  async getPPESummary(): Promise<AIToolResult> {
+    try {
+      const ppeList = await db.select().from(schema.ppeIssuances).catch(() => []);
+      const total = ppeList.length;
+      const totalQty = (ppeList as any[]).reduce((s: number, p: any) => s + Number(p.quantity || 1), 0);
+      const recentItems = ppeList.slice(0, 5).map((p: any) => `${p.itemName} (${p.itemCategory} - تعداد: ${p.quantity})`);
+
+      return {
+        toolName: 'ppe_summary',
+        titleFa: 'ماژول مدیریت تجهیزات حفاظت فردی (PPE)',
+        summary: [
+          `• کل رکوردهای تحویل تجهیزات حفاظت فردی: ${total} نوبت (مجموع اقلام توزیع‌شده: ${totalQty} عدد)`,
+          recentItems.length > 0 ? `• آخرین اقلام تحویلی: ${recentItems.join(' | ')}` : '',
+        ].filter(Boolean).join('\n'),
+        data: { totalIssuances: total, totalQuantity: totalQty, recentItems },
+        timestamp: new Date().toISOString(),
+      };
+    } catch {
+      return {
+        toolName: 'ppe_summary',
+        titleFa: 'ماژول تجهیزات حفاظت فردی (PPE)',
+        summary: 'اطلاعات تجهیزات حفاظت فردی در دسترس نیست.',
+        data: {},
+        timestamp: new Date().toISOString(),
+      };
+    }
+  }
+
+  /**
+   * Tool 12: Environmental Monitoring & Waste Management (محیط زیست، پسماند و پساب)
+   */
+  async getEnvironmentSummary(): Promise<AIToolResult> {
+    try {
+      const envLogs = await db.select().from(schema.environmentalLogs).orderBy(desc(schema.environmentalLogs.createdAt)).catch(() => []);
+      const total = envLogs.length;
+      const compliant = envLogs.filter((e: any) => e.isCompliant !== false).length;
+      const nonCompliant = total - compliant;
+      const recentParams = envLogs.slice(0, 5).map((e: any) => `${e.parameterName || e.category}: ${e.measuredValue ?? '-'} ${e.unit || ''} (${e.isCompliant ? 'منطبق با استاندارد' : 'فراتر از حد مجاز'})`);
+
+      return {
+        toolName: 'environment_summary',
+        titleFa: 'ماژول پایش محیط زیست، پساب و مدیریت پسماند',
+        summary: [
+          `• کل رکوردهای پایش زیست‌محیطی و پسماند: ${total} مورد (${compliant} منطبق با استاندارد، ${nonCompliant} عدم انطباق زیست‌محیطی)`,
+          recentParams.length > 0 ? `• آخرین سنجش‌ها: ${recentParams.join(' | ')}` : '',
+        ].filter(Boolean).join('\n'),
+        data: { totalLogs: total, compliant, nonCompliant, recentParams },
+        timestamp: new Date().toISOString(),
+      };
+    } catch {
+      return {
+        toolName: 'environment_summary',
+        titleFa: 'ماژول محیط زیست و پسماند',
+        summary: 'اطلاعات محیط زیست در دسترس نیست.',
+        data: {},
+        timestamp: new Date().toISOString(),
+      };
+    }
+  }
+
+  /**
+   * Tool 13: Personnel & Organizational Hierarchy Summary (پرسنل و ساختار سازمانی)
+   */
+  async getPersonnelAndOrgSummary(): Promise<AIToolResult> {
+    try {
+      const [pers, companies, sites, depts, units] = await Promise.all([
+        db.select().from(schema.personnel).catch(() => []),
+        db.select().from(schema.orgCompanies).catch(() => []),
+        db.select().from(schema.orgSites).catch(() => []),
+        db.select().from(schema.orgDepartments).catch(() => []),
+        db.select().from(schema.orgUnits).catch(() => []),
+      ]);
+      const activePers = pers.filter((p: any) => String(p.status || 'ACTIVE').toUpperCase() === 'ACTIVE').length;
+
+      return {
+        toolName: 'personnel_org_summary',
+        titleFa: 'ماژول پرونده پرسنلی و ساختار سازمانی',
+        summary: [
+          `• کل پرسنل ثبت‌شده در سامانه: ${pers.length} نفر (${activePers} نفر شاغل فعال)`,
+          `• ساختار سازمانی: ${companies.length} شرکت، ${sites.length} سایت/مجتمع، ${depts.length} مدیریت/اداره و ${units.length} واحد عملیاتی`,
+        ].join('\n'),
+        data: { totalPersonnel: pers.length, activePersonnel: activePers, companies: companies.length, sites: sites.length, departments: depts.length, units: units.length },
+        timestamp: new Date().toISOString(),
+      };
+    } catch {
+      return {
+        toolName: 'personnel_org_summary',
+        titleFa: 'ماژول پرسنل و ساختار سازمانی',
+        summary: 'اطلاعات پرسنل در دسترس نیست.',
+        data: {},
+        timestamp: new Date().toISOString(),
+      };
+    }
+  }
+
+  /**
+   * Tool 14: Workflows, Referrals & BPMN Processes (کارتابل ارجاعات و مدیریت فرآیندها)
+   */
+  async getWorkflowAndReferralsSummary(): Promise<AIToolResult> {
+    try {
+      const [wfInstances, bpmnProcs, settingsMap] = await Promise.all([
+        db.select().from(schema.workflowInstances).catch(() => []),
+        db.select().from(schema.bpmnProcesses).catch(() => []),
+        this.loadSettingsMap(),
+      ]);
+      const referrals: any[] = Array.isArray(settingsMap.get('hse_document_referrals_v1')) ? settingsMap.get('hse_document_referrals_v1') : [];
+      const pendingWf = wfInstances.filter((w: any) => ['PENDING', 'IN_PROGRESS'].includes(String(w.status || '').toUpperCase())).length;
+      const pendingRefs = referrals.filter((r: any) => String(r.status || '').toUpperCase() === 'PENDING').length;
+
+      return {
+        toolName: 'workflow_referrals_summary',
+        titleFa: 'ماژول مدیریت فرآیندها (BPMN) و کارتابل اسناد و ارجاعات',
+        summary: [
+          `• فرآیندهای استاندارد BPMN ثبت‌شده: ${bpmnProcs.length} فرآیند`,
+          `• گردش‌کارهای جاری: ${wfInstances.length} مورد (${pendingWf} در انتظار بررسی و تایید)`,
+          `• ارجاعات کارتابل اسناد: ${referrals.length} ارجاع (${pendingRefs} مورد در انتظار اقدام)`,
+        ].join('\n'),
+        data: { bpmnProcesses: bpmnProcs.length, workflowInstances: wfInstances.length, pendingWorkflows: pendingWf, totalReferrals: referrals.length, pendingReferrals: pendingRefs },
+        timestamp: new Date().toISOString(),
+      };
+    } catch {
+      return {
+        toolName: 'workflow_referrals_summary',
+        titleFa: 'ماژول فرآیندها و کارتابل ارجاعات',
+        summary: 'اطلاعات گردش کار در دسترس نیست.',
+        data: {},
+        timestamp: new Date().toISOString(),
+      };
+    }
+  }
+
+  /**
+   * Tool 15: Management KPI & TRIR Summary (شاخص‌های کلیدی عملکرد و TRIR)
    */
   async getManagementKPISummary(): Promise<AIToolResult> {
     try {
-      const trirRows = await db.select().from(schema.trirMonthlyRecords).catch(() => []);
+      const trirRows = await db.select().from(schema.trirMonthlyRecords).orderBy(desc(schema.trirMonthlyRecords.year), desc(schema.trirMonthlyRecords.monthIndex)).catch(() => []);
       const latestTRIR = trirRows.length > 0 ? trirRows[0] : null;
+      const totalHours = (trirRows as any[]).reduce((s: number, r: any) => s + Number(r.totalHours || 0), 0);
+      const totalInc = (trirRows as any[]).reduce((s: number, r: any) => s + Number(r.incidents || 0), 0);
 
       return {
         toolName: 'kpi_management_summary',
-        titleFa: 'شاخص‌های کلیدی عملکرد مدیریت HSE (TRIR)',
+        titleFa: 'ماژول داشبورد کلان و شاخص‌های کلیدی عملکرد (TRIR)',
         summary: latestTRIR
-          ? `آخرین ضریب تکرار حادثه (TRIR) ثبت‌شده برابر با ${latestTRIR.trirValue || '0'} و نفر-ساعت کارکرد سازمان برابر با ${latestTRIR.totalWorkHours || '0'} ساعت است.`
-          : 'شاخص‌های TRIR در ماه جاری در حال پایش و محاسبه است.',
+          ? `• آخرین دوره ثبت‌شده (${latestTRIR.month} ${latestTRIR.year}): ضریب تکرار حادثه ماهانه (Monthly TRIR) برابر ${latestTRIR.monthlyTrir ?? 0} و ضریب تجمعی ۱۲ ماهه (Rolling TRIR) برابر ${latestTRIR.rollingTrir ?? 0}\n• مجموع نفر-ساعت کارکرد ثبت‌شده: ${totalHours.toLocaleString('en-US')} ساعت | مجموع حوادث قابل ثبت در سری زمانی: ${totalInc} مورد`
+          : 'هیچ رکورد ماهانه TRIR هنوز ثبت نشده است.',
         data: {
           hasRecords: trirRows.length > 0,
           latest: latestTRIR,
+          totalWorkHours: totalHours,
+          totalRecordedIncidents: totalInc,
         },
         timestamp: new Date().toISOString(),
       };
-    } catch (err: any) {
+    } catch {
       return {
         toolName: 'kpi_management_summary',
-        titleFa: 'شاخص‌های کلیدی عملکرد مدیریت',
+        titleFa: 'ماژول شاخص‌های کلیدی عملکرد (KPI)',
         summary: 'اطلاعات KPI در دسترس نیست.',
         data: {},
         timestamp: new Date().toISOString(),
       };
+    }
+  }
+
+  /**
+   * Tool 16: Universal Cross-Module Deep Search (جستجوی هوشمند رکوردها در تمامی ماژول‌های سامانه)
+   * Matches colloquial terms, names, codes, locations, or descriptions across all database tables.
+   */
+  async searchAcrossAllModules(rawQuery: string, includeSensitivePersonnel = true): Promise<AIToolResult | null> {
+    const normalizedQ = normalizePersianText(rawQuery);
+    const stopWords = new Set([
+      'از', 'به', 'در', 'با', 'برای', 'چه', 'چند', 'چطور', 'کجا', 'کی', 'ماژول', 'بخش', 'قسمت',
+      'بهم', 'بده', 'بگو', 'نشان', 'نشون', 'لیست', 'گزارش', 'وضعیت', 'اطلاعات', 'آمار', 'امار',
+      'میخواهم', 'میخوام', 'لطفا', 'لطفاً', 'سلام', 'خوبی', 'چیه', 'چیست', 'است', 'هست', 'داریم',
+      'رو', 'را', 'های', 'ها', 'یا', 'و', 'که', 'این', 'آن', 'ان', 'همه', 'کل', 'تعداد', 'مورد',
+    ]);
+
+    const tokens = normalizedQ
+      .split(/\s+/)
+      .map(t => t.replace(/[^\w\u0600-\u06FF]/g, ''))
+      .filter(t => t.length >= 2 && !stopWords.has(t));
+
+    if (tokens.length === 0) return null;
+
+    try {
+      const [permits, incidents, risks, warnings, ncs, fireEq, trainings, envLogs, personnelList] = await Promise.all([
+        ptwRepository.findAll().catch(() => []),
+        incidentRepository.findAll().catch(() => []),
+        db.select().from(schema.riskAssessments).catch(() => []),
+        db.select().from(schema.safetyWarnings).catch(() => []),
+        db.select().from(schema.nonConformances).catch(() => []),
+        db.select().from(schema.fireEquipment).catch(() => []),
+        db.select().from(schema.hseTrainings).catch(() => []),
+        db.select().from(schema.environmentalLogs).catch(() => []),
+        includeSensitivePersonnel ? db.select().from(schema.personnel).catch(() => []) : Promise.resolve([]),
+      ]);
+
+      const matchesToken = (text: string): number => {
+        const norm = normalizePersianText(text);
+        if (!norm) return 0;
+        let hits = 0;
+        for (const tk of tokens) {
+          if (norm.includes(tk)) hits++;
+        }
+        return hits;
+      };
+
+      const matchedLines: string[] = [];
+
+      // Search Permits
+      for (const p of permits as any[]) {
+        const blob = `${p.permitNumber || ''} ${p.title || ''} ${p.permitType || ''} ${p.location || ''} ${p.contractorName || ''} ${p.description || ''}`;
+        if (matchesToken(blob) > 0) {
+          matchedLines.push(`• [پروانه کار ${p.permitNumber}] عنوان: ${p.title} | نوع: ${p.permitType} | محل: ${p.location} | وضعیت: ${p.status}`);
+          if (matchedLines.length >= 12) break;
+        }
+      }
+
+      // Search Incidents
+      for (const i of incidents as any[]) {
+        const blob = `${i.incidentNumber || ''} ${i.title || ''} ${i.incidentType || ''} ${i.location || ''} ${i.description || ''} ${i.personnelName || ''}`;
+        if (matchesToken(blob) > 0) {
+          matchedLines.push(`• [حادثه/رویداد ${i.incidentNumber || i.id}] نوع: ${i.incidentType} | محل: ${i.location} | شرح: ${(i.description || '').slice(0, 70)} | وضعیت: ${i.status}`);
+          if (matchedLines.length >= 12) break;
+        }
+      }
+
+      // Search Risks
+      for (const r of risks as any[]) {
+        const blob = `${r.activityTitle || ''} ${r.hazardDescription || ''} ${r.consequences || ''} ${r.existingControls || ''}`;
+        if (matchesToken(blob) > 0) {
+          matchedLines.push(`• [ارزیابی ریسک] فعالیت: ${r.activityTitle} | خطر: ${r.hazardDescription} | سطح ریسک: ${r.initialRiskLevel}`);
+          if (matchedLines.length >= 12) break;
+        }
+      }
+
+      // Search Warnings & Non-Conformances
+      for (const w of warnings as any[]) {
+        const blob = `${w.personnelName || ''} ${w.personnelCode || ''} ${w.reason || ''} ${w.category || ''} ${w.unit || ''}`;
+        if (matchesToken(blob) > 0) {
+          matchedLines.push(`• [اخطار ایمنی] نام: ${w.personnelName} | علت: ${w.reason} | سطح: ${w.warningLevel} | تاریخ: ${w.warningDate}`);
+          if (matchedLines.length >= 12) break;
+        }
+      }
+      for (const n of ncs as any[]) {
+        const blob = `${n.trackingCode || ''} ${n.title || ''} ${n.description || ''} ${n.unitName || ''}`;
+        if (matchesToken(blob) > 0) {
+          matchedLines.push(`• [عدم انطباق ${n.trackingCode}] عنوان: ${n.title} | واحد: ${n.unitName || '-'} | وضعیت: ${n.status}`);
+          if (matchedLines.length >= 12) break;
+        }
+      }
+
+      // Search Fire Equipment
+      for (const f of fireEq as any[]) {
+        const blob = `${f.code || ''} ${f.equipmentType || ''} ${f.location || ''} ${f.status || ''}`;
+        if (matchesToken(blob) > 0) {
+          matchedLines.push(`• [تجهیز آتش‌نشانی ${f.code}] نوع: ${f.equipmentType} | محل: ${f.location} | وضعیت: ${f.status}`);
+          if (matchedLines.length >= 12) break;
+        }
+      }
+
+      // Search Trainings
+      for (const t of trainings as any[]) {
+        const blob = `${t.courseTitle || ''} ${t.courseCategory || ''} ${t.instructor || ''} ${t.description || ''}`;
+        if (matchesToken(blob) > 0) {
+          matchedLines.push(`• [دوره آموزشی] عنوان: ${t.courseTitle} | مدت: ${t.durationHours} ساعت | مدرس: ${t.instructor || '-'}`);
+          if (matchedLines.length >= 12) break;
+        }
+      }
+
+      // Search Environment
+      for (const e of envLogs as any[]) {
+        const blob = `${e.category || ''} ${e.parameterName || ''} ${e.notes || ''} ${e.destination || ''}`;
+        if (matchesToken(blob) > 0) {
+          matchedLines.push(`• [پایش محیط زیست] پارامتر: ${e.parameterName || e.category} | مقدار: ${e.measuredValue ?? '-'} ${e.unit || ''} | تاریخ: ${e.logDate}`);
+          if (matchedLines.length >= 12) break;
+        }
+      }
+
+      // Search Personnel
+      for (const p of personnelList as any[]) {
+        const blob = `${p.firstName || ''} ${p.lastName || ''} ${p.personnelCode || ''} ${p.nationalCode || ''} ${p.jobTitle || ''}`;
+        if (matchesToken(blob) > 0) {
+          matchedLines.push(`• [پرونده پرسنلی] نام: ${p.firstName} ${p.lastName} | کد پرسنلی: ${p.personnelCode} | سمت: ${p.jobTitle || '-'} | وضعیت: ${p.status}`);
+          if (matchedLines.length >= 12) break;
+        }
+      }
+
+      if (matchedLines.length === 0) return null;
+
+      return {
+        toolName: 'universal_search',
+        titleFa: 'نتایج جستجوی مستقیم در رکوردهای سامانه HSECORE',
+        summary: matchedLines.slice(0, 10).join('\n'),
+        data: { matchCount: matchedLines.length, matches: matchedLines.slice(0, 10) },
+        timestamp: new Date().toISOString(),
+      };
+    } catch {
+      return null;
     }
   }
 }

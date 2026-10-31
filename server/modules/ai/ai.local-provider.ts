@@ -53,9 +53,26 @@ type QueueTask<T> = () => Promise<T>;
 export class LocalAIProvider {
   private activeCount = 0;
   private queue: Array<{ run: () => void; reject: (err: any) => void }> = [];
+  private offlineUntil = 0;
+  private readonly offlineCooldownMs = 60_000;
 
   private get baseUrl(): string {
     return config.aiEngine.url;
+  }
+
+  private markOfflineIfNetworkError(err: any): boolean {
+    const msg = String(err?.message || err || '').toLowerCase();
+    const isNetErr =
+      err?.name === 'AbortError' ||
+      msg.includes('fetch failed') ||
+      msg.includes('econnrefused') ||
+      msg.includes('enotfound') ||
+      msg.includes('network') ||
+      msg.includes('offline');
+    if (isNetErr) {
+      this.offlineUntil = Date.now() + this.offlineCooldownMs;
+    }
+    return isNetErr;
   }
 
   /**
@@ -123,9 +140,15 @@ export class LocalAIProvider {
       return status;
     }
 
+    if (Date.now() < this.offlineUntil) {
+      status.latencyMs = 0;
+      status.error = 'موتور محلی Ollama در این محیط در دسترس نیست (استفاده از موتور داخلی HSECORE).';
+      return status;
+    }
+
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 6000);
+      const timeout = setTimeout(() => controller.abort(), 2500);
 
       const resp = await fetch(`${this.baseUrl}/api/tags`, {
         method: 'GET',
@@ -140,6 +163,7 @@ export class LocalAIProvider {
         return status;
       }
 
+      this.offlineUntil = 0;
       const data = (await resp.json()) as { models?: OllamaModelInfo[] };
       status.isAvailable = true;
       status.installedModels = data.models || [];
@@ -147,7 +171,7 @@ export class LocalAIProvider {
       // Query version
       try {
         const vController = new AbortController();
-        const vTimeout = setTimeout(() => vController.abort(), 3000);
+        const vTimeout = setTimeout(() => vController.abort(), 2000);
         const vResp = await fetch(`${this.baseUrl}/api/version`, {
           method: 'GET',
           signal: vController.signal,
@@ -161,6 +185,7 @@ export class LocalAIProvider {
 
       return status;
     } catch (err: any) {
+      this.markOfflineIfNetworkError(err);
       status.latencyMs = Date.now() - startTime;
       status.error = err.name === 'AbortError' ? 'عدم پاسخگویی موتور در بازه زمانی تعیین‌شده (Timeout)' : (err.message || 'خطا در ارتباط با موتور هوش مصنوعی');
       return status;
@@ -171,19 +196,24 @@ export class LocalAIProvider {
    * List installed models on Local LLM Engine
    */
   async listInstalledModels(): Promise<OllamaModelInfo[]> {
+    if (!config.aiEngine.enabled || Date.now() < this.offlineUntil) {
+      return [];
+    }
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 8000);
+      const timeout = setTimeout(() => controller.abort(), 3000);
       const resp = await fetch(`${this.baseUrl}/api/tags`, {
         method: 'GET',
         signal: controller.signal,
       });
       clearTimeout(timeout);
       if (!resp.ok) return [];
+      this.offlineUntil = 0;
       const data = (await resp.json()) as { models?: OllamaModelInfo[] };
       return data.models || [];
     } catch (err) {
-      logger.warn('[LocalAIProvider] Failed to list models', { error: String(err) });
+      this.markOfflineIfNetworkError(err);
+      logger.debug('[LocalAIProvider] Failed to list models', { error: String(err) });
       return [];
     }
   }
@@ -201,9 +231,11 @@ export class LocalAIProvider {
       if (!resp.ok) {
         return { success: false, message: `خطا در دریافت مدل: HTTP ${resp.status}` };
       }
+      this.offlineUntil = 0;
       return { success: true, message: `مدل ${modelName} با موفقیت بارگیری شد.` };
     } catch (err: any) {
-      return { success: false, message: err.message || 'خطا در بارگیری مدل' };
+      this.markOfflineIfNetworkError(err);
+      return { success: false, message: 'موتور محلی Ollama در این محیط فعال نیست؛ سامانه از موتور هوشمند داخلی استفاده می‌کند.' };
     }
   }
 
@@ -222,6 +254,7 @@ export class LocalAIProvider {
       }
       return { success: true, message: `مدل ${modelName} با موفقیت حذف گردید.` };
     } catch (err: any) {
+      this.markOfflineIfNetworkError(err);
       return { success: false, message: err.message || 'خطا در حذف مدل' };
     }
   }
@@ -233,10 +266,18 @@ export class LocalAIProvider {
     messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>,
     options?: LocalChatOptions
   ): Promise<{ text: string; model: string; durationMs: number }> {
+    if (!config.aiEngine.enabled || Date.now() < this.offlineUntil) {
+      throw new Error('Local AI engine is offline');
+    }
+
     return this.enqueue(async () => {
+      if (Date.now() < this.offlineUntil) {
+        throw new Error('Local AI engine is offline');
+      }
+
       const startTime = Date.now();
       const model = options?.model || config.aiEngine.defaultChatModel;
-      const timeoutMs = config.aiEngine.timeoutMs || 60000;
+      const timeoutMs = Math.min(config.aiEngine.timeoutMs || 60000, 8000);
 
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -267,6 +308,7 @@ export class LocalAIProvider {
           throw new Error(`Ollama chat error: HTTP ${resp.status} - ${errText}`);
         }
 
+        this.offlineUntil = 0;
         const data = (await resp.json()) as { message?: { content?: string }; model?: string };
         const text = data.message?.content?.trim() || '';
 
@@ -277,7 +319,10 @@ export class LocalAIProvider {
         };
       } catch (err: any) {
         clearTimeout(timeout);
-        logger.error('[LocalAIProvider] Chat completion error', { error: err.message });
+        const isNet = this.markOfflineIfNetworkError(err);
+        if (!isNet) {
+          logger.debug('[LocalAIProvider] Chat completion non-network error', { error: err.message });
+        }
         throw err;
       }
     });
@@ -290,10 +335,18 @@ export class LocalAIProvider {
     prompt: string,
     options?: LocalChatOptions
   ): Promise<{ text: string; model: string; durationMs: number }> {
+    if (!config.aiEngine.enabled || Date.now() < this.offlineUntil) {
+      throw new Error('Local AI engine is offline');
+    }
+
     return this.enqueue(async () => {
+      if (Date.now() < this.offlineUntil) {
+        throw new Error('Local AI engine is offline');
+      }
+
       const startTime = Date.now();
       const model = options?.model || config.aiEngine.defaultChatModel;
-      const timeoutMs = config.aiEngine.timeoutMs || 60000;
+      const timeoutMs = Math.min(config.aiEngine.timeoutMs || 60000, 8000);
 
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -325,6 +378,7 @@ export class LocalAIProvider {
           throw new Error(`Ollama generate error: HTTP ${resp.status} - ${errText}`);
         }
 
+        this.offlineUntil = 0;
         const data = (await resp.json()) as { response?: string; model?: string };
         const text = data.response?.trim() || '';
 
@@ -335,7 +389,10 @@ export class LocalAIProvider {
         };
       } catch (err: any) {
         clearTimeout(timeout);
-        logger.error('[LocalAIProvider] Generate completion error', { error: err.message });
+        const isNet = this.markOfflineIfNetworkError(err);
+        if (!isNet) {
+          logger.debug('[LocalAIProvider] Generate completion non-network error', { error: err.message });
+        }
         throw err;
       }
     });
@@ -348,11 +405,19 @@ export class LocalAIProvider {
     prompt: string,
     modelName?: string
   ): Promise<{ embedding: number[]; model: string; durationMs: number }> {
+    if (!config.aiEngine.enabled || Date.now() < this.offlineUntil) {
+      throw new Error('Local AI engine is offline');
+    }
+
     return this.enqueue(async () => {
+      if (Date.now() < this.offlineUntil) {
+        throw new Error('Local AI engine is offline');
+      }
+
       const startTime = Date.now();
       const model = modelName || config.aiEngine.defaultEmbedModel;
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 30000);
+      const timeout = setTimeout(() => controller.abort(), 4000);
 
       try {
         const resp = await fetch(`${this.baseUrl}/api/embeddings`, {
@@ -368,6 +433,7 @@ export class LocalAIProvider {
           throw new Error(`Ollama embeddings error: HTTP ${resp.status}`);
         }
 
+        this.offlineUntil = 0;
         const data = (await resp.json()) as { embedding?: number[] };
         return {
           embedding: data.embedding || [],
@@ -376,7 +442,7 @@ export class LocalAIProvider {
         };
       } catch (err: any) {
         clearTimeout(timeout);
-        logger.error('[LocalAIProvider] Embedding error', { error: err.message });
+        this.markOfflineIfNetworkError(err);
         throw err;
       }
     });

@@ -52,7 +52,8 @@ import {
   Leaf,
   Inbox,
   BookOpen,
-  Workflow
+  Workflow,
+  Bot
 } from 'lucide-react';
 import LoginScreen from './components/LoginScreen';
 import { HseLogo } from './components/HseLogo';
@@ -73,36 +74,45 @@ function lazyWithRetry<T extends React.ComponentType<any>>(
       return { default: moduleComponentCache.get(key) as T };
     }
 
-    try {
-      const component = await factory();
-      moduleComponentCache.set(key, component.default);
-      return component;
-    } catch (error: any) {
-      console.warn(`Dynamic module load initial attempt for ${key} failed, retrying once...`, error);
-      await new Promise((res) => setTimeout(res, 200));
+    // Try up to 3 attempts with exponential backoff before concluding failure
+    let lastError: any = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        const retryComponent = await factory();
-        moduleComponentCache.set(key, retryComponent.default);
-        return retryComponent;
-      } catch (lastError: any) {
-        // If chunk fetch permanently failed due to Vite server rebuild / hash changes
-        const isChunkLoadError = 
-          lastError?.message?.includes('Failed to fetch dynamically imported module') ||
-          lastError?.message?.includes('Importing a module script failed') ||
-          lastError?.message?.includes('Loading chunk');
-
-        const pageHasAlreadyBeenForceRefreshed = JSON.parse(
-          window.sessionStorage.getItem(`chunk_retry_${key}`) || 'false'
-        );
-
-        if (isChunkLoadError && !pageHasAlreadyBeenForceRefreshed) {
-          window.sessionStorage.setItem(`chunk_retry_${key}`, 'true');
-          window.location.reload();
-          return new Promise(() => {});
+        const component = await factory();
+        moduleComponentCache.set(key, component.default);
+        try {
+          window.sessionStorage.removeItem(`chunk_reload_${key}`);
+        } catch (_) {}
+        return component;
+      } catch (err: any) {
+        lastError = err;
+        console.warn(`Dynamic module load attempt ${attempt}/3 for ${key} failed:`, err?.message || err);
+        if (attempt < 3) {
+          await new Promise((res) => setTimeout(res, attempt * 300));
         }
-        throw lastError;
       }
     }
+
+    // If chunk fetch permanently failed due to Vite server rebuild / hash changes / network drops
+    const isChunkLoadError = 
+      lastError?.message?.includes('Failed to fetch dynamically imported module') ||
+      lastError?.message?.includes('Importing a module script failed') ||
+      lastError?.message?.includes('Loading chunk') ||
+      lastError?.message?.includes('dynamically imported');
+
+    const lastReloadKey = `chunk_reload_${key}`;
+    const now = Date.now();
+    const lastReload = Number(window.sessionStorage.getItem(lastReloadKey) || '0');
+
+    // Debounced auto-reload once per 10 seconds to recover cleanly from server restarts
+    if (isChunkLoadError && (now - lastReload > 10000)) {
+      window.sessionStorage.setItem(lastReloadKey, String(now));
+      console.warn(`Recovering from chunk error on ${key} by synchronizing browser state...`);
+      window.location.reload();
+      return new Promise(() => {});
+    }
+
+    throw lastError;
   });
 }
 
@@ -137,31 +147,38 @@ class ModuleErrorBoundary extends Component<ModuleErrorBoundaryProps, ModuleErro
       error?.message?.includes('Invalid hook call') ||
       error?.message?.includes('reading \'useEffect\'') ||
       error?.message?.includes('reading \'useMemo\'');
+
+    const isChunkLoadError = 
+      error?.message?.includes('Failed to fetch dynamically imported module') ||
+      error?.message?.includes('Importing a module script failed') ||
+      error?.message?.includes('Loading chunk');
     
     const reloadKey = 'hse_module_mismatch_reload';
     const lastReload = Number(sessionStorage.getItem(reloadKey) || '0');
-    if (isReactMismatch && (Date.now() - lastReload > 8000)) {
+    if ((isReactMismatch || isChunkLoadError) && (Date.now() - lastReload > 8000)) {
       sessionStorage.setItem(reloadKey, String(Date.now()));
-      console.warn('React dispatcher mismatch detected. Synchronizing application bundle...');
+      console.warn('Module load / dispatcher mismatch detected. Synchronizing application bundle...');
       window.location.reload();
     }
   }
 
   handleRetry = () => {
     try {
+      moduleComponentCache.clear();
       Object.keys(sessionStorage).forEach((key) => {
-        if (key.startsWith('chunk_retry_')) {
+        if (key.startsWith('chunk_') || key.startsWith('hse_')) {
           sessionStorage.removeItem(key);
         }
       });
     } catch (_) {}
-    this.setState({ hasError: false, error: null });
+    window.location.reload();
   };
 
   handleReload = () => {
     try {
+      moduleComponentCache.clear();
       Object.keys(sessionStorage).forEach((key) => {
-        if (key.startsWith('chunk_retry_')) {
+        if (key.startsWith('chunk_') || key.startsWith('hse_')) {
           sessionStorage.removeItem(key);
         }
       });
@@ -624,6 +641,9 @@ export default function App() {
     }
     if (isAdmin || hasPermission(currentUser, 'TRIR Incident Rate', 'view') || hasPermission(currentUser, 'Statistics', 'view') || hasPermission(currentUser, 'Reports', 'view')) {
       tabs.push({ key: 'hse-ms', icon: ShieldAlert, titleFa: 'پایش نرخ رویدادها (TRIR)', titleEn: 'TRIR Incident Rate' });
+    }
+    if (isAdmin || hasPermission(currentUser, 'HSECORE AI', 'view') || hasPermission(currentUser, 'Dashboard', 'view')) {
+      tabs.push({ key: 'ai-assistant', icon: Bot, titleFa: 'هوش مصنوعی HSECORE', titleEn: 'HSECORE AI Assistant' });
     }
 
     // 2. Specialized HSE Departments
@@ -1199,7 +1219,7 @@ export default function App() {
   {/* Core Sub-Module View Render */}
   <main className={`flex-1 min-w-0 overflow-y-auto px-3 sm:px-4 lg:px-6 custom-scrollbar ${showTopNavbar ? 'py-2.5 sm:py-3 lg:py-3.5' : 'py-3.5 sm:py-4 lg:py-5'}`} id="app-main-stage">
       <div className="w-full max-w-[1920px] mx-auto space-y-6">
-       <ModuleErrorBoundary isFa={isFa}>
+       <ModuleErrorBoundary isFa={isFa} key={activeTab}>
          <React.Suspense fallback={<ModuleLoadingFallback isFa={isFa} />}>
            <div>
          {activeTab === 'dashboard' && (

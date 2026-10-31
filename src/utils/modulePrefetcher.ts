@@ -30,6 +30,7 @@ const MODULE_LOADERS: Record<string, DynamicModuleFactory> = {
   'non-conformances': () => import('../components/non-conformance/ComprehensiveNonConformanceModule'),
   documents: () => import('../components/InstructionsDocumentsModule'),
   notifications: () => import('../components/system-settings/SystemNotificationsTab'),
+  'ai-assistant': () => import('../modules/ai/AiAssistantApp'),
 };
 
 const prefetchedModules = new Set<string>();

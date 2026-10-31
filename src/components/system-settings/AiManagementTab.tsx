@@ -17,6 +17,7 @@ import {
   HardDrive
 } from 'lucide-react';
 import { UserProfile } from '../../types';
+import { authFetch } from '../../services/apiDatabaseClient';
 
 interface AiManagementTabProps {
   language?: 'fa' | 'en';
@@ -49,10 +50,10 @@ export default function AiManagementTab({ language = 'fa', currentUser }: AiMana
     setLoading(true);
     try {
       const [statusRes, modelsRes, auditRes, docsRes] = await Promise.all([
-        fetch('/api/v1/ai/status').then(r => r.json()).catch(() => null),
-        fetch('/api/v1/ai/models').then(r => r.json()).catch(() => null),
-        fetch('/api/v1/ai/audit?limit=20').then(r => r.json()).catch(() => null),
-        fetch('/api/v1/ai/knowledge').then(r => r.json()).catch(() => null),
+        authFetch('/api/v1/ai/status').then(r => r.json()).catch(() => null),
+        authFetch('/api/v1/ai/models').then(r => r.json()).catch(() => null),
+        authFetch('/api/v1/ai/audit?limit=20').then(r => r.json()).catch(() => null),
+        authFetch('/api/v1/ai/knowledge').then(r => r.json()).catch(() => null),
       ]);
 
       if (statusRes?.success) setEngineStatus(statusRes.data);
@@ -75,7 +76,7 @@ export default function AiManagementTab({ language = 'fa', currentUser }: AiMana
     setIsIndexingDoc(true);
     setActionMessage(null);
     try {
-      const res = await fetch('/api/v1/ai/knowledge', {
+      const res = await authFetch('/api/v1/ai/knowledge', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -94,7 +95,7 @@ export default function AiManagementTab({ language = 'fa', currentUser }: AiMana
         setShowAddDocModal(false);
         fetchData();
       } else {
-        setActionMessage({ text: data.message || 'خطا در ثبت سند.', type: 'error' });
+        setActionMessage({ text: data.message || data.error?.message || 'خطا در ثبت سند.', type: 'error' });
       }
     } catch (err: any) {
       setActionMessage({ text: err.message || 'خطا در ارتباط با سرور.', type: 'error' });
@@ -103,19 +104,24 @@ export default function AiManagementTab({ language = 'fa', currentUser }: AiMana
     }
   };
 
+  // Modal confirmation states (avoiding window.confirm in iframe sandbox)
+  const [confirmDeleteDocId, setConfirmDeleteDocId] = useState<number | null>(null);
+  const [confirmDeleteModelName, setConfirmDeleteModelName] = useState<string | null>(null);
+
   const handleDeleteDoc = async (id: number) => {
-    if (!window.confirm('آیا از حذف این سند و تمام قطعات نمایه‌شده آن اطمینان دارید؟')) return;
     try {
-      const res = await fetch(`/api/v1/ai/knowledge/${id}`, { method: 'DELETE' });
+      const res = await authFetch(`/api/v1/ai/knowledge/${id}`, { method: 'DELETE' });
       const data = await res.json();
       if (data.success) {
         setActionMessage({ text: data.message || 'سند با موفقیت حذف شد.', type: 'success' });
         fetchData();
       } else {
-        setActionMessage({ text: data.message || 'خطا در حذف سند.', type: 'error' });
+        setActionMessage({ text: data.message || data.error?.message || 'خطا در حذف سند.', type: 'error' });
       }
     } catch (err: any) {
       setActionMessage({ text: err.message || 'خطا در ارتباط با سرور.', type: 'error' });
+    } finally {
+      setConfirmDeleteDocId(null);
     }
   };
 
@@ -123,7 +129,7 @@ export default function AiManagementTab({ language = 'fa', currentUser }: AiMana
     if (!searchQuery.trim() || isSearching) return;
     setIsSearching(true);
     try {
-      const res = await fetch('/api/v1/ai/knowledge/query', {
+      const res = await authFetch('/api/v1/ai/knowledge/query', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query: searchQuery.trim(), topK: 3 }),
@@ -144,7 +150,7 @@ export default function AiManagementTab({ language = 'fa', currentUser }: AiMana
     setIsPulling(true);
     setActionMessage(null);
     try {
-      const res = await fetch('/api/v1/ai/models/pull', {
+      const res = await authFetch('/api/v1/ai/models/pull', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ modelName: pullModelName.trim() }),
@@ -154,7 +160,7 @@ export default function AiManagementTab({ language = 'fa', currentUser }: AiMana
         setActionMessage({ text: data.message || `مدل ${pullModelName} با موفقیت بارگیری شد.`, type: 'success' });
         fetchData();
       } else {
-        setActionMessage({ text: data.message || 'خطا در بارگیری مدل.', type: 'error' });
+        setActionMessage({ text: data.message || data.error?.message || 'خطا در بارگیری مدل.', type: 'error' });
       }
     } catch (err: any) {
       setActionMessage({ text: err.message || 'خطا در برقراری ارتباط با سرور.', type: 'error' });
@@ -164,9 +170,8 @@ export default function AiManagementTab({ language = 'fa', currentUser }: AiMana
   };
 
   const handleDeleteModel = async (modelName: string) => {
-    if (!window.confirm(`آیا از حذف مدل ${modelName} از حافظه پایدار سرور اطمینان دارید؟`)) return;
     try {
-      const res = await fetch(`/api/v1/ai/models/${encodeURIComponent(modelName)}`, {
+      const res = await authFetch(`/api/v1/ai/models/${encodeURIComponent(modelName)}`, {
         method: 'DELETE',
       });
       const data = await res.json();
@@ -174,10 +179,12 @@ export default function AiManagementTab({ language = 'fa', currentUser }: AiMana
         setActionMessage({ text: data.message || `مدل ${modelName} با موفقیت حذف شد.`, type: 'success' });
         fetchData();
       } else {
-        setActionMessage({ text: data.message || 'خطا در حذف مدل.', type: 'error' });
+        setActionMessage({ text: data.message || data.error?.message || 'خطا در حذف مدل.', type: 'error' });
       }
     } catch (err: any) {
       setActionMessage({ text: err.message || 'خطا در ارتباط با سرور.', type: 'error' });
+    } finally {
+      setConfirmDeleteModelName(null);
     }
   };
 
@@ -367,13 +374,30 @@ export default function AiManagementTab({ language = 'fa', currentUser }: AiMana
                       </span>
                     </td>
                     <td className="py-3 px-3 text-left">
-                      <button
-                        onClick={() => handleDeleteModel(m.name || m.model)}
-                        className="text-slate-400 hover:text-red-500 p-1 rounded-md transition"
-                        title="حذف مدل"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      {confirmDeleteModelName === (m.name || m.model) ? (
+                        <div className="flex items-center gap-1.5 justify-end">
+                          <button
+                            onClick={() => handleDeleteModel(m.name || m.model)}
+                            className="px-2 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-[10px] font-bold transition cursor-pointer"
+                          >
+                            تایید
+                          </button>
+                          <button
+                            onClick={() => setConfirmDeleteModelName(null)}
+                            className="px-2 py-1 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded text-[10px] font-bold transition cursor-pointer"
+                          >
+                            انصراف
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setConfirmDeleteModelName(m.name || m.model)}
+                          className="text-slate-400 hover:text-red-500 p-1 rounded-md transition cursor-pointer"
+                          title="حذف مدل"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))
@@ -604,13 +628,30 @@ export default function AiManagementTab({ language = 'fa', currentUser }: AiMana
                       {doc.createdAt ? new Date(doc.createdAt).toLocaleDateString('fa-IR') : '---'}
                     </td>
                     <td className="py-3 px-3 text-left">
-                      <button
-                        onClick={() => handleDeleteDoc(doc.id)}
-                        className="text-slate-400 hover:text-red-500 p-1 rounded-md transition"
-                        title="حذف سند"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      {confirmDeleteDocId === doc.id ? (
+                        <div className="flex items-center gap-1.5 justify-end">
+                          <button
+                            onClick={() => handleDeleteDoc(doc.id)}
+                            className="px-2 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-[10px] font-bold transition cursor-pointer"
+                          >
+                            تایید
+                          </button>
+                          <button
+                            onClick={() => setConfirmDeleteDocId(null)}
+                            className="px-2 py-1 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded text-[10px] font-bold transition cursor-pointer"
+                          >
+                            انصراف
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setConfirmDeleteDocId(doc.id)}
+                          className="text-slate-400 hover:text-red-500 p-1 rounded-md transition cursor-pointer"
+                          title="حذف سند"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))

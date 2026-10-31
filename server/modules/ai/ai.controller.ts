@@ -117,10 +117,14 @@ export class AIController {
 
   private getAllowedKnowledgeCategories(user?: UserContext): string[] {
     if (!user) return [];
-    const categories = ['GENERAL'];
+    const role = String(user.role || '').trim().toUpperCase();
+    if (role === 'ADMIN' || role === 'ADMINISTRATOR' || role === 'HSE_MANAGER' || checkUserHasPermission(user, '*')) {
+      return ['GENERAL', 'STANDARDS', 'PTW', 'HEALTH', 'SAFETY', 'ENVIRONMENT', '5S', 'INCIDENT', 'OCCUPATIONAL_HEALTH'];
+    }
+    const categories = ['GENERAL', 'STANDARDS'];
     if (checkUserHasPermission(user, 'ptw:read')) categories.push('PTW');
-    if (checkUserHasPermission(user, 'health:read')) categories.push('HEALTH');
-    if (checkUserHasPermission(user, 'safety:read')) categories.push('SAFETY');
+    if (checkUserHasPermission(user, 'health:read')) categories.push('HEALTH', 'OCCUPATIONAL_HEALTH');
+    if (checkUserHasPermission(user, 'safety:read')) categories.push('SAFETY', 'INCIDENT', '5S');
     if (checkUserHasPermission(user, 'environment:read')) categories.push('ENVIRONMENT');
     return categories;
   }

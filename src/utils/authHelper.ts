@@ -79,6 +79,16 @@ export const PERMISSION_MODULES_REGISTRY: PermissionModuleMeta[] = [
     iconName: 'BarChart3',
     descriptionFa: 'نمودارهای آماری، تحلیل روندهای ایمنی و شاخص‌های پیشرو و پسرو HSE'
   },
+  {
+    id: 'HSECORE AI',
+    titleFa: 'دستیار هوشمند HSECORE AI',
+    titleEn: 'HSECORE AI Assistant',
+    category: 'dashboards',
+    categoryTitleFa: 'داشبوردها و شاخص‌های کلیدی',
+    categoryTitleEn: 'Dashboards & KPI Analytics',
+    iconName: 'Bot',
+    descriptionFa: 'دسترسی به دستیار مستقل هوش مصنوعی محلی با ۱۰ مشاور تخصصی و پایگاه دانش RAG'
+  },
 
   // 2. Specialized HSE Departments
   {
@@ -389,6 +399,19 @@ export const HIERARCHICAL_PERMISSION_NODES: HierarchicalPermissionNode[] = [
     descriptionFa: 'نمودارهای آماری، تحلیل روندهای ایمنی و شاخص‌های پیشرو و پسرو',
     level: 1,
     applicableActions: ['view', 'details', 'export', 'print']
+  },
+  {
+    id: 'dashboards.ai_assistant',
+    legacyId: 'HSECORE AI',
+    titleFa: 'دستیار هوشمند HSECORE AI',
+    titleEn: 'HSECORE AI Assistant',
+    category: 'dashboards',
+    categoryTitleFa: 'داشبوردها و تحلیل‌های آماری',
+    categoryTitleEn: 'Dashboards & KPI Analytics',
+    iconName: 'Bot',
+    descriptionFa: 'تعامل با ۱۰ مشاور تخصصی هوش مصنوعی HSE، تحلیل اسناد و جستجوی پایگاه دانش سازمانی',
+    level: 1,
+    applicableActions: ['view', 'details', 'create', 'export', 'print', 'configure']
   },
 
   // 2. Specialized HSE Departments
