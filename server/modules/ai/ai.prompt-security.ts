@@ -29,7 +29,7 @@ export function buildAIConversationMessages(params: {
   if (hasRetrievedContext) {
     systemInstructions.push(RETRIEVED_CONTEXT_SECURITY_INSTRUCTION);
   }
-  const systemContent = systemInstructions.join('\\n\\n');
+  const systemContent = systemInstructions.join('\n\n');
 
   const messages: AIConversationMessage[] = [
     { role: 'system', content: systemContent },
