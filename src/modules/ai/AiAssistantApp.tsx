@@ -550,7 +550,7 @@ export default function AiAssistantApp({ currentUser, language = 'fa' }: AiAssis
           <div className="flex items-center justify-between text-[11px] font-bold text-slate-500">
             <span className="flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-              موتور محلی: Qwen 2.5 (1.7B)
+              موتور محلی: Qwen 3 (1.7B)
             </span>
             <span className="text-[10px] bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 px-1.5 py-0.5 rounded-md font-mono">
               CPU Safe
