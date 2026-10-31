@@ -16,7 +16,8 @@ Recommended initial test profile (not a claim of validated production capacity):
 - Ollama parallel requests: 1.
 - Loaded models: 1.
 - AI request timeout: 180 seconds.
-- AI queue: at most 10 waiting requests.
+- The request deadline includes waiting time in both the orchestrator queue and the local Ollama provider queue; expired waiting tasks are removed before execution.
+- AI queue: at most 10 waiting requests per queue layer.
 - Cloud fallback: disabled unless explicitly enabled.
 - Ollama HTTP API: internal Docker network only; host port remains loopback-bound.
 
@@ -93,8 +94,8 @@ explicit administrator operation and should be performed once.
    may respond instead.
 5. A user without the relevant HSECORE permission cannot retrieve restricted
    RAG documents or invoke restricted module tools.
-6. Queue saturation is rejected with a controlled Persian error; no unbounded
-   queue growth occurs.
+6. Queue saturation is rejected with a controlled Persian error; expired tasks
+   are removed from both queue layers and are not executed after their deadline.
 7. Measure cold-start and warm inference latency, peak RSS, host available RAM,
    swap activity and OOM events using 1, 2 and 5 sequential requests.
 8. Run the existing AI regression suite:
