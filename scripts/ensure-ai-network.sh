@@ -32,8 +32,14 @@ fi
 docker info >/dev/null
 
 if docker network inspect "${NETWORK_NAME}" >/dev/null 2>&1; then
-  echo "[AI Network] Shared network '${NETWORK_NAME}' already exists."
+  network_driver="$(docker network inspect --format '{{.Driver}}' "${NETWORK_NAME}")"
+  network_internal="$(docker network inspect --format '{{.Internal}}' "${NETWORK_NAME}")"
+  if [[ "${network_driver}" != "bridge" || "${network_internal}" != "false" ]]; then
+    echo "[AI Network] Existing network '${NETWORK_NAME}' is incompatible (driver=${network_driver}, internal=${network_internal}); expected a non-internal bridge." >&2
+    exit 1
+  fi
+  echo "[AI Network] Shared non-internal bridge '${NETWORK_NAME}' already exists."
 else
   docker network create --driver bridge "${NETWORK_NAME}" >/dev/null
-  echo "[AI Network] Created shared bridge network '${NETWORK_NAME}'."
+  echo "[AI Network] Created shared non-internal bridge network '${NETWORK_NAME}'."
 fi
