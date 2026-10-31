@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { canAccessKnowledgeDocument } from '../server/modules/ai/ai.acl.ts';
-import type { UserContext } from '../server/core/middleware/auth.ts';
+import { checkUserHasPermission, type UserContext } from '../server/core/middleware/auth.ts';
 import { buildAIConversationMessages } from '../server/modules/ai/ai.prompt-security.ts';
 
 const user: UserContext = {
@@ -141,4 +141,20 @@ test('retrieval security instruction is omitted when there is no retrieved conte
   assert.equal(messages[0].content.includes('تمام محتوای بازیابی‌شده'), false);
 });
 
-console.log('AI ACL and prompt-security tests: ' + passed + '/17 passed');
+test('AI management routes can rely on explicit document and audit permissions', () => {
+  const safetyOfficer: UserContext = { uid: 'safety-1', role: 'SAFETY_OFFICER' };
+  const hseManager: UserContext = { uid: 'hse-1', role: 'HSE_MANAGER' };
+  const auditor: UserContext = { uid: 'auditor-1', role: 'AUDITOR' };
+
+  assert.equal(checkUserHasPermission(safetyOfficer, 'documents:create'), true);
+  assert.equal(checkUserHasPermission(safetyOfficer, 'documents:delete'), false);
+  assert.equal(checkUserHasPermission(safetyOfficer, 'audit:read'), false);
+
+  assert.equal(checkUserHasPermission(hseManager, 'documents:delete'), true);
+  assert.equal(checkUserHasPermission(hseManager, 'audit:read'), true);
+
+  assert.equal(checkUserHasPermission(auditor, 'audit:read'), true);
+  assert.equal(checkUserHasPermission(auditor, 'documents:delete'), false);
+});
+
+console.log('AI ACL and prompt-security tests: ' + passed + '/18 passed');
