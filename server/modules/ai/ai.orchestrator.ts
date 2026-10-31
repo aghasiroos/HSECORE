@@ -193,7 +193,7 @@ export class AIOrchestrator {
       const canonicalRole = normalizeRoleToCanonical(userContext?.role);
       const rawRole = String(userContext?.role || '').trim().toUpperCase();
       const hasOrganizationWideScope = rawRole === 'ADMIN' || rawRole === 'ADMINISTRATOR' ||
-        rawRole === 'HSE_MANAGER' || canonicalRole === 'ADMINISTRATOR' && (rawRole.includes('مدیر سامانه') || rawRole.includes('مدیر سیستم'));
+        canonicalRole === 'ADMINISTRATOR' && (rawRole.includes('مدیر سامانه') || rawRole.includes('مدیر سیستم'));
       if (!userContext || !hasOrganizationWideScope ||
           !assistant.tools.includes(toolName) || !checkUserHasPermission(userContext, toolPermissions[toolName] || '')) return;
       if (!executedToolNames.has(toolName)) {
