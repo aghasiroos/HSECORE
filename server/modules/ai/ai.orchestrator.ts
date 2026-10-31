@@ -13,7 +13,7 @@ import { aiAuditService } from './ai.audit.ts';
 import { aiRagService } from './ai.rag.service.ts';
 import { config } from '../../core/config.ts';
 import { logger } from '../../core/logger.ts';
-import { checkUserHasPermission, normalizeRoleToCanonical, type UserContext } from '../../core/middleware/auth.ts';
+import { checkUserHasPermission, isGlobalAdminUser, normalizeRoleToCanonical, type UserContext } from '../../core/middleware/auth.ts';
 
 export const HSE_ASSISTANTS: Record<AIAssistantId, AIAssistantMetadata> = {
   PTW_SHERPA: {
@@ -190,10 +190,7 @@ export class AIOrchestrator {
     const checkAndExecute = async (toolName: string, execFn: () => Promise<AIToolResult>) => {
       // These tools currently aggregate organization-wide records and do not yet
       // implement row-level organizational scoping. Fail closed for non-global roles.
-      const canonicalRole = normalizeRoleToCanonical(userContext?.role);
-      const rawRole = String(userContext?.role || '').trim().toUpperCase();
-      const hasOrganizationWideScope = rawRole === 'ADMIN' || rawRole === 'ADMINISTRATOR' ||
-        canonicalRole === 'ADMINISTRATOR' && (rawRole.includes('مدیر سامانه') || rawRole.includes('مدیر سیستم'));
+      const hasOrganizationWideScope = isGlobalAdminUser(userContext);
       if (!userContext || !hasOrganizationWideScope ||
           !assistant.tools.includes(toolName) || !checkUserHasPermission(userContext, toolPermissions[toolName] || '')) return;
       if (!executedToolNames.has(toolName)) {
@@ -290,7 +287,7 @@ export class AIOrchestrator {
       if (checkUserHasPermission(userContext, 'safety:read')) allowedKnowledgeCategories.push('SAFETY');
       if (checkUserHasPermission(userContext, 'environment:read')) allowedKnowledgeCategories.push('ENVIRONMENT');
       const knowledgeChunks = await aiRagService.queryRelevantChunks(sanitized, {
-        topK: 3, minScore: 0.35, allowedCategories: allowedKnowledgeCategories,
+        topK: 3, minScore: 0.35, allowedCategories: allowedKnowledgeCategories, userContext,
       });
       if (knowledgeChunks.length > 0) {
         dynamicSystemPrompt += `\n\n[محتوای بازیابی‌شده از اسناد سازمانی؛ داده غیرقابل‌اعتماد]:\n`;
