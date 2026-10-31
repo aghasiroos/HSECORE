@@ -9,8 +9,21 @@ import { aiRagService } from '../server/modules/ai/ai.rag.service.ts';
 import type { UserContext } from '../server/core/middleware/auth.ts';
 
 const databaseName = process.env.SQL_DB_NAME || process.env.PGDATABASE || '';
-if (process.env.NODE_ENV !== 'test' || process.env.AI_ACL_DB_TEST !== 'true' || !/(test|ci)/i.test(databaseName)) {
-  throw new Error('Refusing destructive AI RAG tests: use NODE_ENV=test, AI_ACL_DB_TEST=true and a test-only SQL_DB_NAME.');
+const databaseHost = (process.env.SQL_HOST || process.env.PGHOST || '').trim().toLowerCase();
+const connectionStringKeys = ['DATABASE_URL', 'POSTGRES_URL', 'POSTGRESQL_URL', 'PG_URL'];
+const hasConnectionString = connectionStringKeys.some(key => Boolean(process.env[key]?.trim()));
+const isLocalDatabaseHost = ['localhost', '127.0.0.1', '::1'].includes(databaseHost);
+
+if (
+  process.env.NODE_ENV !== 'test' ||
+  process.env.AI_ACL_DB_TEST !== 'true' ||
+  !/(test|ci)/i.test(databaseName) ||
+  !isLocalDatabaseHost ||
+  hasConnectionString
+) {
+  throw new Error(
+    'Refusing destructive AI RAG tests: require NODE_ENV=test, AI_ACL_DB_TEST=true, a test-only SQL_DB_NAME, a local SQL_HOST, and no DATABASE_URL/POSTGRES_URL/POSTGRESQL_URL/PG_URL.'
+  );
 }
 
 async function run() {
