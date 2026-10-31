@@ -188,4 +188,15 @@ test('Persian adversarial prompt patterns are rejected', () => {
   );
 });
 
-console.log('AI ACL and prompt-security tests: ' + passed + '/20 passed');
+test('client-provided history messages are bounded to prevent prompt size abuse', () => {
+  const messages = buildAIConversationMessages({
+    systemPrompt: 'Trusted instructions.',
+    history: [{ role: 'user', content: 'x'.repeat(5000) }],
+    userMessage: 'Current question',
+  });
+
+  assert.equal(messages[1].content.length, 3500);
+  assert.equal(messages[1].content, 'x'.repeat(3500));
+});
+
+console.log('AI ACL and prompt-security tests: ' + passed + '/21 passed');
