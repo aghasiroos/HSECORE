@@ -42,20 +42,35 @@ fi
 if (( CPU_CORES < 4 )); then
   echo -e "${YELLOW}[WARNING] Fewer than 4 CPU cores detected; inference throughput may be limited.${NC}"
 fi
-if (( FREE_DISK_GB < MIN_FREE_DISK_GB )); then
-  echo -e "${RED}[ERROR] At least ${MIN_FREE_DISK_GB} GB free disk space is required before pulling the Ollama image.${NC}" >&2
-  exit 1
-fi
-
 echo -e "${CYAN}[1/4] Ensuring shared Docker network...${NC}"
 bash "${PROJECT_DIR}/scripts/ensure-ai-network.sh"
 
-echo -e "${CYAN}[2/4] Validating runtime Compose configuration and persistent volume...${NC}"
+echo -e "${CYAN}[2/4] Validating runtime Compose configuration, image cache and persistent volume...${NC}"
 docker compose -f "${AI_COMPOSE}" config --quiet
+IMAGE_REF="$(docker compose -f "${AI_COMPOSE}" config --images | head -n 1)"
+if [[ -z "${IMAGE_REF}" || "${IMAGE_REF}" != ollama/ollama:* ]]; then
+  echo -e "${RED}[ERROR] Could not resolve a pinned official Ollama image from Compose configuration.${NC}" >&2
+  exit 1
+fi
 docker volume inspect hse_ai_models >/dev/null 2>&1 || docker volume create hse_ai_models >/dev/null
 
-echo -e "${CYAN}[3/4] Pulling the pinned Ollama runtime image and starting the service...${NC}"
-docker compose -f "${AI_COMPOSE}" pull hse-ai-engine
+IMAGE_ALREADY_AVAILABLE=false
+if docker image inspect "${IMAGE_REF}" >/dev/null 2>&1; then
+  IMAGE_ALREADY_AVAILABLE=true
+  echo -e "${GREEN}[✓] Runtime image ${IMAGE_REF} is already cached; no image download is needed.${NC}"
+fi
+
+# The 8GB free-space guard is required only for the first image download.
+# Re-running setup must not fail merely because the already-downloaded image occupies disk.
+if [[ "${IMAGE_ALREADY_AVAILABLE}" != true ]] && (( FREE_DISK_GB < MIN_FREE_DISK_GB )); then
+  echo -e "${RED}[ERROR] At least ${MIN_FREE_DISK_GB} GB free disk space is required before the first Ollama image download.${NC}" >&2
+  exit 1
+fi
+
+echo -e "${CYAN}[3/4] Starting the pinned Ollama runtime...${NC}"
+if [[ "${IMAGE_ALREADY_AVAILABLE}" != true ]]; then
+  docker compose -f "${AI_COMPOSE}" pull hse-ai-engine
+fi
 docker compose -f "${AI_COMPOSE}" up -d hse-ai-engine
 
 echo -e "${CYAN}[4/4] Running runtime integration checks...${NC}"
