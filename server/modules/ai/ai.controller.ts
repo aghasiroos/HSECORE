@@ -46,10 +46,25 @@ export class AIController {
       return res.status(400).json({ success: false, message: 'نام مدل الزامی است.' });
     }
 
+    const startedAt = Date.now();
     try {
       const result = await aiService.pullModel(modelName);
-      return res.json(result);
+      aiAuditService.log({
+        userId: req.user?.id, userUid: req.user?.uid,
+        userName: req.user?.name || req.user?.username, role: req.user?.role,
+        assistantId: 'GENERAL_HSE', promptLength: modelName.length, responseLength: 0,
+        toolsUsed: [], durationMs: Date.now() - startedAt,
+        model: 'ollama-model-pull', success: result.success, timestamp: new Date().toISOString(),
+      });
+      return res.status(result.success ? 200 : 400).json(result);
     } catch (err: any) {
+      aiAuditService.log({
+        userId: req.user?.id, userUid: req.user?.uid,
+        userName: req.user?.name || req.user?.username, role: req.user?.role,
+        assistantId: 'GENERAL_HSE', promptLength: modelName.length, responseLength: 0,
+        toolsUsed: [], durationMs: Date.now() - startedAt,
+        model: 'ollama-model-pull', success: false, timestamp: new Date().toISOString(),
+      });
       return res.status(500).json({ success: false, message: err.message || 'خطا در شروع بارگیری مدل' });
     }
   }
@@ -60,10 +75,25 @@ export class AIController {
       return res.status(400).json({ success: false, message: 'نام مدل مشخص نشده است.' });
     }
 
+    const startedAt = Date.now();
     try {
       const result = await aiService.deleteModel(modelName);
-      return res.json(result);
+      aiAuditService.log({
+        userId: req.user?.id, userUid: req.user?.uid,
+        userName: req.user?.name || req.user?.username, role: req.user?.role,
+        assistantId: 'GENERAL_HSE', promptLength: modelName.length, responseLength: 0,
+        toolsUsed: [], durationMs: Date.now() - startedAt,
+        model: 'ollama-model-delete', success: result.success, timestamp: new Date().toISOString(),
+      });
+      return res.status(result.success ? 200 : 400).json(result);
     } catch (err: any) {
+      aiAuditService.log({
+        userId: req.user?.id, userUid: req.user?.uid,
+        userName: req.user?.name || req.user?.username, role: req.user?.role,
+        assistantId: 'GENERAL_HSE', promptLength: modelName.length, responseLength: 0,
+        toolsUsed: [], durationMs: Date.now() - startedAt,
+        model: 'ollama-model-delete', success: false, timestamp: new Date().toISOString(),
+      });
       return res.status(500).json({ success: false, message: err.message || 'خطا در حذف مدل' });
     }
   }
