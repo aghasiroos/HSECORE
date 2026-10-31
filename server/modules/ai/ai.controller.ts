@@ -175,15 +175,6 @@ export class AIController {
     if (docType !== undefined && (typeof docType !== 'string' || docType.length > 64)) {
       return res.status(400).json({ success: false, message: 'نوع سند نامعتبر است.' });
     }
-    if (req.body.accessControl !== undefined) {
-      const role = String(req.user?.role || '').trim().toUpperCase();
-      const canManageAcl = role === 'ADMIN' || role === 'ADMINISTRATOR' ||
-        checkUserHasPermission(req.user, 'documents:manage_acl');
-      if (!canManageAcl) {
-        return res.status(403).json({ success: false, message: 'تعریف سطح دسترسی اختصاصی سند فقط برای مدیر مجاز است.' });
-      }
-    }
-
     const normalizedCategory = typeof category === 'string' && category.trim()
       ? category.trim().toUpperCase()
       : 'GENERAL';
@@ -196,6 +187,15 @@ export class AIController {
       accessControl = this.validateKnowledgeAccessControl(req.body.accessControl);
     } catch (err: any) {
       return res.status(400).json({ success: false, message: err.message || 'ساختار سطح دسترسی سند نامعتبر است.' });
+    }
+
+    if (req.body.accessControl !== undefined) {
+      const role = String(req.user?.role || '').trim().toUpperCase();
+      const canManageAcl = role === 'ADMIN' || role === 'ADMINISTRATOR' ||
+        checkUserHasPermission(req.user, 'documents:manage_acl');
+      if (!canManageAcl) {
+        return res.status(403).json({ success: false, message: 'تعریف سطح دسترسی اختصاصی سند فقط برای مدیر مجاز است.' });
+      }
     }
 
     try {
