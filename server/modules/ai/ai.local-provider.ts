@@ -362,7 +362,7 @@ export class LocalAIProvider {
       throw new Error('Local AI engine is offline');
     }
 
-    return this.enqueue(async () => {
+    return this.enqueue(async (remainingMs) => {
       if (Date.now() < this.offlineUntil) {
         throw new Error('Local AI engine is offline');
       }
