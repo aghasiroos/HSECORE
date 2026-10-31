@@ -16,6 +16,7 @@ on:
       - 'scripts/test-ai-routes.ts'
       - 'package.json'
       - 'package-lock.json'
+      - '.github/workflows/ai-acl-security-tests.yml'
 
 jobs:
   ai-acl:
