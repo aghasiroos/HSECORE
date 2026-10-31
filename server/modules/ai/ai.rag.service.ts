@@ -160,8 +160,37 @@ export class AIRagService {
     if (allowedCategories.length === 0) return [];
     if (options?.category && options.category !== 'ALL' && !allowedCategories.includes(options.category)) return [];
 
-    // 1. Fetch chunks with document info
-    let chunkRows = await db
+    const user = options?.userContext;
+    if (!user) return [];
+
+    // Resolve authorized document IDs before fetching chunks. Applying the 200-row
+    // chunk limit before ACL filtering can let inaccessible documents crowd out
+    // authorized results (false negatives) and makes the retrieval boundary unclear.
+    const scope = await this.resolveUserOrgScope(user);
+    const documentConditions = [
+      eq(schema.aiKnowledgeDocs.status, 'INDEXED'),
+      inArray(schema.aiKnowledgeDocs.category, allowedCategories),
+    ];
+    if (options?.category && options.category !== 'ALL') {
+      documentConditions.push(eq(schema.aiKnowledgeDocs.category, options.category));
+    }
+
+    const candidateDocs = await db
+      .select({
+        id: schema.aiKnowledgeDocs.id,
+        metadata: schema.aiKnowledgeDocs.metadata,
+      })
+      .from(schema.aiKnowledgeDocs)
+      .where(and(...documentConditions));
+
+    const authorizedDocIds = candidateDocs
+      .filter(doc => canAccessKnowledgeDocument(doc.metadata, user, scope))
+      .map(doc => doc.id);
+
+    if (authorizedDocIds.length === 0) return [];
+
+    // The retrieval limit now applies only to chunks belonging to authorized docs.
+    const chunkRows = await db
       .select({
         chunkId: schema.aiKnowledgeChunks.id,
         docId: schema.aiKnowledgeChunks.docId,
@@ -175,23 +204,12 @@ export class AIRagService {
       })
       .from(schema.aiKnowledgeChunks)
       .innerJoin(schema.aiKnowledgeDocs, eq(schema.aiKnowledgeChunks.docId, schema.aiKnowledgeDocs.id))
-      .where(and(eq(schema.aiKnowledgeDocs.status, 'INDEXED'), inArray(schema.aiKnowledgeDocs.category, allowedCategories)))
+      .where(and(
+        eq(schema.aiKnowledgeDocs.status, 'INDEXED'),
+        inArray(schema.aiKnowledgeDocs.category, allowedCategories),
+        inArray(schema.aiKnowledgeChunks.docId, authorizedDocIds),
+      ))
       .limit(200);
-
-    if (options?.category && options.category !== 'ALL') {
-      chunkRows = chunkRows.filter(c => c.category === options.category);
-    }
-
-    const user = options?.userContext;
-    if (!user || chunkRows.length === 0) return [];
-    const scope = await this.resolveUserOrgScope(user);
-    chunkRows = chunkRows.filter(row =>
-      canAccessKnowledgeDocument(row.docMetadata, user, scope)
-    );
-
-    if (chunkRows.length === 0) {
-      return [];
-    }
 
     // 2. Try generating query embedding vector
     let queryEmbedding: number[] | null = null;
