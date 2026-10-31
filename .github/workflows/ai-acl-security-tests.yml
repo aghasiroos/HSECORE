@@ -13,6 +13,7 @@ on:
       - 'scripts/test-ai-acl.ts'
       - 'scripts/test-ai-auth.ts'
       - 'scripts/test-ai-rag-db.ts'
+      - 'scripts/test-ai-routes.ts'
       - 'package.json'
       - 'package-lock.json'
 
@@ -61,5 +62,7 @@ jobs:
         run: npm run test:ai-auth
       - name: Run PostgreSQL RAG integration tests
         run: npm run test:ai-rag-db
+      - name: Run AI knowledge HTTP authorization tests
+        run: npm run test:ai-routes
       - name: TypeScript validation
         run: npm run lint
