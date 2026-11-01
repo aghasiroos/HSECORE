@@ -4,7 +4,7 @@
  * Replaces frontend localStorage storage for compliance with HSECORE security rules.
  */
 
-import { eq, desc, and, sql } from 'drizzle-orm';
+import { eq, desc, and, or, sql } from 'drizzle-orm';
 import { db, schema } from '../../core/db.ts';
 import { logger } from '../../core/logger.ts';
 import { randomUUID } from 'crypto';
@@ -39,6 +39,7 @@ export class AISessionService {
     const userId = user.id != null ? Number(user.id) : null;
     const userUid = user.uid || null;
 
+    // Match sessions owned by this user via userId OR userUid (not AND).
     const conditions = [];
     if (userId != null && !Number.isNaN(userId)) {
       conditions.push(eq(schema.aiChatSessions.userId, userId));
@@ -50,6 +51,8 @@ export class AISessionService {
       return [];
     }
 
+    const whereClause = conditions.length === 1 ? conditions[0] : or(...conditions);
+
     const rows = await db
       .select({
         id: schema.aiChatSessions.id,
@@ -59,7 +62,7 @@ export class AISessionService {
         updatedAt: schema.aiChatSessions.updatedAt,
       })
       .from(schema.aiChatSessions)
-      .where(conditions.length === 1 ? conditions[0] : and(...conditions))
+      .where(whereClause!)
       .orderBy(desc(schema.aiChatSessions.updatedAt))
       .limit(Math.min(Math.max(limit, 1), 100));
 

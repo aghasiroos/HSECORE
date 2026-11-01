@@ -380,6 +380,81 @@ async function ensureSchemaColumnsAndTables() {
     console.warn('[Migration] user_personnel_assignments table creation notice:', err?.message || err);
   }
 
+  // 15. Local AI knowledge base + persistent chat sessions (HSECORE AI)
+  try {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS ai_knowledge_docs (
+        id SERIAL PRIMARY KEY,
+        title TEXT NOT NULL,
+        doc_type TEXT DEFAULT 'REGULATION' NOT NULL,
+        category TEXT DEFAULT 'GENERAL' NOT NULL,
+        content TEXT NOT NULL,
+        summary TEXT,
+        file_size INTEGER DEFAULT 0 NOT NULL,
+        chunk_count INTEGER DEFAULT 0 NOT NULL,
+        status TEXT DEFAULT 'INDEXED' NOT NULL,
+        uploaded_by TEXT,
+        metadata JSONB DEFAULT '{}'::jsonb NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+        updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+      );
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_ai_docs_category ON ai_knowledge_docs (category);`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_ai_docs_status ON ai_knowledge_docs (status);`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_ai_docs_created ON ai_knowledge_docs (created_at);`);
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS ai_knowledge_chunks (
+        id SERIAL PRIMARY KEY,
+        doc_id INTEGER NOT NULL REFERENCES ai_knowledge_docs(id) ON DELETE CASCADE,
+        chunk_index INTEGER NOT NULL,
+        chunk_text TEXT NOT NULL,
+        token_count INTEGER DEFAULT 0 NOT NULL,
+        embedding JSONB,
+        metadata JSONB,
+        created_at TIMESTAMP DEFAULT NOW() NOT NULL
+      );
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_ai_chunks_doc ON ai_knowledge_chunks (doc_id);`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_ai_chunks_index ON ai_knowledge_chunks (doc_id, chunk_index);`);
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS ai_chat_sessions (
+        id TEXT PRIMARY KEY,
+        user_id INTEGER,
+        user_uid TEXT,
+        title TEXT NOT NULL,
+        assistant_id TEXT DEFAULT 'GENERAL_HSE' NOT NULL,
+        metadata JSONB,
+        created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+        updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+      );
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_ai_sessions_user ON ai_chat_sessions (user_id);`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_ai_sessions_user_uid ON ai_chat_sessions (user_uid);`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_ai_sessions_created ON ai_chat_sessions (created_at);`);
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS ai_chat_messages (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL REFERENCES ai_chat_sessions(id) ON DELETE CASCADE,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL,
+        tools_used JSONB,
+        citations JSONB,
+        duration_ms INTEGER,
+        model TEXT,
+        created_at TIMESTAMP DEFAULT NOW() NOT NULL
+      );
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_ai_msgs_session ON ai_chat_messages (session_id);`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_ai_msgs_created ON ai_chat_messages (created_at);`);
+
+    console.log('[Migration] AI knowledge and chat session tables verified.');
+  } catch (err: any) {
+    console.warn('[Migration] AI tables creation notice:', err?.message || err);
+  }
+
   console.log('[Migration] All database tables and missing columns verified successfully.');
 }
 
