@@ -4,6 +4,7 @@
  */
 import assert from 'node:assert/strict';
 import { db, sql } from '../server/core/db.ts';
+import { config } from '../server/core/config.ts';
 import { pool } from '../src/db/index.ts';
 import { aiRagService } from '../server/modules/ai/ai.rag.service.ts';
 import { migrateLegacyAIKnowledgeMetadata } from '../server/modules/ai/ai.metadata.migration.ts';
@@ -243,6 +244,69 @@ async function run() {
     assert.equal(results.some(result => result.docTitle.startsWith('Blocked document ')), false);
     console.log('PASS RAG filters ACL before applying the 200-chunk retrieval limit');
 
+    // Indexing persists the document, all chunks and INDEXED state in one transaction.
+    {
+      const originalFetch = globalThis.fetch;
+      const originalAIEnabled = config.aiEngine.enabled;
+      config.aiEngine.enabled = true;
+      globalThis.fetch = (async () => new Response(
+        JSON.stringify({ embedding: [0.1, 0.2, 0.3] }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )) as typeof fetch;
+
+      try {
+        const indexed = await aiRagService.indexDocument({
+          title: 'Atomic RAG indexing success test',
+          content: 'HSE permit to work atomic indexing verification text.',
+          category: 'PTW',
+          uploadedBy: 'ci-test',
+        });
+        const indexedDoc = await db.execute(sql`
+          SELECT status, chunk_count FROM ai_knowledge_docs WHERE id = ${indexed.docId}
+        `);
+        const indexedChunks = await db.execute(sql`
+          SELECT id FROM ai_knowledge_chunks WHERE doc_id = ${indexed.docId}
+        `);
+        assert.equal((indexedDoc as any).rows[0].status, 'INDEXED');
+        assert.equal(Number((indexedDoc as any).rows[0].chunk_count), indexed.chunkCount);
+        assert.equal((indexedChunks as any).rows.length, indexed.chunkCount);
+        console.log('PASS RAG indexing commits document header, chunks and INDEXED state together');
+
+        await db.execute(sql`
+          CREATE OR REPLACE FUNCTION reject_ai_rag_chunk_insert()
+          RETURNS trigger AS $func$
+          BEGIN
+            RAISE EXCEPTION 'simulated chunk persistence failure';
+          END;
+          $func$ LANGUAGE plpgsql
+        `);
+        await db.execute(sql`
+          CREATE TRIGGER reject_ai_rag_chunk_insert
+          BEFORE INSERT ON ai_knowledge_chunks
+          FOR EACH ROW EXECUTE FUNCTION reject_ai_rag_chunk_insert()
+        `);
+
+        await assert.rejects(
+          aiRagService.indexDocument({
+            title: 'Atomic RAG rollback test',
+            content: 'This document must not survive a failed chunk insert.',
+            category: 'PTW',
+            uploadedBy: 'ci-test',
+          })
+        );
+        const rolledBackDoc = await db.execute(sql`
+          SELECT id FROM ai_knowledge_docs WHERE title = 'Atomic RAG rollback test'
+        `);
+        assert.equal((rolledBackDoc as any).rows.length, 0);
+        console.log('PASS failed chunk persistence rolls back the document header');
+      } finally {
+        await db.execute(sql`DROP TRIGGER IF EXISTS reject_ai_rag_chunk_insert ON ai_knowledge_chunks`).catch(() => undefined);
+        await db.execute(sql`DROP FUNCTION IF EXISTS reject_ai_rag_chunk_insert()`).catch(() => undefined);
+        globalThis.fetch = originalFetch;
+        config.aiEngine.enabled = originalAIEnabled;
+      }
+    }
+
     await aiRagService.deleteDocument(authorizedDocId);
     const deletedDoc = await db.execute(sql`
       SELECT id FROM ai_knowledge_docs WHERE id = ${authorizedDocId}
@@ -254,7 +318,7 @@ async function run() {
     assert.equal((deletedChunks as any).rows.length, 0);
     console.log('PASS PostgreSQL document deletion cascades to its chunks');
 
-    console.log('AI RAG PostgreSQL integration tests: 5/5 passed');
+    console.log('AI RAG PostgreSQL integration tests: 7/7 passed');
   } finally {
     await db.execute(sql`DROP TABLE IF EXISTS ai_knowledge_chunks CASCADE`).catch(() => undefined);
     await db.execute(sql`DROP TABLE IF EXISTS ai_knowledge_docs CASCADE`).catch(() => undefined);

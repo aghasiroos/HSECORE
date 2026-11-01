@@ -3,7 +3,22 @@ name: AI ACL Security Tests
 on:
   push:
     branches:
+      - main
       - security/p0-ai-acl-org-tests
+    paths:
+      - 'server/modules/ai/**'
+      - 'server/core/middleware/auth.ts'
+      - 'scripts/test-ai-acl.ts'
+      - 'scripts/test-ai-auth.ts'
+      - 'scripts/test-ai-rag-db.ts'
+      - 'scripts/test-ai-routes.ts'
+      - 'scripts/test-ai-queue.ts'
+      - 'Dockerfile.prod'
+      - 'docker-compose*.yml'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/ai-acl-security-tests.yml'
+      - 'docs/PHASE2_SPARK_X2_6_DEPLOYMENT.md'
   pull_request:
     branches:
       - main
@@ -15,9 +30,13 @@ on:
       - 'scripts/test-ai-rag-db.ts'
       - 'scripts/test-ai-routes.ts'
       - 'scripts/test-ai-queue.ts'
+      - 'Dockerfile.prod'
+      - 'docker-compose*.yml'
       - 'package.json'
       - 'package-lock.json'
       - '.github/workflows/ai-acl-security-tests.yml'
+      - 'docs/PHASE2_SPARK_X2_6_DEPLOYMENT.md'
+  workflow_dispatch:
 
 concurrency:
   group: ai-acl-${{ github.event.pull_request.number || github.ref }}
@@ -26,7 +45,7 @@ concurrency:
 jobs:
   ai-acl:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
     services:
       postgres:
         image: postgres:16-alpine
@@ -72,7 +91,27 @@ jobs:
         run: npm run test:ai-routes
       - name: AI request queue regression tests
         run: npm run test:ai-queue
+      - name: Validate production Compose configurations
+        run: |
+          cat > .env <<'EOF'
+          SQL_USER=postgres
+          SQL_PASSWORD=hsecore_test_password
+          SQL_DB_NAME=hsecore_test
+          JWT_SECRET=ci-only-hsecore-ai-acl-jwt-secret-at-least-32-characters
+          AI_CLOUD_FALLBACK_ENABLED=false
+          EOF
+          docker compose -f docker-compose.server.yml config --quiet
+          docker compose -f docker-compose.ai.yml config --quiet
       - name: TypeScript validation
         run: npm run lint
       - name: Production build validation
         run: npm run build
+      - name: Build and verify production Docker image provenance
+        run: |
+          docker build --pull \
+            --build-arg GIT_COMMIT="$GITHUB_SHA" \
+            --build-arg BUILD_ID="ci-$GITHUB_RUN_ID" \
+            --build-arg RELEASE_ID="ci-$GITHUB_RUN_NUMBER" \
+            --tag "hsecore-ci:$GITHUB_SHA" \
+            --file Dockerfile.prod .
+          test "$(docker image inspect "hsecore-ci:$GITHUB_SHA" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" = "$GITHUB_SHA"
