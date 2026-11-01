@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# HSECORE Enterprise - Local AI Automated Setup & Verification Engine (Phase 2)
-# Performs automated installation, container verification, and model deployment
+# HSECORE Enterprise - Local AI Runtime Setup & Verification Engine (Phase 3)
+# Validates production Compose runtime; model downloads remain explicit administrator actions
 # ==============================================================================
 
 set -eo pipefail
@@ -87,6 +87,7 @@ echo -e "\n${BOLD}[4/6] Verifying Network Isolation & Security Constraints...${N
 EXPOSED_WAN=$(docker port "${CONTAINER_NAME}" 2>/dev/null | grep -v '127.0.0.1' || true)
 if [ -n "${EXPOSED_WAN}" ]; then
   echo -e "  ${RED}[SECURITY VIOLATION] AI container exposed on non-loopback interface: ${EXPOSED_WAN}${NC}"
+  exit 1
 else
   echo -e "  ${GREEN}[✓] Port 11434 is strictly restricted to internal Docker bridge and 127.0.0.1.${NC}"
 fi
