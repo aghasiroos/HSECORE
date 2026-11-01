@@ -1,5 +1,3 @@
-version: '3.8'
-
 # ==============================================================================
 # HSECORE Enterprise - Dedicated Local AI Engine (Ollama Service)
 # Architecture:
@@ -11,7 +9,7 @@ version: '3.8'
 
 services:
   hse-ai-engine:
-    image: ollama/ollama:latest
+    image: ${OLLAMA_IMAGE:-ollama/ollama:0.40.13}
     container_name: hse-ai-engine
     restart: unless-stopped
     env_file:
@@ -22,7 +20,8 @@ services:
       - "OLLAMA_MAX_LOADED_MODELS=${AI_MAX_LOADED_MODELS:-1}"
       - "OLLAMA_KEEP_ALIVE=${AI_KEEP_ALIVE:-15m}"
       - "OLLAMA_FLASH_ATTENTION=0"
-      - "OLLAMA_ORIGINS=*"
+      - "OLLAMA_ORIGINS="
+      - "OLLAMA_ORIGINS="
       - "OMP_NUM_THREADS=${AI_CPU_THREADS:-4}"
     volumes:
       # Persistent volume ensures downloaded models are preserved across HSECORE container updates
@@ -37,7 +36,7 @@ services:
       resources:
         limits:
           cpus: "${AI_CPU_LIMIT:-4.0}"
-          memory: "${AI_MEMORY_LIMIT:-4096M}"
+          memory: "${AI_MEMORY_LIMIT:-4608M}"
         reservations:
           cpus: "1.0"
           memory: "1024M"
