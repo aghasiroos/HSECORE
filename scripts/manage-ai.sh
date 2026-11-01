@@ -243,6 +243,15 @@ cmd_set_default() {
   fi
   print_header
   echo -e "${BLUE}[*] Setting default AI chat model to '${model}' in .env...${NC}"
+  if [[ -z "${model}" || ! "${model}" =~ ^[A-Za-z0-9._/-]+(:[A-Za-z0-9._-]+)?$ ]]; then
+    echo -e "${RED}[ERROR] Invalid model reference.${NC}"
+    return 1
+  fi
+  check_docker
+  if ! is_container_running || ! docker exec "${CONTAINER_NAME}" ollama list | awk 'NR > 1 {print $1}' | grep -Fxq "${model}"; then
+    echo -e "${RED}[ERROR] The selected model must already be installed before setting it as default.${NC}"
+    return 1
+  fi
   local env_file="${PROJECT_DIR}/.env"
   if [ -f "${env_file}" ]; then
     if grep -q "^AI_DEFAULT_CHAT_MODEL=" "${env_file}"; then
