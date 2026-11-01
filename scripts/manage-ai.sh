@@ -255,7 +255,7 @@ cmd_set_default() {
   local env_file="${PROJECT_DIR}/.env"
   if [ -f "${env_file}" ]; then
     if grep -q "^AI_DEFAULT_CHAT_MODEL=" "${env_file}"; then
-      sed -i "s/^AI_DEFAULT_CHAT_MODEL=.*/AI_DEFAULT_CHAT_MODEL=${model}/" "${env_file}"
+      sed -i "s|^AI_DEFAULT_CHAT_MODEL=.*|AI_DEFAULT_CHAT_MODEL=${model}|" "${env_file}"
     else
       echo "AI_DEFAULT_CHAT_MODEL=${model}" >> "${env_file}"
     fi
