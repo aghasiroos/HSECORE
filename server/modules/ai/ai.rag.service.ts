@@ -97,46 +97,25 @@ export class AIRagService {
       throw new Error('تعداد بخش‌های سند از سقف مجاز ۵۰۰ بیشتر است.');
     }
 
-    // 1. Create Document Header in DB
-    const [doc] = await db
-      .insert(schema.aiKnowledgeDocs)
-      .values({
-        title,
-        docType,
-        category,
-        content,
-        summary,
-        metadata: accessControl ? { accessControl } : {},
-        fileSize: Buffer.byteLength(content, 'utf8'),
-        chunkCount: 0,
-        status: 'PENDING',
-        uploadedBy: uploadedBy || 'system',
-      })
-      .returning();
+    // Generate embeddings before opening the DB transaction. Embedding failures
+    // remain non-fatal and use the existing keyword-search fallback.
+    const indexedChunks: Array<{
+      chunkIndex: number;
+      chunkText: string;
+      tokenCount: number;
+      embedding: number[] | null;
+      metadata: any;
+    }> = [];
 
-    const docId = doc.id;
-
-    // 2. Persist prevalidated chunks.
-    if (chunks.length === 0) {
-      await db.update(schema.aiKnowledgeDocs).set({ status: 'INDEXED', chunkCount: 0 }).where(eq(schema.aiKnowledgeDocs.id, docId));
-      return { docId, id: docId, chunkCount: 0 };
-    }
-
-    // 3. Generate embeddings & save chunks
     for (const ch of chunks) {
       let embeddingVector: number[] | null = null;
-
       try {
         const embRes = await localAIProvider.generateEmbedding(ch.text);
-        if (embRes && embRes.embedding && embRes.embedding.length > 0) {
-          embeddingVector = embRes.embedding;
-        }
+        if (embRes?.embedding?.length) embeddingVector = embRes.embedding;
       } catch {
-        // Fallback: embedding deferred
+        // Keep the chunk indexable through the keyword fallback when embeddings are unavailable.
       }
-
-      await db.insert(schema.aiKnowledgeChunks).values({
-        docId,
+      indexedChunks.push({
         chunkIndex: ch.index,
         chunkText: ch.text,
         tokenCount: ch.tokenCount,
@@ -145,15 +124,50 @@ export class AIRagService {
       });
     }
 
-    // 4. Update Document Status
-    await db
-      .update(schema.aiKnowledgeDocs)
-      .set({
-        chunkCount: chunks.length,
-        status: 'INDEXED',
-        updatedAt: new Date(),
-      })
-      .where(eq(schema.aiKnowledgeDocs.id, docId));
+    // Persist the document header, every chunk and the final INDEXED state atomically.
+    // A database failure cannot leave an orphaned PENDING document or partial chunks.
+    const doc = await db.transaction(async (tx) => {
+      const [createdDoc] = await tx
+        .insert(schema.aiKnowledgeDocs)
+        .values({
+          title,
+          docType,
+          category,
+          content,
+          summary,
+          metadata: accessControl ? { accessControl } : {},
+          fileSize: Buffer.byteLength(content, 'utf8'),
+          chunkCount: indexedChunks.length,
+          status: 'PENDING',
+          uploadedBy: uploadedBy || 'system',
+        })
+        .returning();
+
+      if (indexedChunks.length > 0) {
+        await tx.insert(schema.aiKnowledgeChunks).values(
+          indexedChunks.map(chunk => ({
+            docId: createdDoc.id,
+            chunkIndex: chunk.chunkIndex,
+            chunkText: chunk.chunkText,
+            tokenCount: chunk.tokenCount,
+            embedding: chunk.embedding,
+            metadata: chunk.metadata,
+          }))
+        );
+      }
+
+      const [indexedDoc] = await tx
+        .update(schema.aiKnowledgeDocs)
+        .set({
+          chunkCount: indexedChunks.length,
+          status: 'INDEXED',
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.aiKnowledgeDocs.id, createdDoc.id))
+        .returning();
+
+      return indexedDoc;
+    });
 
     logger.info(`[AIRagService] Indexed document "${title}" (ID: ${docId}) into ${chunks.length} chunks`);
 
