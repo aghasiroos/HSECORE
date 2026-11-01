@@ -450,7 +450,115 @@ async function ensureSchemaColumnsAndTables() {
     await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_ai_msgs_session ON ai_chat_messages (session_id);`);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_ai_msgs_created ON ai_chat_messages (created_at);`);
 
-    console.log('[Migration] AI knowledge and chat session tables verified.');
+
+    // Provider registry & assignments (Phase 3b)
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS ai_providers (
+        id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL,
+        name TEXT NOT NULL,
+        name_fa TEXT NOT NULL,
+        enabled BOOLEAN DEFAULT TRUE NOT NULL,
+        is_default BOOLEAN DEFAULT FALSE NOT NULL,
+        base_url TEXT,
+        capabilities JSONB DEFAULT '[]'::jsonb NOT NULL,
+        metadata JSONB DEFAULT '{}'::jsonb NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+        updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+      );
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_ai_providers_kind ON ai_providers (kind);`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_ai_providers_default ON ai_providers (is_default);`);
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS ai_provider_configs (
+        id SERIAL PRIMARY KEY,
+        provider_id TEXT NOT NULL REFERENCES ai_providers(id) ON DELETE CASCADE,
+        config_key TEXT NOT NULL,
+        config_value TEXT,
+        is_secret BOOLEAN DEFAULT FALSE NOT NULL,
+        updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+      );
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_ai_provider_configs_provider ON ai_provider_configs (provider_id);`);
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS ai_models (
+        id SERIAL PRIMARY KEY,
+        provider_id TEXT NOT NULL REFERENCES ai_providers(id) ON DELETE CASCADE,
+        model_ref TEXT NOT NULL,
+        display_name TEXT,
+        size_bytes INTEGER,
+        status TEXT DEFAULT 'known' NOT NULL,
+        metadata JSONB DEFAULT '{}'::jsonb NOT NULL,
+        updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+      );
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_ai_models_provider ON ai_models (provider_id);`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_ai_models_ref ON ai_models (model_ref);`);
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS ai_model_assignments (
+        id SERIAL PRIMARY KEY,
+        service_key TEXT NOT NULL,
+        provider_id TEXT REFERENCES ai_providers(id) ON DELETE SET NULL,
+        model_ref TEXT,
+        fallback_provider_id TEXT,
+        fallback_model_ref TEXT,
+        context_limit INTEGER,
+        enabled BOOLEAN DEFAULT TRUE NOT NULL,
+        metadata JSONB DEFAULT '{}'::jsonb NOT NULL,
+        updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+      );
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_ai_assignments_service ON ai_model_assignments (service_key);`);
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS ai_service_settings (
+        id SERIAL PRIMARY KEY,
+        setting_key TEXT NOT NULL,
+        setting_value TEXT,
+        updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+      );
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_ai_service_settings_key ON ai_service_settings (setting_key);`);
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS ai_deployment_jobs (
+        id TEXT PRIMARY KEY,
+        job_type TEXT NOT NULL,
+        provider_id TEXT,
+        target_ref TEXT,
+        status TEXT DEFAULT 'pending' NOT NULL,
+        progress INTEGER DEFAULT 0 NOT NULL,
+        message TEXT,
+        error_message TEXT,
+        created_by TEXT,
+        created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+        updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+      );
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_ai_jobs_status ON ai_deployment_jobs (status);`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_ai_jobs_created ON ai_deployment_jobs (created_at);`);
+
+    // Ensure default Ollama provider row exists (structural, not demo seed data)
+    await db.execute(sql`
+      INSERT INTO ai_providers (id, kind, name, name_fa, enabled, is_default, base_url, capabilities, metadata)
+      VALUES (
+        'ollama',
+        'ollama',
+        'Ollama',
+        'موتور محلی Ollama',
+        TRUE,
+        TRUE,
+        'http://hse-ai-engine:11434',
+        '["health","listInstalled","pull","delete","chat","generate","embeddings"]'::jsonb,
+        '{}'::jsonb
+      )
+      ON CONFLICT (id) DO NOTHING;
+    `);
+
+    console.log('[Migration] AI knowledge, chat, provider and assignment tables verified.');
   } catch (err: any) {
     console.warn('[Migration] AI tables creation notice:', err?.message || err);
   }

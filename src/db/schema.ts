@@ -1080,3 +1080,116 @@ export const aiChatMessages = pgTable(
 );
 
 
+// ==========================================
+// 16. AI Provider Registry & Model Assignments (Phase 3b)
+// ==========================================
+export const aiProviders = pgTable(
+  'ai_providers',
+  {
+    id: text('id').primaryKey(), // e.g. ollama
+    kind: text('kind').notNull(), // ollama | lmstudio | openai_compatible | custom
+    name: text('name').notNull(),
+    nameFa: text('name_fa').notNull(),
+    enabled: boolean('enabled').default(true).notNull(),
+    isDefault: boolean('is_default').default(false).notNull(),
+    baseUrl: text('base_url'),
+    capabilities: jsonb('capabilities').default([]).notNull(),
+    metadata: jsonb('metadata').default({}).notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_ai_providers_kind').on(table.kind),
+    index('idx_ai_providers_default').on(table.isDefault),
+  ]
+);
+
+export const aiProviderConfigs = pgTable(
+  'ai_provider_configs',
+  {
+    id: serial('id').primaryKey(),
+    providerId: text('provider_id')
+      .references(() => aiProviders.id, { onDelete: 'cascade' })
+      .notNull(),
+    configKey: text('config_key').notNull(),
+    configValue: text('config_value'),
+    isSecret: boolean('is_secret').default(false).notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_ai_provider_configs_provider').on(table.providerId),
+  ]
+);
+
+export const aiModels = pgTable(
+  'ai_models',
+  {
+    id: serial('id').primaryKey(),
+    providerId: text('provider_id')
+      .references(() => aiProviders.id, { onDelete: 'cascade' })
+      .notNull(),
+    modelRef: text('model_ref').notNull(),
+    displayName: text('display_name'),
+    sizeBytes: integer('size_bytes'),
+    status: text('status').default('known').notNull(), // known | installed | error
+    metadata: jsonb('metadata').default({}).notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_ai_models_provider').on(table.providerId),
+    index('idx_ai_models_ref').on(table.modelRef),
+  ]
+);
+
+export const aiModelAssignments = pgTable(
+  'ai_model_assignments',
+  {
+    id: serial('id').primaryKey(),
+    serviceKey: text('service_key').notNull(), // GENERAL_HSE, PTW_SHERPA, ...
+    providerId: text('provider_id').references(() => aiProviders.id, { onDelete: 'set null' }),
+    modelRef: text('model_ref'),
+    fallbackProviderId: text('fallback_provider_id'),
+    fallbackModelRef: text('fallback_model_ref'),
+    contextLimit: integer('context_limit'),
+    enabled: boolean('enabled').default(true).notNull(),
+    metadata: jsonb('metadata').default({}).notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_ai_assignments_service').on(table.serviceKey),
+  ]
+);
+
+export const aiServiceSettings = pgTable(
+  'ai_service_settings',
+  {
+    id: serial('id').primaryKey(),
+    settingKey: text('setting_key').notNull(),
+    settingValue: text('setting_value'),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_ai_service_settings_key').on(table.settingKey),
+  ]
+);
+
+export const aiDeploymentJobs = pgTable(
+  'ai_deployment_jobs',
+  {
+    id: text('id').primaryKey(),
+    jobType: text('job_type').notNull(), // pull | delete | install_engine | ...
+    providerId: text('provider_id'),
+    targetRef: text('target_ref'),
+    status: text('status').default('pending').notNull(), // pending | running | success | failed | cancelled
+    progress: integer('progress').default(0).notNull(),
+    message: text('message'),
+    errorMessage: text('error_message'),
+    createdBy: text('created_by'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_ai_jobs_status').on(table.status),
+    index('idx_ai_jobs_created').on(table.createdAt),
+  ]
+);

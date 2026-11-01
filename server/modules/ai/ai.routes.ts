@@ -19,9 +19,31 @@ router.get('/models', requireAuth, (req, res, next) => {
   aiController.listModels(req, res).catch(next);
 });
 
+
 // Provider registry (Phase 3a — currently Ollama only)
 router.get('/providers', requireAuth, (req, res, next) => {
   aiController.listProviders(req, res).catch(next);
+});
+
+// Model assignments & resource settings (Phase 3b)
+router.get('/assignments', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR', 'HSE_MANAGER'), (req, res, next) => {
+  aiController.listAssignments(req, res).catch(next);
+});
+
+router.put('/assignments/:serviceKey', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR'), (req, res, next) => {
+  aiController.upsertAssignment(req, res).catch(next);
+});
+
+router.get('/settings/resources', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR', 'HSE_MANAGER'), (req, res, next) => {
+  aiController.getResourceSettings(req, res).catch(next);
+});
+
+router.put('/settings/resources', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR'), (req, res, next) => {
+  aiController.putResourceSettings(req, res).catch(next);
+});
+
+router.post('/models/sync', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR'), (req, res, next) => {
+  aiController.syncInstalledModels(req, res).catch(next);
 });
 
 // Chat endpoint with orchestrator & domain tool execution

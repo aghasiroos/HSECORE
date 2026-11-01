@@ -6,6 +6,7 @@
  */
 
 import { AIAssistantId, AIAssistantMetadata, AIChatRequest, AIChatResponse, AIToolResult } from './ai.types.ts';
+import { aiModelManager } from './ai.model-manager.ts';
 import { aiSecurityService } from './ai.security.ts';
 import { aiRequestQueue } from './ai.queue.ts';
 import { aiToolsRegistry, normalizePersianText } from './ai.tools.ts';

@@ -5,6 +5,7 @@ import { aiRequestQueue } from './ai.queue.ts';
 import { aiAuditService, normalizeAILogLimit } from './ai.audit.ts';
 import { aiRagService } from './ai.rag.service.ts';
 import { aiSessionService } from './ai.sessions.ts';
+import { aiModelManager } from './ai.model-manager.ts';
 import { checkUserHasPermission, type UserContext } from '../../core/middleware/auth.ts';
 
 export class AIController {
@@ -453,18 +454,89 @@ export class AIController {
 }
 
 
+
   async listProviders(_req: Request, res: Response) {
     try {
-      const providers = aiService.listProviders();
+      const runtime = aiService.listProviders();
+      const fromDb = await aiModelManager.listProvidersFromDb();
       return res.json({
         success: true,
         data: {
-          providers,
+          providers: fromDb.length ? fromDb : runtime,
+          runtimeProviders: runtime,
           defaultProviderId: aiService.getDefaultProviderId(),
         },
       });
     } catch (err: any) {
       return res.status(500).json({ success: false, message: err.message || 'خطا در دریافت فهرست موتورهای هوش مصنوعی' });
+    }
+  }
+
+  async listAssignments(_req: Request, res: Response) {
+    try {
+      const data = await aiModelManager.listAssignments();
+      return res.json({ success: true, data });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, message: err.message || 'خطا در دریافت تخصیص مدل‌ها' });
+    }
+  }
+
+  async upsertAssignment(req: Request, res: Response) {
+    try {
+      const serviceKey = req.params.serviceKey || req.body?.serviceKey;
+      const saved = await aiModelManager.upsertAssignment({
+        serviceKey,
+        providerId: req.body?.providerId,
+        modelRef: req.body?.modelRef,
+        fallbackProviderId: req.body?.fallbackProviderId,
+        fallbackModelRef: req.body?.fallbackModelRef,
+        contextLimit: req.body?.contextLimit != null ? Number(req.body.contextLimit) : undefined,
+        enabled: req.body?.enabled,
+      });
+      return res.json({ success: true, data: saved });
+    } catch (err: any) {
+      return res.status(400).json({ success: false, message: err.message || 'خطا در ذخیره تخصیص مدل' });
+    }
+  }
+
+  async getResourceSettings(_req: Request, res: Response) {
+    try {
+      const data = await aiModelManager.getResourceSettings();
+      return res.json({ success: true, data });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, message: err.message || 'خطا در دریافت تنظیمات منابع' });
+    }
+  }
+
+  async putResourceSettings(req: Request, res: Response) {
+    try {
+      const body = req.body || {};
+      const allowed = [
+        'max_concurrency',
+        'request_timeout_ms',
+        'context_tokens',
+        'default_chat_model',
+        'default_embed_model',
+      ];
+      for (const key of allowed) {
+        if (body[key] != null && body[key] !== '') {
+          await aiModelManager.setSetting(key, String(body[key]).slice(0, 200));
+        }
+      }
+      const data = await aiModelManager.getResourceSettings();
+      return res.json({ success: true, data });
+    } catch (err: any) {
+      return res.status(400).json({ success: false, message: err.message || 'خطا در ذخیره تنظیمات منابع' });
+    }
+  }
+
+  async syncInstalledModels(req: Request, res: Response) {
+    try {
+      const providerId = typeof req.body?.providerId === 'string' ? req.body.providerId : 'ollama';
+      const count = await aiModelManager.syncInstalledModelsFromProvider(providerId);
+      return res.json({ success: true, data: { synced: count, providerId } });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, message: err.message || 'خطا در همگام‌سازی مدل‌ها' });
     }
   }
 
