@@ -107,22 +107,32 @@ async function run() {
   // Reachable Ollama without installed models must not be reported inference-ready.
   {
     const provider = new LocalAIProvider();
+    let inventory: Array<{ name: string; model: string; size: number; digest: string }> = [];
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith('/api/tags')) {
-        return new Response(JSON.stringify({ models: [] }), { status: 200 });
+        return new Response(JSON.stringify({ models: inventory }), { status: 200 });
       }
       if (url.endsWith('/api/version')) {
         return new Response(JSON.stringify({ version: 'test' }), { status: 200 });
       }
       throw new Error('unexpected URL');
     }) as typeof fetch;
-    const status = await provider.checkHealth();
-    assert.equal(status.isAvailable, true);
-    assert.equal(status.localInferenceReady, false);
-    assert.equal(status.chatModelInstalled, false);
-    assert.equal(status.embeddingModelInstalled, false);
-    console.log('PASS empty Ollama inventory is not inference-ready');
+    const emptyStatus = await provider.checkHealth();
+    assert.equal(emptyStatus.isAvailable, true);
+    assert.equal(emptyStatus.localInferenceReady, false);
+    assert.equal(emptyStatus.chatModelInstalled, false);
+    assert.equal(emptyStatus.embeddingModelInstalled, false);
+
+    inventory = [
+      { name: 'qwen2.5:latest', model: 'qwen2.5:latest', size: 1, digest: 'chat-test' },
+      { name: 'bge-m3:latest', model: 'bge-m3:latest', size: 1, digest: 'embed-test' },
+    ];
+    const aliasStatus = await provider.checkHealth();
+    assert.equal(aliasStatus.chatModelInstalled, true);
+    assert.equal(aliasStatus.embeddingModelInstalled, true);
+    assert.equal(aliasStatus.localInferenceReady, true);
+    console.log('PASS empty inventory readiness and canonical :latest inventory matching');
   }
 
   console.log('AI request queue and model safety tests: 4/4 passed');
