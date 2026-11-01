@@ -13,6 +13,9 @@ on:
       - 'scripts/test-ai-rag-db.ts'
       - 'scripts/test-ai-routes.ts'
       - 'scripts/test-ai-queue.ts'
+      - 'scripts/setup-local-ai.sh'
+      - 'scripts/manage-ai.sh'
+      - 'install.sh'
       - 'Dockerfile.prod'
       - 'docker-compose*.yml'
       - 'package.json'
@@ -79,6 +82,8 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Validate AI deployment shell scripts
+        run: bash -n install.sh scripts/setup-local-ai.sh scripts/manage-ai.sh
       - name: Install dependencies
         run: npm ci
       - name: Run document ACL and prompt-security regression tests
