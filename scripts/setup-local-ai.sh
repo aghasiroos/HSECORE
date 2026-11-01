@@ -40,20 +40,18 @@ else
   echo -e "  ${GREEN}[✓] Resource check passed: 8GB RAM architecture approved for ${PRIMARY_CHAT_MODEL}.${NC}"
 fi
 
-# 2. Network & Volume Setup
-echo -e "\n${BOLD}[2/6] Configuring Dedicated Docker Network & Persistent Volume...${NC}"
-docker network inspect hse-network >/dev/null 2>&1 || {
-  echo "  Creating internal network: hse-network"
-  docker network create --driver bridge hse-network
-}
-echo -e "  ${GREEN}[✓] Internal network 'hse-network' verified.${NC}"
-
-docker volume inspect hse_ai_models >/dev/null 2>&1 || {
-  echo "  Creating persistent model volume: hse_ai_models"
-  docker volume create hse_ai_models
-}
-echo -e "  ${GREEN}[✓] Persistent storage volume 'hse_ai_models' verified.${NC}"
-
+# 2. Validate production Compose configuration and container ownership
+echo -e "\n${BOLD}[2/6] Validating Production Compose Configuration...${NC}"
+[[ -f "${PROJECT_DIR}/.env" ]] || { echo -e "${RED}[ERROR] .env is required. Complete the main HSECORE installation first.${NC}"; exit 1; }
+docker compose -f "${AI_COMPOSE}" --env-file "${PROJECT_DIR}/.env" config --quiet
+EXISTING_ID="$(docker ps -aq --filter "name=^/${CONTAINER_NAME}$" | head -n1 || true)"
+if [[ -n "${EXISTING_ID}" ]]; then
+  EXISTING_CONFIG="$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' "${EXISTING_ID}" 2>/dev/null || true)"
+  if [[ "${EXISTING_CONFIG}" != *"docker-compose.server.yml"* ]]; then
+    echo -e "${RED}[ERROR] Existing ${CONTAINER_NAME} belongs to another Compose project (${EXISTING_CONFIG:-unknown}). No container was changed; plan a separate migration with rollback.${NC}"
+    exit 1
+  fi
+fi
 # 3. Container Deployment & Resource Enforcements
 echo -e "\n${BOLD}[3/6] Starting Local AI Engine Container with Resource Ceilings...${NC}"
 docker compose -f "${AI_COMPOSE}" --env-file "${PROJECT_DIR}/.env" up -d --no-deps hse-ai-engine
@@ -137,6 +135,6 @@ echo -e " - Container       : ${CONTAINER_NAME} (Active, Healthcheck OK)"
 echo -e " - CPU Limit       : 4.0 Cores (Reserved: 1.0 Core)"
 echo -e " - RAM Limit       : 4096 MB (Reserved: 1024 MB)"
 echo -e " - Persistent Vol  : hse_ai_models (Model persistence guaranteed)"
-echo -e " - Network         : Isolated inside hse-network (No WAN exposure)"
+echo -e " - Network         : Private production Compose bridge; host API binding is loopback-only"
 echo -e " - Chat Model Target: ${PRIMARY_CHAT_MODEL} (not auto-downloaded)"
 echo -e "${BOLD}${CYAN}==================================================================${NC}"
