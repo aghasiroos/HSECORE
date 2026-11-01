@@ -65,7 +65,7 @@ services:
 
   # Independent Local AI Engine (Ollama - Offline CPU Inference)
   hse-ai-engine:
-    image: ollama/ollama:latest
+    image: ${OLLAMA_IMAGE:-ollama/ollama:0.40.13}
     container_name: hse-ai-engine
     restart: unless-stopped
     env_file:
@@ -76,8 +76,9 @@ services:
       - "OLLAMA_MAX_LOADED_MODELS=${AI_MAX_LOADED_MODELS:-1}"
       - "OLLAMA_KEEP_ALIVE=${AI_KEEP_ALIVE:-15m}"
       - "OLLAMA_FLASH_ATTENTION=0"
+      - "OLLAMA_ORIGINS="
       # Keep Ollama HTTP API private to the Docker network; wildcard CORS is not needed.
-      - "OMP_NUM_THREADS=${AI_CPU_THREADS:-8}"
+      - "OMP_NUM_THREADS=${AI_CPU_THREADS:-4}"
     volumes:
       - hse_ai_models:/root/.ollama
     expose:
@@ -87,7 +88,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "${AI_CPU_LIMIT:-6.0}"
+          cpus: "${AI_CPU_LIMIT:-4.0}"
           memory: "${AI_MEMORY_LIMIT:-4608M}"
         reservations:
           cpus: "1.0"
