@@ -292,8 +292,7 @@ async function run() {
             content: 'This document must not survive a failed chunk insert.',
             category: 'PTW',
             uploadedBy: 'ci-test',
-          }),
-          /simulated chunk persistence failure/
+          })
         );
         const rolledBackDoc = await db.execute(sql`
           SELECT id FROM ai_knowledge_docs WHERE title = 'Atomic RAG rollback test'
