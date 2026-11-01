@@ -169,7 +169,7 @@ export class AIRagService {
       return indexedDoc;
     });
 
-    logger.info(`[AIRagService] Indexed document "${title}" (ID: ${docId}) into ${chunks.length} chunks`);
+    logger.info(`[AIRagService] Indexed document "${title}" (ID: ${doc.id}) into ${chunks.length} chunks`);
 
     return { docId, id: docId, chunkCount: chunks.length };
   }
