@@ -209,7 +209,7 @@ export const config: AppConfig = {
   },
   security: {
     jwtSecret,
-    tokenExpiry: process.env.JWT_EXPIRY || '7d',
+    tokenExpiry: process.env.JWT_EXPIRY || '8h',
     corsOrigins: resolveCorsOrigins(process.env.CORS_ORIGINS, process.env.APP_URL),
     rateLimitWindowMs: Number(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
     rateLimitMax: Number(process.env.RATE_LIMIT_MAX) || 20000, // High capacity for SPA and dashboard analytics

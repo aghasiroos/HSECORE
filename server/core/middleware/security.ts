@@ -2,157 +2,153 @@ import { Request, Response, NextFunction } from 'express';
 import { config } from '../config.ts';
 import { logger } from '../logger.ts';
 
+/**
+ * Enterprise security response headers.
+ * CSP is intentionally moderate (allows same-origin assets + inline styles used by RTL UI)
+ * and can be tightened further via env once front-end nonces are introduced.
+ */
 export function securityHeadersMiddleware(req: Request, res: Response, next: NextFunction) {
-  // Prevent MIME type sniffing
   res.setHeader('X-Content-Type-Options', 'nosniff');
-  // XSS protection
-  res.setHeader('X-XSS-Protection', '1; mode=block');
-  // Referrer Policy
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-  // Permissions Policy: restrict unused hardware APIs
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
-  // Cross-Origin Opener Policy
   res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
-  // Strict Transport Security (HSTS) when on HTTPS
+  res.setHeader('X-DNS-Prefetch-Control', 'off');
+  res.setHeader('X-Download-Options', 'noopen');
+  res.setHeader('X-Permitted-Cross-Domain-Policies', 'none');
+
+  // Baseline CSP for SPA + API same-origin deployments (no wildcard script sources)
+  const cspEnabled = (process.env.CSP_ENABLED || 'true').toLowerCase() !== 'false';
+  if (cspEnabled) {
+    const csp = [
+      "default-src 'self'",
+      "base-uri 'self'",
+      "form-action 'self'",
+      "frame-ancestors 'self'",
+      "object-src 'none'",
+      "img-src 'self' data: blob:",
+      "font-src 'self' data:",
+      "style-src 'self' 'unsafe-inline'",
+      "script-src 'self'",
+      "connect-src 'self'",
+      "worker-src 'self' blob:",
+      "media-src 'self' blob:",
+    ].join('; ');
+    res.setHeader('Content-Security-Policy', csp);
+  }
+
   if (req.secure || req.headers['x-forwarded-proto'] === 'https') {
     res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   }
-  // Remove Express signature
+
   res.removeHeader('X-Powered-By');
   next();
 }
 
 /**
- * Check if the origin is permitted, including Same-Origin, explicitly whitelisted domains,
- * and AI Studio / Google Cloud preview environments.
+ * Production-safe origin check:
+ * - Same-Origin always allowed
+ * - Explicit CORS_ORIGINS whitelist
+ * - localhost / 127.0.0.1 only when NODE_ENV !== production
+ * - Google Cloud / AI Studio host suffixes only when ALLOW_PREVIEW_ORIGINS=true
  */
 function isAllowedOrigin(req: Request, origin: string): boolean {
   if (!origin) return true;
   const normalizedOrigin = origin.trim().replace(/\/$/, '');
 
-  // 1. Same-Origin verification
   if (isSameOrigin(req, normalizedOrigin)) {
     return true;
   }
 
-  // 2. Configured origins from environment / config
   const allowedOrigins = config.security.corsOrigins || [];
   if (allowedOrigins.includes(normalizedOrigin)) {
     return true;
   }
 
-  // 3. AI Studio preview, Google Cloud Run, and localhost environments
   try {
     const originUrl = new URL(normalizedOrigin);
     const hostname = originUrl.hostname.toLowerCase();
-    if (
-      hostname === 'localhost' ||
-      hostname === '127.0.0.1' ||
-      hostname.endsWith('.google.com') ||
-      hostname.endsWith('.run.app') ||
-      hostname.endsWith('.googleusercontent.com')
-    ) {
-      return true;
-    }
-  } catch {
-    return false;
-  }
+    const isProd = (process.env.NODE_ENV || '').toLowerCase() === 'production';
+    const allowPreview = (process.env.ALLOW_PREVIEW_ORIGINS || 'false').toLowerCase() === 'true';
 
-  return false;
-}
-
-/**
- * Helper to dynamically detect if an incoming request Origin is Same-Origin
- * relative to the server's host as resolved by Express and Reverse Proxy (Nginx).
- */
-function isSameOrigin(req: Request, origin: string): boolean {
-  try {
-    const originUrl = new URL(origin);
-    const originHost = originUrl.host.toLowerCase(); // includes hostname:port if non-standard
-
-    // Get the request host (Express resolves this via X-Forwarded-Host if proxy is trusted, or Host header)
-    const rawReqHost = (req.get('x-forwarded-host') || req.get('host') || '').toLowerCase();
-    if (!rawReqHost) {
-      return false;
-    }
-
-    // Split multiple comma-separated proxy hosts if present
-    const reqHost = rawReqHost.split(',')[0].trim();
-
-    // 1. Direct match on host (hostname:port)
-    if (originHost === reqHost) {
+    if (!isProd && (hostname === 'localhost' || hostname === '127.0.0.1')) {
       return true;
     }
 
-    // 2. Normalized hostname and port comparison
-    const originHostname = originUrl.hostname.toLowerCase();
-    const [reqHostname, reqPortPart] = reqHost.split(':');
-    if (originHostname === reqHostname) {
-      const originPort = originUrl.port || (originUrl.protocol === 'https:' ? '443' : '80');
-      const resolvedReqPort = reqPortPart || (req.protocol === 'https' ? '443' : '80');
-      if (originPort === resolvedReqPort) {
+    if (allowPreview) {
+      if (
+        hostname.endsWith('.google.com') ||
+        hostname.endsWith('.run.app') ||
+        hostname.endsWith('.googleusercontent.com')
+      ) {
         return true;
       }
     }
   } catch {
     return false;
   }
+
+  return false;
+}
+
+function isSameOrigin(req: Request, origin: string): boolean {
+  try {
+    const originUrl = new URL(origin);
+    const originHost = originUrl.host.toLowerCase();
+    const rawReqHost = (req.get('x-forwarded-host') || req.get('host') || '').toLowerCase();
+    if (!rawReqHost) return false;
+    const reqHost = rawReqHost.split(',')[0].trim();
+
+    if (originHost === reqHost) return true;
+
+    const originHostname = originUrl.hostname.toLowerCase();
+    const [reqHostname, reqPortPart] = reqHost.split(':');
+    if (originHostname === reqHostname) {
+      const originPort = originUrl.port || (originUrl.protocol === 'https:' ? '443' : '80');
+      const resolvedReqPort = reqPortPart || (req.protocol === 'https' ? '443' : '80');
+      if (originPort === resolvedReqPort) return true;
+    }
+  } catch {
+    return false;
+  }
   return false;
 }
 
 /**
- * Enterprise Secure CORS Middleware (Deployment-Agnostic)
- * - Dynamically verifies Same-Origin requests without hardcoded IP or domain.
- * - Supports explicit Cross-Origin whitelist from CORS_ORIGINS environment variable.
- * - Wildcard (*) is strictly forbidden.
- * - Credentials and JWT headers are securely permitted only for verified origins.
- * - Unauthorized external origins are rejected with HTTP 403 Forbidden.
+ * Enterprise Secure CORS Middleware
+ * - Wildcard (*) is strictly forbidden
+ * - Credentials only for verified origins
  */
 export function corsMiddleware(req: Request, res: Response, next: NextFunction) {
   const origin = req.headers.origin;
 
-  // Requests without an Origin header (e.g. server-to-server, direct cURL, standard GET navigation)
   if (!origin) {
     return next();
   }
 
   const normalizedOrigin = origin.trim().replace(/\/$/, '');
-  // Dynamic verification: either Same-Origin, whitelisted domain, or AI Studio environment
-  const isAllowed = isAllowedOrigin(req, normalizedOrigin);
 
-  if (!isAllowed) {
-    logger.warn('CORS request rejected from unauthorized origin', {
-      origin: normalizedOrigin,
-      host: req.get('host'),
-      xForwardedHost: req.get('x-forwarded-host'),
-      method: req.method,
-      url: req.originalUrl,
-      ip: req.ip,
-    });
+  if (!isAllowedOrigin(req, normalizedOrigin)) {
+    logger.warn('CORS blocked origin', { origin: normalizedOrigin, path: req.path });
     return res.status(403).json({
       success: false,
-      error: {
-        code: 'CORS_ORIGIN_DENIED',
-        message: 'دسترسی از این مبدأ (Origin) توسط سیاست امنیتی سامانه مسدود شده است.',
-      },
+      message: 'Origin not allowed by CORS policy.',
     });
   }
 
-  // Origin is authorized: set explicit CORS response headers (Never use wildcard '*')
   res.setHeader('Access-Control-Allow-Origin', normalizedOrigin);
+  res.setHeader('Vary', 'Origin');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
   res.setHeader(
     'Access-Control-Allow-Headers',
-    'Content-Type, Authorization, x-correlation-id, x-user-id, x-user-role, x-user-name'
+    'Authorization, Content-Type, X-Requested-With, X-Correlation-Id, Accept, Origin'
   );
-  res.setHeader('Access-Control-Max-Age', '86400');
-  res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+  res.setHeader('Access-Control-Max-Age', '600');
 
-  // Preflight OPTIONS requests for authorized origin
   if (req.method === 'OPTIONS') {
     return res.status(204).end();
   }
 
-  next();
+  return next();
 }

@@ -64,7 +64,7 @@ services:
 
   # Independent Local AI Engine (Ollama - Offline CPU Inference)
   hse-ai-engine:
-    image: ollama/ollama:latest
+    image: ${OLLAMA_IMAGE:-ollama/ollama:0.40.13}
     container_name: hse-ai-engine
     restart: unless-stopped
     env_file:
@@ -75,7 +75,7 @@ services:
       - "OLLAMA_MAX_LOADED_MODELS=${AI_MAX_LOADED_MODELS:-1}"
       - "OLLAMA_KEEP_ALIVE=${AI_KEEP_ALIVE:-15m}"
       - "OLLAMA_FLASH_ATTENTION=0"
-      - "OLLAMA_ORIGINS=*"
+      - "OLLAMA_ORIGINS="
       - "OMP_NUM_THREADS=${AI_CPU_THREADS:-4}"
     volumes:
       - hse_ai_models:/root/.ollama

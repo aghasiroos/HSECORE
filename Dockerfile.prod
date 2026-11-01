@@ -86,6 +86,10 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/drizzle ./drizzle
 COPY create-user-cli.js ./
 
+# Run as non-root (Alpine node image provides uid 1000 "node")
+RUN mkdir -p /app/uploads /app/backups /app/data && chown -R node:node /app
+USER node
+
 EXPOSE 3000
 
 CMD ["node", "dist/server.cjs"]
