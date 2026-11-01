@@ -8,7 +8,7 @@ set -eo pipefail
 
 CONTAINER_NAME="hse-ai-engine"
 NETWORK_NAME="hse-network"
-COMPOSE_FILE="docker-compose.ai.yml"
+COMPOSE_FILE="docker-compose.server.yml"
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # Colors
@@ -115,19 +115,25 @@ cmd_restart() {
 }
 
 cmd_pull() {
-  local model="$1"
-  if [ -z "${model}" ]; then
-    echo -e "${RED}[ERROR] Model name required. Example: ./scripts/manage-ai.sh pull qwen2.5:1.7b${NC}"
-    exit 1
+  local model="${1:-}" allowed chat embed
+  if [[ -z "${model}" || ! "${model}" =~ ^[A-Za-z0-9._/-]+(:[A-Za-z0-9._-]+)?$ ]]; then
+    echo -e "${RED}[ERROR] Invalid model reference.${NC}"
+    return 1
+  fi
+  allowed="$(grep -E '^AI_ALLOWED_MODELS=' "${PROJECT_DIR}/.env" 2>/dev/null | tail -n1 | cut -d= -f2-)"
+  chat="$(grep -E '^AI_DEFAULT_CHAT_MODEL=' "${PROJECT_DIR}/.env" 2>/dev/null | tail -n1 | cut -d= -f2-)"
+  embed="$(grep -E '^AI_DEFAULT_EMBED_MODEL=' "${PROJECT_DIR}/.env" 2>/dev/null | tail -n1 | cut -d= -f2-)"
+  chat="${chat:-qwen2.5:1.7b}"
+  embed="${embed:-bge-m3}"
+  if [[ "${model}" != "${chat}" && "${model}" != "${embed}" && "${model}" != "${chat}:latest" && "${model}" != "${embed}:latest" && ",${allowed}," != *",${model},"* ]]; then
+    echo -e "${RED}[ERROR] Model is not allowlisted. Add its exact reference to AI_ALLOWED_MODELS in .env first.${NC}"
+    return 1
   fi
   print_header
   check_docker
-  if ! is_container_running; then
-    echo -e "${YELLOW}[*] Engine container not running. Starting it now...${NC}"
-    cmd_start
-  fi
-  echo -e "${BLUE}[*] Pulling model '${model}' into persistent storage (hse_ai_models)...${NC}"
-  docker exec -it "${CONTAINER_NAME}" ollama pull "${model}"
+  if ! is_container_running; then cmd_start; fi
+  echo -e "${BLUE}[*] Pulling explicitly allowlisted model '${model}' into persistent storage...${NC}"
+  docker exec "${CONTAINER_NAME}" ollama pull "${model}"
   echo -e "${GREEN}[✓] Successfully pulled model '${model}'.${NC}"
 }
 
@@ -141,13 +147,22 @@ cmd_list() {
 }
 
 cmd_rm() {
-  local model="$1"
-  if [ -z "${model}" ]; then
-    echo -e "${RED}[ERROR] Model name required. Example: ./scripts/manage-ai.sh rm qwen2.5:1.7b${NC}"
-    exit 1
+  local model="${1:-}" chat embed confirm
+  if [[ -z "${model}" ]]; then
+    echo -e "${RED}[ERROR] Model name required.${NC}"
+    return 1
+  fi
+  chat="$(grep -E '^AI_DEFAULT_CHAT_MODEL=' "${PROJECT_DIR}/.env" 2>/dev/null | tail -n1 | cut -d= -f2-)"
+  embed="$(grep -E '^AI_DEFAULT_EMBED_MODEL=' "${PROJECT_DIR}/.env" 2>/dev/null | tail -n1 | cut -d= -f2-)"
+  chat="${chat:-qwen2.5:1.7b}"; embed="${embed:-bge-m3}"
+  if [[ "${model}" == "${chat}" || "${model}" == "${embed}" || "${model}" == "${chat}:latest" || "${model}" == "${embed}:latest" ]]; then
+    echo -e "${RED}[ERROR] Cannot delete a configured default chat/embedding model.${NC}"
+    return 1
   fi
   check_docker
-  echo -e "${BLUE}[*] Removing model '${model}' from persistent storage...${NC}"
+  if ! is_container_running; then echo -e "${YELLOW}[ERROR] AI container is not running.${NC}"; return 1; fi
+  read -r -p "Type DELETE to permanently remove '${model}': " confirm
+  [[ "${confirm}" == "DELETE" ]] || { echo "Cancelled."; return 0; }
   docker exec "${CONTAINER_NAME}" ollama rm "${model}"
   echo -e "${GREEN}[✓] Removed model '${model}'.${NC}"
 }
@@ -228,10 +243,19 @@ cmd_set_default() {
   fi
   print_header
   echo -e "${BLUE}[*] Setting default AI chat model to '${model}' in .env...${NC}"
+  if [[ -z "${model}" || ! "${model}" =~ ^[A-Za-z0-9._/-]+(:[A-Za-z0-9._-]+)?$ ]]; then
+    echo -e "${RED}[ERROR] Invalid model reference.${NC}"
+    return 1
+  fi
+  check_docker
+  if ! is_container_running || ! docker exec "${CONTAINER_NAME}" ollama list | awk 'NR > 1 {print $1}' | grep -Fxq "${model}"; then
+    echo -e "${RED}[ERROR] The selected model must already be installed before setting it as default.${NC}"
+    return 1
+  fi
   local env_file="${PROJECT_DIR}/.env"
   if [ -f "${env_file}" ]; then
     if grep -q "^AI_DEFAULT_CHAT_MODEL=" "${env_file}"; then
-      sed -i "s/^AI_DEFAULT_CHAT_MODEL=.*/AI_DEFAULT_CHAT_MODEL=${model}/" "${env_file}"
+      sed -i "s|^AI_DEFAULT_CHAT_MODEL=.*|AI_DEFAULT_CHAT_MODEL=${model}|" "${env_file}"
     else
       echo "AI_DEFAULT_CHAT_MODEL=${model}" >> "${env_file}"
     fi
@@ -267,11 +291,17 @@ cmd_toggle() {
 cmd_update() {
   print_header
   check_docker
-  echo -e "${BLUE}[*] Updating Local AI Engine container image (ollama/ollama:latest)...${NC}"
-  docker pull ollama/ollama:latest
-  echo -e "${BLUE}[*] Recreating AI container with updated image...${NC}"
-  docker compose -f "${COMPOSE_FILE}" up -d --force-recreate hse-ai-engine
-  echo -e "${GREEN}[✓] Local AI Engine updated and running.${NC}"
+  local image
+  image="$(grep -E '^OLLAMA_IMAGE=' "${PROJECT_DIR}/.env" 2>/dev/null | tail -n1 | cut -d= -f2-)"
+  image="${image:-ollama/ollama:0.40.13}"
+  if [[ "${image}" == *":latest" ]]; then
+    echo -e "${RED}[ERROR] Floating :latest image is blocked. Pin an explicit version in .env.${NC}"
+    return 1
+  fi
+  echo -e "${BLUE}[*] Updating configured Ollama image: ${image}${NC}"
+  docker compose -f "${PROJECT_DIR}/docker-compose.server.yml" pull hse-ai-engine
+  docker compose -f "${PROJECT_DIR}/docker-compose.server.yml" up -d --no-deps hse-ai-engine
+  echo -e "${GREEN}[✓] Configured Ollama image update completed.${NC}"
 }
 
 cmd_uninstall() {
@@ -284,7 +314,8 @@ cmd_uninstall() {
     return 0
   fi
   echo -e "${BLUE}[*] Stopping and removing hse-ai-engine container...${NC}"
-  docker compose -f "${COMPOSE_FILE}" down 2>/dev/null || true
+  docker compose -f "${COMPOSE_FILE}" stop hse-ai-engine 2>/dev/null || true
+  docker compose -f "${COMPOSE_FILE}" rm -f hse-ai-engine 2>/dev/null || true
   read -r -p "Do you ALSO want to delete the persistent models volume (hse_ai_models)? [y/N]: " del_vol
   if [[ "${del_vol}" =~ ^[Yy]$ ]]; then
     docker volume rm hse_ai_models 2>/dev/null || true
