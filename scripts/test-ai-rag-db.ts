@@ -274,7 +274,7 @@ async function run() {
 
         await db.execute(sql`
           CREATE OR REPLACE FUNCTION reject_ai_rag_chunk_insert()
-          RETURNS trigger AS $
+          RETURNS trigger AS $func$
           BEGIN
             RAISE EXCEPTION 'simulated chunk persistence failure';
           END;
