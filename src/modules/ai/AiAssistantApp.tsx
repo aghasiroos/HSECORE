@@ -71,6 +71,8 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
   const activeSession = sessions.find(s => s.id === activeSessionId) || sessions[0];
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const migratedRef = useRef(false);
+  const autoCreateOnceRef = useRef(false);
+  const deletingRef = useRef(false);
 
   const loadSessionsFromServer = async () => {
     setSessionsLoading(true);
@@ -117,7 +119,9 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
         }
       }
 
-      if (list.length === 0) {
+      // Auto-create only on first empty load of this mount — never after user deletes all sessions
+      if (list.length === 0 && !autoCreateOnceRef.current) {
+        autoCreateOnceRef.current = true;
         const createRes = await authFetch('/api/v1/ai/sessions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -137,6 +141,8 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
             },
           ];
         }
+      } else if (list.length > 0) {
+        autoCreateOnceRef.current = true;
       }
 
       setSessions(list);
@@ -218,6 +224,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
   };
 
   const handleNewSession = async () => {
+    if (deletingRef.current) return;
     try {
       const res = await authFetch('/api/v1/ai/sessions', {
         method: 'POST',
@@ -244,20 +251,37 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
   };
 
   const handleDeleteSession = async (sessionId: string, e: React.MouseEvent) => {
+    e.preventDefault();
     e.stopPropagation();
-    try {
-      await authFetch(`/api/v1/ai/sessions/${sessionId}`, { method: 'DELETE' });
-    } catch {
-      // continue
-    }
-    const filtered = sessions.filter(s => s.id !== sessionId);
-    if (filtered.length === 0) {
-      await handleNewSession();
-      return;
-    }
+    if (deletingRef.current) return;
+    deletingRef.current = true;
+
+    const previous = sessions;
+    const filtered = previous.filter(s => s.id !== sessionId);
+
+    // Optimistic UI: remove immediately; do NOT auto-create a replacement session
     setSessions(filtered);
     if (activeSessionId === sessionId) {
-      setActiveSessionId(filtered[0]?.id);
+      setActiveSessionId(filtered[0]?.id || '');
+    }
+
+    try {
+      const res = await authFetch(`/api/v1/ai/sessions/${sessionId}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.success === false) {
+        // Roll back on failure
+        setSessions(previous);
+        if (activeSessionId === sessionId || !filtered.length) {
+          setActiveSessionId(sessionId);
+        }
+        setSessionsError(data.message || 'حذف گفتگو ناموفق بود.');
+      }
+    } catch {
+      setSessions(previous);
+      setActiveSessionId(prev => prev || sessionId);
+      setSessionsError('خطا در ارتباط هنگام حذف گفتگو.');
+    } finally {
+      deletingRef.current = false;
     }
   };
 
@@ -269,7 +293,34 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
 
   const handleSendMessage = async (textToSend?: string) => {
     const text = (textToSend || inputMessage).trim();
-    if (!text || isLoading || !activeSession) return;
+    if (!text || isLoading) return;
+
+    // If user deleted all sessions, create one on first send
+    let session = activeSession;
+    if (!session) {
+      try {
+        const res = await authFetch('/api/v1/ai/sessions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: text.slice(0, 35) || 'مشاوره جدید HSE و مراجع قانونی',
+            assistantId: 'GENERAL_HSE',
+          }),
+        });
+        const data = await res.json();
+        if (!data.success || !data.data) return;
+        session = {
+          id: data.data.id,
+          title: data.data.title,
+          createdAt: data.data.createdAt,
+          messages: [],
+        };
+        setSessions([session]);
+        setActiveSessionId(session.id);
+      } catch {
+        return;
+      }
+    }
 
     setInputMessage('');
 
@@ -280,18 +331,19 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
       timestamp: new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }),
     };
 
-    const updatedMessages = [...(activeSession.messages || []), userMsg];
-    let sessionTitle = activeSession.title;
-    if (activeSession.messages.length === 0) {
+    const updatedMessages = [...(session.messages || []), userMsg];
+    let sessionTitle = session.title;
+    if ((session.messages || []).length === 0) {
       sessionTitle = text.slice(0, 35);
     }
 
+    const sessionId = session.id;
     setSessions(prev =>
-      prev.map(s => (s.id === activeSession.id ? { ...s, title: sessionTitle, messages: updatedMessages } : s))
+      prev.map(s => (s.id === sessionId ? { ...s, title: sessionTitle, messages: updatedMessages } : s))
     );
 
     try {
-      await authFetch(`/api/v1/ai/sessions/${activeSession.id}/messages`, {
+      await authFetch(`/api/v1/ai/sessions/${sessionId}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ role: 'user', content: text }),
@@ -335,12 +387,12 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
 
         setSessions(prev =>
           prev.map(s =>
-            s.id === activeSession.id ? { ...s, messages: [...updatedMessages, assistantMsg] } : s
+            s.id === sessionId ? { ...s, messages: [...updatedMessages, assistantMsg] } : s
           )
         );
 
         try {
-          await authFetch(`/api/v1/ai/sessions/${activeSession.id}/messages`, {
+          await authFetch(`/api/v1/ai/sessions/${sessionId}/messages`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -369,7 +421,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
         };
         setSessions(prev =>
           prev.map(s =>
-            s.id === activeSession.id ? { ...s, messages: [...updatedMessages, errorMsg] } : s
+            s.id === sessionId ? { ...s, messages: [...updatedMessages, errorMsg] } : s
           )
         );
       }
@@ -382,7 +434,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
       };
       setSessions(prev =>
         prev.map(s =>
-          s.id === activeSession.id ? { ...s, messages: [...updatedMessages, networkErrorMsg] } : s
+          s.id === sessionId ? { ...s, messages: [...updatedMessages, networkErrorMsg] } : s
         )
       );
     } finally {
@@ -471,6 +523,11 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
                     </p>
                   </div>
                   <button
+                    type="button"
+                    onMouseDown={e => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }}
                     onClick={e => handleDeleteSession(session.id, e)}
                     className="opacity-0 group-hover:opacity-100 p-1 hover:bg-rose-100 dark:hover:bg-rose-900/40 rounded-lg text-rose-500 transition"
                     title="حذف گفتگو"
