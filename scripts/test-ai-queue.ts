@@ -7,6 +7,8 @@ const originalConcurrency = config.aiEngine.maxConcurrency;
 const originalQueueLength = config.aiEngine.maxQueueLength;
 const originalTimeout = config.aiEngine.timeoutMs;
 const originalAllowedModels = config.aiEngine.allowedModels;
+const originalDefaultChatModel = config.aiEngine.defaultChatModel;
+const originalDefaultEmbedModel = config.aiEngine.defaultEmbedModel;
 const originalFetch = globalThis.fetch;
 
 function deferred<T = void>() {
@@ -75,24 +77,31 @@ async function run() {
     console.log('PASS queue capacity rejects excess waiting work and drains normally');
   }
 
-  // Model downloads must be explicitly allowlisted; defaults cannot be deleted.
+  // Model downloads must be explicitly allowlisted; :latest aliases cannot bypass
+  // protection of configured defaults or the exact allowlist.
   {
-    config.aiEngine.allowedModels = [config.aiEngine.defaultChatModel, config.aiEngine.defaultEmbedModel];
+    config.aiEngine.defaultChatModel = 'qwen2.5';
+    config.aiEngine.defaultEmbedModel = 'bge-m3';
+    config.aiEngine.allowedModels = ['qwen2.5', 'bge-m3'];
     const provider = new LocalAIProvider();
     let fetchCalls = 0;
     globalThis.fetch = (async () => {
       fetchCalls++;
-      throw new Error('fetch must not be called for a blocked model');
+      return new Response(JSON.stringify({}), { status: 200 });
     }) as typeof fetch;
 
     const blockedPull = await provider.pullModel('attacker/unknown-model:latest');
     assert.equal(blockedPull.success, false);
     assert.equal(fetchCalls, 0);
 
-    const protectedDelete = await provider.deleteModel(config.aiEngine.defaultChatModel);
-    assert.equal(protectedDelete.success, false);
-    assert.equal(fetchCalls, 0);
-    console.log('PASS model pull allowlist and default-model deletion protection');
+    const allowedAliasPull = await provider.pullModel('qwen2.5:latest');
+    assert.equal(allowedAliasPull.success, true);
+    assert.equal(fetchCalls, 1);
+
+    const protectedAliasDelete = await provider.deleteModel('qwen2.5:latest');
+    assert.equal(protectedAliasDelete.success, false);
+    assert.equal(fetchCalls, 1);
+    console.log('PASS model allowlist and default protection normalize omitted/:latest tags');
   }
 
   // Reachable Ollama without installed models must not be reported inference-ready.
@@ -129,5 +138,7 @@ run()
     config.aiEngine.maxQueueLength = originalQueueLength;
     config.aiEngine.timeoutMs = originalTimeout;
     config.aiEngine.allowedModels = originalAllowedModels;
+    config.aiEngine.defaultChatModel = originalDefaultChatModel;
+    config.aiEngine.defaultEmbedModel = originalDefaultEmbedModel;
     globalThis.fetch = originalFetch;
   });
