@@ -535,6 +535,50 @@ export class AIOrchestrator {
   listAssistants(_userContext?: UserContext): AIAssistantMetadata[] {
     return [COMPREHENSIVE_HSE_ASSISTANT];
   }
+
+  /**
+   * AI Module Registry — coverage report across HSECORE modules.
+   * Reflects which modules have live read-only tools wired into the orchestrator.
+   */
+  getModuleCoverage(_userContext?: UserContext): import('./ai.types.ts').AIModuleCoverage[] {
+    const toolMap: Record<string, string[]> = {
+      heat: ['heat_weather_summary'],
+      ptw: ['ptw_summary'],
+      incidents: ['incidents_summary'],
+      health: ['health_medical_summary', 'nutrition_high_risk_summary'],
+      risks: ['risk_assessment_summary'],
+      five_s: ['five_s_inspections_summary'],
+      fire: ['fire_safety_summary'],
+      warnings: ['warnings_anomalies_summary'],
+      training: ['training_summary'],
+      ppe: ['ppe_summary'],
+      environment: ['environment_summary'],
+      personnel: ['personnel_org_summary'],
+      workflows: ['workflow_referrals_summary'],
+      reports: ['kpi_management_summary'],
+      search: ['universal_search'],
+    };
+
+    const modules: import('./ai.types.ts').AIModuleCoverage[] = [
+      { moduleId: 'dashboard', moduleNameFa: 'داشبورد جامع مدیریتی', connected: true, tools: toolMap.reports, assistantIds: ['GENERAL_HSE', 'MANAGEMENT_ANALYTICS'] },
+      { moduleId: 'heat', moduleNameFa: 'پایش استرس گرمایی', connected: true, tools: toolMap.heat, assistantIds: ['GENERAL_HSE'] },
+      { moduleId: 'ptw', moduleNameFa: 'پروانه کار ایمن (PTW)', connected: true, tools: toolMap.ptw, assistantIds: ['GENERAL_HSE', 'PTW_SHERPA'] },
+      { moduleId: 'incidents', moduleNameFa: 'گزارشات ناهنجاری و حوادث', connected: true, tools: toolMap.incidents, assistantIds: ['GENERAL_HSE', 'INCIDENT_ANALYSIS'] },
+      { moduleId: 'health', moduleNameFa: 'واحد بهداشت و محیط زیست / طب کار', connected: true, tools: toolMap.health, assistantIds: ['GENERAL_HSE', 'OCCUPATIONAL_HEALTH', 'NUTRITION_LIFESTYLE'] },
+      { moduleId: 'risks', moduleNameFa: 'ارزیابی ریسک هوشمند (AI JSA)', connected: true, tools: toolMap.risks, assistantIds: ['GENERAL_HSE', 'RISK_ASSESSMENT'] },
+      { moduleId: 'five_s', moduleNameFa: 'نظام آراستگی ۵S و بازرسی‌ها', connected: true, tools: toolMap.five_s, assistantIds: ['GENERAL_HSE', 'INSPECTION_5S'] },
+      { moduleId: 'fire', moduleNameFa: 'واحد آتش‌نشانی و امداد', connected: true, tools: toolMap.fire, assistantIds: ['GENERAL_HSE'] },
+      { moduleId: 'warnings', moduleNameFa: 'ثبت و پیگیری اخطارها', connected: true, tools: toolMap.warnings, assistantIds: ['GENERAL_HSE'] },
+      { moduleId: 'training', moduleNameFa: 'مدیریت و تقویم آموزش', connected: true, tools: toolMap.training, assistantIds: ['GENERAL_HSE', 'TRAINING_COMPLIANCE'] },
+      { moduleId: 'ppe', moduleNameFa: 'تجهیزات حفاظت فردی (PPE)', connected: true, tools: toolMap.ppe, assistantIds: ['GENERAL_HSE'] },
+      { moduleId: 'environment', moduleNameFa: 'محیط زیست و پسماند', connected: true, tools: toolMap.environment, assistantIds: ['GENERAL_HSE', 'ENVIRONMENT_WASTE'] },
+      { moduleId: 'personnel', moduleNameFa: 'پرونده جامع پرسنل / ساختار سازمانی', connected: true, tools: toolMap.personnel, assistantIds: ['GENERAL_HSE'] },
+      { moduleId: 'workflows', moduleNameFa: 'کارتابل اسناد و فرآیندها', connected: true, tools: toolMap.workflows, assistantIds: ['GENERAL_HSE'] },
+      { moduleId: 'documents', moduleNameFa: 'دستورالعمل‌ها و مستندات (RAG)', connected: true, tools: [], assistantIds: ['GENERAL_HSE'], notes: 'از طریق پایگاه دانش RAG' },
+    ];
+
+    return modules;
+  }
 }
 
 export const aiOrchestrator = new AIOrchestrator();

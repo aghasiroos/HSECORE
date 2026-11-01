@@ -4,6 +4,7 @@ import { aiOrchestrator } from './ai.orchestrator.ts';
 import { aiRequestQueue } from './ai.queue.ts';
 import { aiAuditService, normalizeAILogLimit } from './ai.audit.ts';
 import { aiRagService } from './ai.rag.service.ts';
+import { aiSessionService } from './ai.sessions.ts';
 import { checkUserHasPermission, type UserContext } from '../../core/middleware/auth.ts';
 
 export class AIController {
@@ -325,6 +326,128 @@ export class AIController {
       return res.json({ success: true, data: generated, queueWaitMs: queued.queueWaitMs });
     } catch (err: any) {
       return res.status(503).json({ success: false, message: err.message || 'سرویس تولید فرآیند موقتاً در دسترس نیست.' });
+    }
+  }
+
+  // ---------- Persistent Chat Sessions ----------
+  private requireUser(req: Request): UserContext {
+    if (!req.user) throw new Error('احراز هویت الزامی است.');
+    return {
+      id: req.user.id,
+      uid: req.user.uid,
+      name: req.user.name || req.user.username,
+      role: req.user.role,
+      permissions: req.user.permissions,
+      personnelCode: req.user.personnelCode,
+      department: req.user.department,
+    };
+  }
+
+  async listSessions(req: Request, res: Response) {
+    try {
+      const user = this.requireUser(req);
+      const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 100);
+      const sessions = await aiSessionService.listSessions(user, limit);
+      return res.json({ success: true, data: sessions });
+    } catch (err: any) {
+      return res.status(err.message?.includes('احراز') ? 401 : 500).json({
+        success: false,
+        message: err.message || 'خطا در دریافت فهرست گفتگوها',
+      });
+    }
+  }
+
+  async createSession(req: Request, res: Response) {
+    try {
+      const user = this.requireUser(req);
+      const title = typeof req.body?.title === 'string' ? req.body.title.slice(0, 200) : undefined;
+      const assistantId = typeof req.body?.assistantId === 'string' ? req.body.assistantId : 'GENERAL_HSE';
+      const session = await aiSessionService.createSession(user, title, assistantId);
+      return res.status(201).json({ success: true, data: session });
+    } catch (err: any) {
+      return res.status(err.message?.includes('احراز') ? 401 : 500).json({
+        success: false,
+        message: err.message || 'خطا در ایجاد گفتگو',
+      });
+    }
+  }
+
+  async getSessionMessages(req: Request, res: Response) {
+    try {
+      const user = this.requireUser(req);
+      const sessionId = req.params.id;
+      if (!sessionId) return res.status(400).json({ success: false, message: 'شناسه گفتگو الزامی است.' });
+      const messages = await aiSessionService.getMessages(sessionId, user);
+      return res.json({ success: true, data: messages });
+    } catch (err: any) {
+      const status = err.message?.includes('مجاز نیست') ? 403 : err.message?.includes('احراز') ? 401 : 500;
+      return res.status(status).json({ success: false, message: err.message || 'خطا در دریافت پیام‌ها' });
+    }
+  }
+
+  async appendSessionMessage(req: Request, res: Response) {
+    try {
+      const user = this.requireUser(req);
+      const sessionId = req.params.id;
+      const { role, content, toolsUsed, citations, durationMs, model } = req.body || {};
+      if (!sessionId) return res.status(400).json({ success: false, message: 'شناسه گفتگو الزامی است.' });
+      if (role !== 'user' && role !== 'assistant' && role !== 'system') {
+        return res.status(400).json({ success: false, message: 'نقش پیام نامعتبر است.' });
+      }
+      if (typeof content !== 'string' || !content.trim()) {
+        return res.status(400).json({ success: false, message: 'متن پیام الزامی است.' });
+      }
+      const saved = await aiSessionService.appendMessage(sessionId, user, {
+        role,
+        content: content.slice(0, 50000),
+        toolsUsed: Array.isArray(toolsUsed) ? toolsUsed : undefined,
+        citations: Array.isArray(citations) ? citations : undefined,
+        durationMs: typeof durationMs === 'number' ? durationMs : undefined,
+        model: typeof model === 'string' ? model : undefined,
+      });
+      return res.status(201).json({ success: true, data: saved });
+    } catch (err: any) {
+      const status = err.message?.includes('مجاز نیست') ? 403 : err.message?.includes('احراز') ? 401 : 500;
+      return res.status(status).json({ success: false, message: err.message || 'خطا در ذخیره پیام' });
+    }
+  }
+
+  async deleteSession(req: Request, res: Response) {
+    try {
+      const user = this.requireUser(req);
+      const sessionId = req.params.id;
+      if (!sessionId) return res.status(400).json({ success: false, message: 'شناسه گفتگو الزامی است.' });
+      await aiSessionService.deleteSession(sessionId, user);
+      return res.json({ success: true });
+    } catch (err: any) {
+      const status = err.message?.includes('مجاز نیست') ? 403 : err.message?.includes('احراز') ? 401 : 500;
+      return res.status(status).json({ success: false, message: err.message || 'خطا در حذف گفتگو' });
+    }
+  }
+
+  async importLocalSessions(req: Request, res: Response) {
+    try {
+      const user = this.requireUser(req);
+      const sessions = req.body?.sessions;
+      if (!Array.isArray(sessions)) {
+        return res.status(400).json({ success: false, message: 'آرایه sessions الزامی است.' });
+      }
+      const result = await aiSessionService.importLocalSessions(user, sessions);
+      return res.json({ success: true, data: result });
+    } catch (err: any) {
+      return res.status(err.message?.includes('احراز') ? 401 : 500).json({
+        success: false,
+        message: err.message || 'خطا در مهاجرت تاریخچه محلی',
+      });
+    }
+  }
+
+  async getModuleCoverage(req: Request, res: Response) {
+    try {
+      const coverage = aiOrchestrator.getModuleCoverage(req.user);
+      return res.json({ success: true, data: coverage });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, message: err.message || 'خطا در دریافت گزارش پوشش' });
     }
   }
 }

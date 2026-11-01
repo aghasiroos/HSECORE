@@ -24,6 +24,36 @@ router.post('/chat', requireAuth, (req, res, next) => {
   aiController.chat(req, res).catch(next);
 });
 
+// ---------- Persistent Chat Sessions (user-isolated, replaces localStorage) ----------
+router.get('/sessions', requireAuth, (req, res, next) => {
+  aiController.listSessions(req, res).catch(next);
+});
+
+router.post('/sessions', requireAuth, (req, res, next) => {
+  aiController.createSession(req, res).catch(next);
+});
+
+router.get('/sessions/:id/messages', requireAuth, (req, res, next) => {
+  aiController.getSessionMessages(req, res).catch(next);
+});
+
+router.post('/sessions/:id/messages', requireAuth, (req, res, next) => {
+  aiController.appendSessionMessage(req, res).catch(next);
+});
+
+router.delete('/sessions/:id', requireAuth, (req, res, next) => {
+  aiController.deleteSession(req, res).catch(next);
+});
+
+router.post('/sessions/import-local', requireAuth, (req, res, next) => {
+  aiController.importLocalSessions(req, res).catch(next);
+});
+
+// AI Module Registry / coverage report
+router.get('/coverage', requireAuth, (req, res, next) => {
+  aiController.getModuleCoverage(req, res).catch(next);
+});
+
 // AI Audit logs & telemetry (Admins and HSE Managers)
 router.get('/audit', requireAuth, requirePermission('audit:read'), (req, res, next) => {
   aiController.getAuditLogs(req, res).catch(next);

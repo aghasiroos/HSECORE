@@ -2,7 +2,17 @@
  * HSECORE Enterprise Local AI - Core Type Definitions
  */
 
-export type AIAssistantId = 'GENERAL_HSE';
+export type AIAssistantId =
+  | 'GENERAL_HSE'
+  | 'PTW_SHERPA'
+  | 'INCIDENT_ANALYSIS'
+  | 'RISK_ASSESSMENT'
+  | 'OCCUPATIONAL_HEALTH'
+  | 'NUTRITION_LIFESTYLE'
+  | 'ENVIRONMENT_WASTE'
+  | 'INSPECTION_5S'
+  | 'TRAINING_COMPLIANCE'
+  | 'MANAGEMENT_ANALYTICS';
 
 export interface AIAssistantMetadata {
   id: AIAssistantId;
@@ -15,6 +25,16 @@ export interface AIAssistantMetadata {
   associatedModule: string;
   tools: string[];
   icon: string;
+}
+
+/** Module coverage entry for AI Module Registry */
+export interface AIModuleCoverage {
+  moduleId: string;
+  moduleNameFa: string;
+  connected: boolean;
+  tools: string[];
+  assistantIds: AIAssistantId[];
+  notes?: string;
 }
 
 export interface AIChatMessage {
