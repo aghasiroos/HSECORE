@@ -21,7 +21,6 @@ services:
       - "OLLAMA_KEEP_ALIVE=${AI_KEEP_ALIVE:-15m}"
       - "OLLAMA_FLASH_ATTENTION=0"
       - "OLLAMA_ORIGINS="
-      - "OLLAMA_ORIGINS="
       - "OMP_NUM_THREADS=${AI_CPU_THREADS:-4}"
     volumes:
       # Persistent volume ensures downloaded models are preserved across HSECORE container updates
