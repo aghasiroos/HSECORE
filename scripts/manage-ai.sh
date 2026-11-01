@@ -8,7 +8,7 @@ set -eo pipefail
 
 CONTAINER_NAME="hse-ai-engine"
 NETWORK_NAME="hse-network"
-COMPOSE_FILE="docker-compose.ai.yml"
+COMPOSE_FILE="docker-compose.server.yml"
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # Colors
@@ -127,7 +127,7 @@ cmd_pull() {
     cmd_start
   fi
   echo -e "${BLUE}[*] Pulling model '${model}' into persistent storage (hse_ai_models)...${NC}"
-  docker exec -it "${CONTAINER_NAME}" ollama pull "${model}"
+  docker exec "${CONTAINER_NAME}" ollama pull "${model}"
   echo -e "${GREEN}[✓] Successfully pulled model '${model}'.${NC}"
 }
 
@@ -268,7 +268,8 @@ cmd_update() {
   print_header
   check_docker
   echo -e "${BLUE}[*] Updating Local AI Engine container image (ollama/ollama:latest)...${NC}"
-  docker pull ollama/ollama:latest
+  echo "ERROR: automatic floating :latest updates are disabled; pin OLLAMA_IMAGE and perform a controlled update."
+  return 1
   echo -e "${BLUE}[*] Recreating AI container with updated image...${NC}"
   docker compose -f "${COMPOSE_FILE}" up -d --force-recreate hse-ai-engine
   echo -e "${GREEN}[✓] Local AI Engine updated and running.${NC}"
@@ -284,7 +285,8 @@ cmd_uninstall() {
     return 0
   fi
   echo -e "${BLUE}[*] Stopping and removing hse-ai-engine container...${NC}"
-  docker compose -f "${COMPOSE_FILE}" down 2>/dev/null || true
+  docker compose -f "${COMPOSE_FILE}" stop hse-ai-engine 2>/dev/null || true
+  docker compose -f "${COMPOSE_FILE}" rm -f hse-ai-engine 2>/dev/null || true
   read -r -p "Do you ALSO want to delete the persistent models volume (hse_ai_models)? [y/N]: " del_vol
   if [[ "${del_vol}" =~ ^[Yy]$ ]]; then
     docker volume rm hse_ai_models 2>/dev/null || true
