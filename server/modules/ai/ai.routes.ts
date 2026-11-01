@@ -87,6 +87,24 @@ router.get('/audit', requireAuth, requirePermission('audit:read'), (req, res, ne
 });
 
 // Admin-only model management
+
+// Deployment jobs — async pull/delete with progress (Phase 3c)
+router.get('/jobs', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR', 'HSE_MANAGER'), (req, res, next) => {
+  aiController.listJobs(req, res).catch(next);
+});
+
+router.get('/jobs/:id', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR', 'HSE_MANAGER'), (req, res, next) => {
+  aiController.getJob(req, res).catch(next);
+});
+
+router.post('/jobs/pull', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR'), (req, res, next) => {
+  aiController.enqueuePullJob(req, res).catch(next);
+});
+
+router.post('/jobs/delete', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR'), (req, res, next) => {
+  aiController.enqueueDeleteJob(req, res).catch(next);
+});
+
 router.post('/models/pull', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR'), (req, res, next) => {
   aiController.pullModel(req, res).catch(next);
 });

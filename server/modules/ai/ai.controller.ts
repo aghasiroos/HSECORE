@@ -6,6 +6,7 @@ import { aiAuditService, normalizeAILogLimit } from './ai.audit.ts';
 import { aiRagService } from './ai.rag.service.ts';
 import { aiSessionService } from './ai.sessions.ts';
 import { aiModelManager } from './ai.model-manager.ts';
+import { aiJobManager } from './ai.job-manager.ts';
 import { checkUserHasPermission, type UserContext } from '../../core/middleware/auth.ts';
 
 export class AIController {
@@ -537,6 +538,55 @@ export class AIController {
       return res.json({ success: true, data: { synced: count, providerId } });
     } catch (err: any) {
       return res.status(500).json({ success: false, message: err.message || 'خطا در همگام‌سازی مدل‌ها' });
+    }
+  }
+
+
+  async listJobs(req: Request, res: Response) {
+    try {
+      const limit = Math.min(Math.max(Number(req.query.limit) || 30, 1), 100);
+      const data = await aiJobManager.listJobs(limit);
+      return res.json({ success: true, data });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, message: err.message || 'خطا در دریافت فهرست عملیات' });
+    }
+  }
+
+  async getJob(req: Request, res: Response) {
+    try {
+      const job = await aiJobManager.getJob(req.params.id);
+      if (!job) return res.status(404).json({ success: false, message: 'عملیات یافت نشد.' });
+      return res.json({ success: true, data: job });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, message: err.message || 'خطا در دریافت وضعیت عملیات' });
+    }
+  }
+
+  async enqueuePullJob(req: Request, res: Response) {
+    try {
+      const modelName = req.body?.modelName || req.body?.model || req.body?.name;
+      if (!modelName || typeof modelName !== 'string') {
+        return res.status(400).json({ success: false, message: 'نام مدل الزامی است.' });
+      }
+      const createdBy = req.user?.uid || req.user?.username || String(req.user?.id || '');
+      const job = await aiJobManager.enqueuePull(modelName.trim(), createdBy);
+      return res.status(202).json({ success: true, data: job });
+    } catch (err: any) {
+      return res.status(400).json({ success: false, message: err.message || 'خطا در صف‌گذاری دریافت مدل' });
+    }
+  }
+
+  async enqueueDeleteJob(req: Request, res: Response) {
+    try {
+      const modelName = req.body?.modelName || req.body?.model || req.body?.name;
+      if (!modelName || typeof modelName !== 'string') {
+        return res.status(400).json({ success: false, message: 'نام مدل الزامی است.' });
+      }
+      const createdBy = req.user?.uid || req.user?.username || String(req.user?.id || '');
+      const job = await aiJobManager.enqueueDelete(modelName.trim(), createdBy);
+      return res.status(202).json({ success: true, data: job });
+    } catch (err: any) {
+      return res.status(400).json({ success: false, message: err.message || 'خطا در صف‌گذاری حذف مدل' });
     }
   }
 
