@@ -278,7 +278,7 @@ async function run() {
           BEGIN
             RAISE EXCEPTION 'simulated chunk persistence failure';
           END;
-          $ LANGUAGE plpgsql
+          $func$ LANGUAGE plpgsql
         `);
         await db.execute(sql`
           CREATE TRIGGER reject_ai_rag_chunk_insert
