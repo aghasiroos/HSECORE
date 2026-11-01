@@ -7,8 +7,9 @@ services:
       args:
         - "NODE_BASE_IMAGE=${NODE_BASE_IMAGE:-node:22-alpine}"
         - "APP_VERSION=${APP_VERSION:-0.2.8}"
-        - "BUILD_ID=${BUILD_ID:-local-build}"
-        - "RELEASE_ID=${RELEASE_ID:-local-release}"
+        - "BUILD_ID=${BUILD_ID:-unknown}"
+        - "RELEASE_ID=${RELEASE_ID:-unknown}"
+        - "GIT_COMMIT=${GIT_COMMIT:-unknown}"
     container_name: hse-enterprise-app
     restart: unless-stopped
     env_file:
