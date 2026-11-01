@@ -267,12 +267,17 @@ cmd_toggle() {
 cmd_update() {
   print_header
   check_docker
-  echo -e "${BLUE}[*] Updating Local AI Engine container image (ollama/ollama:latest)...${NC}"
-  echo "ERROR: automatic floating :latest updates are disabled; pin OLLAMA_IMAGE and perform a controlled update."
-  return 1
-  echo -e "${BLUE}[*] Recreating AI container with updated image...${NC}"
-  docker compose -f "${COMPOSE_FILE}" up -d --force-recreate hse-ai-engine
-  echo -e "${GREEN}[✓] Local AI Engine updated and running.${NC}"
+  local image
+  image="$(grep -E '^OLLAMA_IMAGE=' "${PROJECT_DIR}/.env" 2>/dev/null | tail -n1 | cut -d= -f2-)"
+  image="${image:-ollama/ollama:0.40.13}"
+  if [[ "${image}" == *":latest" ]]; then
+    echo -e "${RED}[ERROR] Floating :latest image is blocked. Pin an explicit version in .env.${NC}"
+    return 1
+  fi
+  echo -e "${BLUE}[*] Updating configured Ollama image: ${image}${NC}"
+  docker compose -f "${PROJECT_DIR}/docker-compose.server.yml" pull hse-ai-engine
+  docker compose -f "${PROJECT_DIR}/docker-compose.server.yml" up -d --no-deps hse-ai-engine
+  echo -e "${GREEN}[✓] Configured Ollama image update completed.${NC}"
 }
 
 cmd_uninstall() {
