@@ -2,6 +2,10 @@ import { GoogleGenAI } from '@google/genai';
 import { config } from '../../core/config.ts';
 import { logger } from '../../core/logger.ts';
 import { localAIProvider, OllamaHealthStatus, OllamaModelInfo } from './ai.local-provider.ts';
+import { bootstrapAIProviders, aiProviderRegistry } from './provider/index.ts';
+
+// Register default Ollama provider once (idempotent)
+bootstrapAIProviders();
 
 let aiClient: GoogleGenAI | null = null;
 let cachedApiKey: string = '';
@@ -86,6 +90,24 @@ export class AIService {
    */
   async deleteModel(modelName: string): Promise<{ success: boolean; message: string }> {
     return localAIProvider.deleteModel(modelName);
+  }
+
+  /**
+   * Provider registry surface (Phase 3a — Ollama only; more engines later).
+   */
+  listProviders() {
+    bootstrapAIProviders();
+    return aiProviderRegistry.list();
+  }
+
+  getDefaultProviderId(): string | null {
+    bootstrapAIProviders();
+    return aiProviderRegistry.getDefaultId();
+  }
+
+  getProvider(providerId?: string) {
+    bootstrapAIProviders();
+    return aiProviderRegistry.get(providerId);
   }
 
   /**

@@ -452,5 +452,21 @@ export class AIController {
   }
 }
 
+
+  async listProviders(_req: Request, res: Response) {
+    try {
+      const providers = aiService.listProviders();
+      return res.json({
+        success: true,
+        data: {
+          providers,
+          defaultProviderId: aiService.getDefaultProviderId(),
+        },
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, message: err.message || 'خطا در دریافت فهرست موتورهای هوش مصنوعی' });
+    }
+  }
+
 export const aiController = new AIController();
 

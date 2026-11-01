@@ -19,6 +19,11 @@ router.get('/models', requireAuth, (req, res, next) => {
   aiController.listModels(req, res).catch(next);
 });
 
+// Provider registry (Phase 3a — currently Ollama only)
+router.get('/providers', requireAuth, (req, res, next) => {
+  aiController.listProviders(req, res).catch(next);
+});
+
 // Chat endpoint with orchestrator & domain tool execution
 router.post('/chat', requireAuth, (req, res, next) => {
   aiController.chat(req, res).catch(next);
