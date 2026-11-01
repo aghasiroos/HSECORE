@@ -7,9 +7,9 @@
 set -eo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-AI_COMPOSE="${PROJECT_DIR}/docker-compose.ai.yml"
+AI_COMPOSE="${PROJECT_DIR}/docker-compose.server.yml"
 CONTAINER_NAME="hse-ai-engine"
-PRIMARY_CHAT_MODEL="qwen2.5:1.7b"
+PRIMARY_CHAT_MODEL="SparkLLM/Spark-X2.6-4B:q4_k_m"
 PRIMARY_EMBED_MODEL="bge-m3"
 
 RED='\033[0;31m'
@@ -23,7 +23,7 @@ NC='\033[0m'
 cd "${PROJECT_DIR}"
 
 echo -e "${BOLD}${CYAN}==================================================================${NC}"
-echo -e " ${BOLD}${BLUE}HSECORE Enterprise AI${NC} - ${BOLD}${GREEN}Phase 2 Automated Setup & Test${NC}"
+echo -e " ${BOLD}${BLUE}HSECORE Enterprise AI${NC} - ${BOLD}${GREEN}Phase 3 Runtime Setup & Verification${NC}"
 echo -e "${BOLD}${CYAN}==================================================================${NC}"
 
 # 1. System Prerequisite Check
@@ -56,7 +56,7 @@ echo -e "  ${GREEN}[✓] Persistent storage volume 'hse_ai_models' verified.${NC
 
 # 3. Container Deployment & Resource Enforcements
 echo -e "\n${BOLD}[3/6] Starting Local AI Engine Container with Resource Ceilings...${NC}"
-docker compose -f "${AI_COMPOSE}" up -d hse-ai-engine
+docker compose -f "${AI_COMPOSE}" --env-file "${PROJECT_DIR}/.env" up -d --no-deps hse-ai-engine
 
 echo -e "  Waiting for Ollama internal runtime initialization..."
 MAX_WAIT=20
@@ -99,8 +99,8 @@ if docker exec "${CONTAINER_NAME}" ollama list | grep -q "${PRIMARY_CHAT_MODEL}"
   echo -e "  ${GREEN}[✓] Primary Chat Model '${PRIMARY_CHAT_MODEL}' already exists in persistent volume.${NC}"
 else
   echo -e "  Downloading and verifying Primary Chat Model (${PRIMARY_CHAT_MODEL})..."
-  docker exec "${CONTAINER_NAME}" ollama pull "${PRIMARY_CHAT_MODEL}"
-  echo -e "  ${GREEN}[✓] Chat model installed successfully.${NC}"
+  echo -e "  ${YELLOW}[NOTE] Automatic model download is disabled. Pull the allowlisted model explicitly after runtime verification.${NC}"
+  echo -e "  ${YELLOW}[NOTE] Chat model pull was intentionally skipped.${NC}"
 fi
 
 # Check if embedding model already exists
@@ -108,8 +108,8 @@ if docker exec "${CONTAINER_NAME}" ollama list | grep -q "${PRIMARY_EMBED_MODEL}
   echo -e "  ${GREEN}[✓] Primary Embed Model '${PRIMARY_EMBED_MODEL}' already exists in persistent volume.${NC}"
 else
   echo -e "  Downloading and verifying Primary Embed Model (${PRIMARY_EMBED_MODEL})..."
-  docker exec "${CONTAINER_NAME}" ollama pull "${PRIMARY_EMBED_MODEL}" || {
-    echo -e "  ${YELLOW}[NOTE] Embed model pull will be deferred to RAG phase.${NC}"
+  echo -e "  ${YELLOW}[NOTE] Embedding model pull is intentionally deferred to the explicit model-management step.${NC}" || {
+    echo -e "  ${YELLOW}[NOTE] Embed model pull remains an explicit administrator action.${NC}"
   }
 fi
 
@@ -119,7 +119,11 @@ TEST_PROMPT="لطفاً در یک جمله کاربرد سامانه HSECORE د�
 echo -e "  Prompt: '${TEST_PROMPT}'"
 
 START_TIME=$(date +%s%N)
-TEST_OUTPUT=$(docker exec "${CONTAINER_NAME}" ollama run "${PRIMARY_CHAT_MODEL}" "${TEST_PROMPT}" 2>/dev/null || echo "Test failed")
+if docker exec "${CONTAINER_NAME}" ollama list 2>/dev/null | grep -q "${PRIMARY_CHAT_MODEL}"; then
+  TEST_OUTPUT=$(docker exec "${CONTAINER_NAME}" ollama run "${PRIMARY_CHAT_MODEL}" "${TEST_PROMPT}" 2>/dev/null || echo "Test failed")
+else
+  TEST_OUTPUT="Inference test skipped: target model is not installed."
+fi
 END_TIME=$(date +%s%N)
 DIFF_MS=$(( (END_TIME - START_TIME) / 1000000 ))
 
@@ -127,11 +131,11 @@ echo -e "  Response: ${CYAN}${TEST_OUTPUT}${NC}"
 echo -e "  Latency : ${GREEN}${DIFF_MS} ms${NC}"
 
 echo -e "\n${BOLD}${CYAN}==================================================================${NC}"
-echo -e " ${BOLD}${GREEN}PHASE 2 COMPLETED SUCCESSFULLY!${NC}"
+echo -e " ${BOLD}${GREEN}PHASE 3 RUNTIME SETUP COMPLETED!${NC}"
 echo -e " - Container       : ${CONTAINER_NAME} (Active, Healthcheck OK)"
 echo -e " - CPU Limit       : 4.0 Cores (Reserved: 1.0 Core)"
 echo -e " - RAM Limit       : 4096 MB (Reserved: 1024 MB)"
 echo -e " - Persistent Vol  : hse_ai_models (Model persistence guaranteed)"
 echo -e " - Network         : Isolated inside hse-network (No WAN exposure)"
-echo -e " - Installed Model : ${PRIMARY_CHAT_MODEL}"
+echo -e " - Chat Model Target: ${PRIMARY_CHAT_MODEL} (not auto-downloaded)"
 echo -e "${BOLD}${CYAN}==================================================================${NC}"
