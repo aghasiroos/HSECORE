@@ -45,7 +45,7 @@ concurrency:
 jobs:
   ai-acl:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
     services:
       postgres:
         image: postgres:16-alpine
@@ -106,3 +106,12 @@ jobs:
         run: npm run lint
       - name: Production build validation
         run: npm run build
+      - name: Build and verify production Docker image provenance
+        run: |
+          docker build --pull \
+            --build-arg GIT_COMMIT="$GITHUB_SHA" \
+            --build-arg BUILD_ID="ci-$GITHUB_RUN_ID" \
+            --build-arg RELEASE_ID="ci-$GITHUB_RUN_NUMBER" \
+            --tag "hsecore-ci:$GITHUB_SHA" \
+            --file Dockerfile.prod .
+          test "$(docker image inspect "hsecore-ci:$GITHUB_SHA" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" = "$GITHUB_SHA"
