@@ -80,6 +80,25 @@ export class LocalAIProvider {
     return normalized;
   }
 
+  /**
+   * Ollama treats an omitted tag as :latest. Use the same canonical reference
+   * for allowlists, inventory checks and protection of configured default models.
+   */
+  private canonicalModelName(name: string): string | null {
+    const normalized = this.normalizeModelName(name);
+    if (!normalized) return null;
+    const separator = normalized.lastIndexOf(':');
+    const repository = separator === -1 ? normalized : normalized.slice(0, separator);
+    const tag = separator === -1 ? 'latest' : normalized.slice(separator + 1);
+    return `${repository.toLowerCase()}:${tag.toLowerCase()}`;
+  }
+
+  private sameModelName(left: string, right: string): boolean {
+    const canonicalLeft = this.canonicalModelName(left);
+    const canonicalRight = this.canonicalModelName(right);
+    return canonicalLeft !== null && canonicalLeft === canonicalRight;
+  }
+
   private markOfflineIfNetworkError(err: any): boolean {
     const msg = String(err?.message || err || '').toLowerCase();
     const isNetErr =
@@ -217,9 +236,9 @@ export class LocalAIProvider {
       status.installedModels = data.models || [];
       const installedNames = new Set(status.installedModels.flatMap(model =>
         [model.name, model.model].filter((name): name is string => typeof name === 'string')
-      ).map(name => name.toLowerCase()));
-      status.chatModelInstalled = installedNames.has(config.aiEngine.defaultChatModel.toLowerCase());
-      status.embeddingModelInstalled = installedNames.has(config.aiEngine.defaultEmbedModel.toLowerCase());
+      ).map(name => this.canonicalModelName(name)).filter((name): name is string => name !== null));
+      status.chatModelInstalled = installedNames.has(this.canonicalModelName(config.aiEngine.defaultChatModel) || '');
+      status.embeddingModelInstalled = installedNames.has(this.canonicalModelName(config.aiEngine.defaultEmbedModel) || '');
       // Engine reachability is not equivalent to inference readiness.
       status.localInferenceReady = status.chatModelInstalled;
 
@@ -281,7 +300,7 @@ export class LocalAIProvider {
     if (!normalized) {
       return { success: false, message: 'شناسه مدل نامعتبر است.' };
     }
-    const allowed = config.aiEngine.allowedModels.some(name => name.toLowerCase() === normalized.toLowerCase());
+    const allowed = config.aiEngine.allowedModels.some(name => this.sameModelName(name, normalized));
     if (!allowed) {
       return { success: false, message: 'این مدل در فهرست مجاز دانلود مدل‌های HSECORE قرار ندارد.' };
     }
@@ -332,8 +351,8 @@ export class LocalAIProvider {
     const protectedModels = [
       config.aiEngine.defaultChatModel,
       config.aiEngine.defaultEmbedModel,
-    ].map(name => name.toLowerCase());
-    if (protectedModels.includes(normalized.toLowerCase())) {
+    ];
+    if (protectedModels.some(name => this.sameModelName(name, normalized))) {
       return { success: false, message: 'حذف مدل پیش‌فرض گفت‌وگو یا embedding مجاز نیست.' };
     }
     if (this.pullInProgress || this.activeCount > 0 || this.queue.length > 0) {
@@ -342,7 +361,7 @@ export class LocalAIProvider {
 
     const installed = await this.listInstalledModels();
     const exists = installed.some(model =>
-      [model.name, model.model].some(name => typeof name === 'string' && name.toLowerCase() === normalized.toLowerCase())
+      [model.name, model.model].some(name => typeof name === 'string' && this.sameModelName(name, normalized))
     );
     if (!exists) return { success: false, message: 'مدل موردنظر در موتور محلی نصب نشده است.' };
     // Re-check after the inventory request, then lock inference during deletion.
