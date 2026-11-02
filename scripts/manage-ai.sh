@@ -159,25 +159,24 @@ cmd_restart() {
   echo -e "${GREEN}[✓] Engine restarted.${NC}"
 }
 
+is_valid_model_ref() {
+  local model="${1:-}"
+  [[ -n "${model}" && ${#model} -le 160 ]] || return 1
+  [[ "${model}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(/[A-Za-z0-9][A-Za-z0-9._-]{0,63}){0,2}(:[A-Za-z0-9][A-Za-z0-9._-]{0,63})?$ ]] || return 1
+  [[ "${model}" != *..* ]] || return 1
+  return 0
+}
+
 cmd_pull() {
-  local model="${1:-}" allowed chat embed
-  if [[ -z "${model}" || ! "${model}" =~ ^[A-Za-z0-9._/-]+(:[A-Za-z0-9._-]+)?$ ]]; then
-    echo -e "${RED}[ERROR] Invalid model reference.${NC}" >&2
+  local model="${1:-}"
+  if ! is_valid_model_ref "${model}"; then
+    echo -e "${RED}[ERROR] Model reference is required. Use a valid Ollama model name, namespace/model, or namespace/model:tag (maximum 160 characters). ${NC}" >&2
     return 1
   fi
   print_header
   check_docker
   ensure_env_file
   ensure_compose_file
-  allowed="$(grep -E '^AI_ALLOWED_MODELS=' "${ENV_FILE}" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '[:space:]' || true)"
-  chat="$(grep -E '^AI_DEFAULT_CHAT_MODEL=' "${ENV_FILE}" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '[:space:]' || true)"
-  embed="$(grep -E '^AI_DEFAULT_EMBED_MODEL=' "${ENV_FILE}" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '[:space:]' || true)"
-  chat="${chat:-qwen2.5:1.7b}"
-  embed="${embed:-bge-m3}"
-  if [[ "${model}" != "${chat}" && "${model}" != "${embed}" && "${model}" != "${chat}:latest" && "${model}" != "${embed}:latest" && ",${allowed}," != *",${model},"* ]]; then
-    echo -e "${RED}[ERROR] Model is not allowlisted. Add its exact reference to AI_ALLOWED_MODELS in .env first.${NC}" >&2
-    return 1
-  fi
   local free_gb
   free_gb="$(disk_free_gb)"
   if [[ "${free_gb}" =~ ^[0-9]+$ ]] && [ "${free_gb}" -lt 3 ]; then
@@ -189,8 +188,11 @@ cmd_pull() {
     echo -e "${YELLOW}[*] Engine container not running. Starting it now...${NC}"
     cmd_start || return 1
   fi
-  echo -e "${BLUE}[*] Pulling allowlisted model '${model}' into persistent storage...${NC}"
-  docker exec "${CONTAINER_NAME}" ollama pull "${model}"
+  echo -e "${BLUE}[*] Pulling model '${model}' into persistent storage (no model allowlist is applied)...${NC}"
+  if ! docker exec "${CONTAINER_NAME}" ollama pull "${model}"; then
+    echo -e "${RED}[ERROR] Ollama could not download '${model}'. Check the exact model name/tag and the Ollama registry response above.${NC}" >&2
+    return 1
+  fi
   echo -e "${GREEN}[✓] Successfully pulled model '${model}'.${NC}"
 }
 cmd_list() {
@@ -206,7 +208,7 @@ cmd_list() {
 
 cmd_rm() {
   local model="${1:-}" chat embed confirm
-  if [[ -z "${model}" || ! "${model}" =~ ^[A-Za-z0-9._/-]+(:[A-Za-z0-9._-]+)?$ ]]; then
+  if ! is_valid_model_ref "${model}"; then
     echo -e "${RED}[ERROR] Invalid model reference.${NC}" >&2
     return 1
   fi
@@ -231,7 +233,11 @@ cmd_rm() {
   echo -e "${GREEN}[✓] Removed model '${model}'.${NC}"
 }
 cmd_bench() {
-  local model="${1:-qwen2.5:1.7b}"
+  local model="${1:-}"
+  if ! is_valid_model_ref "${model}"; then
+    echo -e "${RED}[ERROR] Specify an installed model reference to benchmark.${NC}" >&2
+    return 1
+  fi
   print_header
   check_docker
   if ! is_container_running; then
@@ -295,7 +301,7 @@ cmd_logs() {
 
 cmd_set_default() {
   local model="${1:-}"
-  if [[ -z "${model}" || ! "${model}" =~ ^[A-Za-z0-9._/-]+(:[A-Za-z0-9._-]+)?$ ]]; then
+  if ! is_valid_model_ref "${model}"; then
     echo -e "${RED}[ERROR] Invalid model reference.${NC}" >&2
     return 1
   fi
@@ -451,7 +457,7 @@ case "${1:-}" in
     echo "  start                Start the local AI engine container"
     echo "  stop                 Stop the local AI engine container"
     echo "  restart              Restart the local AI engine container"
-    echo "  pull <model>         Pull an LLM model into persistent volume (e.g. qwen2.5:1.7b)"
+    echo "  pull <model>         Pull any valid Ollama model reference into persistent storage"
     echo "  list                 List all installed models in persistent volume"
     echo "  rm <model>           Remove a model from persistent storage"
     echo "  set-default <model>  Change default AI model in .env"
