@@ -420,7 +420,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
         const { value, done } = await reader.read();
         if (done) break;
         pending += decoder.decode(value, { stream: true });
-        const lines = pending.split('\\n');
+        const lines = pending.split('\n');
         pending = lines.pop() || '';
         for (const line of lines) if (line.trim()) applyEvent(line);
       }
