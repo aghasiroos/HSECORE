@@ -73,6 +73,24 @@ export default function AiManagementTab({ language = 'fa', currentUser }: AiMana
     fetchData();
   }, []);
 
+  // Restore an unfinished persisted model operation after a page refresh.
+  useEffect(() => {
+    let cancelled = false;
+    authFetch('/api/v1/ai/jobs?limit=10')
+      .then(response => response.json())
+      .then(result => {
+        if (cancelled || !result?.success || !Array.isArray(result.data)) return;
+        const activeJob = result.data.find((job: any) => ['pending', 'running'].includes(job.status));
+        if (activeJob) {
+          setModelJob(activeJob);
+          setModelJobAction(activeJob.jobType === 'delete' ? 'delete' : 'pull');
+          setIsPulling(true);
+        }
+      })
+      .catch(error => console.warn('Could not restore active model operation.', error));
+    return () => { cancelled = true; };
+  }, []);
+
   // Resume and monitor persisted model operations; never report success before the job completes.
   useEffect(() => {
     if (!modelJob?.id || ['success', 'failed', 'cancelled'].includes(modelJob.status)) return;
