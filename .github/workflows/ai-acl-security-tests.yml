@@ -26,6 +26,7 @@ on:
       - 'docker-compose*.yml'
       - 'package.json'
       - 'package-lock.json'
+      - 'vite.config.ts'
       - '.github/workflows/ai-acl-security-tests.yml'
       - 'docs/PHASE2_SPARK_X2_6_DEPLOYMENT.md'
   pull_request:
@@ -52,6 +53,7 @@ on:
       - 'docker-compose*.yml'
       - 'package.json'
       - 'package-lock.json'
+      - 'vite.config.ts'
       - '.github/workflows/ai-acl-security-tests.yml'
       - 'docs/PHASE2_SPARK_X2_6_DEPLOYMENT.md'
   workflow_dispatch:
@@ -99,6 +101,8 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
+      - name: Verify production JavaScript minification is enabled
+        run: grep -Fq "minify: 'esbuild'" vite.config.ts
       - name: Verify local spreadsheet libraries and restrictive CSP
         run: |
           node -e "const p=require('./package-lock.json').packages; if (p['node_modules/xlsx']?.version !== '0.20.3') process.exit(1)"
