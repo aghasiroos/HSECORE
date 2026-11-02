@@ -429,40 +429,6 @@ export function isGlobalAdminUser(user?: UserContext | any | null): boolean {
   return false;
 }
 
-function safeDecodeHeader(val?: string | string[]): string {
-  if (!val) return '';
-  const raw = Array.isArray(val) ? val[0] : val;
-  try {
-    return decodeURIComponent(raw).trim();
-  } catch {
-    return String(raw).trim();
-  }
-}
-
-export function extractHeaderUserContext(req: Request): UserContext | null {
-  const headerUid = safeDecodeHeader(req.headers['x-hse-user-id']);
-  const headerUsername = safeDecodeHeader(req.headers['x-hse-username']);
-  const headerRole = safeDecodeHeader(req.headers['x-hse-user-role']);
-  const headerCode = safeDecodeHeader(req.headers['x-hse-personnel-code']);
-  const headerName = safeDecodeHeader(req.headers['x-hse-user-name']);
-
-  if (!headerUid && !headerUsername && !headerName) {
-    return null;
-  }
-
-  const canonicalRole = normalizeRoleToCanonical(headerRole || 'USER');
-  const perms = ROLE_PERMISSIONS[canonicalRole] || ['user:read'];
-  return {
-    uid: headerUid || headerUsername || 'session-user',
-    id: !isNaN(Number(headerUid)) ? Number(headerUid) : undefined,
-    username: headerUsername || headerUid,
-    name: headerName || headerUsername || headerUid,
-    role: headerRole || canonicalRole,
-    personnelCode: headerCode || undefined,
-    permissions: perms,
-  };
-}
-
 export async function authenticateToken(req: Request): Promise<UserContext | null> {
   // 1. First priority: Check HttpOnly cookie hse_auth_token
   let token = (req as any).cookies?.hse_auth_token;
