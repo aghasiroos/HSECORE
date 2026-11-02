@@ -7,6 +7,7 @@ import * as schema from '../../src/db/schema.ts';
 import { eq } from 'drizzle-orm';
 import { logger } from '../core/logger.ts';
 import { broadcastDataMutation } from '../core/socket.ts';
+import { selectScheduledBackupsForRetention } from './backup-retention.ts';
 
 export type BackupTag = 'manual' | 'scheduled' | 'pre_restore_safety' | 'pre_update';
 
@@ -1793,13 +1794,11 @@ export async function enforceBackupRetentionPolicy(): Promise<{ prunedIds: strin
     encryptBackups: false,
   });
 
-  const maxCount = Math.max(2, Number(config.retentionCount) || 10);
   const allBackups = listServerBackups();
-  const scheduledBackups = allBackups.filter((b) => b.tag === 'scheduled' || b.tag === 'manual');
+  const toRemove = selectScheduledBackupsForRetention(allBackups, config.retentionCount);
 
   const prunedIds: string[] = [];
-  if (scheduledBackups.length > maxCount) {
-    const toRemove = scheduledBackups.slice(maxCount);
+  if (toRemove.length > 0) {
     for (const item of toRemove) {
       try {
         await deleteServerBackup(item.backupId, 'SYSTEM_RETENTION_POLICY');
