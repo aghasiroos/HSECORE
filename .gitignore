@@ -24,3 +24,6 @@ data/
 uploads/
 tmp/
 bun.lock*
+
+# Generated AI Studio working artifacts (keep source assets under public/)
+.aistudio/artifacts/
