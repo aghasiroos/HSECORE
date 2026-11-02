@@ -9,7 +9,7 @@ set -eo pipefail
 
 CONTAINER_NAME="hse-ai-engine"
 NETWORK_NAME="hse-network"
-COMPOSE_FILE="docker-compose.ai.yml"
+COMPOSE_FILE="docker-compose.server.yml"
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${PROJECT_DIR}/.env"
 
@@ -46,30 +46,25 @@ check_docker() {
 
 ensure_env_file() {
   if [ ! -f "${ENV_FILE}" ]; then
-    echo -e "${YELLOW}[!] .env not found. Creating minimal AI-related .env...${NC}"
-    cat > "${ENV_FILE}" << 'EOF'
-AI_ENGINE_ENABLED=true
-AI_ENGINE_URL=http://hse-ai-engine:11434
-AI_DEFAULT_CHAT_MODEL=qwen2.5:1.7b
-AI_DEFAULT_EMBED_MODEL=bge-m3
-OLLAMA_IMAGE=ollama/ollama:0.40.13
-AI_CPU_LIMIT=4.0
-AI_MEMORY_LIMIT=4608M
-AI_CPU_THREADS=4
-AI_NUM_PARALLEL=1
-AI_MAX_LOADED_MODELS=1
-AI_KEEP_ALIVE=15m
-AI_BIND_IP=127.0.0.1
-AI_HOST_PORT=11434
-EOF
-    echo -e "${GREEN}[✓] Created ${ENV_FILE} with AI defaults.${NC}"
+    echo -e "${RED}[ERROR] .env not found. Complete the main HSECORE installation first.${NC}" >&2
+    exit 1
   fi
 }
-
 ensure_compose_file() {
   if [ ! -f "${PROJECT_DIR}/${COMPOSE_FILE}" ]; then
     echo -e "${RED}[ERROR] ${COMPOSE_FILE} not found in ${PROJECT_DIR}${NC}"
     exit 1
+  fi
+}
+
+verify_container_compose_owner() {
+  local cid config_files
+  cid="$(docker ps -aq --filter "name=^/@{CONTAINER_NAME}$" | head -n1 || true)"
+  [[ -z "@{cid}" ]] && return 0
+  config_files="$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' "@{cid}" 2>/dev/null || true)"
+  if [[ "@{config_files}" != *"docker-compose.server.yml"* ]]; then
+    echo -e "@{RED}[ERROR] Existing @{CONTAINER_NAME} belongs to a different Compose configuration (@{config_files:-unknown}). No container was changed; plan a separate migration with rollback.@{NC}" >&2
+    return 1
   fi
 }
 
@@ -124,24 +119,24 @@ cmd_start() {
   check_docker
   ensure_env_file
   ensure_compose_file
+  verify_container_compose_owner || return 1
   echo -e "${BLUE}[*] Starting HSECORE Local AI Engine container...${NC}"
-  docker compose -f "${COMPOSE_FILE}" up -d hse-ai-engine
+  docker compose -f "${PROJECT_DIR}/${COMPOSE_FILE}" --env-file "${ENV_FILE}" up -d --no-deps hse-ai-engine
   echo -e "${BLUE}[*] Waiting for engine healthcheck...${NC}"
   local attempts=0
-  until docker exec "${CONTAINER_NAME}" ollama list >/dev/null 2>&1 || [ ${attempts} -ge 30 ]; do
+  until docker exec "${CONTAINER_NAME}" ollama list >/dev/null 2>&1 || [ ${attempts} -ge 45 ]; do
     sleep 1
     attempts=$((attempts + 1))
     printf "."
   done
   echo ""
-  if [ ${attempts} -lt 30 ]; then
+  if [ ${attempts} -lt 45 ]; then
     echo -e "${GREEN}[✓] Local AI Engine is ready and running!${NC}"
   else
-    echo -e "${YELLOW}[!] Engine container started but healthcheck is taking longer than usual.${NC}"
-    echo -e "    Check logs with: ${CYAN}./scripts/manage-ai.sh logs${NC}"
+    echo -e "${RED}[ERROR] AI Engine healthcheck timed out. Inspect: docker logs ${CONTAINER_NAME}${NC}"
+    return 1
   fi
 }
-
 cmd_stop() {
   print_header
   check_docker
@@ -163,34 +158,39 @@ cmd_restart() {
 }
 
 cmd_pull() {
-  local model="$1"
-  if [ -z "${model}" ]; then
-    echo -e "${RED}[ERROR] Model name required. Example: ./scripts/manage-ai.sh pull qwen2.5:1.7b${NC}"
-    exit 1
+  local model="@{1:-}" allowed chat embed
+  if [[ -z "${model}" || ! "${model}" =~ ^[A-Za-z0-9._/-]+(:[A-Za-z0-9._-]+)?$ ]]; then
+    echo -e "${RED}[ERROR] Invalid model reference.${NC}" >&2
+    return 1
   fi
   print_header
   check_docker
   ensure_env_file
   ensure_compose_file
-
+  allowed="$(grep -E '^AI_ALLOWED_MODELS=' "${ENV_FILE}" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '"\'' ' || true)"
+  chat="$(grep -E '^AI_DEFAULT_CHAT_MODEL=' "${ENV_FILE}" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '"\'' ' || true)"
+  embed="$(grep -E '^AI_DEFAULT_EMBED_MODEL=' "${ENV_FILE}" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '"\'' ' || true)"
+  chat="@{chat:-qwen2.5:1.7b}"
+  embed="@{embed:-bge-m3}"
+  if [[ "${model}" != "${chat}" && "${model}" != "${embed}" && "${model}" != "${chat}:latest" && "${model}" != "${embed}:latest" && ",${allowed}," != *",${model},"* ]]; then
+    echo -e "${RED}[ERROR] Model is not allowlisted. Add its exact reference to AI_ALLOWED_MODELS in .env first.${NC}" >&2
+    return 1
+  fi
   local free_gb
   free_gb="$(disk_free_gb)"
   if [[ "${free_gb}" =~ ^[0-9]+$ ]] && [ "${free_gb}" -lt 3 ]; then
     echo -e "${RED}[ERROR] Less than 3GB free disk space (detected: ${free_gb}GB). Aborting model pull.${NC}"
-    exit 1
+    return 1
   fi
   echo -e "  Free disk space: ${CYAN}${free_gb}GB${NC}"
-
   if ! is_container_running; then
     echo -e "${YELLOW}[*] Engine container not running. Starting it now...${NC}"
-    cmd_start
+    cmd_start || return 1
   fi
-  echo -e "${BLUE}[*] Pulling model '${model}' into persistent storage (hse_ai_models)...${NC}"
-  # No -t flag: safe for non-interactive SSH / install.sh menus
+  echo -e "${BLUE}[*] Pulling allowlisted model '${model}' into persistent storage...${NC}"
   docker exec "${CONTAINER_NAME}" ollama pull "${model}"
   echo -e "${GREEN}[✓] Successfully pulled model '${model}'.${NC}"
 }
-
 cmd_list() {
   check_docker
   if ! is_container_running; then
@@ -201,27 +201,31 @@ cmd_list() {
 }
 
 cmd_rm() {
-  local model="$1"
-  if [ -z "${model}" ]; then
-    echo -e "${RED}[ERROR] Model name required. Example: ./scripts/manage-ai.sh rm qwen2.5:1.7b${NC}"
-    exit 1
+  local model="@{1:-}" chat embed confirm
+  if [[ -z "${model}" || ! "${model}" =~ ^[A-Za-z0-9._/-]+(:[A-Za-z0-9._-]+)?$ ]]; then
+    echo -e "${RED}[ERROR] Invalid model reference.${NC}" >&2
+    return 1
+  fi
+  ensure_env_file
+  chat="$(grep -E '^AI_DEFAULT_CHAT_MODEL=' "${ENV_FILE}" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '"\'' ' || true)"
+  embed="$(grep -E '^AI_DEFAULT_EMBED_MODEL=' "${ENV_FILE}" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '"\'' ' || true)"
+  chat="@{chat:-qwen2.5:1.7b}"
+  embed="@{embed:-bge-m3}"
+  if [[ "${model}" == "${chat}" || "${model}" == "${embed}" || "${model}" == "${chat}:latest" || "${model}" == "${embed}:latest" ]]; then
+    echo -e "${RED}[ERROR] Cannot remove a configured default chat or embedding model.${NC}" >&2
+    return 1
   fi
   check_docker
   if ! is_container_running; then
     echo -e "${YELLOW}[!] Container is not running. Starting it first...${NC}"
-    cmd_start
+    cmd_start || return 1
   fi
-  echo -e "${YELLOW}[!] About to remove model '${model}' from persistent storage.${NC}"
-  read -r -p "Confirm deletion? [y/N]: " confirm
-  if ! [[ "${confirm}" =~ ^[Yy]$ ]]; then
-    echo -e "${BLUE}Cancelled.${NC}"
-    return 0
-  fi
-  echo -e "${BLUE}[*] Removing model '${model}'...${NC}"
+  echo -e "${YELLOW}[!] About to permanently remove model '${model}'.${NC}"
+  read -r -p "Type DELETE to confirm: " confirm
+  [[ "${confirm}" == "DELETE" ]] || { echo -e "${BLUE}Cancelled.${NC}"; return 0; }
   docker exec "${CONTAINER_NAME}" ollama rm "${model}"
   echo -e "${GREEN}[✓] Removed model '${model}'.${NC}"
 }
-
 cmd_bench() {
   local model="${1:-qwen2.5:1.7b}"
   print_header
@@ -286,13 +290,20 @@ cmd_logs() {
 }
 
 cmd_set_default() {
-  local model="$1"
-  if [ -z "${model}" ]; then
-    echo -e "${RED}[ERROR] Model name required. Example: ./scripts/manage-ai.sh set-default qwen2.5:1.7b${NC}"
-    exit 1
+  local model="@{1:-}"
+  if [[ -z "${model}" || ! "${model}" =~ ^[A-Za-z0-9._/-]+(:[A-Za-z0-9._-]+)?$ ]]; then
+    echo -e "${RED}[ERROR] Invalid model reference.${NC}" >&2
+    return 1
   fi
   print_header
+  check_docker
   ensure_env_file
+  ensure_compose_file
+  if ! is_container_running; then cmd_start || return 1; fi
+  if ! docker exec "${CONTAINER_NAME}" ollama list | awk 'NR > 1 {print $1}' | grep -Fxq "${model}"; then
+    echo -e "${RED}[ERROR] The selected model must already be installed before setting it as default.${NC}" >&2
+    return 1
+  fi
   echo -e "${BLUE}[*] Setting default AI chat model to '${model}' in .env...${NC}"
   if grep -q "^AI_DEFAULT_CHAT_MODEL=" "${ENV_FILE}"; then
     sed -i "s|^AI_DEFAULT_CHAT_MODEL=.*|AI_DEFAULT_CHAT_MODEL=${model}|" "${ENV_FILE}"
@@ -301,20 +312,16 @@ cmd_set_default() {
   fi
   echo -e "${GREEN}[✓] Default model updated to '${model}' in ${ENV_FILE}.${NC}"
   echo -e "${YELLOW}[!] Restart the main app container for the change to take effect:${NC}"
-  echo -e "    ${CYAN}sudo docker compose -f docker-compose.yml up -d hse-app${NC}"
-  echo -e "    (or from install.sh: Update / restart services)"
+  echo -e "    ${CYAN}sudo docker compose -f docker-compose.server.yml up -d --no-deps hse-app${NC}"
 }
-
 cmd_toggle() {
   ensure_env_file
   local current="true"
   if grep -q "^AI_ENGINE_ENABLED=" "${ENV_FILE}"; then
-    current="$(grep "^AI_ENGINE_ENABLED=" "${ENV_FILE}" | cut -d'=' -f2 | tr -d '[:space:]\"' | tr '[:upper:]' '[:lower:]')"
+    current="$(grep "^AI_ENGINE_ENABLED=" "${ENV_FILE}" | tail -n1 | cut -d'=' -f2 | tr -d '[:space:]\"' | tr '[:upper:]' '[:lower:]')"
   fi
   local new_val="false"
-  if [ "${current}" = "false" ]; then
-    new_val="true"
-  fi
+  if [ "${current}" = "false" ]; then new_val="true"; fi
   print_header
   echo -e "${BLUE}[*] Toggling AI_ENGINE_ENABLED from '${current}' to '${new_val}'...${NC}"
   if grep -q "^AI_ENGINE_ENABLED=" "${ENV_FILE}"; then
@@ -322,38 +329,40 @@ cmd_toggle() {
   else
     echo "AI_ENGINE_ENABLED=${new_val}" >> "${ENV_FILE}"
   fi
+  if [[ "${new_val}" == "false" ]]; then
+    docker compose -f "${PROJECT_DIR}/${COMPOSE_FILE}" --env-file "${ENV_FILE}" stop hse-ai-engine
+  else
+    cmd_start || return 1
+  fi
   echo -e "${GREEN}[✓] AI Engine status set to: ${BOLD}${new_val}${NC}"
   echo -e "${YELLOW}[!] Restart the main app container for the change to take effect:${NC}"
-  echo -e "    ${CYAN}sudo docker compose -f docker-compose.yml up -d hse-app${NC}"
+  echo -e "    ${CYAN}sudo docker compose -f docker-compose.server.yml up -d --no-deps hse-app${NC}"
 }
-
 cmd_update() {
   print_header
   check_docker
   ensure_env_file
   ensure_compose_file
-  # Keep image tag aligned with compose default unless OLLAMA_IMAGE is set in .env
   local image_tag
-  image_tag="$(grep -E '^OLLAMA_IMAGE=' "${ENV_FILE}" 2>/dev/null | cut -d'=' -f2- | tr -d '\"' | tr -d \"'\" || true)"
-  if [ -z "${image_tag}" ]; then
-    image_tag="ollama/ollama:0.40.13"
-    if grep -q "^OLLAMA_IMAGE=" "${ENV_FILE}"; then
-      sed -i "s|^OLLAMA_IMAGE=.*|OLLAMA_IMAGE=${image_tag}|" "${ENV_FILE}"
-    else
-      echo "OLLAMA_IMAGE=${image_tag}" >> "${ENV_FILE}"
-    fi
+  image_tag="$(grep -E '^OLLAMA_IMAGE=' "${ENV_FILE}" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '"\'' ' || true)"
+  image_tag="@{image_tag:-ollama/ollama:0.40.13}"
+  if [[ "${image_tag}" == "ollama/ollama" || "${image_tag}" == *":latest" ]]; then
+    echo -e "${RED}[ERROR] Floating :latest Ollama images are blocked. Pin an explicit version in .env.${NC}" >&2
+    return 1
   fi
-  echo -e "${BLUE}[*] Updating Local AI Engine image: ${CYAN}${image_tag}${NC}"
-  docker pull "${image_tag}"
-  echo -e "${BLUE}[*] Recreating AI container with updated image...${NC}"
-  docker compose -f "${COMPOSE_FILE}" up -d --force-recreate hse-ai-engine
-  echo -e "${GREEN}[✓] Local AI Engine updated and running.${NC}"
+  verify_container_compose_owner || return 1
+  echo -e "${BLUE}[*] Updating configured Ollama image: ${image_tag}${NC}"
+  docker compose -f "${PROJECT_DIR}/${COMPOSE_FILE}" --env-file "${ENV_FILE}" pull hse-ai-engine
+  docker compose -f "${PROJECT_DIR}/${COMPOSE_FILE}" --env-file "${ENV_FILE}" up -d --no-deps hse-ai-engine
+  echo -e "${GREEN}[✓] Configured Ollama image update completed.${NC}"
   echo -e "${DIM}Models volume (hse_ai_models) was preserved.${NC}"
 }
-
 cmd_uninstall() {
   print_header
   check_docker
+  ensure_env_file
+  ensure_compose_file
+  verify_container_compose_owner || return 1
   echo -e "${RED}${BOLD}[WARNING] You are about to remove the Local AI Infrastructure container.${NC}"
   echo -e "The main HSECORE application will continue to run."
   read -r -p "Do you want to proceed with stopping and removing the AI container? [y/N]: " confirm
@@ -361,20 +370,16 @@ cmd_uninstall() {
     echo -e "${BLUE}Uninstallation cancelled.${NC}"
     return 0
   fi
-  echo -e "${BLUE}[*] Stopping and removing hse-ai-engine container...${NC}"
-  docker compose -f "${COMPOSE_FILE}" down 2>/dev/null || true
-  docker rm -f "${CONTAINER_NAME}" 2>/dev/null || true
-
+  echo -e "${BLUE}[*] Stopping and removing only hse-ai-engine...${NC}"
+  docker compose -f "${PROJECT_DIR}/${COMPOSE_FILE}" --env-file "${ENV_FILE}" stop hse-ai-engine
+  docker compose -f "${PROJECT_DIR}/${COMPOSE_FILE}" --env-file "${ENV_FILE}" rm -f hse-ai-engine
   read -r -p "Do you ALSO want to delete the persistent models volume (hse_ai_models)? [y/N]: " del_vol
   if [[ "${del_vol}" =~ ^[Yy]$ ]]; then
-    docker volume rm hse_ai_models 2>/dev/null || true
+    docker volume rm hse_ai_models
     echo -e "${YELLOW}[✓] Persistent volume hse_ai_models deleted.${NC}"
   else
     echo -e "${GREEN}[✓] Preserved models volume hse_ai_models for future use.${NC}"
   fi
-
-  # Reflect disabled state in .env
-  ensure_env_file
   if grep -q "^AI_ENGINE_ENABLED=" "${ENV_FILE}"; then
     sed -i "s|^AI_ENGINE_ENABLED=.*|AI_ENGINE_ENABLED=false|" "${ENV_FILE}"
   else
@@ -383,7 +388,6 @@ cmd_uninstall() {
   echo -e "${GREEN}[✓] AI Infrastructure uninstallation complete. AI_ENGINE_ENABLED=false${NC}"
   echo -e "${YELLOW}[!] Restart hse-app if it is running so it picks up AI_ENGINE_ENABLED=false.${NC}"
 }
-
 # Main Command Dispatcher
 case "${1:-}" in
   status)
