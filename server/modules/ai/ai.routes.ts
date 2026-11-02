@@ -105,12 +105,15 @@ router.post('/jobs/delete', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR'), 
   aiController.enqueueDeleteJob(req, res).catch(next);
 });
 
+// Legacy-compatible endpoint; route through the persistent job manager to preserve locking and progress.
 router.post('/models/pull', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR'), (req, res, next) => {
-  aiController.pullModel(req, res).catch(next);
+  aiController.enqueuePullJob(req, res).catch(next);
 });
 
+// Legacy-compatible endpoint; route through the persistent job manager to preserve locking and recovery.
 router.delete('/models/:name', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR'), (req, res, next) => {
-  aiController.deleteModel(req, res).catch(next);
+  req.body = { ...(req.body || {}), modelName: req.params.name };
+  aiController.enqueueDeleteJob(req, res).catch(next);
 });
 
 // Knowledge Base & RAG management
