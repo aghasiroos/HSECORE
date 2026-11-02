@@ -58,8 +58,8 @@ export default function AiManagementTab({ language = 'fa', currentUser }: AiMana
   const [isSearching, setIsSearching] = useState<boolean>(false);
   const [searchResults, setSearchResults] = useState<any[]>([]);
 
-  const fetchData = async () => {
-    setLoading(true);
+  const fetchData = async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const [statusRes, modelsRes, auditRes, docsRes] = await Promise.all([
         authFetch('/api/v1/ai/status').then(r => r.json()).catch(() => null),
@@ -75,12 +75,15 @@ export default function AiManagementTab({ language = 'fa', currentUser }: AiMana
     } catch (err) {
       console.error('Failed to load AI management data:', err);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchData();
+    void fetchData();
+    // Keep engine health and the live Ollama inventory current after runtime changes.
+    const refreshTimer = window.setInterval(() => { void fetchData(true); }, 30000);
+    return () => window.clearInterval(refreshTimer);
   }, []);
 
   // Restore an unfinished persisted model operation after a page refresh.
