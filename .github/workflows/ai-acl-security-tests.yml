@@ -16,6 +16,8 @@ on:
       - 'scripts/test-ai-routes.ts'
       - 'scripts/test-ai-queue.ts'
       - 'scripts/test-ai-model-pull.ts'
+      - 'scripts/test-api-cache-session.ts'
+      - 'src/services/apiDatabaseClient.ts'
       - 'index.html'
       - '.env.example'
       - 'install.sh'
@@ -43,6 +45,8 @@ on:
       - 'scripts/test-ai-routes.ts'
       - 'scripts/test-ai-queue.ts'
       - 'scripts/test-ai-model-pull.ts'
+      - 'scripts/test-api-cache-session.ts'
+      - 'src/services/apiDatabaseClient.ts'
       - 'index.html'
       - '.env.example'
       - 'install.sh'
@@ -102,6 +106,8 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
+      - name: Verify API cache isolation across authenticated sessions
+        run: npm run test:api-cache-session
       - name: Verify production JavaScript minification is enabled
         run: grep -Fq "minify: 'esbuild'" vite.config.ts
       - name: Verify production server bundles do not emit source maps
