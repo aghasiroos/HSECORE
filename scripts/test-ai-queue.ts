@@ -6,7 +6,6 @@ import { LocalAIProvider } from '../server/modules/ai/ai.local-provider.ts';
 const originalConcurrency = config.aiEngine.maxConcurrency;
 const originalQueueLength = config.aiEngine.maxQueueLength;
 const originalTimeout = config.aiEngine.timeoutMs;
-const originalAllowedModels = config.aiEngine.allowedModels;
 const originalDefaultChatModel = config.aiEngine.defaultChatModel;
 const originalDefaultEmbedModel = config.aiEngine.defaultEmbedModel;
 const originalFetch = globalThis.fetch;
@@ -77,31 +76,30 @@ async function run() {
     console.log('PASS queue capacity rejects excess waiting work and drains normally');
   }
 
-  // Model downloads must be explicitly allowlisted; :latest aliases cannot bypass
-  // protection of configured defaults or the exact allowlist.
+  // Any syntactically valid Ollama model reference may be pulled, while
+  // configured defaults remain protected from deletion, including :latest aliases.
   {
     config.aiEngine.defaultChatModel = 'qwen2.5';
     config.aiEngine.defaultEmbedModel = 'bge-m3';
-    config.aiEngine.allowedModels = ['qwen2.5', 'bge-m3'];
     const provider = new LocalAIProvider();
     let fetchCalls = 0;
     globalThis.fetch = (async () => {
       fetchCalls++;
-      return new Response(JSON.stringify({}), { status: 200 });
+      return new Response(JSON.stringify({ status: 'success' }), { status: 200 });
     }) as typeof fetch;
 
-    const blockedPull = await provider.pullModel('attacker/unknown-model:latest');
-    assert.equal(blockedPull.success, false);
-    assert.equal(fetchCalls, 0);
-
-    const allowedAliasPull = await provider.pullModel('qwen2.5:latest');
-    assert.equal(allowedAliasPull.success, true);
+    const arbitraryPull = await provider.pullModel('attacker/unknown-model:latest');
+    assert.equal(arbitraryPull.success, true);
     assert.equal(fetchCalls, 1);
+
+    const validAliasPull = await provider.pullModel('qwen2.5:latest');
+    assert.equal(validAliasPull.success, true);
+    assert.equal(fetchCalls, 2);
 
     const protectedAliasDelete = await provider.deleteModel('qwen2.5:latest');
     assert.equal(protectedAliasDelete.success, false);
-    assert.equal(fetchCalls, 1);
-    console.log('PASS model allowlist and default protection normalize omitted/:latest tags');
+    assert.equal(fetchCalls, 2);
+    console.log('PASS unrestricted valid model pulls and configured-default deletion protection');
   }
 
   // Reachable Ollama without installed models must not be reported inference-ready.
@@ -184,7 +182,6 @@ run()
     config.aiEngine.maxConcurrency = originalConcurrency;
     config.aiEngine.maxQueueLength = originalQueueLength;
     config.aiEngine.timeoutMs = originalTimeout;
-    config.aiEngine.allowedModels = originalAllowedModels;
     config.aiEngine.defaultChatModel = originalDefaultChatModel;
     config.aiEngine.defaultEmbedModel = originalDefaultEmbedModel;
     globalThis.fetch = originalFetch;
