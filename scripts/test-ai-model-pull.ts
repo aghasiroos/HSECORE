@@ -39,9 +39,27 @@ async function main() {
     const missing = await localAIProvider.pullModel('qwen2.5:1.7b');
     assert.equal(missing.success, false);
     assert.match(missing.message, /manifest: file does not exist/);
+    // Deletion must use the same normalized model identifier and the current Ollama API field.
+    let deleteBody: unknown;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/api/tags')) {
+        return new Response(JSON.stringify({
+          models: [{ name: 'hf.co/user/model:Q4_K_M', model: 'hf.co/user/model:Q4_K_M', size: 1, digest: 'test' }],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/delete')) {
+        deleteBody = JSON.parse(String(init?.body));
+        return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      throw new Error('Unexpected Ollama endpoint: ' + url);
+    }) as typeof fetch;
+    const deleted = await localAIProvider.deleteModel('hf.co/user/model:Q4_K_M');
+    assert.equal(deleted.success, true);
+    assert.deepEqual(deleteBody, { model: 'hf.co/user/model:Q4_K_M' });
   } finally {
     globalThis.fetch = originalFetch;
   }
-  console.log('AI model-pull regression tests passed.');
+  console.log('AI model-pull and delete regression tests passed.');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });
