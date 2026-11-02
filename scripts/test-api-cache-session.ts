@@ -32,8 +32,7 @@ try {
 
   assert.deepEqual(await newSessionRequest, [{ id: 'session-B' }]);
 
-  // A late response from the previous session may resolve for its original caller,
-  // but it must not repopulate the shared cache for the new session.
+  // A late response from the previous session must be rejected and never cached.
   resolveFirstRequest(jsonResponse([{ id: 'session-A' }]));
   await assert.rejects(
     oldSessionRequest,
