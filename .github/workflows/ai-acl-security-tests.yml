@@ -161,7 +161,7 @@ jobs:
             echo "Model downloads must not be restricted by a fixed allowlist."
             exit 1
           fi
-          if grep -Eq 'Enter model tag \\[default:|target_m="\\$\\{target_m:-' install.sh; then
+          if grep -Fq 'Enter model tag [default:' install.sh || grep -Fq 'target_m="${target_m:-' install.sh; then
             echo "The model download menu must not preselect a model."
             exit 1
           fi
