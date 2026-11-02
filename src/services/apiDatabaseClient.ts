@@ -261,7 +261,7 @@ function invalidateCacheKeys(...prefixes: string[]) {
   const matchesPrefix = (key: string) =>
     invalidateAll || prefixes.some((p) => key === p || key.startsWith(`${p}:`) || key.startsWith(p));
 
-  // In-flight keys are prefixed with the auth-session version: "<version>:<cache-key>".
+  // In-flight keys include the auth-session version, cache-key invalidation version, and cache key.
   // Invalidate only matching requests so unrelated modules keep working normally.
   for (const activeKey of inFlightPromises.keys()) {
     const key = activeKey.slice(activeKey.indexOf(':', activeKey.indexOf(':') + 1) + 1);
