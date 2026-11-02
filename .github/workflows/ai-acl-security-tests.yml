@@ -11,6 +11,7 @@ on:
       - 'server.ts'
       - 'server/core/middleware/auth.ts'
       - 'server/core/middleware/security.ts'
+      - 'server/core/ip.ts'
       - 'scripts/test-ai-acl.ts'
       - 'scripts/test-ai-auth.ts'
       - 'scripts/test-ai-rag-db.ts'
@@ -18,6 +19,7 @@ on:
       - 'scripts/test-ai-queue.ts'
       - 'scripts/test-ai-model-pull.ts'
       - 'scripts/test-api-cache-session.ts'
+      - 'scripts/test-client-ip-trust.ts'
       - 'src/services/apiDatabaseClient.ts'
       - 'index.html'
       - '.env.example'
@@ -40,6 +42,7 @@ on:
       - 'server/modules/ai/**'
       - 'server/core/middleware/auth.ts'
       - 'server/core/middleware/security.ts'
+      - 'server/core/ip.ts'
       - 'scripts/test-ai-acl.ts'
       - 'scripts/test-ai-auth.ts'
       - 'scripts/test-ai-rag-db.ts'
@@ -47,6 +50,7 @@ on:
       - 'scripts/test-ai-queue.ts'
       - 'scripts/test-ai-model-pull.ts'
       - 'scripts/test-api-cache-session.ts'
+      - 'scripts/test-client-ip-trust.ts'
       - 'src/services/apiDatabaseClient.ts'
       - 'index.html'
       - '.env.example'
@@ -109,6 +113,8 @@ jobs:
         run: npm ci
       - name: Verify API cache isolation across authenticated sessions
         run: npm run test:api-cache-session
+      - name: Verify rate limiting uses Express-trusted client IP
+        run: npx tsx scripts/test-client-ip-trust.ts
       - name: Verify production JavaScript minification is enabled
         run: grep -Fq "minify: 'esbuild'" vite.config.ts
       - name: Verify production server bundles do not emit source maps
