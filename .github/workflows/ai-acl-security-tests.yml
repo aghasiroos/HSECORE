@@ -17,6 +17,9 @@ on:
       - 'index.html'
       - '.env.example'
       - 'install.sh'
+      - 'scripts/manage-ai.sh'
+      - 'scripts/setup-local-ai.sh'
+      - 'scripts/start-ai-if-enabled.sh'
       - 'scripts/build-windows-icon.js'
       - 'Dockerfile.prod'
       - 'docker-compose*.yml'
@@ -39,6 +42,9 @@ on:
       - 'index.html'
       - '.env.example'
       - 'install.sh'
+      - 'scripts/manage-ai.sh'
+      - 'scripts/setup-local-ai.sh'
+      - 'scripts/start-ai-if-enabled.sh'
       - 'scripts/build-windows-icon.js'
       - 'Dockerfile.prod'
       - 'docker-compose*.yml'
@@ -139,11 +145,29 @@ jobs:
           fi
       - name: Validate installer shell syntax and prohibit remote shell execution
         run: |
-          bash -n install.sh
+          bash -n install.sh scripts/manage-ai.sh scripts/setup-local-ai.sh scripts/start-ai-if-enabled.sh
           if grep -EnE '(curl|wget)[^#]*[|][[:space:]]*(sudo[[:space:]]+)?(ba)?sh' install.sh; then
             echo "Remote downloaded scripts must not be piped directly into a shell."
             exit 1
           fi
+      - name: Verify safe AI runtime management
+        run: |
+          grep -Fq 'COMPOSE_FILE="docker-compose.server.yml"' scripts/manage-ai.sh
+          grep -Fq 'AI_ALLOWED_MODELS' scripts/manage-ai.sh
+          grep -Fq 'Type DELETE to confirm' scripts/manage-ai.sh
+          grep -Fq 'verify_container_compose_owner' scripts/manage-ai.sh
+          if grep -Fq 'ollama pull' scripts/setup-local-ai.sh; then
+            echo "Runtime verification must not download models implicitly."
+            exit 1
+          fi
+          grep -Fq 'up -d --no-deps hse-ai-engine' scripts/setup-local-ai.sh
+          grep -Fq 'AI_ENGINE_ENABLED=false' .env.example
+          grep -Fq 'ensure_env_key "AI_ENGINE_ENABLED" "false"' scripts/setup-local-ai.sh
+          grep -Fq 'local current="false"' scripts/manage-ai.sh
+          grep -Fq 'verify_container_compose_owner || return 1' scripts/manage-ai.sh
+          grep -Fq 'profiles:' docker-compose.server.yml
+          grep -Fq 'ExecStartPost=/bin/bash' install.sh
+          grep -Fq 'AI_ENGINE_ENABLED' scripts/start-ai-if-enabled.sh
       - name: TypeScript validation
         run: npm run lint
       - name: Production build validation

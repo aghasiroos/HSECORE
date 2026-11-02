@@ -2474,6 +2474,7 @@ Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=${PROJECT_DIR}
 ExecStart=${docker_bin} compose -f docker-compose.server.yml up -d hse-app
+ExecStartPost=/bin/bash ${PROJECT_DIR}/scripts/start-ai-if-enabled.sh
 ExecStop=${docker_bin} compose -f docker-compose.server.yml stop
 TimeoutStartSec=0
 
@@ -2484,7 +2485,7 @@ EOF
   tui_run_task \
     "Enabling systemd auto-start service (hsecore.service)" \
     "Check systemd unit file /etc/systemd/system/hsecore.service and run: sudo systemctl daemon-reload" \
-    bash -c "systemctl daemon-reload && systemctl enable hsecore.service"
+    bash -c "systemctl daemon-reload && systemctl enable --now hsecore.service"
 
   set_completed_step 12
 }
