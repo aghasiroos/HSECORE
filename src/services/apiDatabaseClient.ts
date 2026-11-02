@@ -91,6 +91,7 @@ export function setAuthToken(token: string | null): void {
     authSessionVersion += 1;
     queryCache.clear();
     inFlightPromises.clear();
+    cacheKeyVersions.clear();
   }
   inMemoryAuthToken = token;
   try {
