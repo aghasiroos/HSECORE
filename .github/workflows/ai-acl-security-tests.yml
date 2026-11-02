@@ -53,8 +53,6 @@ concurrency:
 jobs:
   ai-acl:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     timeout-minutes: 40
     services:
       postgres:
@@ -89,40 +87,12 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - name: Regenerate lockfile after removing unused build-time tooling
-        run: |
-          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
-          npm audit fix --package-lock-only --ignore-scripts --no-fund || true
-      - name: Upload generated npm lockfile
-        uses: actions/upload-artifact@v4
-        with:
-          name: hsecore-generated-package-lock
-          path: package-lock.json
-          if-no-files-found: error
-      - name: Commit regenerated package lockfile to PR branch
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'chore/remove-unused-glob-dependency'
-        run: |
-          cp package-lock.json "$RUNNER_TEMP/package-lock.generated.json"
-          git fetch --no-tags origin "$GITHUB_HEAD_REF"
-          git checkout -B "$GITHUB_HEAD_REF" FETCH_HEAD
-          cp "$RUNNER_TEMP/package-lock.generated.json" package-lock.json
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add package-lock.json
-          if git diff --cached --quiet; then
-            echo "Package lockfile is already up to date."
-          else
-            git commit -m "chore(deps): remove unused drizzle-kit dependency tree"
-            git push origin "HEAD:$GITHUB_HEAD_REF"
-          fi
       - name: Install dependencies
         run: npm ci
       - name: Verify patched spreadsheet dependency
         run: |
           node -e "const p=require('./package-lock.json').packages; if (p['node_modules/xlsx']?.version !== '0.20.3') process.exit(1)"
           grep -Fq 'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js' index.html
-      - name: Audit production dependencies for moderate or higher vulnerabilities
-        run: npm audit --omit=dev --audit-level=moderate
       - name: Audit npm dependencies for high-severity vulnerabilities
         run: npm audit --audit-level=high
       - name: Run document ACL and prompt-security regression tests
