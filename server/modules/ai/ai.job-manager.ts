@@ -9,7 +9,7 @@ import { eq, desc, and, inArray } from 'drizzle-orm';
 import { db, schema } from '../../core/db.ts';
 import { config } from '../../core/config.ts';
 import { logger } from '../../core/logger.ts';
-import { localAIProvider } from './ai.local-provider.ts';
+import { localAIProvider, normalizeOllamaModelName } from './ai.local-provider.ts';
 import { aiModelManager } from './ai.model-manager.ts';
 
 export type AIJobType = 'pull' | 'delete';
@@ -31,6 +31,7 @@ export interface AIDeploymentJobView {
 
 /** Only one mutating model job at a time on 8GB hosts */
 let activeJobId: string | null = null;
+let enqueueReservationInProgress = false;
 
 function toView(row: any): AIDeploymentJobView {
   return {
@@ -50,6 +51,7 @@ function toView(row: any): AIDeploymentJobView {
 
 export class AIJobManager {
   async listJobs(limit = 30): Promise<AIDeploymentJobView[]> {
+    await this.recoverExpiredJobs();
     const rows = await db
       .select()
       .from(schema.aiDeploymentJobs)
@@ -59,6 +61,7 @@ export class AIJobManager {
   }
 
   async getJob(jobId: string): Promise<AIDeploymentJobView | null> {
+    await this.recoverExpiredJobs();
     const rows = await db
       .select()
       .from(schema.aiDeploymentJobs)
@@ -85,57 +88,110 @@ export class AIJobManager {
       .where(eq(schema.aiDeploymentJobs.id, jobId));
   }
 
+  private async reserveJobSlot(): Promise<void> {
+    if (enqueueReservationInProgress) {
+      throw new Error('درخواست عملیات مدل دیگری در حال ثبت است؛ لحظه‌ای بعد دوباره تلاش کنید.');
+    }
+    enqueueReservationInProgress = true;
+    try {
+      await this.assertNoActiveJob();
+    } catch (error) {
+      enqueueReservationInProgress = false;
+      throw error;
+    }
+  }
+
+  private releaseJobReservation(): void {
+    enqueueReservationInProgress = false;
+  }
+
+  private async recoverExpiredJobs(): Promise<void> {
+    let activeRows: Array<{ id: string; status: string; updatedAt: Date | string }> = [];
+    try {
+      activeRows = await db
+        .select({
+          id: schema.aiDeploymentJobs.id,
+          status: schema.aiDeploymentJobs.status,
+          updatedAt: schema.aiDeploymentJobs.updatedAt,
+        })
+        .from(schema.aiDeploymentJobs)
+        .where(inArray(schema.aiDeploymentJobs.status, ['pending', 'running']));
+    } catch (err: any) {
+      logger.error('AI deployment job recovery check failed', { error: err?.message });
+      throw new Error('امکان بررسی وضعیت عملیات قبلی مدل وجود ندارد؛ وضعیت عملیات قابل اطمینان نیست.');
+    }
+
+    const now = Date.now();
+    for (const job of activeRows) {
+      const updatedAt = job.updatedAt instanceof Date ? job.updatedAt.getTime() : new Date(job.updatedAt).getTime();
+      const staleAfterMs = job.status === 'pending'
+        ? 10 * 60 * 1000
+        : Math.max(config.aiEngine.modelPullTimeoutMs || 30 * 60 * 1000, 60 * 1000) + 60 * 1000;
+
+      // A running pull may legitimately take the full configured timeout.
+      // Recovery is applied only after that timeout plus a safety margin.
+      if (!Number.isFinite(updatedAt) || now - updatedAt <= staleAfterMs) continue;
+
+      await this.updateJob(job.id, {
+        status: 'failed',
+        errorMessage: 'عملیات پس از توقف پردازش یا پایان مهلت مجاز ناتمام ماند.',
+        message: 'بازیابی امن عملیات منقضی‌شده',
+      });
+    }
+  }
+
   private async assertNoActiveJob(): Promise<void> {
     if (activeJobId) {
       throw new Error('یک عملیات مدل در حال اجرا است؛ تا پایان آن صبر کنید.');
     }
+    await this.recoverExpiredJobs();
+
+    let activeRows: Array<{ id: string }> = [];
     try {
-      const running = await db
+      activeRows = await db
         .select({ id: schema.aiDeploymentJobs.id })
         .from(schema.aiDeploymentJobs)
-        .where(inArray(schema.aiDeploymentJobs.status, ['pending', 'running']))
-        .limit(1);
-      if (running.length) {
-        // Stale recovery: if process restarted, mark old running as failed
-        const job = running[0];
-        await this.updateJob(job.id, {
-          status: 'failed',
-          errorMessage: 'عملیات پس از راه‌اندازی مجدد سرور ناتمام ماند.',
-          message: 'بازیابی پس از restart',
-        });
-      }
+        .where(inArray(schema.aiDeploymentJobs.status, ['pending', 'running']));
     } catch (err: any) {
-      logger.warn('assertNoActiveJob DB check failed', { error: err?.message });
+      logger.error('assertNoActiveJob DB check failed; refusing model mutation', { error: err?.message });
+      throw new Error('امکان بررسی وضعیت عملیات قبلی مدل وجود ندارد؛ برای جلوگیری از عملیات هم‌زمان، درخواست پذیرفته نشد.');
+    }
+    if (activeRows.length) {
+      throw new Error('یک عملیات مدل در حال اجرا یا بازیابی است؛ پس از پایان آن دوباره تلاش کنید.');
     }
   }
-
   /**
    * Enqueue model pull — returns immediately with job id; work runs in background.
    */
   async enqueuePull(modelRef: string, createdBy?: string): Promise<AIDeploymentJobView> {
-    const normalized = (modelRef || '').trim();
-    if (!normalized || normalized.length > 160) {
-      throw new Error('شناسه مدل نامعتبر است.');
+    const normalized = normalizeOllamaModelName(modelRef);
+    if (!normalized) {
+      throw new Error('شناسه مدل نامعتبر است. از قالب model:tag یا namespace/model:tag استفاده کنید.');
     }
-    await this.assertNoActiveJob();
+    await this.reserveJobSlot();
 
     const id = randomUUID();
     const now = new Date();
-    await db.insert(schema.aiDeploymentJobs).values({
-      id,
-      jobType: 'pull',
-      providerId: 'ollama',
-      targetRef: normalized,
-      status: 'pending',
-      progress: 0,
-      message: 'در صف دریافت مدل',
-      errorMessage: null,
-      createdBy: createdBy || null,
-      createdAt: now,
-      updatedAt: now,
-    });
-
-    activeJobId = id;
+    try {
+      await db.insert(schema.aiDeploymentJobs).values({
+        id,
+        jobType: 'pull',
+        providerId: 'ollama',
+        targetRef: normalized,
+        status: 'pending',
+        progress: 0,
+        message: 'در صف دریافت مدل',
+        errorMessage: null,
+        createdBy: createdBy || null,
+        createdAt: now,
+        updatedAt: now,
+      });
+      activeJobId = id;
+    } catch (error) {
+      this.releaseJobReservation();
+      throw error;
+    }
+    this.releaseJobReservation();
     setImmediate(() => {
       this.runPullJob(id, normalized).catch((err) => {
         logger.error('runPullJob unhandled', { jobId: id, error: err?.message });
@@ -147,29 +203,34 @@ export class AIJobManager {
   }
 
   async enqueueDelete(modelRef: string, createdBy?: string): Promise<AIDeploymentJobView> {
-    const normalized = (modelRef || '').trim();
-    if (!normalized || normalized.length > 160) {
-      throw new Error('شناسه مدل نامعتبر است.');
+    const normalized = normalizeOllamaModelName(modelRef);
+    if (!normalized) {
+      throw new Error('شناسه مدل نامعتبر است. از قالب model:tag یا namespace/model:tag استفاده کنید.');
     }
-    await this.assertNoActiveJob();
+    await this.reserveJobSlot();
 
     const id = randomUUID();
     const now = new Date();
-    await db.insert(schema.aiDeploymentJobs).values({
-      id,
-      jobType: 'delete',
-      providerId: 'ollama',
-      targetRef: normalized,
-      status: 'pending',
-      progress: 0,
-      message: 'در صف حذف مدل',
-      errorMessage: null,
-      createdBy: createdBy || null,
-      createdAt: now,
-      updatedAt: now,
-    });
-
-    activeJobId = id;
+    try {
+      await db.insert(schema.aiDeploymentJobs).values({
+        id,
+        jobType: 'delete',
+        providerId: 'ollama',
+        targetRef: normalized,
+        status: 'pending',
+        progress: 0,
+        message: 'در صف حذف مدل',
+        errorMessage: null,
+        createdBy: createdBy || null,
+        createdAt: now,
+        updatedAt: now,
+      });
+      activeJobId = id;
+    } catch (error) {
+      this.releaseJobReservation();
+      throw error;
+    }
+    this.releaseJobReservation();
     setImmediate(() => {
       this.runDeleteJob(id, normalized).catch((err) => {
         logger.error('runDeleteJob unhandled', { jobId: id, error: err?.message });
@@ -184,127 +245,48 @@ export class AIJobManager {
     try {
       await this.updateJob(jobId, {
         status: 'running',
-        progress: 1,
+        progress: 5,
         message: 'شروع دریافت مدل از موتور Ollama',
       });
 
-      const baseUrl = config.aiEngine.url;
-      const timeoutMs = config.aiEngine.modelPullTimeoutMs || 30 * 60 * 1000;
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-      try {
-        const resp = await fetch(`${baseUrl}/api/pull`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: modelRef, stream: true }),
-          signal: controller.signal,
-        });
-
-        if (!resp.ok || !resp.body) {
-          const errText = resp.ok ? '' : await resp.text().catch(() => '');
-          throw new Error(`HTTP ${resp.status} ${errText}`.trim());
-        }
-
-        // Prefer LocalAIProvider allowlist by also calling through it when stream fails
-        const reader = (resp.body as any).getReader?.();
-        if (!reader) {
-          // Fallback: non-stream pull via existing provider
-          clearTimeout(timer);
-          const result = await localAIProvider.pullModel(modelRef);
-          if (!result.success) throw new Error(result.message);
+      // Use one authoritative pull path for validation, API payload, timeout,
+      // error handling, and installed-model inventory synchronization.
+      const result = await localAIProvider.pullModel(modelRef, async (progress, status) => {
+        try {
           await this.updateJob(jobId, {
-            status: 'success',
-            progress: 100,
-            message: result.message,
-            errorMessage: null,
+            progress: Math.min(95, Math.max(5, progress)),
+            message: status ? `دریافت مدل: ${status}` : 'در حال دریافت مدل از Ollama',
           });
-          await aiModelManager.syncInstalledModelsFromProvider('ollama').catch(() => 0);
-          return;
+        } catch (error: any) {
+          // Progress persistence is best-effort; a transient DB write must not
+          // abort an otherwise healthy Ollama download.
+          logger.warn('Could not persist model pull progress', { jobId, error: error?.message });
         }
-
-        const decoder = new TextDecoder();
-        let buffer = '';
-        let lastProgress = 1;
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed) continue;
-            try {
-              const evt = JSON.parse(trimmed);
-              if (evt.error) {
-                throw new Error(String(evt.error));
-              }
-              // Ollama stream: status, completed, total
-              let progress = lastProgress;
-              if (typeof evt.completed === 'number' && typeof evt.total === 'number' && evt.total > 0) {
-                progress = Math.min(99, Math.max(1, Math.floor((evt.completed / evt.total) * 100)));
-              } else if (evt.status === 'success') {
-                progress = 100;
-              } else if (typeof evt.status === 'string') {
-                // incremental nudge while downloading layers
-                progress = Math.min(95, lastProgress + 1);
-              }
-              if (progress !== lastProgress) {
-                lastProgress = progress;
-                await this.updateJob(jobId, {
-                  status: 'running',
-                  progress,
-                  message: typeof evt.status === 'string' ? evt.status : 'در حال دریافت',
-                });
-              }
-            } catch (parseErr: any) {
-              if (parseErr?.message && String(parseErr.message).includes('HTTP')) throw parseErr;
-              // ignore partial JSON lines
-            }
-          }
-        }
-
-        clearTimeout(timer);
-        await this.updateJob(jobId, {
-          status: 'success',
-          progress: 100,
-          message: `مدل ${modelRef} با موفقیت بارگیری شد.`,
-          errorMessage: null,
-        });
-        await aiModelManager.syncInstalledModelsFromProvider('ollama').catch(() => 0);
-      } catch (err: any) {
-        clearTimeout(timer);
-        // Fallback to non-stream provider pull once
-        if (err?.name !== 'AbortError') {
-          const result = await localAIProvider.pullModel(modelRef);
-          if (result.success) {
-            await this.updateJob(jobId, {
-              status: 'success',
-              progress: 100,
-              message: result.message,
-              errorMessage: null,
-            });
-            await aiModelManager.syncInstalledModelsFromProvider('ollama').catch(() => 0);
-            return;
-          }
-          await this.updateJob(jobId, {
-            status: 'failed',
-            message: 'دریافت مدل ناموفق بود',
-            errorMessage: result.message || err?.message || 'خطای ناشناخته',
-          });
-          return;
-        }
+      });
+      if (!result.success) {
         await this.updateJob(jobId, {
           status: 'failed',
+          progress: 100,
           message: 'دریافت مدل ناموفق بود',
-          errorMessage:
-            err?.name === 'AbortError'
-              ? 'مهلت مجاز دریافت مدل به پایان رسید.'
-              : err?.message || 'خطای ناشناخته',
+          errorMessage: result.message,
         });
+        return;
       }
+
+      await this.updateJob(jobId, {
+        status: 'success',
+        progress: 100,
+        message: result.message,
+        errorMessage: null,
+      });
+      await aiModelManager.syncInstalledModelsFromProvider('ollama').catch(() => 0);
+    } catch (err: any) {
+      await this.updateJob(jobId, {
+        status: 'failed',
+        progress: 100,
+        message: 'دریافت مدل با خطا مواجه شد',
+        errorMessage: err?.message || 'خطای ناشناخته',
+      });
     } finally {
       if (activeJobId === jobId) activeJobId = null;
     }
