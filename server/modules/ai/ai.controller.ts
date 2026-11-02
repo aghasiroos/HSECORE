@@ -125,7 +125,11 @@ export class AIController {
         ? requestedModel.trim()
         : config.aiEngine.defaultChatModel;
       const modelInfo = candidates.find(item =>
-        [item.name, item.model].some(name => typeof name === 'string' && name.toLowerCase() === selectedModel.toLowerCase())
+        [item.name, item.model].some(name => typeof name === 'string' && (
+          name.toLowerCase() === selectedModel.toLowerCase() ||
+          name.toLowerCase() === `${selectedModel.toLowerCase()}:latest` ||
+          `${name.toLowerCase()}:latest` === selectedModel.toLowerCase()
+        ))
       );
       if (!modelInfo) {
         return res.status(400).json({ success: false, message: 'مدل انتخاب‌شده نصب نیست یا برای گفت‌وگو قابل استفاده نیست. از فهرست مدل‌های نصب‌شده یک مدل زبانی انتخاب کنید.' });

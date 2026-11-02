@@ -73,11 +73,31 @@ export class LocalAIProvider {
   private activeCount = 0;
   private queue: Array<{ run: () => void; reject: (err: any) => void; timer?: NodeJS.Timeout }> = [];
   private offlineUntil = 0;
-  private readonly offlineCooldownMs = 60_000;
+  private readonly offlineCooldownMs = 5_000;
   private pullInProgress = false;
+  private activeUrl: string | null = null;
+  private runtimeEngineReachable = false;
+
+  get isEngineEnabled(): boolean {
+    return config.aiEngine.enabled || this.runtimeEngineReachable;
+  }
+
+  get isReachable(): boolean {
+    return this.runtimeEngineReachable;
+  }
 
   private get baseUrl(): string {
-    return config.aiEngine.url;
+    return this.activeUrl || config.aiEngine.url;
+  }
+
+  private getCandidateUrls(): string[] {
+    const urls = [config.aiEngine.url];
+    if (config.aiEngine.url.includes('hse-ai-engine')) {
+      urls.push('http://host.docker.internal:11434', 'http://127.0.0.1:11434');
+    } else if (config.aiEngine.url.includes('127.0.0.1') || config.aiEngine.url.includes('localhost')) {
+      urls.push('http://hse-ai-engine:11434');
+    }
+    return [...new Set(urls.map(u => u.trim().replace(/\/$/, '')))];
   }
 
   private normalizeModelName(name: string): string | null {
@@ -205,94 +225,114 @@ export class LocalAIProvider {
       cloudFallbackEnabled: config.aiEngine.allowCloudFallback,
     };
 
-    if (!config.aiEngine.enabled) {
-      status.error = 'سرویس هوش مصنوعی محلی در پیکربندی سامانه غیرفعال است.';
-      return status;
-    }
-
     if (Date.now() < this.offlineUntil) {
       status.latencyMs = 0;
       status.error = 'موتور محلی Ollama در این محیط در دسترس نیست (استفاده از موتور داخلی HSECORE).';
       return status;
     }
 
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 2500);
+    const candidateUrls = this.getCandidateUrls();
+    let lastError: any = null;
 
-      const resp = await fetch(`${this.baseUrl}/api/tags`, {
-        method: 'GET',
-        signal: controller.signal,
-      });
-      clearTimeout(timeout);
-
-      status.latencyMs = Date.now() - startTime;
-
-      if (!resp.ok) {
-        status.error = `پاسخ ناموفق موتور هوش مصنوعی: HTTP ${resp.status}`;
-        return status;
-      }
-
-      this.offlineUntil = 0;
-      const data = (await resp.json()) as { models?: OllamaModelInfo[] };
-      status.isAvailable = true;
-      status.installedModels = data.models || [];
-      const installedNames = new Set(status.installedModels.flatMap(model =>
-        [model.name, model.model].filter((name): name is string => typeof name === 'string')
-      ).map(name => this.canonicalModelName(name)).filter((name): name is string => name !== null));
-      status.chatModelInstalled = installedNames.has(this.canonicalModelName(config.aiEngine.defaultChatModel) || '');
-      status.embeddingModelInstalled = installedNames.has(this.canonicalModelName(config.aiEngine.defaultEmbedModel) || '');
-      // Engine reachability is not equivalent to inference readiness.
-      status.localInferenceReady = status.chatModelInstalled;
-
-      // Query version
+    for (const targetUrl of candidateUrls) {
       try {
-        const vController = new AbortController();
-        const vTimeout = setTimeout(() => vController.abort(), 2000);
-        const vResp = await fetch(`${this.baseUrl}/api/version`, {
-          method: 'GET',
-          signal: vController.signal,
-        });
-        clearTimeout(vTimeout);
-        if (vResp.ok) {
-          const vData = (await vResp.json()) as { version?: string };
-          status.version = vData.version;
-        }
-      } catch {}
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 2500);
 
-      return status;
-    } catch (err: any) {
-      this.markOfflineIfNetworkError(err);
-      status.latencyMs = Date.now() - startTime;
-      status.error = err.name === 'AbortError' ? 'عدم پاسخگویی موتور در بازه زمانی تعیین‌شده (Timeout)' : (err.message || 'خطا در ارتباط با موتور هوش مصنوعی');
-      return status;
+        const resp = await fetch(`${targetUrl}/api/tags`, {
+          method: 'GET',
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+
+        if (resp.ok) {
+          status.latencyMs = Date.now() - startTime;
+          this.offlineUntil = 0;
+          this.activeUrl = targetUrl;
+          this.runtimeEngineReachable = true;
+
+          const data = (await resp.json()) as { models?: OllamaModelInfo[] };
+          status.isAvailable = true;
+          status.engineUrl = targetUrl;
+          status.installedModels = data.models || [];
+          const installedNames = new Set(status.installedModels.flatMap(model =>
+            [model.name, model.model].filter((name): name is string => typeof name === 'string')
+          ).map(name => this.canonicalModelName(name)).filter((name): name is string => name !== null));
+          status.chatModelInstalled = installedNames.has(this.canonicalModelName(config.aiEngine.defaultChatModel) || '');
+          status.embeddingModelInstalled = installedNames.has(this.canonicalModelName(config.aiEngine.defaultEmbedModel) || '');
+          status.localInferenceReady = status.chatModelInstalled;
+
+          // Query version
+          try {
+            const vController = new AbortController();
+            const vTimeout = setTimeout(() => vController.abort(), 2000);
+            const vResp = await fetch(`${targetUrl}/api/version`, {
+              method: 'GET',
+              signal: vController.signal,
+            });
+            clearTimeout(vTimeout);
+            if (vResp.ok) {
+              const vData = (await vResp.json()) as { version?: string };
+              status.version = vData.version;
+            }
+          } catch {}
+
+          return status;
+        } else {
+          lastError = new Error(`پاسخ ناموفق موتور هوش مصنوعی: HTTP ${resp.status}`);
+        }
+      } catch (err: any) {
+        lastError = err;
+      }
     }
+
+    this.runtimeEngineReachable = false;
+    if (config.aiEngine.enabled) {
+      this.markOfflineIfNetworkError(lastError);
+    }
+    status.latencyMs = Date.now() - startTime;
+    if (!config.aiEngine.enabled) {
+      status.error = 'سرویس هوش مصنوعی محلی در پیکربندی سامانه غیرفعال است.';
+    } else {
+      status.error = lastError?.name === 'AbortError'
+        ? 'عدم پاسخگویی موتور در بازه زمانی تعیین‌شده (Timeout)'
+        : (lastError?.message || 'خطا در ارتباط با موتور هوش مصنوعی');
+    }
+    return status;
   }
 
   /**
    * List installed models on Local LLM Engine
    */
   async listInstalledModels(): Promise<OllamaModelInfo[]> {
-    if (!config.aiEngine.enabled || Date.now() < this.offlineUntil) {
+    if (Date.now() < this.offlineUntil) {
       return [];
     }
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 3000);
-      const resp = await fetch(`${this.baseUrl}/api/tags`, {
-        method: 'GET',
-        signal: controller.signal,
-      });
-      clearTimeout(timeout);
-      if (!resp.ok) return [];
-      this.offlineUntil = 0;
-      const data = (await resp.json()) as { models?: OllamaModelInfo[] };
-      return data.models || [];
-    } catch (err) {
-      this.markOfflineIfNetworkError(err);
-      logger.debug('[LocalAIProvider] Failed to list models', { error: String(err) });
-      return [];
+    const candidateUrls = this.getCandidateUrls();
+    for (const targetUrl of candidateUrls) {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 3000);
+        const resp = await fetch(`${targetUrl}/api/tags`, {
+          method: 'GET',
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+        if (resp.ok) {
+          this.offlineUntil = 0;
+          this.activeUrl = targetUrl;
+          this.runtimeEngineReachable = true;
+          const data = (await resp.json()) as { models?: OllamaModelInfo[] };
+          return data.models || [];
+        }
+      } catch (err) {
+        // Try next candidate URL
+      }
     }
+    if (config.aiEngine.enabled) {
+      logger.debug('[LocalAIProvider] Failed to list models from all candidate URLs');
+    }
+    return [];
   }
 
   /**
@@ -450,7 +490,7 @@ export class LocalAIProvider {
     messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>,
     options?: LocalChatOptions
   ): Promise<{ text: string; model: string; durationMs: number }> {
-    if (!config.aiEngine.enabled || Date.now() < this.offlineUntil) {
+    if (!this.isEngineEnabled || Date.now() < this.offlineUntil) {
       throw new Error('Local AI engine is offline');
     }
 
@@ -521,7 +561,7 @@ export class LocalAIProvider {
     onToken: (token: string) => void,
     signal?: AbortSignal
   ): Promise<{ text: string; model: string; durationMs: number }> {
-    if (!config.aiEngine.enabled || Date.now() < this.offlineUntil) {
+    if (!this.isEngineEnabled || Date.now() < this.offlineUntil) {
       throw new Error('Local AI engine is offline');
     }
 
@@ -612,7 +652,7 @@ export class LocalAIProvider {
     prompt: string,
     options?: LocalChatOptions
   ): Promise<{ text: string; model: string; durationMs: number }> {
-    if (!config.aiEngine.enabled || Date.now() < this.offlineUntil) {
+    if (!this.isEngineEnabled || Date.now() < this.offlineUntil) {
       throw new Error('Local AI engine is offline');
     }
 
@@ -682,7 +722,7 @@ export class LocalAIProvider {
     prompt: string,
     modelName?: string
   ): Promise<{ embedding: number[]; model: string; durationMs: number }> {
-    if (!config.aiEngine.enabled || Date.now() < this.offlineUntil) {
+    if (!this.isEngineEnabled || Date.now() < this.offlineUntil) {
       throw new Error('Local AI engine is offline');
     }
 

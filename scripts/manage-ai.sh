@@ -132,6 +132,9 @@ cmd_start() {
   echo ""
   if [ ${attempts} -lt 45 ]; then
     echo -e "${GREEN}[✓] Local AI Engine is ready and running!${NC}"
+    if docker ps --format '{{.Names}}' 2>/dev/null | grep -Eq '^(hse-enterprise-app|.*-hse-app)$'; then
+      docker compose -f "${PROJECT_DIR}/${COMPOSE_FILE}" --env-file "${ENV_FILE}" up -d --no-deps hse-app >/dev/null 2>&1 || true
+    fi
   else
     echo -e "${RED}[ERROR] AI Engine healthcheck timed out. Inspect: docker logs ${CONTAINER_NAME}${NC}"
     return 1

@@ -10,8 +10,7 @@ export class AIService {
    * Check whether the local Ollama provider is enabled
    */
   isConfigured(): boolean {
-    // This indicates that the local provider is enabled, not that a model is installed.
-    return config.aiEngine.enabled;
+    return localAIProvider.isEngineEnabled;
   }
 
   /**
@@ -80,7 +79,7 @@ Return ONLY valid JSON matching this schema:
   ]
 }`;
 
-    if (!config.aiEngine.enabled) throw new Error('سرویس Ollama غیرفعال است.');
+    if (!localAIProvider.isEngineEnabled) throw new Error('سرویس Ollama غیرفعال است.');
     const result = await localAIProvider.generate(prompt, { temperature: 0.2, max_tokens: 1500 });
     const cleanJson = result.text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
     try {
