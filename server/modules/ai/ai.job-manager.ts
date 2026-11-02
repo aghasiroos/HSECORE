@@ -236,10 +236,16 @@ export class AIJobManager {
       // Use one authoritative pull path for validation, API payload, timeout,
       // error handling, and installed-model inventory synchronization.
       const result = await localAIProvider.pullModel(modelRef, async (progress, status) => {
-        await this.updateJob(jobId, {
-          progress: Math.min(95, Math.max(5, progress)),
-          message: status ? `دریافت مدل: ${status}` : 'در حال دریافت مدل از Ollama',
-        });
+        try {
+          await this.updateJob(jobId, {
+            progress: Math.min(95, Math.max(5, progress)),
+            message: status ? `دریافت مدل: ${status}` : 'در حال دریافت مدل از Ollama',
+          });
+        } catch (error: any) {
+          // Progress persistence is best-effort; a transient DB write must not
+          // abort an otherwise healthy Ollama download.
+          logger.warn('Could not persist model pull progress', { jobId, error: error?.message });
+        }
       });
       if (!result.success) {
         await this.updateJob(jobId, {
