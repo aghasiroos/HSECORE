@@ -168,7 +168,7 @@ export const config: AppConfig = {
   appUrl: process.env.APP_URL || '',
   isProd,
   aiEngine: {
-    enabled: process.env.AI_ENGINE_ENABLED === 'true' || process.env.AI_ENGINE_ENABLED !== 'false',
+    enabled: (process.env.AI_ENGINE_ENABLED ?? 'false').trim().toLowerCase() === 'true',
     url: (process.env.AI_ENGINE_URL || 'http://hse-ai-engine:11434').trim().replace(/\/$/, ''),
     defaultChatModel: process.env.AI_DEFAULT_CHAT_MODEL || 'qwen2.5:1.5b',
     defaultEmbedModel: process.env.AI_DEFAULT_EMBED_MODEL || 'bge-m3',
