@@ -37,7 +37,7 @@ services:
       - "FORECA_API_KEY=${FORECA_API_KEY:-}"
       - "FORECA_API_TOKEN=${FORECA_API_TOKEN:-}"
       - "UPLOAD_DIR=/app/uploads"
-      - "AI_ENGINE_ENABLED=${AI_ENGINE_ENABLED:-true}"
+      - "AI_ENGINE_ENABLED=${AI_ENGINE_ENABLED:-false}"
       - "AI_ENGINE_URL=${AI_ENGINE_URL:-http://hse-ai-engine:11434}"
       - "AI_DEFAULT_CHAT_MODEL=${AI_DEFAULT_CHAT_MODEL:-qwen2.5:1.7b}"
       - "AI_DEFAULT_EMBED_MODEL=${AI_DEFAULT_EMBED_MODEL:-bge-m3}"
@@ -60,11 +60,10 @@ services:
       start_period: 25s
     networks:
       - hse-network
-    depends_on:
-      - hse-ai-engine
-
-  # Independent Local AI Engine (Ollama - Offline CPU Inference)
+  # Optional Local AI Engine (Ollama - Offline CPU Inference)
   hse-ai-engine:
+    profiles:
+      - ai
     image: ${OLLAMA_IMAGE:-ollama/ollama:0.40.13}
     container_name: hse-ai-engine
     restart: unless-stopped
