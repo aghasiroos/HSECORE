@@ -13,7 +13,6 @@ import {
   MessageSquare,
   Download,
   Search,
-  Scale,
   Square,
 } from 'lucide-react';
 import { UserProfile } from '../../types';
@@ -487,8 +486,8 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
               <Bot className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-sm font-black text-slate-800 dark:text-slate-100">هوش مصنوعی HSECORE</h2>
-              <p className="text-[10px] text-slate-400">مشاور جامع HSE و مراجع قانونی</p>
+              <h2 className="text-sm font-black text-slate-800 dark:text-slate-100">دستیار هوش مصنوعی</h2>
+              <p className="text-[10px] text-slate-400">مدل‌های زبانی محلی · Ollama</p>
             </div>
           </div>
           <button
@@ -729,13 +728,24 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
               className="flex-1 resize-none bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-indigo-500/30 text-slate-800 dark:text-slate-100 max-h-32"
               disabled={isLoading || sessionsLoading}
             />
-            <button
-              onClick={() => handleSendMessage()}
-              disabled={!inputMessage.trim() || isLoading || sessionsLoading}
-              className="p-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-2xl shadow-sm transition"
-            >
-              <Send className="w-5 h-5" />
-            </button>
+            {isLoading ? (
+              <button
+                onClick={handleStopGeneration}
+                className="p-3 bg-slate-700 hover:bg-slate-600 text-white rounded-2xl shadow-sm transition"
+                title="توقف تولید پاسخ"
+              >
+                <Square className="w-5 h-5" />
+              </button>
+            ) : (
+              <button
+                onClick={() => handleSendMessage()}
+                disabled={!inputMessage.trim() || sessionsLoading || !selectedModel}
+                className="p-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-2xl shadow-sm transition"
+                title="ارسال پیام"
+              >
+                <Send className="w-5 h-5" />
+              </button>
+            )}
             </div>
           </div>
         </div>
