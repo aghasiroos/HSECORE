@@ -120,10 +120,10 @@ fs.copyFileSync(path.join(publicAssetsDir, 'hsecore-icon-512.png'), path.join(pu
 fs.copyFileSync(path.join(publicAssetsDir, 'hsecore-icon-192.png'), path.join(publicAssetsDir, 'icon-192.png'));
 
 console.log('>>> [5/5] Generating standard Windows multi-resolution .ico bundles...');
+// Generate one canonical ICO file. Other icon aliases are intentionally not
+// emitted because they were byte-for-byte duplicates of this favicon.
 const icoDestinations = [
-  path.join(publicAssetsDir, 'hsecore-icon.ico'),
-  path.join(publicDir, 'favicon.ico'),
-  path.join(publicDir, 'icon.ico')
+  path.join(publicDir, 'favicon.ico')
 ];
 
 for (const dest of icoDestinations) {
