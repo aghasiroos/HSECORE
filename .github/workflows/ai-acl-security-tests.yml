@@ -13,6 +13,9 @@ on:
       - 'server/core/middleware/security.ts'
       - 'server/core/ip.ts'
       - 'server/modules/files/**'
+      - 'server/services/backup-retention.ts'
+      - 'server/services/backup.service.ts'
+      - 'scripts/test-backup-retention.ts'
       - 'scripts/test-ai-acl.ts'
       - 'scripts/test-ai-auth.ts'
       - 'scripts/test-ai-rag-db.ts'
@@ -115,6 +118,8 @@ jobs:
         run: npm ci
       - name: Verify API cache isolation across authenticated sessions
         run: npm run test:api-cache-session
+      - name: Verify backup retention preserves manual and safety backups
+        run: npm run test:backup-retention
       - name: Verify rate limiting uses Express-trusted client IP
         run: npx tsx scripts/test-client-ip-trust.ts
       - name: Verify authenticated PDF pages are never shared-cacheable
