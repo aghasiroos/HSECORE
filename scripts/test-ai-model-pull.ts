@@ -17,20 +17,28 @@ async function main() {
   let capturedUrl = '';
   let capturedInit: RequestInit | undefined;
   try {
+    const progressUpdates: number[] = [];
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       capturedUrl = String(input);
       capturedInit = init;
-      return new Response(JSON.stringify({ status: 'success' }), {
-        status: 200, headers: { 'Content-Type': 'application/json' },
+      return new Response([
+        JSON.stringify({ status: 'pulling manifest' }),
+        JSON.stringify({ status: 'pulling model', completed: 50, total: 100 }),
+        JSON.stringify({ status: 'success' }),
+      ].join('\\n') + '\\n', {
+        status: 200, headers: { 'Content-Type': 'application/x-ndjson' },
       });
     }) as typeof fetch;
-    const success = await localAIProvider.pullModel('hf.co/user/model:Q4_K_M');
+    const success = await localAIProvider.pullModel('hf.co/user/model:Q4_K_M', progress => {
+      progressUpdates.push(progress);
+    });
     assert.equal(success.success, true);
     assert.equal(capturedUrl.endsWith('/api/pull'), true);
     assert.equal(capturedInit?.method, 'POST');
     assert.deepEqual(JSON.parse(String(capturedInit?.body)), {
-      model: 'hf.co/user/model:Q4_K_M', stream: false,
+      model: 'hf.co/user/model:Q4_K_M', stream: true,
     });
+    assert(progressUpdates.some(progress => progress >= 50), 'Expected real download progress events');
 
     globalThis.fetch = (async () => new Response(
       JSON.stringify({ error: 'pull model manifest: file does not exist' }),
