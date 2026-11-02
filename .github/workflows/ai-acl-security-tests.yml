@@ -165,7 +165,7 @@ jobs:
             echo "The model download menu must not preselect a model."
             exit 1
           fi
-          grep -Fq 'JSON.stringify({ model: normalized, stream: false })' server/modules/ai/ai.local-provider.ts
+          grep -Fq 'JSON.stringify({ model: normalized, stream: true })' server/modules/ai/ai.local-provider.ts
           grep -Fq 'JSON.stringify({ model: normalized })' server/modules/ai/ai.local-provider.ts
           grep -Fq 'Type DELETE to confirm' scripts/manage-ai.sh
           grep -Fq 'verify_container_compose_owner' scripts/manage-ai.sh
