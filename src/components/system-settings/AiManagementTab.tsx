@@ -31,8 +31,10 @@ export default function AiManagementTab({ language = 'fa', currentUser }: AiMana
   const [engineStatus, setEngineStatus] = useState<any>(null);
   const [installedModels, setInstalledModels] = useState<any[]>([]);
   const [auditData, setAuditData] = useState<any>(null);
-  const [pullModelName, setPullModelName] = useState<string>('qwen2.5:1.5b');
+  const [pullModelName, setPullModelName] = useState<string>('');
   const [isPulling, setIsPulling] = useState<boolean>(false);
+  const [modelJob, setModelJob] = useState<any>(null);
+  const [modelJobAction, setModelJobAction] = useState<'pull' | 'delete'>('pull');
   const [actionMessage, setActionMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const [allowTools, setAllowTools] = useState<boolean>(getAiAllowToolsSetting);
 
@@ -80,6 +82,56 @@ export default function AiManagementTab({ language = 'fa', currentUser }: AiMana
   useEffect(() => {
     fetchData();
   }, []);
+
+  // Restore an unfinished persisted model operation after a page refresh.
+  useEffect(() => {
+    let cancelled = false;
+    authFetch('/api/v1/ai/jobs?limit=10')
+      .then(response => response.json())
+      .then(result => {
+        if (cancelled || !result?.success || !Array.isArray(result.data)) return;
+        const activeJob = result.data.find((job: any) => ['pending', 'running'].includes(job.status));
+        if (activeJob) {
+          setModelJob(activeJob);
+          setModelJobAction(activeJob.jobType === 'delete' ? 'delete' : 'pull');
+          setIsPulling(true);
+        }
+      })
+      .catch(error => console.warn('Could not restore active model operation.', error));
+    return () => { cancelled = true; };
+  }, []);
+
+  // Resume and monitor persisted model operations; never report success before the job completes.
+  useEffect(() => {
+    if (!modelJob?.id || ['success', 'failed', 'cancelled'].includes(modelJob.status)) return;
+    let stopped = false;
+    const pollJob = async () => {
+      try {
+        const response = await authFetch(`/api/v1/ai/jobs/${encodeURIComponent(modelJob.id)}`);
+        const result = await response.json();
+        if (stopped || !result?.success || !result.data) return;
+        const job = result.data;
+        setModelJob(job);
+        if (['success', 'failed', 'cancelled'].includes(job.status)) {
+          setIsPulling(false);
+          if (job.status === 'success') {
+            setActionMessage({ text: job.message || (modelJobAction === 'pull' ? 'دانلود مدل با موفقیت تکمیل شد.' : 'حذف مدل با موفقیت تکمیل شد.'), type: 'success' });
+            fetchData();
+          } else {
+            setActionMessage({ text: job.errorMessage || job.message || 'عملیات مدل ناموفق بود.', type: 'error' });
+          }
+        }
+      } catch (error) {
+        if (!stopped) console.warn('Model operation status polling failed; it will retry.', error);
+      }
+    };
+    void pollJob();
+    const timer = window.setInterval(pollJob, 1500);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [modelJob?.id, modelJob?.status, modelJobAction]);
 
   const handleCreateDoc = async () => {
     if (!newDocTitle.trim() || !newDocContent.trim() || isIndexingDoc) return;
@@ -156,42 +208,54 @@ export default function AiManagementTab({ language = 'fa', currentUser }: AiMana
   };
 
   const handlePullModel = async () => {
-    if (!pullModelName.trim() || isPulling) return;
+    const requestedModel = pullModelName.trim();
+    if (!requestedModel || isPulling) return;
     setIsPulling(true);
+    setModelJobAction('pull');
+    setModelJob(null);
     setActionMessage(null);
     try {
-      const res = await authFetch('/api/v1/ai/models/pull', {
+      const res = await authFetch('/api/v1/ai/jobs/pull', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ modelName: pullModelName.trim() }),
+        body: JSON.stringify({ modelName: requestedModel }),
       });
       const data = await res.json();
-      if (data.success) {
-        setActionMessage({ text: data.message || `مدل ${pullModelName} با موفقیت بارگیری شد.`, type: 'success' });
-        fetchData();
+      if (res.ok && data.success && data.data?.id) {
+        setModelJob(data.data);
+        setActionMessage({ text: `درخواست دانلود مدل ${requestedModel} ثبت شد؛ وضعیت و پیشرفت به‌صورت زنده نمایش داده می‌شود.`, type: 'success' });
       } else {
-        setActionMessage({ text: data.message || data.error?.message || 'خطا در بارگیری مدل.', type: 'error' });
+        setIsPulling(false);
+        setActionMessage({ text: data.message || data.error?.message || 'خطا در ثبت درخواست دانلود مدل.', type: 'error' });
       }
     } catch (err: any) {
-      setActionMessage({ text: err.message || 'خطا در برقراری ارتباط با سرور.', type: 'error' });
-    } finally {
       setIsPulling(false);
+      setActionMessage({ text: err.message || 'خطا در برقراری ارتباط با سرور.', type: 'error' });
     }
   };
 
   const handleDeleteModel = async (modelName: string) => {
+    if (isPulling) return;
+    setIsPulling(true);
+    setModelJobAction('delete');
+    setModelJob(null);
+    setActionMessage(null);
     try {
-      const res = await authFetch(`/api/v1/ai/models/${encodeURIComponent(modelName)}`, {
-        method: 'DELETE',
+      const res = await authFetch('/api/v1/ai/jobs/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ modelName }),
       });
       const data = await res.json();
-      if (data.success) {
-        setActionMessage({ text: data.message || `مدل ${modelName} با موفقیت حذف شد.`, type: 'success' });
-        fetchData();
+      if (res.ok && data.success && data.data?.id) {
+        setModelJob(data.data);
+        setActionMessage({ text: `درخواست حذف مدل ${modelName} ثبت شد.`, type: 'success' });
       } else {
-        setActionMessage({ text: data.message || data.error?.message || 'خطا در حذف مدل.', type: 'error' });
+        setIsPulling(false);
+        setActionMessage({ text: data.message || data.error?.message || 'خطا در ثبت درخواست حذف مدل.', type: 'error' });
       }
     } catch (err: any) {
+      setIsPulling(false);
       setActionMessage({ text: err.message || 'خطا در ارتباط با سرور.', type: 'error' });
     } finally {
       setConfirmDeleteModelName(null);
@@ -241,7 +305,6 @@ export default function AiManagementTab({ language = 'fa', currentUser }: AiMana
             <Database className="w-3.5 h-3.5" />
             <span>جستجو در تمام ماژول‌ها: {allowTools ? 'فعال' : 'غیرفعال'}</span>
           </button>
-
           <button
             onClick={fetchData}
             disabled={loading}
@@ -338,7 +401,7 @@ export default function AiManagementTab({ language = 'fa', currentUser }: AiMana
               <span>فهرست مدل‌های زبانی مستقر در حافظه پایدار</span>
             </h4>
             <p className="text-xs text-slate-400 mt-0.5">
-              مدل‌های کوانتایز شده سبک GGUF جهت پاسخ‌گویی آفلاین بدون خروج داده‌ها از سرور
+              هر شناسه معتبر Ollama قابل دانلود است؛ هیچ مدلی از پیش انتخاب یا خودکار نصب نمی‌شود. پیش از اجرای مدل، تناسب آن با منابع سخت‌افزاری سرور را بررسی کنید.
             </p>
           </div>
 
@@ -348,12 +411,14 @@ export default function AiManagementTab({ language = 'fa', currentUser }: AiMana
               type="text"
               value={pullModelName}
               onChange={e => setPullModelName(e.target.value)}
-              placeholder="مثال: qwen2.5:1.5b"
+              placeholder="نام مدل؛ مثال: qwen3:1.7b یا hf.co/user/model:tag"
+              maxLength={160}
+              spellCheck={false}
               className="px-3 py-1.5 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-mono bg-slate-50 dark:bg-slate-800 w-44"
             />
             <button
               onClick={handlePullModel}
-              disabled={isPulling}
+              disabled={isPulling || !pullModelName.trim()}
               className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer disabled:opacity-50"
             >
               <Download className={`w-3.5 h-3.5 ${isPulling ? 'animate-bounce' : ''}`} />
@@ -361,6 +426,19 @@ export default function AiManagementTab({ language = 'fa', currentUser }: AiMana
             </button>
           </div>
         </div>
+
+        {modelJob && ['pending', 'running'].includes(modelJob.status) && (
+          <div className="rounded-2xl border border-indigo-200 dark:border-indigo-900 bg-indigo-50/70 dark:bg-indigo-950/30 p-4 space-y-2" aria-live="polite">
+            <div className="flex items-center justify-between gap-3 text-xs font-bold text-slate-700 dark:text-slate-200">
+              <span>{modelJobAction === 'pull' ? 'پیشرفت دانلود مدل' : 'وضعیت حذف مدل'}</span>
+              <span className="tabular-nums">{Math.max(0, Math.min(100, Number(modelJob.progress) || 0))}٪</span>
+            </div>
+            <div className="h-2.5 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
+              <div className="h-full rounded-full bg-indigo-600 transition-all duration-500" style={{ width: `${Math.max(0, Math.min(100, Number(modelJob.progress) || 0))}%` }} />
+            </div>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">{modelJob.message || 'در حال انجام عملیات...'}</p>
+          </div>
+        )}
 
         {/* Models List Table */}
         <div className="overflow-x-auto">
