@@ -58,7 +58,8 @@ interface AiAssistantAppProps {
 export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps) {
   const [inputMessage, setInputMessage] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [allowTools, setAllowTools] = useState<boolean>(true);
+  const [installedModels, setInstalledModels] = useState<Array<{ name: string; details?: { family?: string } }>>([]);
+  const [selectedModel, setSelectedModel] = useState<string>('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(false);
   const [sessionsLoading, setSessionsLoading] = useState<boolean>(true);
@@ -182,6 +183,16 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
 
   useEffect(() => {
     loadSessionsFromServer();
+    authFetch('/api/v1/ai/models')
+      .then(response => response.json())
+      .then(data => {
+        const models = Array.isArray(data?.data) ? data.data.filter((model: any) =>
+          String(model?.details?.family || '').toLowerCase() !== 'bert' && !/embed|embedding/i.test(String(model?.name || ''))
+        ) : [];
+        setInstalledModels(models);
+        setSelectedModel((current) => current || models[0]?.name || '');
+      })
+      .catch(() => setInstalledModels([]));
   }, []);
 
   useEffect(() => {
@@ -367,7 +378,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
           message: text,
           assistantId: 'GENERAL_HSE',
           history: historyPayload,
-          allowTools,
+          model: selectedModel,
         }),
       });
 
@@ -559,15 +570,6 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
             </div>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
-            <label className="flex items-center gap-1.5 text-[11px] text-slate-500 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={allowTools}
-                onChange={e => setAllowTools(e.target.checked)}
-                className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-              />
-              دسترسی به داده‌های سامانه
-            </label>
             <button
               onClick={handleExportSession}
               className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition"
@@ -687,7 +689,19 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
         </div>
 
         <div className="p-4 border-t border-slate-200 dark:border-slate-800 bg-white/90 dark:bg-slate-900/90 backdrop-blur">
-          <div className="max-w-3xl mx-auto flex items-end gap-2">
+          <div className="max-w-3xl mx-auto flex flex-col gap-2">
+            <div className="flex items-center justify-between gap-2">
+              <label className="text-[11px] text-slate-500">مدل محلی</label>
+              <select
+                value={selectedModel}
+                onChange={e => setSelectedModel(e.target.value)}
+                disabled={isLoading || installedModels.length === 0}
+                className="max-w-[70%] rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-xs text-slate-700 dark:text-slate-200"
+              >
+                {installedModels.length === 0 ? <option value="">مدل گفت‌وگو نصب نیست</option> : installedModels.map(model => <option key={model.name} value={model.name}>{model.name}</option>)}
+              </select>
+            </div>
+            <div className="flex items-end gap-2">
             <textarea
               value={inputMessage}
               onChange={e => setInputMessage(e.target.value)}
@@ -704,6 +718,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
             >
               <Send className="w-5 h-5" />
             </button>
+            </div>
           </div>
         </div>
       </main>
