@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - security/p0-ai-acl-org-tests
+      - refactor/comprehensive-code-audit
     paths:
       - 'server/modules/ai/**'
       - 'server.ts'
