@@ -14,6 +14,7 @@ on:
       - 'scripts/test-ai-rag-db.ts'
       - 'scripts/test-ai-routes.ts'
       - 'scripts/test-ai-queue.ts'
+      - 'scripts/test-ai-model-pull.ts'
       - 'index.html'
       - '.env.example'
       - 'install.sh'
@@ -126,6 +127,8 @@ jobs:
         run: npm run test:ai-routes
       - name: AI request queue regression tests
         run: npm run test:ai-queue
+      - name: AI model pull validation and Ollama API regression tests
+        run: npm run test:ai-model-pull
       - name: Validate production Compose configurations
         run: |
           cat > .env <<'EOF'
@@ -153,7 +156,15 @@ jobs:
       - name: Verify safe AI runtime management
         run: |
           grep -Fq 'COMPOSE_FILE="docker-compose.server.yml"' scripts/manage-ai.sh
-          grep -Fq 'AI_ALLOWED_MODELS' scripts/manage-ai.sh
+          if grep -Rq 'AI_ALLOWED_MODELS\|allowlisted model' scripts/manage-ai.sh server/modules/ai/ai.local-provider.ts server/core/config.ts .env.example; then
+            echo "Model downloads must not be restricted by a fixed allowlist."
+            exit 1
+          fi
+          if grep -Fq 'default: qwen2.5:1.7b' install.sh; then
+            echo "The model download menu must not preselect a model."
+            exit 1
+          fi
+          grep -Fq 'JSON.stringify({ model: normalized, stream: false })' server/modules/ai/ai.local-provider.ts
           grep -Fq 'Type DELETE to confirm' scripts/manage-ai.sh
           grep -Fq 'verify_container_compose_owner' scripts/manage-ai.sh
           if grep -Fq 'ollama pull' scripts/setup-local-ai.sh; then

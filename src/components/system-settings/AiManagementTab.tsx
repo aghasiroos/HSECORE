@@ -30,7 +30,7 @@ export default function AiManagementTab({ language = 'fa', currentUser }: AiMana
   const [engineStatus, setEngineStatus] = useState<any>(null);
   const [installedModels, setInstalledModels] = useState<any[]>([]);
   const [auditData, setAuditData] = useState<any>(null);
-  const [pullModelName, setPullModelName] = useState<string>('qwen2.5:1.7b');
+  const [pullModelName, setPullModelName] = useState<string>('');
   const [isPulling, setIsPulling] = useState<boolean>(false);
   const [actionMessage, setActionMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
@@ -323,12 +323,14 @@ export default function AiManagementTab({ language = 'fa', currentUser }: AiMana
               type="text"
               value={pullModelName}
               onChange={e => setPullModelName(e.target.value)}
-              placeholder="مثال: qwen2.5:1.7b"
+              placeholder="نام مدل؛ مثال: qwen3:1.7b یا hf.co/user/model:tag"
+              maxLength={160}
+              spellCheck={false}
               className="px-3 py-1.5 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-mono bg-slate-50 dark:bg-slate-800 w-44"
             />
             <button
               onClick={handlePullModel}
-              disabled={isPulling}
+              disabled={isPulling || !pullModelName.trim()}
               className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer disabled:opacity-50"
             >
               <Download className={`w-3.5 h-3.5 ${isPulling ? 'animate-bounce' : ''}`} />
