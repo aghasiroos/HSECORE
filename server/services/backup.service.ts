@@ -8,6 +8,7 @@ import { eq } from 'drizzle-orm';
 import { logger } from '../core/logger.ts';
 import { broadcastDataMutation } from '../core/socket.ts';
 import { selectScheduledBackupsForRetention } from './backup-retention.ts';
+import { resolveBackupRestorePath } from './backup-restore-path.ts';
 
 export type BackupTag = 'manual' | 'scheduled' | 'pre_restore_safety' | 'pre_update';
 
@@ -1673,8 +1674,8 @@ export async function executeRealRestore(
 
     try {
       for (const f of files) {
-        const safeRel = path.normalize(f.relativePath || f.fileName).replace(/^(\.\.(\/|\\|$))+/, '');
-        const stagePath = path.join(stageDir, safeRel);
+        const archivePath = f.relativePath || f.fileName;
+        const stagePath = resolveBackupRestorePath(stageDir, archivePath);
         fs.mkdirSync(path.dirname(stagePath), { recursive: true });
         const buf = Buffer.from(f.contentBase64 || '', 'base64');
         if (f.sha256 && sha256Hex(buf) !== f.sha256) {
@@ -1685,9 +1686,9 @@ export async function executeRealRestore(
 
       // Move verified staged files into live uploads directory
       for (const f of files) {
-        const safeRel = path.normalize(f.relativePath || f.fileName).replace(/^(\.\.(\/|\\|$))+/, '');
-        const stagePath = path.join(stageDir, safeRel);
-        const destPath = path.join(uploadsDir, safeRel);
+        const archivePath = f.relativePath || f.fileName;
+        const stagePath = resolveBackupRestorePath(stageDir, archivePath);
+        const destPath = resolveBackupRestorePath(uploadsDir, archivePath);
         fs.mkdirSync(path.dirname(destPath), { recursive: true });
         fs.renameSync(stagePath, destPath);
         filesRestored++;
