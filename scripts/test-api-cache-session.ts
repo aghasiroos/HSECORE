@@ -23,7 +23,7 @@ const jsonResponse = (data: unknown) =>
   });
 
 try {
-  globalThis.fetch = (async (input) => {
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
     if (url.includes('/medical-exams')) return unrelatedReadResponse;
     fetchCalls += 1;
