@@ -17,7 +17,8 @@
     "test:ai-auth": "tsx scripts/test-ai-auth.ts",
     "test:ai-rag-db": "tsx scripts/test-ai-rag-db.ts",
     "test:ai-routes": "tsx scripts/test-ai-routes.ts",
-    "test:ai-queue": "tsx scripts/test-ai-queue.ts"
+    "test:ai-queue": "tsx scripts/test-ai-queue.ts",
+    "test:ai-model-pull": "tsx scripts/test-ai-model-pull.ts"
   },
   "dependencies": {
     "@bpmn-io/properties-panel": "^3.48.0",
@@ -52,7 +53,7 @@
     "cors": "^2.8.6",
     "dotenv": "^17.2.3",
     "drizzle-orm": "^0.45.2",
-    "express": "^4.21.2",
+    "express": "^4.22.3",
     "fast-xml-parser": "^5.10.1",
     "html-to-image": "^1.11.13",
     "html2canvas": "^1.4.1",
@@ -98,7 +99,7 @@
     "@types/uuid": "^11.0.0",
     "@vitejs/plugin-react-swc": "^4.3.3",
     "autoprefixer": "^10.4.21",
-    "drizzle-kit": "^0.31.11",
+    "drizzle-kit": "^0.31.10",
     "esbuild": "^0.25.0",
     "react-hot-toast": "^2.6.0",
     "tailwindcss": "^4.1.14",

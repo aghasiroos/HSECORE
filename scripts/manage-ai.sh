@@ -159,25 +159,24 @@ cmd_restart() {
   echo -e "${GREEN}[✓] Engine restarted.${NC}"
 }
 
+is_valid_model_ref() {
+  local model="${1:-}"
+  [[ -n "${model}" && ${#model} -le 160 ]] || return 1
+  [[ "${model}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(/[A-Za-z0-9][A-Za-z0-9._-]{0,63}){0,2}(:[A-Za-z0-9][A-Za-z0-9._-]{0,63})?$ ]] || return 1
+  [[ "${model}" != *..* ]] || return 1
+  return 0
+}
+
 cmd_pull() {
-  local model="${1:-}" allowed chat embed
-  if [[ -z "${model}" || ! "${model}" =~ ^[A-Za-z0-9._/-]+(:[A-Za-z0-9._-]+)?$ ]]; then
-    echo -e "${RED}[ERROR] Invalid model reference.${NC}" >&2
+  local model="${1:-}"
+  if ! is_valid_model_ref "${model}"; then
+    echo -e "${RED}[ERROR] Model reference is required. Use a valid Ollama model name, namespace/model, or namespace/model:tag (maximum 160 characters). ${NC}" >&2
     return 1
   fi
   print_header
   check_docker
   ensure_env_file
   ensure_compose_file
-  allowed="$(grep -E '^AI_ALLOWED_MODELS=' "${ENV_FILE}" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '[:space:]' || true)"
-  chat="$(grep -E '^AI_DEFAULT_CHAT_MODEL=' "${ENV_FILE}" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '[:space:]' || true)"
-  embed="$(grep -E '^AI_DEFAULT_EMBED_MODEL=' "${ENV_FILE}" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '[:space:]' || true)"
-  chat="${chat:-qwen2.5:1.7b}"
-  embed="${embed:-bge-m3}"
-  if [[ "${model}" != "${chat}" && "${model}" != "${embed}" && "${model}" != "${chat}:latest" && "${model}" != "${embed}:latest" && ",${allowed}," != *",${model},"* ]]; then
-    echo -e "${RED}[ERROR] Model is not allowlisted. Add its exact reference to AI_ALLOWED_MODELS in .env first.${NC}" >&2
-    return 1
-  fi
   local free_gb
   free_gb="$(disk_free_gb)"
   if [[ "${free_gb}" =~ ^[0-9]+$ ]] && [ "${free_gb}" -lt 3 ]; then
@@ -189,8 +188,11 @@ cmd_pull() {
     echo -e "${YELLOW}[*] Engine container not running. Starting it now...${NC}"
     cmd_start || return 1
   fi
-  echo -e "${BLUE}[*] Pulling allowlisted model '${model}' into persistent storage...${NC}"
-  docker exec "${CONTAINER_NAME}" ollama pull "${model}"
+  echo -e "${BLUE}[*] Pulling model '${model}' into persistent storage (no model allowlist is applied)...${NC}"
+  if ! docker exec "${CONTAINER_NAME}" ollama pull "${model}"; then
+    echo -e "${RED}[ERROR] Ollama could not download '${model}'. Check the exact model name/tag and the Ollama registry response above.${NC}" >&2
+    return 1
+  fi
   echo -e "${GREEN}[✓] Successfully pulled model '${model}'.${NC}"
 }
 cmd_list() {
@@ -206,14 +208,14 @@ cmd_list() {
 
 cmd_rm() {
   local model="${1:-}" chat embed confirm
-  if [[ -z "${model}" || ! "${model}" =~ ^[A-Za-z0-9._/-]+(:[A-Za-z0-9._-]+)?$ ]]; then
+  if ! is_valid_model_ref "${model}"; then
     echo -e "${RED}[ERROR] Invalid model reference.${NC}" >&2
     return 1
   fi
   ensure_env_file
   chat="$(grep -E '^AI_DEFAULT_CHAT_MODEL=' "${ENV_FILE}" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '[:space:]' || true)"
   embed="$(grep -E '^AI_DEFAULT_EMBED_MODEL=' "${ENV_FILE}" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '[:space:]' || true)"
-  chat="${chat:-qwen2.5:1.7b}"
+  chat="${chat:-qwen2.5:1.5b}"
   embed="${embed:-bge-m3}"
   if [[ "${model}" == "${chat}" || "${model}" == "${embed}" || "${model}" == "${chat}:latest" || "${model}" == "${embed}:latest" ]]; then
     echo -e "${RED}[ERROR] Cannot remove a configured default chat or embedding model.${NC}" >&2
@@ -231,12 +233,20 @@ cmd_rm() {
   echo -e "${GREEN}[✓] Removed model '${model}'.${NC}"
 }
 cmd_bench() {
-  local model="${1:-qwen2.5:1.7b}"
+  local model="${1:-}"
+  if ! is_valid_model_ref "${model}"; then
+    echo -e "${RED}[ERROR] Specify an installed model reference to benchmark.${NC}" >&2
+    return 1
+  fi
   print_header
   check_docker
   if ! is_container_running; then
     echo -e "${YELLOW}[*] Starting AI container first...${NC}"
-    cmd_start
+    cmd_start || return 1
+  fi
+  if ! docker exec "${CONTAINER_NAME}" ollama list | awk 'NR > 1 {print $1}' | grep -Fxq "${model}"; then
+    echo -e "${RED}[ERROR] Model '${model}' is not installed. Download it explicitly with: ./scripts/manage-ai.sh pull ${model}${NC}" >&2
+    return 1
   fi
   echo -e "${BLUE}[*] Running inference benchmark on model '${model}'...${NC}"
   echo -e "${DIM}Prompt: تست تحلیل خطرات شغلی در کار در ارتفاع و الزامات PTW${NC}"
@@ -250,16 +260,23 @@ cmd_bench() {
 }
 
 cmd_embed() {
-  local model="${1:-bge-m3}"
+  local model="${1:-}"
+  if ! is_valid_model_ref "${model}"; then
+    echo -e "${RED}[ERROR] Specify an installed model reference to test embeddings.${NC}" >&2
+    return 1
+  fi
   print_header
   check_docker
   if ! is_container_running; then
     echo -e "${YELLOW}[*] Starting AI container first...${NC}"
-    cmd_start
+    cmd_start || return 1
+  fi
+  if ! docker exec "${CONTAINER_NAME}" ollama list | awk 'NR > 1 {print $1}' | grep -Fxq "${model}"; then
+    echo -e "${RED}[ERROR] Model '${model}' is not installed. Download it explicitly with: ./scripts/manage-ai.sh pull ${model}${NC}" >&2
+    return 1
   fi
   echo -e "${BLUE}[*] Testing dense embedding generation with '${model}'...${NC}"
-  docker exec "${CONTAINER_NAME}" ollama run "${model}" "test embedding" 2>/dev/null || \
-    echo -e "${YELLOW}[!] Embedding test completed with warnings (model may need pull).${NC}"
+  docker exec "${CONTAINER_NAME}" ollama run "${model}" "test embedding"
 }
 
 cmd_sysinfo() {
@@ -274,9 +291,9 @@ cmd_sysinfo() {
   echo ""
   echo -e "${BOLD}Recommended models for this host:${NC}"
   if [[ "${ram_mb}" =~ ^[0-9]+$ ]] && [ "${ram_mb}" -ge 7000 ]; then
-    echo -e "  ${GREEN}• Qwen 2.5 1.7B / 3B quantized${NC} — suitable for 8GB RAM class"
+    echo -e "  ${GREEN}• Qwen 2.5 1.5B / 3B quantized${NC} — suitable for 8GB RAM class"
   elif [[ "${ram_mb}" =~ ^[0-9]+$ ]] && [ "${ram_mb}" -ge 3500 ]; then
-    echo -e "  ${GREEN}• Qwen 2.5 0.5B / 1.7B Q4_K_M${NC} — tight but workable"
+    echo -e "  ${GREEN}• Qwen 2.5 0.5B / 1.5B Q4_K_M${NC} — tight but workable"
   else
     echo -e "  ${YELLOW}• Qwen 2.5 0.5B Q4_K_M only${NC} — low RAM; keep concurrency=1"
   fi
@@ -295,7 +312,7 @@ cmd_logs() {
 
 cmd_set_default() {
   local model="${1:-}"
-  if [[ -z "${model}" || ! "${model}" =~ ^[A-Za-z0-9._/-]+(:[A-Za-z0-9._-]+)?$ ]]; then
+  if ! is_valid_model_ref "${model}"; then
     echo -e "${RED}[ERROR] Invalid model reference.${NC}" >&2
     return 1
   fi
@@ -451,7 +468,7 @@ case "${1:-}" in
     echo "  start                Start the local AI engine container"
     echo "  stop                 Stop the local AI engine container"
     echo "  restart              Restart the local AI engine container"
-    echo "  pull <model>         Pull an LLM model into persistent volume (e.g. qwen2.5:1.7b)"
+    echo "  pull <model>         Pull any valid Ollama model reference into persistent storage"
     echo "  list                 List all installed models in persistent volume"
     echo "  rm <model>           Remove a model from persistent storage"
     echo "  set-default <model>  Change default AI model in .env"

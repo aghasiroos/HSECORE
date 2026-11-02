@@ -55,6 +55,20 @@ export interface LocalChatOptions {
 
 type QueueTask<T> = (remainingMs: number) => Promise<T>;
 
+/** Validate an Ollama model reference without restricting it to a curated allowlist. */
+export function normalizeOllamaModelName(name: unknown): string | null {
+  const normalized = typeof name === 'string' ? name.trim() : '';
+  if (!normalized || normalized.length > 160) return null;
+  const [repository, tag, ...extra] = normalized.split(':');
+  if (extra.length > 0 || !repository) return null;
+  if (tag !== undefined && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(tag)) return null;
+  const segments = repository.split('/');
+  if (segments.length > 3 || segments.some(segment =>
+    !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(segment) || segment.includes('..')
+  )) return null;
+  return normalized;
+}
+
 export class LocalAIProvider {
   private activeCount = 0;
   private queue: Array<{ run: () => void; reject: (err: any) => void; timer?: NodeJS.Timeout }> = [];
@@ -67,21 +81,12 @@ export class LocalAIProvider {
   }
 
   private normalizeModelName(name: string): string | null {
-    const normalized = typeof name === 'string' ? name.trim() : '';
-    if (!normalized || normalized.length > 160) return null;
-    const [repository, tag, ...extra] = normalized.split(':');
-    if (extra.length > 0 || !repository) return null;
-    if (tag !== undefined && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(tag)) return null;
-    const segments = repository.split('/');
-    if (segments.length > 3 || segments.some(segment =>
-      !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(segment) || segment.includes('..')
-    )) return null;
-    return normalized;
+    return normalizeOllamaModelName(name);
   }
 
   /**
    * Ollama treats an omitted tag as :latest. Use the same canonical reference
-   * for allowlists, inventory checks and protection of configured default models.
+   * for inventory checks and protection of configured default models.
    */
   private canonicalModelName(name: string): string | null {
     const normalized = this.normalizeModelName(name);
@@ -293,14 +298,13 @@ export class LocalAIProvider {
   /**
    * Request pulling/downloading a model inside the container
    */
-  async pullModel(modelName: string): Promise<{ success: boolean; message: string }> {
+  async pullModel(
+    modelName: string,
+    onProgress?: (progress: number, message: string) => void | Promise<void>
+  ): Promise<{ success: boolean; message: string }> {
     const normalized = this.normalizeModelName(modelName);
     if (!normalized) {
       return { success: false, message: 'شناسه مدل نامعتبر است.' };
-    }
-    const allowed = config.aiEngine.allowedModels.some(name => this.sameModelName(name, normalized));
-    if (!allowed) {
-      return { success: false, message: 'این مدل در فهرست مجاز دانلود مدل‌های HSECORE قرار ندارد.' };
     }
     if (this.pullInProgress) {
       return { success: false, message: 'در حال حاضر یک عملیات دریافت مدل در حال اجرا است.' };
@@ -316,13 +320,64 @@ export class LocalAIProvider {
       const resp = await fetch(`${this.baseUrl}/api/pull`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: normalized, stream: false }),
+        // Ollama streams manifest and layer download progress as NDJSON events.
+        body: JSON.stringify({ model: normalized, stream: true }),
         signal: controller.signal,
       });
-      if (!resp.ok) {
-        return { success: false, message: `خطا در دریافت مدل: HTTP ${resp.status}` };
+
+      const reportEvent = async (event: any): Promise<void> => {
+        if (event?.error) throw new Error(String(event.error));
+        const status = typeof event?.status === 'string' ? event.status : 'در حال دریافت مدل';
+        let progress = 5;
+        const total = Number(event?.total);
+        const completed = Number(event?.completed);
+        if (Number.isFinite(total) && total > 0 && Number.isFinite(completed) && completed >= 0) {
+          progress = Math.min(95, Math.max(5, 5 + Math.floor((completed / total) * 90)));
+        }
+        if (status.toLowerCase() === 'success') progress = 100;
+        await onProgress?.(progress, status);
+      };
+
+      let finalStatus = '';
+      let apiError = '';
+      const contentType = resp.headers.get('content-type') || '';
+      if (resp.body && (contentType.includes('ndjson') || contentType.includes('json'))) {
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+          const lines = buffer.split(/\r?\n/);
+          buffer = lines.pop() || '';
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            const event = JSON.parse(line);
+            if (typeof event?.status === 'string') finalStatus = event.status;
+            if (typeof event?.error === 'string') apiError = event.error;
+            await reportEvent(event);
+          }
+          if (done) break;
+        }
+        if (buffer.trim()) {
+          const event = JSON.parse(buffer);
+          if (typeof event?.status === 'string') finalStatus = event.status;
+          if (typeof event?.error === 'string') apiError = event.error;
+          await reportEvent(event);
+        }
+      } else {
+        const payload = await resp.json().catch(() => null) as { error?: string; status?: string } | null;
+        if (payload?.status) finalStatus = payload.status;
+        if (payload?.error) apiError = payload.error;
+        await reportEvent(payload);
       }
-      await resp.json().catch(() => null);
+
+      if (!resp.ok || apiError) {
+        return { success: false, message: `خطا در دریافت مدل ${normalized}: ${apiError || `HTTP ${resp.status}`}` };
+      }
+      if (finalStatus !== 'success') {
+        return { success: false, message: `دریافت مدل ${normalized} کامل نشد: ${finalStatus || 'پاسخ نهایی معتبر از Ollama دریافت نشد.'}` };
+      }
       this.offlineUntil = 0;
       return { success: true, message: `مدل ${normalized} با موفقیت بارگیری شد.` };
     } catch (err: any) {
@@ -331,7 +386,7 @@ export class LocalAIProvider {
         success: false,
         message: err?.name === 'AbortError'
           ? 'مهلت مجاز دریافت مدل به پایان رسید.'
-          : 'موتور محلی Ollama در دسترس نیست یا دریافت مدل با خطا مواجه شد.',
+          : (err?.message || 'موتور محلی Ollama در دسترس نیست یا دریافت مدل با خطا مواجه شد.'),
       };
     } finally {
       clearTimeout(timeout);
@@ -374,7 +429,7 @@ export class LocalAIProvider {
       const resp = await fetch(`${this.baseUrl}/api/delete`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: normalized }),
+        body: JSON.stringify({ model: normalized }),
         signal: controller.signal,
       });
       if (!resp.ok) return { success: false, message: `خطا در حذف مدل: HTTP ${resp.status}` };
