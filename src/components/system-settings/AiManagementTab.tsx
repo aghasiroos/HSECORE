@@ -58,31 +58,36 @@ export default function AiManagementTab({ language = 'fa', currentUser }: AiMana
   const [isSearching, setIsSearching] = useState<boolean>(false);
   const [searchResults, setSearchResults] = useState<any[]>([]);
 
-  const fetchData = async (silent = false) => {
-    if (!silent) setLoading(true);
+  const fetchRuntimeData = async () => {
+    const [statusRes, modelsRes] = await Promise.all([
+      authFetch('/api/v1/ai/status').then(r => r.json()).catch(() => null),
+      authFetch('/api/v1/ai/models').then(r => r.json()).catch(() => null),
+    ]);
+    if (statusRes?.success) setEngineStatus(statusRes.data);
+    if (modelsRes?.success) setInstalledModels(modelsRes.data || []);
+  };
+
+  const fetchData = async () => {
+    setLoading(true);
     try {
-      const [statusRes, modelsRes, auditRes, docsRes] = await Promise.all([
-        authFetch('/api/v1/ai/status').then(r => r.json()).catch(() => null),
-        authFetch('/api/v1/ai/models').then(r => r.json()).catch(() => null),
+      const [, auditRes, docsRes] = await Promise.all([
+        fetchRuntimeData(),
         authFetch('/api/v1/ai/audit?limit=20').then(r => r.json()).catch(() => null),
         authFetch('/api/v1/ai/knowledge').then(r => r.json()).catch(() => null),
       ]);
-
-      if (statusRes?.success) setEngineStatus(statusRes.data);
-      if (modelsRes?.success) setInstalledModels(modelsRes.data || []);
       if (auditRes?.success) setAuditData(auditRes.data);
       if (docsRes?.success) setKnowledgeDocs(docsRes.data || []);
     } catch (err) {
       console.error('Failed to load AI management data:', err);
     } finally {
-      if (!silent) setLoading(false);
+      setLoading(false);
     }
   };
 
   useEffect(() => {
     void fetchData();
-    // Keep engine health and the live Ollama inventory current after runtime changes.
-    const refreshTimer = window.setInterval(() => { void fetchData(true); }, 30000);
+    // Refresh only live runtime data; audit and knowledge lists stay on demand.
+    const refreshTimer = window.setInterval(() => { void fetchRuntimeData(); }, 30000);
     return () => window.clearInterval(refreshTimer);
   }, []);
 
