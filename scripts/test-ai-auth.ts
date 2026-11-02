@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import jwt from 'jsonwebtoken';
 import type { Request } from 'express';
-import { authenticateToken, checkUserHasPermission, normalizeRoleToCanonical } from '../server/core/middleware/auth.ts';
+import { authenticateToken, checkUserHasPermission, normalizeRoleToCanonical, isGlobalAdminUser } from '../server/core/middleware/auth.ts';
 import { config } from '../server/core/config.ts';
 
 function requestWith(options: {
@@ -84,7 +84,12 @@ async function run() {
   );
   console.log('PASS custom roles follow least-privilege permission defaults');
 
-  console.log('AI JWT authentication tests: 6/6 passed');
+  assert.equal(isGlobalAdminUser({ uid: 'ordinary-user', username: 'admin', role: 'WORKER' }), false);
+  assert.equal(isGlobalAdminUser({ uid: 'dev-admin-user', username: 'worker', role: 'WORKER' }), false);
+  assert.equal(isGlobalAdminUser({ uid: 'ordinary-user', username: 'ordinary', role: 'ADMINISTRATOR' }), true);
+  console.log('PASS global administrator access is role-based, not username/UID-based');
+
+  console.log('AI JWT authentication tests: 7/7 passed');
 }
 
 run().catch(error => {
