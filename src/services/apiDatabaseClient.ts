@@ -50,13 +50,14 @@ function getCachedOrFetch<T>(key: string, fetcher: () => Promise<T>, ttlMs = CAC
 
   const promise = fetcher()
     .then((result) => {
-      // Ignore stale responses that complete after logout or account switching.
-      if (sessionVersion === authSessionVersion) {
-        if (queryCache.size >= MAX_CACHE_ENTRIES) {
-          pruneCache();
-        }
-        queryCache.set(key, { data: result, expiry: Date.now() + ttlMs });
+      // Never deliver data from an earlier account to a caller in the new session.
+      if (sessionVersion !== authSessionVersion) {
+        throw new Error('API request discarded because the authenticated session changed');
       }
+      if (queryCache.size >= MAX_CACHE_ENTRIES) {
+        pruneCache();
+      }
+      queryCache.set(key, { data: result, expiry: Date.now() + ttlMs });
       return result;
     })
     .finally(() => {
