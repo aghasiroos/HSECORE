@@ -135,7 +135,44 @@ async function run() {
     console.log('PASS empty inventory readiness and canonical :latest inventory matching');
   }
 
-  console.log('AI request queue and model safety tests: 4/4 passed');
+  // A user-requested stream cancellation must not mark a healthy Ollama provider offline.
+  {
+    const provider = new LocalAIProvider();
+    const abortController = new AbortController();
+    globalThis.fetch = ((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      const signal = init?.signal;
+      const abort = () => reject(new DOMException('The operation was aborted.', 'AbortError'));
+      if (signal?.aborted) abort();
+      else signal?.addEventListener('abort', abort, { once: true });
+    })) as typeof fetch;
+
+    const cancelledRequest = provider.chatStream(
+      [{ role: 'user', content: 'stop test' }],
+      { model: 'qwen2.5', timeoutMs: 1000 },
+      () => undefined,
+      abortController.signal,
+    );
+    setTimeout(() => abortController.abort(), 10);
+    await assert.rejects(cancelledRequest, error => (error as Error)?.name === 'AbortError');
+
+    globalThis.fetch = (async () => new Response(
+      [
+        JSON.stringify({ model: 'qwen2.5', message: { role: 'assistant', content: 'stream recovered' }, done: false }),
+        JSON.stringify({ model: 'qwen2.5', done: true }),
+      ].join('\n') + '\n',
+      { status: 200, headers: { 'Content-Type': 'application/x-ndjson' } },
+    )) as typeof fetch;
+
+    const recovered = await provider.chatStream(
+      [{ role: 'user', content: 'continue test' }],
+      { model: 'qwen2.5', timeoutMs: 1000 },
+      () => undefined,
+    );
+    assert.equal(recovered.text, 'stream recovered');
+    console.log('PASS intentional stream cancellation leaves provider available for the next request');
+  }
+
+  console.log('AI request queue and model safety tests: 5/5 passed');
 }
 
 run()
