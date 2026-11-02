@@ -26,11 +26,12 @@ export function securityHeadersMiddleware(req: Request, res: Response, next: Nex
       "form-action 'self'",
       "frame-ancestors 'self'",
       "object-src 'none'",
-      "img-src 'self' data: blob:",
-      "font-src 'self' data:",
-      "style-src 'self' 'unsafe-inline'",
+      // Allow only the explicitly used external font and map-tile origins.
+      "img-src 'self' data: blob: https://mt0.google.com https://mt1.google.com https://mt2.google.com https://mt3.google.com https://*.tile.openstreetmap.org https://server.arcgisonline.com",
+      "font-src 'self' data: https://fonts.gstatic.com",
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "script-src 'self'",
-      "connect-src 'self'",
+      "connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com",
       "worker-src 'self' blob:",
       "media-src 'self' blob:",
     ].join('; ');

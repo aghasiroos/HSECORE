@@ -8,6 +8,7 @@ on:
     paths:
       - 'server/modules/ai/**'
       - 'server/core/middleware/auth.ts'
+      - 'server/core/middleware/security.ts'
       - 'scripts/test-ai-acl.ts'
       - 'scripts/test-ai-auth.ts'
       - 'scripts/test-ai-rag-db.ts'
@@ -29,6 +30,7 @@ on:
     paths:
       - 'server/modules/ai/**'
       - 'server/core/middleware/auth.ts'
+      - 'server/core/middleware/security.ts'
       - 'scripts/test-ai-acl.ts'
       - 'scripts/test-ai-auth.ts'
       - 'scripts/test-ai-rag-db.ts'
@@ -89,10 +91,23 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
-      - name: Verify patched spreadsheet dependency
+      - name: Verify local spreadsheet libraries and restrictive CSP
         run: |
           node -e "const p=require('./package-lock.json').packages; if (p['node_modules/xlsx']?.version !== '0.20.3') process.exit(1)"
-          grep -Fq 'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js' index.html
+          grep -Fq "from 'xlsx'" src/services/personnelImportService.ts
+          node <<'NODE'
+          const fs = require('node:fs');
+          const html = fs.readFileSync('index.html', 'utf8');
+          if (html.includes('<script src="https://') || html.includes("<script src='https://")) {
+            throw new Error('Executable third-party libraries must be bundled locally, not loaded from CDNs.');
+          }
+          const csp = fs.readFileSync('server/core/middleware/security.ts', 'utf8');
+          for (const origin of ['https://fonts.googleapis.com', 'https://fonts.gstatic.com', 'https://mt0.google.com', 'https://*.tile.openstreetmap.org']) {
+            if (!csp.includes(origin)) throw new Error('Missing required CSP origin: ' + origin);
+          }
+          NODE
+      - name: Audit production dependencies for moderate or higher vulnerabilities
+        run: npm audit --omit=dev --audit-level=moderate
       - name: Audit npm dependencies for high-severity vulnerabilities
         run: npm audit --audit-level=high
       - name: Run document ACL and prompt-security regression tests

@@ -237,22 +237,9 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'notifications:read',
     'documents:read',
   ],
-  CUSTOM_ROLE: [
-    'dashboard:view',
-    'ptw:*',
-    'incidents:*',
-    'warnings:*',
-    'reports:*',
-    'ppe:*',
-    'heat:*',
-    'trir:*',
-    'personnel:read',
-    'notifications:read',
-    'safety:*',
-    'fire:*',
-    'health:*',
-    'documents:*',
-  ],
+  // Custom roles must receive only explicitly configured permissions.
+  // An unknown/custom role must never inherit broad module access by default.
+  CUSTOM_ROLE: [],
 };
 
 /**
@@ -422,15 +409,12 @@ export function checkUserHasPermission(user: UserContext | undefined, permission
  */
 export function isGlobalAdminUser(user?: UserContext | any | null): boolean {
   if (!user) return false;
-  const uid = String(user.uid || user.id || '').trim().toLowerCase();
-  const username = String(user.username || '').trim().toLowerCase();
   const rawRole = String(user.role || '').trim();
   const upperRole = rawRole.toUpperCase().replace(/\s+|_/g, '');
 
+  // Global administrator status is role-based only. A username or UID is not
+  // an authorization credential and must never grant elevated privileges.
   if (
-    uid === 'user-admin' ||
-    uid === 'dev-admin-user' ||
-    username === 'admin' ||
     upperRole === 'ADMIN' ||
     upperRole === 'ADMINISTRATOR' ||
     upperRole === 'SUPERADMIN' ||
@@ -443,40 +427,6 @@ export function isGlobalAdminUser(user?: UserContext | any | null): boolean {
     return true;
   }
   return false;
-}
-
-function safeDecodeHeader(val?: string | string[]): string {
-  if (!val) return '';
-  const raw = Array.isArray(val) ? val[0] : val;
-  try {
-    return decodeURIComponent(raw).trim();
-  } catch {
-    return String(raw).trim();
-  }
-}
-
-export function extractHeaderUserContext(req: Request): UserContext | null {
-  const headerUid = safeDecodeHeader(req.headers['x-hse-user-id']);
-  const headerUsername = safeDecodeHeader(req.headers['x-hse-username']);
-  const headerRole = safeDecodeHeader(req.headers['x-hse-user-role']);
-  const headerCode = safeDecodeHeader(req.headers['x-hse-personnel-code']);
-  const headerName = safeDecodeHeader(req.headers['x-hse-user-name']);
-
-  if (!headerUid && !headerUsername && !headerName) {
-    return null;
-  }
-
-  const canonicalRole = normalizeRoleToCanonical(headerRole || 'USER');
-  const perms = ROLE_PERMISSIONS[canonicalRole] || ['user:read'];
-  return {
-    uid: headerUid || headerUsername || 'session-user',
-    id: !isNaN(Number(headerUid)) ? Number(headerUid) : undefined,
-    username: headerUsername || headerUid,
-    name: headerName || headerUsername || headerUid,
-    role: headerRole || canonicalRole,
-    personnelCode: headerCode || undefined,
-    permissions: perms,
-  };
 }
 
 export async function authenticateToken(req: Request): Promise<UserContext | null> {
