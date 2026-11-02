@@ -51,6 +51,7 @@ function toView(row: any): AIDeploymentJobView {
 
 export class AIJobManager {
   async listJobs(limit = 30): Promise<AIDeploymentJobView[]> {
+    await this.recoverExpiredJobs();
     const rows = await db
       .select()
       .from(schema.aiDeploymentJobs)
@@ -60,6 +61,7 @@ export class AIJobManager {
   }
 
   async getJob(jobId: string): Promise<AIDeploymentJobView | null> {
+    await this.recoverExpiredJobs();
     const rows = await db
       .select()
       .from(schema.aiDeploymentJobs)
@@ -103,11 +105,7 @@ export class AIJobManager {
     enqueueReservationInProgress = false;
   }
 
-  private async assertNoActiveJob(): Promise<void> {
-    if (activeJobId) {
-      throw new Error('یک عملیات مدل در حال اجرا است؛ تا پایان آن صبر کنید.');
-    }
-
+  private async recoverExpiredJobs(): Promise<void> {
     let activeRows: Array<{ id: string; status: string; updatedAt: Date | string }> = [];
     try {
       activeRows = await db
@@ -119,8 +117,8 @@ export class AIJobManager {
         .from(schema.aiDeploymentJobs)
         .where(inArray(schema.aiDeploymentJobs.status, ['pending', 'running']));
     } catch (err: any) {
-      logger.error('assertNoActiveJob DB check failed; refusing model mutation', { error: err?.message });
-      throw new Error('امکان بررسی وضعیت عملیات قبلی مدل وجود ندارد؛ برای جلوگیری از عملیات هم‌زمان، درخواست پذیرفته نشد.');
+      logger.error('AI deployment job recovery check failed', { error: err?.message });
+      throw new Error('امکان بررسی وضعیت عملیات قبلی مدل وجود ندارد؛ وضعیت عملیات قابل اطمینان نیست.');
     }
 
     const now = Date.now();
@@ -131,10 +129,8 @@ export class AIJobManager {
         : Math.max(config.aiEngine.modelPullTimeoutMs || 30 * 60 * 1000, 60 * 1000) + 60 * 1000;
 
       // A running pull may legitimately take the full configured timeout.
-      // Never mark it stale merely because a second request arrived.
-      if (!Number.isFinite(updatedAt) || now - updatedAt <= staleAfterMs) {
-        throw new Error('یک عملیات مدل در حال اجرا یا بازیابی است؛ پس از پایان آن دوباره تلاش کنید.');
-      }
+      // Recovery is applied only after that timeout plus a safety margin.
+      if (!Number.isFinite(updatedAt) || now - updatedAt <= staleAfterMs) continue;
 
       await this.updateJob(job.id, {
         status: 'failed',
@@ -144,6 +140,26 @@ export class AIJobManager {
     }
   }
 
+  private async assertNoActiveJob(): Promise<void> {
+    if (activeJobId) {
+      throw new Error('یک عملیات مدل در حال اجرا است؛ تا پایان آن صبر کنید.');
+    }
+    await this.recoverExpiredJobs();
+
+    let activeRows: Array<{ id: string }> = [];
+    try {
+      activeRows = await db
+        .select({ id: schema.aiDeploymentJobs.id })
+        .from(schema.aiDeploymentJobs)
+        .where(inArray(schema.aiDeploymentJobs.status, ['pending', 'running']));
+    } catch (err: any) {
+      logger.error('assertNoActiveJob DB check failed; refusing model mutation', { error: err?.message });
+      throw new Error('امکان بررسی وضعیت عملیات قبلی مدل وجود ندارد؛ برای جلوگیری از عملیات هم‌زمان، درخواست پذیرفته نشد.');
+    }
+    if (activeRows.length) {
+      throw new Error('یک عملیات مدل در حال اجرا یا بازیابی است؛ پس از پایان آن دوباره تلاش کنید.');
+    }
+  }
   /**
    * Enqueue model pull — returns immediately with job id; work runs in background.
    */
