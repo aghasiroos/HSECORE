@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import jwt from 'jsonwebtoken';
 import type { Request } from 'express';
-import { authenticateToken } from '../server/core/middleware/auth.ts';
+import { authenticateToken, checkUserHasPermission, normalizeRoleToCanonical, isGlobalAdminUser } from '../server/core/middleware/auth.ts';
 import { config } from '../server/core/config.ts';
 
 function requestWith(options: {
@@ -66,7 +66,30 @@ async function run() {
   assert.equal(cookieUser?.uid, 'jwt-test-user');
   console.log('PASS HttpOnly cookie token is accepted');
 
-  console.log('AI JWT authentication tests: 5/5 passed');
+  assert.equal(normalizeRoleToCanonical('Custom Operations Role'), 'CUSTOM_ROLE');
+  assert.equal(
+    checkUserHasPermission({ uid: 'custom-role-user', role: 'Custom Operations Role' }, 'ptw:create'),
+    false,
+    'Custom roles must not inherit broad default module permissions'
+  );
+  assert.equal(
+    checkUserHasPermission({ uid: 'custom-role-user', role: 'Custom Operations Role', permissions: ['ptw:read'] }, 'ptw:read'),
+    true,
+    'Explicitly assigned custom-role permissions must remain effective'
+  );
+  assert.equal(
+    checkUserHasPermission({ uid: 'custom-role-user', role: 'Custom Operations Role', permissions: ['ptw:read'] }, 'ptw:create'),
+    false,
+    'Custom roles must not receive unassigned actions'
+  );
+  console.log('PASS custom roles follow least-privilege permission defaults');
+
+  assert.equal(isGlobalAdminUser({ uid: 'ordinary-user', username: 'admin', role: 'WORKER' }), false);
+  assert.equal(isGlobalAdminUser({ uid: 'dev-admin-user', username: 'worker', role: 'WORKER' }), false);
+  assert.equal(isGlobalAdminUser({ uid: 'ordinary-user', username: 'ordinary', role: 'ADMINISTRATOR' }), true);
+  console.log('PASS global administrator access is role-based, not username/UID-based');
+
+  console.log('AI JWT authentication tests: 7/7 passed');
 }
 
 run().catch(error => {
