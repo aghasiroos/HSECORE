@@ -571,11 +571,20 @@ export default function UserManagement({ currentUser, language, onUserUpdateTrig
       return;
     }
 
-    if (!effectiveTargetId && password.trim() && password.trim().length < 6) {
+    if (!effectiveTargetId && !password.trim()) {
       setFormError(
         isFa
-          ? 'لطفاً یک رمز عبور معتبر (حداقل ۶ کاراکتر) برای کاربر جدید تعیین کنید.'
-          : 'Please enter a valid password (at least 6 characters) for the new user.'
+          ? 'برای ایجاد حساب کاربری جدید، تعیین رمز عبور الزامی است.'
+          : 'A password is required when creating a new account.'
+      );
+      return;
+    }
+
+    if (!effectiveTargetId && password.trim().length < 8) {
+      setFormError(
+        isFa
+          ? 'رمز عبور اولیه باید حداقل ۸ کاراکتر باشد و شامل حروف و ارقام باشد.'
+          : 'The initial password must be at least 8 characters and contain letters and numbers.'
       );
       return;
     }
@@ -1291,11 +1300,12 @@ export default function UserManagement({ currentUser, language, onUserUpdateTrig
 
                 <div className="space-y-1.5">
                   <label className="text-xs text-slate-700 dark:text-slate-200 font-bold block text-right">
-                    {editingUserId ? (isFa ? 'رمز عبور جدید (اختیاری)' : 'New Password') : (isFa ? 'رمز عبور اولیه (اختیاری - پیش‌فرض کد پرسنلی)' : 'Password')}:
+                    {editingUserId ? (isFa ? 'رمز عبور جدید (اختیاری)' : 'New Password (optional)') : (isFa ? 'رمز عبور اولیه (الزامی)' : 'Initial Password (required)')}:
                   </label>
                   <input 
-                    type="text" 
-                    placeholder={editingUserId ? "••••••••" : (isFa ? "حداقل ۶ کاراکتر (یا خالی جهت پیش‌فرض)" : "Min 6 characters")}
+                    type="password" 
+                    autoComplete="new-password"
+                    placeholder={isFa ? "حداقل ۸ کاراکتر، شامل حروف و ارقام" : "At least 8 characters, letters and numbers"}
                     value={password} 
                     onChange={(e) => setPassword(e.target.value)}
                     className="w-full bg-slate-50/80 border border-slate-200 dark:border-slate-800 focus:border-rose-500 focus:bg-white dark:bg-slate-900 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-800 dark:text-slate-100 text-right transition"
