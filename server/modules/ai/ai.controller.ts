@@ -553,9 +553,6 @@ export class AIController {
       return res.status(500).json({ success: false, message: err.message || 'خطا در دریافت گزارش پوشش' });
     }
   }
-}
-
-
 
   async listProviders(_req: Request, res: Response) {
     try {
@@ -690,6 +687,8 @@ export class AIController {
       return res.status(400).json({ success: false, message: err.message || 'خطا در صف‌گذاری حذف مدل' });
     }
   }
+
+}
 
 export const aiController = new AIController();
 
