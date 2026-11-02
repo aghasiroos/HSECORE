@@ -366,7 +366,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
     setIsLoading(true);
 
     try {
-      const historyPayload = updatedMessages.slice(-6).map(m => ({
+      const historyPayload = updatedMessages.slice(0, -1).slice(-6).map(m => ({
         role: m.role,
         content: m.content,
       }));
