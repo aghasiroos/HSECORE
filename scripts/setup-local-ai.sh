@@ -41,7 +41,7 @@ docker info >/dev/null 2>&1 || fail "Docker daemon is not running."
 # Add only missing AI keys; never replace values already configured by the installer.
 ensure_env_key "AI_ENGINE_ENABLED" "false"
 ensure_env_key "AI_ENGINE_URL" "http://hse-ai-engine:11434"
-ensure_env_key "AI_DEFAULT_CHAT_MODEL" "qwen2.5:1.7b"
+ensure_env_key "AI_DEFAULT_CHAT_MODEL" "qwen2.5:1.5b"
 ensure_env_key "AI_DEFAULT_EMBED_MODEL" "bge-m3"
 ensure_env_key "OLLAMA_IMAGE" "ollama/ollama:0.40.13"
 ensure_env_key "AI_BIND_IP" "127.0.0.1"
@@ -68,7 +68,7 @@ if [[ "${AI_ENABLED}" != "true" ]]; then
 fi
 PRIMARY_CHAT_MODEL="$(get_env_value AI_DEFAULT_CHAT_MODEL)"
 PRIMARY_EMBED_MODEL="$(get_env_value AI_DEFAULT_EMBED_MODEL)"
-PRIMARY_CHAT_MODEL="${PRIMARY_CHAT_MODEL:-qwen2.5:1.7b}"
+PRIMARY_CHAT_MODEL="${PRIMARY_CHAT_MODEL:-qwen2.5:1.5b}"
 PRIMARY_EMBED_MODEL="${PRIMARY_EMBED_MODEL:-bge-m3}"
 
 # Resource and disk preflight.
