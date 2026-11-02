@@ -48,7 +48,24 @@ ensure_env_key "AI_BIND_IP" "127.0.0.1"
 ensure_env_key "AI_HOST_PORT" "11434"
 
 AI_ENABLED="$(get_env_value AI_ENGINE_ENABLED | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]\"')"
-[[ "${AI_ENABLED}" == "true" ]] || fail "AI_ENGINE_ENABLED is false. Enable the local AI runtime explicitly before running setup."
+if [[ "${AI_ENABLED}" != "true" ]]; then
+  if [[ -t 0 ]]; then
+    read -r -p "Local AI is disabled. Enable it now and start the optional runtime? [y/N]: " enable_ai
+    if [[ "${enable_ai}" =~ ^[Yy]$ ]]; then
+      if grep -q "^AI_ENGINE_ENABLED=" "${ENV_FILE}"; then
+        sed -i "s|^AI_ENGINE_ENABLED=.*|AI_ENGINE_ENABLED=true|" "${ENV_FILE}"
+      else
+        echo "AI_ENGINE_ENABLED=true" >> "${ENV_FILE}"
+      fi
+      AI_ENABLED="true"
+    else
+      echo "Local AI setup cancelled; the existing disabled setting was preserved."
+      exit 0
+    fi
+  else
+    fail "AI_ENGINE_ENABLED is false. Enable it explicitly in the AI management menu or .env before non-interactive setup."
+  fi
+fi
 PRIMARY_CHAT_MODEL="$(get_env_value AI_DEFAULT_CHAT_MODEL)"
 PRIMARY_EMBED_MODEL="$(get_env_value AI_DEFAULT_EMBED_MODEL)"
 PRIMARY_CHAT_MODEL="${PRIMARY_CHAT_MODEL:-qwen2.5:1.7b}"
