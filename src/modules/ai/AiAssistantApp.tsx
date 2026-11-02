@@ -364,6 +364,10 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
     }
 
     setIsLoading(true);
+    let partialAssistantText = '';
+    let partialAssistantId = '';
+    let partialResponseModel = selectedModel;
+    let partialDurationMs: number | undefined;
 
     try {
       const historyPayload = updatedMessages.slice(0, -1).slice(-6).map(m => ({
@@ -391,6 +395,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
       }
 
       const assistantId = `msg-${Date.now()}`;
+      partialAssistantId = assistantId;
       const timestamp = new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
       let assistantText = '';
       let responseModel = selectedModel;
@@ -411,12 +416,13 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
         const payload = JSON.parse(line.slice(5).trim());
         if (payload.token) {
           assistantText += payload.token;
+          partialAssistantText = assistantText;
           setSessions(prev => prev.map(s => s.id === sessionId ? {
             ...s, messages: s.messages.map(m => m.id === assistantId ? { ...m, content: assistantText } : m),
           } : s));
         }
-        if (payload.model) responseModel = payload.model;
-        if (payload.durationMs) durationMs = payload.durationMs;
+        if (payload.model) { responseModel = payload.model; partialResponseModel = responseModel; }
+        if (payload.durationMs) { durationMs = payload.durationMs; partialDurationMs = durationMs; }
         if (payload.error) streamError = payload.error;
       };
       while (true) {
@@ -445,23 +451,38 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
         // non-blocking
       }
     } catch (requestError: any) {
-      if (requestError?.name === 'AbortError') {
+      if (partialAssistantText.trim() && partialAssistantId) {
+        const partialMessage: ChatMessage = {
+          id: partialAssistantId, role: 'assistant', content: partialAssistantText,
+          timestamp: new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }),
+          model: partialResponseModel, durationMs: partialDurationMs,
+        };
         setSessions(prev => prev.map(s => s.id === sessionId ? {
-          ...s, messages: s.messages.filter(m => m.content.trim().length > 0 || m.role !== 'assistant'),
+          ...s, messages: [...s.messages.filter(m => m.id !== partialAssistantId), partialMessage],
         } : s));
-        return;
+        try {
+          await authFetch(`/api/v1/ai/sessions/${sessionId}/messages`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              role: 'assistant', content: partialAssistantText, toolsUsed: [], citations: [],
+              durationMs: partialDurationMs, model: partialResponseModel,
+            }),
+          });
+        } catch { /* keep the partial response visible */ }
       }
+      if (requestError?.name === 'AbortError') return;
       const networkErrorMsg: ChatMessage = {
         id: `msg-${Date.now()}`,
         role: 'assistant',
         content: requestError?.message || 'خطا در ارتباط با سرور هوش مصنوعی سامانه. لطفاً اتصال شبکه را بررسی فرمایید.',
         timestamp: new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }),
       };
-      setSessions(prev =>
-        prev.map(s =>
-          s.id === sessionId ? { ...s, messages: [...updatedMessages, networkErrorMsg] } : s
-        )
-      );
+      setSessions(prev => prev.map(s => s.id === sessionId ? {
+        ...s, messages: [...s.messages.filter(m => m.id !== partialAssistantId), ...(partialAssistantText.trim() ? [{
+          id: partialAssistantId, role: 'assistant' as const, content: partialAssistantText,
+          timestamp: networkErrorMsg.timestamp, model: partialResponseModel, durationMs: partialDurationMs,
+        }] : []), networkErrorMsg],
+      } : s));
     } finally {
       activeRequestRef.current = null;
       setIsLoading(false);
