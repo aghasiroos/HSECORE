@@ -1679,7 +1679,7 @@ export async function executeRealRestore(
         fs.mkdirSync(path.dirname(stagePath), { recursive: true });
         const buf = Buffer.from(f.contentBase64 || '', 'base64');
         if (f.sha256 && sha256Hex(buf) !== f.sha256) {
-          throw new Error(`عدم تطابق هش فایل پیوست ${safeRel}`);
+          throw new Error(`عدم تطابق هش فایل پیوست ${archivePath}`);
         }
         fs.writeFileSync(stagePath, buf);
       }
