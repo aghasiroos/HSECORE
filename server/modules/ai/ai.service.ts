@@ -1,5 +1,4 @@
 import { config } from '../../core/config.ts';
-import { logger } from '../../core/logger.ts';
 import { localAIProvider, OllamaHealthStatus, OllamaModelInfo } from './ai.local-provider.ts';
 import { bootstrapAIProviders, aiProviderRegistry } from './provider/index.ts';
 
@@ -8,7 +7,7 @@ bootstrapAIProviders();
 
 export class AIService {
   /**
-   * Check if any AI provider is available (Local Ollama, Cloud Gemini, or Built-in HSECORE Expert Engine)
+   * Check whether the local Ollama provider is enabled
    */
   isConfigured(): boolean {
     // This indicates that the local provider is enabled, not that a model is installed.
@@ -19,8 +18,7 @@ export class AIService {
    * Health and status inspection of the AI engine
    */
   async getStatus(): Promise<OllamaHealthStatus> {
-    // Preserve the real Ollama health result. The built-in deterministic fallback
-    // is not an inference engine and must not make the local engine look healthy.
+    // Report actual Ollama health; no synthetic fallback is treated as an AI engine.
     return localAIProvider.checkHealth();
   }
 
