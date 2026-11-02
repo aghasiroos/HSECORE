@@ -110,6 +110,12 @@ jobs:
           EOF
           docker compose -f docker-compose.server.yml config --quiet
           docker compose -f docker-compose.ai.yml config --quiet
+      - name: Verify icon generation does not recreate duplicate aliases
+        run: |
+          if grep -En 'copyFileSync.*icon-(192|512)\.png' scripts/build-windows-icon.js; then
+            echo "Duplicate icon aliases must not be generated."
+            exit 1
+          fi
       - name: Validate installer shell syntax and prohibit remote shell execution
         run: |
           bash -n install.sh
