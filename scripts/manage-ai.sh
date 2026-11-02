@@ -140,8 +140,11 @@ cmd_start() {
 cmd_stop() {
   print_header
   check_docker
+  ensure_env_file
+  ensure_compose_file
+  verify_container_compose_owner || return 1
   echo -e "${BLUE}[*] Stopping Local AI Engine container...${NC}"
-  docker compose -f "${COMPOSE_FILE}" stop hse-ai-engine 2>/dev/null || docker stop "${CONTAINER_NAME}" 2>/dev/null || true
+  docker compose -f "${PROJECT_DIR}/${COMPOSE_FILE}" --env-file "${ENV_FILE}" stop hse-ai-engine
   echo -e "${GREEN}[✓] Engine stopped cleanly.${NC}"
 }
 
@@ -150,10 +153,9 @@ cmd_restart() {
   check_docker
   ensure_env_file
   ensure_compose_file
+  verify_container_compose_owner || return 1
   echo -e "${BLUE}[*] Restarting Local AI Engine container...${NC}"
-  docker compose -f "${COMPOSE_FILE}" restart hse-ai-engine 2>/dev/null || {
-    docker compose -f "${COMPOSE_FILE}" up -d hse-ai-engine
-  }
+  docker compose -f "${PROJECT_DIR}/${COMPOSE_FILE}" --env-file "${ENV_FILE}" restart hse-ai-engine
   echo -e "${GREEN}[✓] Engine restarted.${NC}"
 }
 
@@ -193,6 +195,8 @@ cmd_pull() {
 }
 cmd_list() {
   check_docker
+  ensure_compose_file
+  verify_container_compose_owner || return 1
   if ! is_container_running; then
     echo -e "${YELLOW}[!] Container is not running. Starting it to list models...${NC}"
     cmd_start
