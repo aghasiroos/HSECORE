@@ -460,6 +460,94 @@ export class LocalAIProvider {
   }
 
   /**
+   * Stream chat tokens from Ollama while holding the same bounded inference slot.
+   */
+  async chatStream(
+    messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>,
+    options: LocalChatOptions,
+    onToken: (token: string) => void,
+    signal?: AbortSignal
+  ): Promise<{ text: string; model: string; durationMs: number }> {
+    if (!config.aiEngine.enabled || Date.now() < this.offlineUntil) {
+      throw new Error('Local AI engine is offline');
+    }
+
+    return this.enqueue(async (remainingMs) => {
+      const startedAt = Date.now();
+      const model = options.model || config.aiEngine.defaultChatModel;
+      const controller = new AbortController();
+      const abortFromCaller = () => controller.abort();
+      if (signal?.aborted) controller.abort();
+      else signal?.addEventListener('abort', abortFromCaller, { once: true });
+      const timeout = setTimeout(() => controller.abort(), Math.min(options.timeoutMs || remainingMs, remainingMs));
+
+      try {
+        const response = await fetch(`${this.baseUrl}/api/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model,
+            messages,
+            stream: true,
+            options: {
+              temperature: options.temperature ?? 0.4,
+              top_p: options.top_p ?? 0.85,
+              num_predict: options.max_tokens ?? 1024,
+              num_ctx: config.aiEngine.contextTokens,
+            },
+          }),
+          signal: controller.signal,
+        });
+        if (!response.ok || !response.body) {
+          const detail = await response.text().catch(() => '');
+          throw new Error(`Ollama streaming error: HTTP ${response.status} ${detail}`);
+        }
+
+        this.offlineUntil = 0;
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let pending = '';
+        let fullText = '';
+        let returnedModel = model;
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          pending += decoder.decode(value, { stream: true });
+          const lines = pending.split('\n');
+          pending = lines.pop() || '';
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            const chunk = JSON.parse(line);
+            if (chunk.error) throw new Error(String(chunk.error));
+            if (chunk.model) returnedModel = chunk.model;
+            const token = chunk.message?.content || '';
+            if (token) {
+              fullText += token;
+              onToken(token);
+            }
+          }
+        }
+        pending += decoder.decode();
+        if (pending.trim()) {
+          const chunk = JSON.parse(pending);
+          if (chunk.error) throw new Error(String(chunk.error));
+          if (chunk.model) returnedModel = chunk.model;
+          const token = chunk.message?.content || '';
+          if (token) { fullText += token; onToken(token); }
+        }
+        return { text: fullText.trim(), model: returnedModel, durationMs: Date.now() - startedAt };
+      } catch (error: any) {
+        const isNetworkError = this.markOfflineIfNetworkError(error);
+        if (!isNetworkError) logger.debug('[LocalAIProvider] Streaming chat failed', { error: String(error?.message || error) });
+        throw error;
+      } finally {
+        clearTimeout(timeout);
+        signal?.removeEventListener('abort', abortFromCaller);
+      }
+    }, options.timeoutMs || config.aiEngine.timeoutMs || 180000);
+  }
+
+  /**
    * Generate text completion via Local LLM Engine
    */
   async generate(
