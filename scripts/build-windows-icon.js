@@ -115,9 +115,8 @@ for (const s of sizes) {
   execSync(`convert "${master1024}" -filter Lanczos -resize ${s}x${s} "${outPng}"`);
 }
 
-// Copy standard PWA icons
-fs.copyFileSync(path.join(publicAssetsDir, 'hsecore-icon-512.png'), path.join(publicAssetsDir, 'icon-512.png'));
-fs.copyFileSync(path.join(publicAssetsDir, 'hsecore-icon-192.png'), path.join(publicAssetsDir, 'icon-192.png'));
+// PWA manifests and HTML reference the canonical hsecore-icon-* assets directly.
+// Do not emit icon-192.png / icon-512.png aliases: they duplicate the canonical files.
 
 console.log('>>> [5/5] Generating standard Windows multi-resolution .ico bundles...');
 // Generate one canonical ICO file. Other icon aliases are intentionally not

@@ -1383,9 +1383,9 @@ step3_install_docker() {
 
   if ! command -v docker &>/dev/null || ! docker compose version &>/dev/null; then
     tui_run_task \
-      "Installing Docker Engine and Docker Compose plugin" \
-      "Check APT repositories or install Docker manually via https://get.docker.com" \
-      bash -c "apt-get install -y docker.io docker-compose-v2 || (curl -fsSL https://get.docker.com | sh)"
+      "Installing Docker Engine and Docker Compose plugin from Ubuntu APT packages" \
+      "Check Ubuntu APT sources and package availability; do not execute downloaded shell scripts." \
+      apt-get install -y docker.io docker-compose-v2
 
     tui_run_task \
       "Enabling and starting Docker daemon service" \
