@@ -535,8 +535,13 @@ export class LocalAIProvider {
         }
         return { text: fullText.trim(), model: returnedModel, durationMs: Date.now() - startedAt };
       } catch (error: any) {
-        const isNetworkError = this.markOfflineIfNetworkError(error);
-        if (!isNetworkError) logger.debug('[LocalAIProvider] Streaming chat failed', { error: String(error?.message || error) });
+        // A client-requested stop (or disconnected client) is not an Ollama outage.
+        // Do not poison the provider's offline cooldown for an intentional cancellation.
+        const callerCancelled = signal?.aborted === true;
+        const isNetworkError = callerCancelled ? false : this.markOfflineIfNetworkError(error);
+        if (!callerCancelled && !isNetworkError) {
+          logger.debug('[LocalAIProvider] Streaming chat failed', { error: String(error?.message || error) });
+        }
         throw error;
       } finally {
         clearTimeout(timeout);
