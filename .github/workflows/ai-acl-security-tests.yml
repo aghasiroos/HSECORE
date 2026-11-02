@@ -12,6 +12,7 @@ on:
       - 'server/core/middleware/auth.ts'
       - 'server/core/middleware/security.ts'
       - 'server/core/ip.ts'
+      - 'server/modules/files/**'
       - 'scripts/test-ai-acl.ts'
       - 'scripts/test-ai-auth.ts'
       - 'scripts/test-ai-rag-db.ts'
@@ -43,6 +44,7 @@ on:
       - 'server/core/middleware/auth.ts'
       - 'server/core/middleware/security.ts'
       - 'server/core/ip.ts'
+      - 'server/modules/files/**'
       - 'scripts/test-ai-acl.ts'
       - 'scripts/test-ai-auth.ts'
       - 'scripts/test-ai-rag-db.ts'
@@ -115,6 +117,8 @@ jobs:
         run: npm run test:api-cache-session
       - name: Verify rate limiting uses Express-trusted client IP
         run: npx tsx scripts/test-client-ip-trust.ts
+      - name: Verify authenticated PDF pages are never shared-cacheable
+        run: grep -Fq "Cache-Control', 'private, no-store, max-age=0" server/modules/files/file.controller.ts
       - name: Verify production JavaScript minification is enabled
         run: grep -Fq "minify: 'esbuild'" vite.config.ts
       - name: Verify production server bundles do not emit source maps
