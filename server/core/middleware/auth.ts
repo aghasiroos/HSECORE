@@ -237,22 +237,9 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'notifications:read',
     'documents:read',
   ],
-  CUSTOM_ROLE: [
-    'dashboard:view',
-    'ptw:*',
-    'incidents:*',
-    'warnings:*',
-    'reports:*',
-    'ppe:*',
-    'heat:*',
-    'trir:*',
-    'personnel:read',
-    'notifications:read',
-    'safety:*',
-    'fire:*',
-    'health:*',
-    'documents:*',
-  ],
+  // Custom roles must receive only explicitly configured permissions.
+  // An unknown/custom role must never inherit broad module access by default.
+  CUSTOM_ROLE: [],
 };
 
 /**
