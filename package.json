@@ -18,7 +18,8 @@
     "test:ai-rag-db": "tsx scripts/test-ai-rag-db.ts",
     "test:ai-routes": "tsx scripts/test-ai-routes.ts",
     "test:ai-queue": "tsx scripts/test-ai-queue.ts",
-    "test:ai-model-pull": "tsx scripts/test-ai-model-pull.ts"
+    "test:ai-model-pull": "tsx scripts/test-ai-model-pull.ts",
+    "test:api-cache-session": "tsx scripts/test-api-cache-session.ts"
   },
   "dependencies": {
     "@bpmn-io/properties-panel": "^3.48.0",
