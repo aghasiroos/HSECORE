@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import jwt from 'jsonwebtoken';
 import type { Request } from 'express';
-import { authenticateToken } from '../server/core/middleware/auth.ts';
+import { authenticateToken, checkUserHasPermission, normalizeRoleToCanonical } from '../server/core/middleware/auth.ts';
 import { config } from '../server/core/config.ts';
 
 function requestWith(options: {
@@ -66,7 +66,25 @@ async function run() {
   assert.equal(cookieUser?.uid, 'jwt-test-user');
   console.log('PASS HttpOnly cookie token is accepted');
 
-  console.log('AI JWT authentication tests: 5/5 passed');
+  assert.equal(normalizeRoleToCanonical('Custom Operations Role'), 'CUSTOM_ROLE');
+  assert.equal(
+    checkUserHasPermission({ uid: 'custom-role-user', role: 'Custom Operations Role' }, 'ptw:create'),
+    false,
+    'Custom roles must not inherit broad default module permissions'
+  );
+  assert.equal(
+    checkUserHasPermission({ uid: 'custom-role-user', role: 'Custom Operations Role', permissions: ['ptw:read'] }, 'ptw:read'),
+    true,
+    'Explicitly assigned custom-role permissions must remain effective'
+  );
+  assert.equal(
+    checkUserHasPermission({ uid: 'custom-role-user', role: 'Custom Operations Role', permissions: ['ptw:read'] }, 'ptw:create'),
+    false,
+    'Custom roles must not receive unassigned actions'
+  );
+  console.log('PASS custom roles follow least-privilege permission defaults');
+
+  console.log('AI JWT authentication tests: 6/6 passed');
 }
 
 run().catch(error => {
