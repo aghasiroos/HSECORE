@@ -137,6 +137,64 @@ export class AIController {
         userMessage: message.trim(),
       });
 
+      if (req.body?.stream === true) {
+        const abortController = new AbortController();
+        res.on('close', () => {
+          if (!res.writableEnded) abortController.abort();
+        });
+        res.status(200);
+        res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-cache, no-transform');
+        res.setHeader('Connection', 'keep-alive');
+        res.setHeader('X-Accel-Buffering', 'no');
+        res.flushHeaders?.();
+
+        try {
+          const result = await localAIProvider.chatStream(
+            messages,
+            {
+              model: modelInfo.name || modelInfo.model,
+              temperature: 0.4,
+              max_tokens: 1024,
+              timeoutMs: config.aiEngine.timeoutMs,
+            },
+            (token) => {
+              if (!res.destroyed && !res.writableEnded) {
+                res.write(`data: ${JSON.stringify({ token })}\\n\\n`);
+              }
+            },
+            abortController.signal,
+          );
+          aiAuditService.log({
+            userId: user?.id, userUid: user?.uid,
+            userName: user?.name || user?.username, role: user?.role,
+            assistantId: 'GENERAL_HSE', promptLength: message.length,
+            responseLength: result.text.length, toolsUsed: [],
+            durationMs: Date.now() - startedAt, model: result.model,
+            success: true, timestamp: new Date().toISOString(),
+          });
+          if (!res.destroyed && !res.writableEnded) {
+            res.write(`data: ${JSON.stringify({ done: true, model: result.model, durationMs: Date.now() - startedAt })}\\n\\n`);
+            res.end();
+          }
+        } catch (streamError: any) {
+          aiAuditService.log({
+            userId: user?.id, userUid: user?.uid,
+            userName: user?.name || user?.username, role: user?.role,
+            assistantId: 'GENERAL_HSE', promptLength: message.length,
+            responseLength: 0, toolsUsed: [], durationMs: Date.now() - startedAt,
+            model: modelInfo.name || modelInfo.model, success: false,
+            errorMessage: String(streamError?.message || streamError),
+            timestamp: new Date().toISOString(),
+          });
+          if (!res.destroyed && !res.writableEnded) {
+            res.write(`data: ${JSON.stringify({ error: streamError?.message || 'خطا در تولید پاسخ.' })}\\n\\n`);
+            res.end();
+          }
+        }
+        return;
+      }
+
       const result = await localAIProvider.chat(messages, {
         model: modelInfo.name || modelInfo.model,
         temperature: 0.4,
