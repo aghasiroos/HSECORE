@@ -409,8 +409,6 @@ export function checkUserHasPermission(user: UserContext | undefined, permission
  */
 export function isGlobalAdminUser(user?: UserContext | any | null): boolean {
   if (!user) return false;
-  const uid = String(user.uid || user.id || '').trim().toLowerCase();
-  const username = String(user.username || '').trim().toLowerCase();
   const rawRole = String(user.role || '').trim();
   const upperRole = rawRole.toUpperCase().replace(/\s+|_/g, '');
 
