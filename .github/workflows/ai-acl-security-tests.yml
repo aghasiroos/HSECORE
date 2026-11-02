@@ -40,6 +40,7 @@ on:
       - 'scripts/test-ai-rag-db.ts'
       - 'scripts/test-ai-routes.ts'
       - 'scripts/test-ai-queue.ts'
+      - 'scripts/test-ai-model-pull.ts'
       - 'index.html'
       - '.env.example'
       - 'install.sh'
@@ -165,6 +166,7 @@ jobs:
             exit 1
           fi
           grep -Fq 'JSON.stringify({ model: normalized, stream: false })' server/modules/ai/ai.local-provider.ts
+          grep -Fq 'JSON.stringify({ model: normalized })' server/modules/ai/ai.local-provider.ts
           grep -Fq 'Type DELETE to confirm' scripts/manage-ai.sh
           grep -Fq 'verify_container_compose_owner' scripts/manage-ai.sh
           if grep -Fq 'ollama pull' scripts/setup-local-ai.sh; then
