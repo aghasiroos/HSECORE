@@ -414,10 +414,9 @@ export function isGlobalAdminUser(user?: UserContext | any | null): boolean {
   const rawRole = String(user.role || '').trim();
   const upperRole = rawRole.toUpperCase().replace(/\s+|_/g, '');
 
+  // Global administrator status is role-based only. A username or UID is not
+  // an authorization credential and must never grant elevated privileges.
   if (
-    uid === 'user-admin' ||
-    uid === 'dev-admin-user' ||
-    username === 'admin' ||
     upperRole === 'ADMIN' ||
     upperRole === 'ADMINISTRATOR' ||
     upperRole === 'SUPERADMIN' ||
