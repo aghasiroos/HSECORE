@@ -4104,7 +4104,7 @@ manage_ai_infrastructure() {
         echo -e "${BOLD}${CYAN}==================================================================${NC}"
         echo " 1) نصب زیرساخت هوش مصنوعی (Install / Deploy AI Infrastructure)"
         echo " 2) راه‌اندازی موتور Local LLM (Start AI Engine Container)"
-        echo " 3) دانلود و افزودن مدل جدید (Pull/Download Model - e.g. qwen2.5:1.5b)"
+        echo " 3) دانلود و افزودن مدل دلخواه (Pull/Download any Ollama model)"
         echo " 4) مشاهده مدل‌های نصب‌شده (List Installed Models in Volume)"
         echo " 5) تغییر مدل پیش‌فرض سامانه (Change Default Model in .env)"
         echo " 6) فعال‌سازی یا غیرفعال‌سازی هوش مصنوعی (Toggle AI Engine Enabled/Disabled)"
@@ -4123,9 +4123,12 @@ manage_ai_infrastructure() {
           1) bash "${setup_script}" ;;
           2) bash "${manage_script}" start ;;
           3)
-            read -r -p "Enter model tag [default: qwen2.5:1.5b]: " target_m
-            target_m="${target_m:-qwen2.5:1.5b}"
-            bash "${manage_script}" pull "${target_m}"
+            read -r -p "Enter Ollama model reference (e.g. qwen3:1.7b or hf.co/user/model:tag): " target_m
+            if [ -n "${target_m//[[:space:]]/}" ]; then
+              bash "${manage_script}" pull "${target_m}"
+            else
+              echo -e "${YELLOW}No model specified; download cancelled. No default model is selected.${NC}"
+            fi
             ;;
           4) bash "${manage_script}" list ;;
           5)
@@ -4143,7 +4146,10 @@ manage_ai_infrastructure() {
           9) bash "${manage_script}" sysinfo ;;
           10) bash "${manage_script}" logs ;;
           11)
-            bash "${manage_script}" rm
+            read -r -p "Enter model name to delete: " del_m
+            if [ -n "${del_m}" ]; then
+              bash "${manage_script}" rm "${del_m}"
+            fi
             ;;
           12) bash "${manage_script}" uninstall ;;
           13) break ;;
