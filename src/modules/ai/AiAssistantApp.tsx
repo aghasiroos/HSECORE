@@ -36,7 +36,7 @@ export interface ChatSession {
   messages: ChatMessage[];
 }
 
-const COMPREHENSIVE_LEGAL_ASSISTANT = {
+const GENERAL_AI_ASSISTANT = {
   id: 'GENERAL_HSE',
   nameFa: 'دستیار هوش مصنوعی',
   title: 'گفت‌وگوی عمومی با مدل‌های زبانی محلی نصب‌شده',
@@ -214,7 +214,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
     report += `========================================================\n\n`;
 
     activeSession.messages.forEach((m, idx) => {
-      const sender = m.role === 'user' ? 'شما' : COMPREHENSIVE_LEGAL_ASSISTANT.nameFa;
+      const sender = m.role === 'user' ? 'شما' : GENERAL_AI_ASSISTANT.nameFa;
       report += `[${idx + 1}] ${sender} - ${m.timestamp}\n`;
       if (m.toolsUsed && m.toolsUsed.length > 0) {
         report += `ابزارها و منابع داده: ${m.toolsUsed.join('، ')}\n`;
@@ -599,11 +599,11 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
             </button>
             <div className="min-w-0">
               <h3 className="text-sm font-black text-slate-800 dark:text-slate-100 truncate">
-                {activeSession?.title || COMPREHENSIVE_LEGAL_ASSISTANT.nameFa}
+                {activeSession?.title || GENERAL_AI_ASSISTANT.nameFa}
               </h3>
               <p className="text-[10px] text-slate-400 flex items-center gap-1">
                 <Sparkles className="w-3 h-3" />
-                {COMPREHENSIVE_LEGAL_ASSISTANT.title}
+                {GENERAL_AI_ASSISTANT.title}
               </p>
             </div>
           </div>
@@ -633,14 +633,14 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
               </div>
               <div>
                 <h3 className="text-lg font-black text-slate-800 dark:text-slate-100">
-                  {COMPREHENSIVE_LEGAL_ASSISTANT.nameFa}
+                  {GENERAL_AI_ASSISTANT.nameFa}
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed max-w-md mx-auto">
-                  {COMPREHENSIVE_LEGAL_ASSISTANT.description}
+                  {GENERAL_AI_ASSISTANT.description}
                 </p>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-start">
-                {COMPREHENSIVE_LEGAL_ASSISTANT.promptSuggestions.map((s, i) => (
+                {GENERAL_AI_ASSISTANT.promptSuggestions.map((s, i) => (
                   <button
                     key={i}
                     onClick={() => handleSendMessage(s)}
