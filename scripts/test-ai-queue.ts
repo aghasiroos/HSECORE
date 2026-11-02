@@ -159,7 +159,7 @@ async function run() {
       [
         JSON.stringify({ model: 'qwen2.5', message: { role: 'assistant', content: 'stream recovered' }, done: false }),
         JSON.stringify({ model: 'qwen2.5', done: true }),
-      ].join('\\n') + '\\n',
+      ].join('\n') + '\n',
       { status: 200, headers: { 'Content-Type': 'application/x-ndjson' } },
     )) as typeof fetch;
 
