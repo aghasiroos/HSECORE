@@ -46,6 +46,8 @@ on:
       - main
     paths:
       - 'server/modules/ai/**'
+      - 'server/services/backup-restore-path.ts'
+      - 'scripts/test-backup-restore-path.ts'
       - 'server/core/middleware/auth.ts'
       - 'server/core/middleware/security.ts'
       - 'server/core/ip.ts'
