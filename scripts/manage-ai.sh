@@ -215,7 +215,7 @@ cmd_rm() {
   ensure_env_file
   chat="$(grep -E '^AI_DEFAULT_CHAT_MODEL=' "${ENV_FILE}" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '[:space:]' || true)"
   embed="$(grep -E '^AI_DEFAULT_EMBED_MODEL=' "${ENV_FILE}" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '[:space:]' || true)"
-  chat="${chat:-qwen2.5:1.7b}"
+  chat="${chat:-qwen2.5:1.5b}"
   embed="${embed:-bge-m3}"
   if [[ "${model}" == "${chat}" || "${model}" == "${embed}" || "${model}" == "${chat}:latest" || "${model}" == "${embed}:latest" ]]; then
     echo -e "${RED}[ERROR] Cannot remove a configured default chat or embedding model.${NC}" >&2
