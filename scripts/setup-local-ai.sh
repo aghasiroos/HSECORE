@@ -117,7 +117,7 @@ if printf '%s\n' "${MODEL_LIST}" | awk 'NR > 1 {print $1}' | grep -Fxq "${PRIMAR
   TEST_OUTPUT="$(docker exec "${CONTAINER_NAME}" ollama run "${PRIMARY_CHAT_MODEL}" "${TEST_PROMPT}" 2>&1)" || fail "Inference test failed for ${PRIMARY_CHAT_MODEL}: ${TEST_OUTPUT}"
   echo -e "Inference response: ${TEST_OUTPUT:0:200}"
 else
-  echo -e "${YELLOW}[NOTE] Chat model is not installed: ${PRIMARY_CHAT_MODEL}. Use the AI model-management menu to pull an allowlisted model.${NC}"
+  echo -e "${YELLOW}[NOTE] Chat model is not installed: ${PRIMARY_CHAT_MODEL}. Use the AI model-management menu to pull any valid Ollama model reference.${NC}"
 fi
 
 if printf '%s\n' "${MODEL_LIST}" | awk 'NR > 1 {print $1}' | grep -Fxq "${PRIMARY_EMBED_MODEL}"; then
