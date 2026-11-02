@@ -137,7 +137,7 @@ fi
 echo -e "\n${BOLD}[4/4] Applying AI settings to the HSECORE application... ${NC}"
 docker compose -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" up -d --no-deps hse-app
 
-APP_ENABLED="$(docker exec "${APP_CONTAINER_NAME}" printenv AI_ENGINE_ENABLED 2>/dev/null || true)"
+APP_ENABLED="$(docker exec "${APP_CONTAINER_NAME}" printenv AI_ENGINE_ENABLED 2>/dev/null | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]\"' || true)"
 [[ "${APP_ENABLED}" == "true" ]] || fail "HSECORE app did not receive AI_ENGINE_ENABLED=true. Inspect its Compose environment before retrying."
 
 # Verify the app container can reach the exact Ollama endpoint configured for it.
