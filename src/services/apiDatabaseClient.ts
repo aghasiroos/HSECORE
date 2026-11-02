@@ -15,6 +15,8 @@ export interface ApiResponse<T = any> {
 // In-flight request deduplicator and short-lived TTL cache.
 const inFlightPromises = new Map<string, Promise<any>>();
 const queryCache = new Map<string, { data: any; expiry: number }>();
+// Tracks invalidations that happen while a request for the same key is in flight.
+const cacheKeyVersions = new Map<string, number>();
 const CACHE_TTL_MS = 15000;
 const MAX_CACHE_ENTRIES = 350;
 
@@ -37,6 +39,7 @@ function pruneCache() {
 
 function getCachedOrFetch<T>(key: string, fetcher: () => Promise<T>, ttlMs = CACHE_TTL_MS): Promise<T> {
   const sessionVersion = authSessionVersion;
+  const cacheKeyVersion = cacheKeyVersions.get(key) ?? 0;
   const inFlightKey = `${sessionVersion}:${key}`;
   const cached = queryCache.get(key);
   if (cached && Date.now() < cached.expiry) {
@@ -54,6 +57,9 @@ function getCachedOrFetch<T>(key: string, fetcher: () => Promise<T>, ttlMs = CAC
       if (sessionVersion !== authSessionVersion) {
         throw new Error('API request discarded because the authenticated session changed');
       }
+      if (cacheKeyVersion !== (cacheKeyVersions.get(key) ?? 0)) {
+        throw new Error('API request discarded because cached data was invalidated');
+      }
       if (queryCache.size >= MAX_CACHE_ENTRIES) {
         pruneCache();
       }
@@ -64,6 +70,11 @@ function getCachedOrFetch<T>(key: string, fetcher: () => Promise<T>, ttlMs = CAC
       if (inFlightPromises.get(inFlightKey) === promise) {
         inFlightPromises.delete(inFlightKey);
       }
+      // Keep the invalidation version until every request for this key has settled.
+      const hasPendingRequestForKey = Array.from(inFlightPromises.keys()).some(
+        (activeKey) => activeKey.slice(activeKey.indexOf(':') + 1) === key
+      );
+      if (!hasPendingRequestForKey) cacheKeyVersions.delete(key);
     });
 
   inFlightPromises.set(inFlightKey, promise);
@@ -246,14 +257,25 @@ export async function safeFetchJson<T = ApiResponse>(
 }
 
 function invalidateCacheKeys(...prefixes: string[]) {
-  if (prefixes.length === 0 || prefixes.some((p) => !p || p === '*' || p === 'all')) {
+  const invalidateAll = prefixes.length === 0 || prefixes.some((p) => !p || p === '*' || p === 'all');
+  const matchesPrefix = (key: string) =>
+    invalidateAll || prefixes.some((p) => key === p || key.startsWith(`${p}:`) || key.startsWith(p));
+
+  // In-flight keys are prefixed with the auth-session version: "<version>:<cache-key>".
+  // Invalidate only matching requests so unrelated modules keep working normally.
+  for (const activeKey of inFlightPromises.keys()) {
+    const key = activeKey.slice(activeKey.indexOf(':') + 1);
+    if (matchesPrefix(key)) {
+      cacheKeyVersions.set(key, (cacheKeyVersions.get(key) ?? 0) + 1);
+    }
+  }
+
+  if (invalidateAll) {
     queryCache.clear();
     return;
   }
   for (const key of Array.from(queryCache.keys())) {
-    if (prefixes.some((p) => key === p || key.startsWith(`${p}:`) || key.startsWith(p))) {
-      queryCache.delete(key);
-    }
+    if (matchesPrefix(key)) queryCache.delete(key);
   }
 }
 
