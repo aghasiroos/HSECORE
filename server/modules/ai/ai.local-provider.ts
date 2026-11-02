@@ -41,7 +41,6 @@ export interface OllamaHealthStatus {
   embeddingModelInstalled: boolean;
   localInferenceReady: boolean;
   cloudFallbackEnabled: boolean;
-  cloudFallbackConfigured: boolean;
 }
 
 export interface LocalChatOptions {
@@ -199,7 +198,6 @@ export class LocalAIProvider {
       embeddingModelInstalled: false,
       localInferenceReady: false,
       cloudFallbackEnabled: config.aiEngine.allowCloudFallback,
-      cloudFallbackConfigured: config.aiEngine.allowCloudFallback && Boolean(config.geminiApiKey),
     };
 
     if (!config.aiEngine.enabled) {
