@@ -1304,7 +1304,7 @@ export default function UserManagement({ currentUser, language, onUserUpdateTrig
                   </label>
                   <input 
                     type="password" 
-                    autoComplete={editingUserId ? "new-password" : "new-password"}
+                    autoComplete="new-password"
                     placeholder={isFa ? "حداقل ۸ کاراکتر، شامل حروف و ارقام" : "At least 8 characters, letters and numbers"}
                     value={password} 
                     onChange={(e) => setPassword(e.target.value)}
