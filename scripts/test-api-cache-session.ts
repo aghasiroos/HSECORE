@@ -35,7 +35,11 @@ try {
   // A late response from the previous session may resolve for its original caller,
   // but it must not repopulate the shared cache for the new session.
   resolveFirstRequest(jsonResponse([{ id: 'session-A' }]));
-  assert.deepEqual(await oldSessionRequest, [{ id: 'session-A' }]);
+  await assert.rejects(
+    oldSessionRequest,
+    /authenticated session changed/,
+    'a stale response must not reach a caller after account switching',
+  );
   assert.deepEqual(await apiDb.getPersonnel(), [{ id: 'session-B' }]);
   assert.equal(fetchCalls, 2, 'the new session cache must remain isolated');
 
