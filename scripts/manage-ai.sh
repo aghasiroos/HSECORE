@@ -242,7 +242,11 @@ cmd_bench() {
   check_docker
   if ! is_container_running; then
     echo -e "${YELLOW}[*] Starting AI container first...${NC}"
-    cmd_start
+    cmd_start || return 1
+  fi
+  if ! docker exec "${CONTAINER_NAME}" ollama list | awk 'NR > 1 {print $1}' | grep -Fxq "${model}"; then
+    echo -e "${RED}[ERROR] Model '${model}' is not installed. Download it explicitly with: ./scripts/manage-ai.sh pull ${model}${NC}" >&2
+    return 1
   fi
   echo -e "${BLUE}[*] Running inference benchmark on model '${model}'...${NC}"
   echo -e "${DIM}Prompt: تست تحلیل خطرات شغلی در کار در ارتفاع و الزامات PTW${NC}"
@@ -256,16 +260,23 @@ cmd_bench() {
 }
 
 cmd_embed() {
-  local model="${1:-bge-m3}"
+  local model="${1:-}"
+  if ! is_valid_model_ref "${model}"; then
+    echo -e "${RED}[ERROR] Specify an installed model reference to test embeddings.${NC}" >&2
+    return 1
+  fi
   print_header
   check_docker
   if ! is_container_running; then
     echo -e "${YELLOW}[*] Starting AI container first...${NC}"
-    cmd_start
+    cmd_start || return 1
+  fi
+  if ! docker exec "${CONTAINER_NAME}" ollama list | awk 'NR > 1 {print $1}' | grep -Fxq "${model}"; then
+    echo -e "${RED}[ERROR] Model '${model}' is not installed. Download it explicitly with: ./scripts/manage-ai.sh pull ${model}${NC}" >&2
+    return 1
   fi
   echo -e "${BLUE}[*] Testing dense embedding generation with '${model}'...${NC}"
-  docker exec "${CONTAINER_NAME}" ollama run "${model}" "test embedding" 2>/dev/null || \
-    echo -e "${YELLOW}[!] Embedding test completed with warnings (model may need pull).${NC}"
+  docker exec "${CONTAINER_NAME}" ollama run "${model}" "test embedding"
 }
 
 cmd_sysinfo() {
@@ -280,9 +291,9 @@ cmd_sysinfo() {
   echo ""
   echo -e "${BOLD}Recommended models for this host:${NC}"
   if [[ "${ram_mb}" =~ ^[0-9]+$ ]] && [ "${ram_mb}" -ge 7000 ]; then
-    echo -e "  ${GREEN}• Qwen 2.5 1.7B / 3B quantized${NC} — suitable for 8GB RAM class"
+    echo -e "  ${GREEN}• Qwen 2.5 1.5B / 3B quantized${NC} — suitable for 8GB RAM class"
   elif [[ "${ram_mb}" =~ ^[0-9]+$ ]] && [ "${ram_mb}" -ge 3500 ]; then
-    echo -e "  ${GREEN}• Qwen 2.5 0.5B / 1.7B Q4_K_M${NC} — tight but workable"
+    echo -e "  ${GREEN}• Qwen 2.5 0.5B / 1.5B Q4_K_M${NC} — tight but workable"
   else
     echo -e "  ${YELLOW}• Qwen 2.5 0.5B Q4_K_M only${NC} — low RAM; keep concurrency=1"
   fi
