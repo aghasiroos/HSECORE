@@ -14,6 +14,7 @@ import {
   Download,
   Search,
   Scale,
+  Square,
 } from 'lucide-react';
 import { UserProfile } from '../../types';
 import { authFetch } from '../../services/apiDatabaseClient';
@@ -38,15 +39,14 @@ export interface ChatSession {
 
 const COMPREHENSIVE_LEGAL_ASSISTANT = {
   id: 'GENERAL_HSE',
-  nameFa: 'مشاور جامع HSE و مراجع قانونی',
-  title: 'مرجع تخصصی قوانین کار، آیین‌نامه‌های شورای عالی حفاظت فنی، وزارت بهداشت و پایش یکپارچه ماژول‌ها',
-  description:
-    'پاسخگویی مستند به فصل چهارم قانون کار، آیین‌نامه‌های حفاظت فنی، حدود مجاز مواجهه شغلی (OEL)، استانداردهای ISO 45001 / ISO 14001 / OSHA و استخراج برخط داده‌های تمامی ماژول‌های سامانه HSECORE.',
+  nameFa: 'دستیار هوش مصنوعی',
+  title: 'گفت‌وگوی عمومی با مدل‌های زبانی محلی نصب‌شده',
+  description: 'هر پرسشی دارید مطرح کنید؛ پاسخ‌ها مستقیماً توسط مدل انتخاب‌شده در موتور محلی Ollama تولید می‌شوند.',
   promptSuggestions: [
-    'از ماژول شاخص استرس گرمایی دمای هوا، رطوبت و شاخص WBGT فعلی را به همراه الزامات قانونی گزارش کن.',
-    'وظایف قانونی کارفرما و مسئول ایمنی طبق فصل چهارم قانون کار و آیین‌نامه شورای عالی حفاظت فنی چیست؟',
-    'وضعیت پروانه‌های کار فعال، حوادث ثبت‌شده و اخطارهای ایمنی در سامانه چگونه است؟',
-    'الزامات قانونی معاینات ادواری طب کار (ماده ۹۲ قانون کار) و آمار تناسب شغلی پرسنل در سامانه چیست؟',
+    'مفهوم هوش مصنوعی مولد را ساده و با مثال توضیح بده.',
+    'برای یادگیری یک مهارت جدید، برنامه ۳۰ روزه طراحی کن.',
+    'این متن را خلاصه کن و نکات کلیدی آن را استخراج کن.',
+    'برای حل یک مسئله پیچیده، مرحله‌به‌مرحله راهنمایی‌ام کن.',
   ],
 };
 
@@ -74,6 +74,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
   const migratedRef = useRef(false);
   const autoCreateOnceRef = useRef(false);
   const deletingRef = useRef(false);
+  const activeRequestRef = useRef<AbortController | null>(null);
 
   const loadSessionsFromServer = async () => {
     setSessionsLoading(true);
@@ -127,7 +128,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            title: 'مشاوره جامع HSE و مراجع قانونی',
+            title: 'گفت‌وگوی جدید',
             assistantId: 'GENERAL_HSE',
           }),
         });
@@ -209,12 +210,12 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
     if (!activeSession || activeSession.messages.length === 0) return;
     let report = `گزارش استنتاج هوش مصنوعی HSECORE AI\n`;
     report += `عنوان گفتگو: ${activeSession.title}\n`;
-    report += `مرجع پاسخگویی: ${COMPREHENSIVE_LEGAL_ASSISTANT.nameFa} (${COMPREHENSIVE_LEGAL_ASSISTANT.title})\n`;
+    report += `مدل: ${selectedModel || 'مدل محلی'}\n`;
     report += `تاریخ ثبت گزارش: ${new Date().toLocaleDateString('fa-IR')} ${new Date().toLocaleTimeString('fa-IR')}\n`;
     report += `========================================================\n\n`;
 
     activeSession.messages.forEach((m, idx) => {
-      const sender = m.role === 'user' ? 'کاربر' : COMPREHENSIVE_LEGAL_ASSISTANT.nameFa;
+      const sender = m.role === 'user' ? 'شما' : COMPREHENSIVE_LEGAL_ASSISTANT.nameFa;
       report += `[${idx + 1}] ${sender} - ${m.timestamp}\n`;
       if (m.toolsUsed && m.toolsUsed.length > 0) {
         report += `منابع داده سامانه‌ای: ${m.toolsUsed.join('، ')}\n`;
@@ -241,7 +242,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title: 'مشاوره جدید HSE و مراجع قانونی',
+          title: 'گفت‌وگوی جدید',
           assistantId: 'GENERAL_HSE',
         }),
       });
@@ -314,7 +315,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            title: text.slice(0, 35) || 'مشاوره جدید HSE و مراجع قانونی',
+            title: text.slice(0, 35) || 'گفت‌وگوی جدید',
             assistantId: 'GENERAL_HSE',
           }),
         });
@@ -371,6 +372,8 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
         content: m.content,
       }));
 
+      const requestController = new AbortController();
+      activeRequestRef.current = requestController;
       const res = await authFetch('/api/v1/ai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
@@ -381,6 +384,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
           model: selectedModel,
           stream: true,
         }),
+        signal: requestController.signal,
       });
       if (!res.ok || !res.body) {
         const failure = await res.json().catch(() => ({}));
@@ -442,6 +446,12 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
         // non-blocking
       }
     } catch (requestError: any) {
+      if (requestError?.name === 'AbortError') {
+        setSessions(prev => prev.map(s => s.id === sessionId ? {
+          ...s, messages: s.messages.filter(m => m.content.trim().length > 0 || m.role !== 'assistant'),
+        } : s));
+        return;
+      }
       const networkErrorMsg: ChatMessage = {
         id: `msg-${Date.now()}`,
         role: 'assistant',
@@ -454,9 +464,12 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
         )
       );
     } finally {
+      activeRequestRef.current = null;
       setIsLoading(false);
     }
   };
+
+  const handleStopGeneration = () => activeRequestRef.current?.abort();
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -569,7 +582,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
                 {activeSession?.title || COMPREHENSIVE_LEGAL_ASSISTANT.nameFa}
               </h3>
               <p className="text-[10px] text-slate-400 flex items-center gap-1">
-                <Scale className="w-3 h-3" />
+                <Sparkles className="w-3 h-3" />
                 {COMPREHENSIVE_LEGAL_ASSISTANT.title}
               </p>
             </div>
@@ -686,7 +699,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
                 <Bot className="w-4 h-4 animate-pulse" />
               </div>
               <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl rounded-ts-sm px-4 py-3 text-sm text-slate-400">
-                در حال تحلیل و استخراج داده...
+                در حال تولید پاسخ...
               </div>
             </div>
           )}
