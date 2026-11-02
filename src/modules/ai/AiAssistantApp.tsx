@@ -192,18 +192,32 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
     }
   };
 
+  const refreshInstalledModels = async () => {
+    try {
+      const response = await authFetch('/api/v1/ai/models');
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      const models = Array.isArray(data?.data) ? data.data.filter((model: any) =>
+        String(model?.details?.family || '').toLowerCase() !== 'bert' &&
+        !/embed|embedding/i.test(String(model?.name || ''))
+      ) : [];
+      setInstalledModels(models);
+      setSelectedModel(current =>
+        models.some((model: any) => model.name === current) ? current : (models[0]?.name || '')
+      );
+    } catch {
+      setInstalledModels([]);
+      setSelectedModel('');
+    }
+  };
+
   useEffect(() => {
     loadSessionsFromServer();
-    authFetch('/api/v1/ai/models')
-      .then(response => response.json())
-      .then(data => {
-        const models = Array.isArray(data?.data) ? data.data.filter((model: any) =>
-          String(model?.details?.family || '').toLowerCase() !== 'bert' && !/embed|embedding/i.test(String(model?.name || ''))
-        ) : [];
-        setInstalledModels(models);
-        setSelectedModel((current) => current || models[0]?.name || '');
-      })
-      .catch(() => setInstalledModels([]));
+    void refreshInstalledModels();
+    // Runtime can be enabled or models can be installed while this module is open.
+    // Refresh from the live backend inventory without requiring a page reload.
+    const refreshTimer = window.setInterval(() => { void refreshInstalledModels(); }, 30000);
+    return () => window.clearInterval(refreshTimer);
   }, []);
 
   useEffect(() => {
