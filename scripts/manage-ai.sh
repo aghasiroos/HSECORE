@@ -358,9 +358,14 @@ cmd_toggle() {
   else
     cmd_start || return 1
   fi
+  # Apply the changed AI environment to the app immediately; Compose recreates
+  # only hse-app and leaves the database, uploads, and Ollama model volume intact.
+  docker compose -f "${PROJECT_DIR}/${COMPOSE_FILE}" --env-file "${ENV_FILE}" up -d --no-deps hse-app || {
+    echo -e "${RED}[ERROR] Could not apply AI settings to hse-app. The .env change was retained; inspect Compose output and retry.${NC}" >&2
+    return 1
+  }
   echo -e "${GREEN}[✓] AI Engine status set to: ${BOLD}${new_val}${NC}"
-  echo -e "${YELLOW}[!] Restart the main app container for the change to take effect:${NC}"
-  echo -e "    ${CYAN}sudo docker compose -f docker-compose.server.yml up -d --no-deps hse-app${NC}"
+  echo -e "${GREEN}[✓] HSECORE app recreated to apply the new AI settings.${NC}"
 }
 cmd_update() {
   print_header

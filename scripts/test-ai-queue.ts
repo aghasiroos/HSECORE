@@ -3,6 +3,7 @@ import { config } from '../server/core/config.ts';
 import { AIRequestQueue } from '../server/modules/ai/ai.queue.ts';
 import { LocalAIProvider } from '../server/modules/ai/ai.local-provider.ts';
 
+const originalEngineEnabled = config.aiEngine.enabled;
 const originalConcurrency = config.aiEngine.maxConcurrency;
 const originalQueueLength = config.aiEngine.maxQueueLength;
 const originalTimeout = config.aiEngine.timeoutMs;
@@ -17,6 +18,8 @@ function deferred<T = void>() {
 }
 
 async function run() {
+  // Exercise a reachable local provider explicitly; runtime enablement defaults off.
+  config.aiEngine.enabled = true;
   config.aiEngine.maxConcurrency = 1;
   config.aiEngine.maxQueueLength = 1;
 
@@ -179,6 +182,7 @@ run()
     process.exitCode = 1;
   })
   .finally(() => {
+    config.aiEngine.enabled = originalEngineEnabled;
     config.aiEngine.maxConcurrency = originalConcurrency;
     config.aiEngine.maxQueueLength = originalQueueLength;
     config.aiEngine.timeoutMs = originalTimeout;

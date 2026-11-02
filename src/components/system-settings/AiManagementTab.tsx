@@ -58,18 +58,23 @@ export default function AiManagementTab({ language = 'fa', currentUser }: AiMana
   const [isSearching, setIsSearching] = useState<boolean>(false);
   const [searchResults, setSearchResults] = useState<any[]>([]);
 
+  const fetchRuntimeData = async () => {
+    const [statusRes, modelsRes] = await Promise.all([
+      authFetch('/api/v1/ai/status').then(r => r.json()).catch(() => null),
+      authFetch('/api/v1/ai/models').then(r => r.json()).catch(() => null),
+    ]);
+    if (statusRes?.success) setEngineStatus(statusRes.data);
+    if (modelsRes?.success) setInstalledModels(modelsRes.data || []);
+  };
+
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [statusRes, modelsRes, auditRes, docsRes] = await Promise.all([
-        authFetch('/api/v1/ai/status').then(r => r.json()).catch(() => null),
-        authFetch('/api/v1/ai/models').then(r => r.json()).catch(() => null),
+      const [, auditRes, docsRes] = await Promise.all([
+        fetchRuntimeData(),
         authFetch('/api/v1/ai/audit?limit=20').then(r => r.json()).catch(() => null),
         authFetch('/api/v1/ai/knowledge').then(r => r.json()).catch(() => null),
       ]);
-
-      if (statusRes?.success) setEngineStatus(statusRes.data);
-      if (modelsRes?.success) setInstalledModels(modelsRes.data || []);
       if (auditRes?.success) setAuditData(auditRes.data);
       if (docsRes?.success) setKnowledgeDocs(docsRes.data || []);
     } catch (err) {
@@ -80,7 +85,10 @@ export default function AiManagementTab({ language = 'fa', currentUser }: AiMana
   };
 
   useEffect(() => {
-    fetchData();
+    void fetchData();
+    // Refresh only live runtime data; audit and knowledge lists stay on demand.
+    const refreshTimer = window.setInterval(() => { void fetchRuntimeData(); }, 30000);
+    return () => window.clearInterval(refreshTimer);
   }, []);
 
   // Restore an unfinished persisted model operation after a page refresh.

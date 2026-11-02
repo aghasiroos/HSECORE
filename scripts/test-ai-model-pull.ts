@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { config } from '../server/core/config.ts';
 import { normalizeOllamaModelName, localAIProvider } from '../server/modules/ai/ai.local-provider.ts';
 
 async function main() {
@@ -14,6 +15,8 @@ async function main() {
   }
 
   const originalFetch = globalThis.fetch;
+  const originalEngineEnabled = config.aiEngine.enabled;
+  config.aiEngine.enabled = true;
   let capturedUrl = '';
   let capturedInit: RequestInit | undefined;
   try {
@@ -66,6 +69,7 @@ async function main() {
     assert.equal(deleted.success, true);
     assert.deepEqual(deleteBody, { model: 'hf.co/user/model:Q4_K_M' });
   } finally {
+    config.aiEngine.enabled = originalEngineEnabled;
     globalThis.fetch = originalFetch;
   }
   console.log('AI model-pull and delete regression tests passed.');

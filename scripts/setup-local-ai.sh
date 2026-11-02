@@ -9,6 +9,7 @@ PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE="${PROJECT_DIR}/docker-compose.server.yml"
 ENV_FILE="${PROJECT_DIR}/.env"
 CONTAINER_NAME="hse-ai-engine"
+APP_CONTAINER_NAME="hse-enterprise-app"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -90,10 +91,17 @@ if [[ -n "${EXISTING_ID}" ]]; then
   [[ "${EXISTING_CONFIG}" == *"docker-compose.server.yml"* ]] || fail "Existing ${CONTAINER_NAME} belongs to another Compose configuration (${EXISTING_CONFIG:-unknown}). No container was changed; perform a planned migration with rollback."
 fi
 
-echo -e "\n${BOLD}[1/3] Starting only the Local AI Engine service...${NC}"
+# The running application must be recreated from this Compose project so it
+# receives the updated AI_ENGINE_ENABLED / AI_ENGINE_URL environment.
+APP_ID="$(docker ps -q --filter "name=^/${APP_CONTAINER_NAME}$" | head -n1 || true)"
+[[ -n "${APP_ID}" ]] || fail "The HSECORE app container is not running. Start/repair the main application before enabling Local AI."
+APP_CONFIG="$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' "${APP_ID}" 2>/dev/null || true)"
+[[ "${APP_CONFIG}" == *"docker-compose.server.yml"* ]] || fail "Existing ${APP_CONTAINER_NAME} belongs to another Compose configuration (${APP_CONFIG:-unknown}). No application container was changed."
+
+echo -e "\n${BOLD}[1/4] Starting only the Local AI Engine service...${NC}"
 docker compose -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" up -d --no-deps hse-ai-engine
 
-echo -e "\n${BOLD}[2/3] Waiting for Ollama health...${NC}"
+echo -e "\n${BOLD}[2/4] Waiting for Ollama health...${NC}"
 attempts=0
 until docker exec "${CONTAINER_NAME}" ollama list >/dev/null 2>&1 || (( attempts >= 60 )); do
   sleep 1
@@ -108,7 +116,7 @@ EXPOSED_WAN="$(docker port "${CONTAINER_NAME}" 11434 2>/dev/null | grep -v '127\
 [[ -z "${EXPOSED_WAN}" ]] || fail "Ollama is exposed beyond loopback: ${EXPOSED_WAN}. Correct AI_BIND_IP before continuing."
 echo -e "${GREEN}[✓] Ollama is running and its host binding is loopback-only (or internal-only).${NC}"
 
-echo -e "\n${BOLD}[3/3] Checking configured models (no downloads are performed)...${NC}"
+echo -e "\n${BOLD}[3/4] Checking configured models (no downloads are performed)...${NC}"
 MODEL_LIST="$(docker exec "${CONTAINER_NAME}" ollama list)"
 if printf '%s\n' "${MODEL_LIST}" | awk 'NR > 1 {print $1}' | grep -Fxq "${PRIMARY_CHAT_MODEL}"; then
   echo -e "${GREEN}[✓] Chat model is installed: ${PRIMARY_CHAT_MODEL}${NC}"
@@ -126,8 +134,31 @@ else
   echo -e "${YELLOW}[NOTE] Embedding model is not installed: ${PRIMARY_EMBED_MODEL}. Install it explicitly when RAG is enabled.${NC}"
 fi
 
+echo -e "\n${BOLD}[4/4] Applying AI settings to the HSECORE application... ${NC}"
+docker compose -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" up -d --no-deps hse-app
+
+APP_ENABLED="$(docker exec "${APP_CONTAINER_NAME}" printenv AI_ENGINE_ENABLED 2>/dev/null | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]\"' || true)"
+[[ "${APP_ENABLED}" == "true" ]] || fail "HSECORE app did not receive AI_ENGINE_ENABLED=true. Inspect its Compose environment before retrying."
+
+# Verify the app container can reach the exact Ollama endpoint configured for it.
+docker exec "${APP_CONTAINER_NAME}" node -e '
+const base = (process.env.AI_ENGINE_URL || "").replace(/\/$/, "");
+if (!base) throw new Error("AI_ENGINE_URL is empty");
+fetch(base + "/api/tags", { signal: AbortSignal.timeout(8000) })
+  .then(async response => {
+    if (!response.ok) throw new Error("Ollama returned HTTP " + response.status);
+    const payload = await response.json();
+    const models = Array.isArray(payload.models) ? payload.models : [];
+    console.log("HSECORE-to-Ollama connection: OK");
+    console.log("Installed models visible to HSECORE: " + models.length);
+    for (const model of models) console.log(" - " + (model.name || model.model || "unknown"));
+  })
+  .catch(error => { console.error("HSECORE-to-Ollama connection failed: " + error.message); process.exit(1); });
+' || fail "The HSECORE application cannot reach Ollama. Check AI_ENGINE_URL and the shared Docker network."
+
 echo -e "\n${BOLD}${GREEN}Local AI runtime verification completed.${NC}"
 echo "Container : ${CONTAINER_NAME}"
-echo "Chat model: ${PRIMARY_CHAT_MODEL} (not downloaded or changed by this script)"
-echo "Embed model: ${PRIMARY_EMBED_MODEL} (not downloaded or changed by this script)"
-echo -e "${YELLOW}No model was downloaded, no existing model was deleted, and AI_ENGINE_ENABLED was not overwritten.${NC}"
+echo "Application: ${APP_CONTAINER_NAME} (recreated to apply AI settings)"
+echo "Chat model: ${PRIMARY_CHAT_MODEL}"
+echo "Embed model: ${PRIMARY_EMBED_MODEL}"
+echo -e "${YELLOW}No model was downloaded or deleted. Existing model data and volumes were preserved.${NC}"
