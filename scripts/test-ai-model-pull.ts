@@ -25,7 +25,7 @@ async function main() {
         JSON.stringify({ status: 'pulling manifest' }),
         JSON.stringify({ status: 'pulling model', completed: 50, total: 100 }),
         JSON.stringify({ status: 'success' }),
-      ].join('\\n') + '\\n', {
+      ].join('\n') + '\n', {
         status: 200, headers: { 'Content-Type': 'application/x-ndjson' },
       });
     }) as typeof fetch;
