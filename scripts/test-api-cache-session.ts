@@ -3,6 +3,7 @@ import { apiDb, setAuthToken } from '../src/services/apiDatabaseClient.ts';
 
 const originalFetch = globalThis.fetch;
 let fetchCalls = 0;
+let resolveUnrelatedRead!: (response: Response) => void;
 let resolveFirstSessionRequest!: (response: Response) => void;
 let resolveStaleRead!: (response: Response) => void;
 const firstSessionResponse = new Promise<Response>((resolve) => {
@@ -10,6 +11,9 @@ const firstSessionResponse = new Promise<Response>((resolve) => {
 });
 const staleReadResponse = new Promise<Response>((resolve) => {
   resolveStaleRead = resolve;
+});
+const unrelatedReadResponse = new Promise<Response>((resolve) => {
+  resolveUnrelatedRead = resolve;
 });
 
 const jsonResponse = (data: unknown) =>
@@ -19,7 +23,9 @@ const jsonResponse = (data: unknown) =>
   });
 
 try {
-  globalThis.fetch = (async () => {
+  globalThis.fetch = (async (input) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+    if (url.includes('/medical-exams')) return unrelatedReadResponse;
     fetchCalls += 1;
     if (fetchCalls === 1) return firstSessionResponse;
     if (fetchCalls === 3) return staleReadResponse;
@@ -50,10 +56,13 @@ try {
   apiDb.invalidateCache('personnel'); // Remove the valid session-B cache before starting the stale read.
   const staleRead = apiDb.getPersonnel();
   assert.equal(fetchCalls, 3, 'the stale read should start before invalidation');
+  const unrelatedRead = apiDb.getMedicalExams();
   apiDb.invalidateCache('personnel');
   const freshRead = apiDb.getPersonnel();
   assert.equal(fetchCalls, 4, 'a read after invalidation must not join the stale request');
   assert.deepEqual(await freshRead, [{ id: 'fresh-after-write' }]);
+  resolveUnrelatedRead(jsonResponse([{ id: 'unrelated-module' }]));
+  assert.deepEqual(await unrelatedRead, [{ id: 'unrelated-module' }]);
 
   resolveStaleRead(jsonResponse([{ id: 'stale-before-write' }]));
   await assert.rejects(
@@ -64,7 +73,7 @@ try {
   assert.deepEqual(await apiDb.getPersonnel(), [{ id: 'fresh-after-write' }]);
   assert.equal(fetchCalls, 4, 'the fresh post-invalidation cache must remain intact');
 
-  console.log('PASS: API cache isolates auth sessions and rejects stale reads after invalidation.');
+  console.log('PASS: API cache isolates auth sessions, rejects stale reads, and preserves unrelated requests.');
 } finally {
   setAuthToken(null);
   globalThis.fetch = originalFetch;
