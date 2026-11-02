@@ -161,10 +161,12 @@ jobs:
             echo "Model downloads must not be restricted by a fixed allowlist."
             exit 1
           fi
-          if grep -Fq 'default: qwen2.5:1.7b' install.sh; then
+          if grep -Eq 'Enter model tag \\[default:|target_m="\\$\\{target_m:-' install.sh; then
             echo "The model download menu must not preselect a model."
             exit 1
           fi
+          grep -Fq 'No default model is selected.' install.sh
+          grep -Fq "const [pullModelName, setPullModelName] = useState<string>('');" src/components/system-settings/AiManagementTab.tsx
           grep -Fq 'JSON.stringify({ model: normalized, stream: true })' server/modules/ai/ai.local-provider.ts
           grep -Fq 'JSON.stringify({ model: normalized })' server/modules/ai/ai.local-provider.ts
           grep -Fq 'Type DELETE to confirm' scripts/manage-ai.sh
