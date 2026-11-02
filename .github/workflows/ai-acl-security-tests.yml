@@ -171,6 +171,8 @@ jobs:
           grep -Fq 'JSON.stringify({ model: normalized })' server/modules/ai/ai.local-provider.ts
           grep -Fq 'Type DELETE to confirm' scripts/manage-ai.sh
           grep -Fq 'verify_container_compose_owner' scripts/manage-ai.sh
+          grep -Fq 'cmd_embed() {' scripts/manage-ai.sh
+          grep -Fq 'is not installed. Download it explicitly' scripts/manage-ai.sh
           if grep -Fq 'ollama pull' scripts/setup-local-ai.sh; then
             echo "Runtime verification must not download models implicitly."
             exit 1
