@@ -98,10 +98,10 @@ APP_ID="$(docker ps -q --filter "name=^/${APP_CONTAINER_NAME}$" | head -n1 || tr
 APP_CONFIG="$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' "${APP_ID}" 2>/dev/null || true)"
 [[ "${APP_CONFIG}" == *"docker-compose.server.yml"* ]] || fail "Existing ${APP_CONTAINER_NAME} belongs to another Compose configuration (${APP_CONFIG:-unknown}). No application container was changed."
 
-echo -e "\n${BOLD}[1/3] Starting only the Local AI Engine service...${NC}"
+echo -e "\n${BOLD}[1/4] Starting only the Local AI Engine service...${NC}"
 docker compose -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" up -d --no-deps hse-ai-engine
 
-echo -e "\n${BOLD}[2/3] Waiting for Ollama health...${NC}"
+echo -e "\n${BOLD}[2/4] Waiting for Ollama health...${NC}"
 attempts=0
 until docker exec "${CONTAINER_NAME}" ollama list >/dev/null 2>&1 || (( attempts >= 60 )); do
   sleep 1
@@ -116,7 +116,7 @@ EXPOSED_WAN="$(docker port "${CONTAINER_NAME}" 11434 2>/dev/null | grep -v '127\
 [[ -z "${EXPOSED_WAN}" ]] || fail "Ollama is exposed beyond loopback: ${EXPOSED_WAN}. Correct AI_BIND_IP before continuing."
 echo -e "${GREEN}[✓] Ollama is running and its host binding is loopback-only (or internal-only).${NC}"
 
-echo -e "\n${BOLD}[3/3] Checking configured models (no downloads are performed)...${NC}"
+echo -e "\n${BOLD}[3/4] Checking configured models (no downloads are performed)...${NC}"
 MODEL_LIST="$(docker exec "${CONTAINER_NAME}" ollama list)"
 if printf '%s\n' "${MODEL_LIST}" | awk 'NR > 1 {print $1}' | grep -Fxq "${PRIMARY_CHAT_MODEL}"; then
   echo -e "${GREEN}[✓] Chat model is installed: ${PRIMARY_CHAT_MODEL}${NC}"
@@ -142,7 +142,7 @@ APP_ENABLED="$(docker exec "${APP_CONTAINER_NAME}" printenv AI_ENGINE_ENABLED 2>
 
 # Verify the app container can reach the exact Ollama endpoint configured for it.
 docker exec "${APP_CONTAINER_NAME}" node -e '
-const base = (process.env.AI_ENGINE_URL || "").replace(/\\/$/, "");
+const base = (process.env.AI_ENGINE_URL || "").replace(/\/$/, "");
 if (!base) throw new Error("AI_ENGINE_URL is empty");
 fetch(base + "/api/tags", { signal: AbortSignal.timeout(8000) })
   .then(async response => {
