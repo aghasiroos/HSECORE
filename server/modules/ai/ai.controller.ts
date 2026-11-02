@@ -160,7 +160,7 @@ export class AIController {
             },
             (token) => {
               if (!res.destroyed && !res.writableEnded) {
-                res.write(`data: ${JSON.stringify({ token })}\\n\\n`);
+                res.write(`data: ${JSON.stringify({ token })}\n\n`);
               }
             },
             abortController.signal,
@@ -174,7 +174,7 @@ export class AIController {
             success: true, timestamp: new Date().toISOString(),
           });
           if (!res.destroyed && !res.writableEnded) {
-            res.write(`data: ${JSON.stringify({ done: true, model: result.model, durationMs: Date.now() - startedAt })}\\n\\n`);
+            res.write(`data: ${JSON.stringify({ done: true, model: result.model, durationMs: Date.now() - startedAt })}\n\n`);
             res.end();
           }
         } catch (streamError: any) {
@@ -188,7 +188,7 @@ export class AIController {
             timestamp: new Date().toISOString(),
           });
           if (!res.destroyed && !res.writableEnded) {
-            res.write(`data: ${JSON.stringify({ error: streamError?.message || 'خطا در تولید پاسخ.' })}\\n\\n`);
+            res.write(`data: ${JSON.stringify({ error: streamError?.message || 'خطا در تولید پاسخ.' })}\n\n`);
             res.end();
           }
         }
