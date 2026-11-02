@@ -7,6 +7,7 @@
 import { randomUUID } from 'crypto';
 import { eq, desc, and, inArray } from 'drizzle-orm';
 import { db, schema } from '../../core/db.ts';
+import { config } from '../../core/config.ts';
 import { logger } from '../../core/logger.ts';
 import { localAIProvider, normalizeOllamaModelName } from './ai.local-provider.ts';
 import { aiModelManager } from './ai.model-manager.ts';
@@ -88,23 +89,40 @@ export class AIJobManager {
     if (activeJobId) {
       throw new Error('یک عملیات مدل در حال اجرا است؛ تا پایان آن صبر کنید.');
     }
+
+    let activeRows: Array<{ id: string; status: string; updatedAt: Date | string }> = [];
     try {
-      const running = await db
-        .select({ id: schema.aiDeploymentJobs.id })
+      activeRows = await db
+        .select({
+          id: schema.aiDeploymentJobs.id,
+          status: schema.aiDeploymentJobs.status,
+          updatedAt: schema.aiDeploymentJobs.updatedAt,
+        })
         .from(schema.aiDeploymentJobs)
-        .where(inArray(schema.aiDeploymentJobs.status, ['pending', 'running']))
-        .limit(1);
-      if (running.length) {
-        // Stale recovery: if process restarted, mark old running as failed
-        const job = running[0];
-        await this.updateJob(job.id, {
-          status: 'failed',
-          errorMessage: 'عملیات پس از راه‌اندازی مجدد سرور ناتمام ماند.',
-          message: 'بازیابی پس از restart',
-        });
-      }
+        .where(inArray(schema.aiDeploymentJobs.status, ['pending', 'running']));
     } catch (err: any) {
-      logger.warn('assertNoActiveJob DB check failed', { error: err?.message });
+      logger.error('assertNoActiveJob DB check failed; refusing model mutation', { error: err?.message });
+      throw new Error('امکان بررسی وضعیت عملیات قبلی مدل وجود ندارد؛ برای جلوگیری از عملیات هم‌زمان، درخواست پذیرفته نشد.');
+    }
+
+    const now = Date.now();
+    for (const job of activeRows) {
+      const updatedAt = job.updatedAt instanceof Date ? job.updatedAt.getTime() : new Date(job.updatedAt).getTime();
+      const staleAfterMs = job.status === 'pending'
+        ? 10 * 60 * 1000
+        : Math.max(config.aiEngine.modelPullTimeoutMs || 30 * 60 * 1000, 60 * 1000) + 60 * 1000;
+
+      // A running pull may legitimately take the full configured timeout.
+      // Never mark it stale merely because a second request arrived.
+      if (!Number.isFinite(updatedAt) || now - updatedAt <= staleAfterMs) {
+        throw new Error('یک عملیات مدل در حال اجرا یا بازیابی است؛ پس از پایان آن دوباره تلاش کنید.');
+      }
+
+      await this.updateJob(job.id, {
+        status: 'failed',
+        errorMessage: 'عملیات پس از توقف پردازش یا پایان مهلت مجاز ناتمام ماند.',
+        message: 'بازیابی امن عملیات منقضی‌شده',
+      });
     }
   }
 
@@ -146,9 +164,9 @@ export class AIJobManager {
   }
 
   async enqueueDelete(modelRef: string, createdBy?: string): Promise<AIDeploymentJobView> {
-    const normalized = (modelRef || '').trim();
-    if (!normalized || normalized.length > 160) {
-      throw new Error('شناسه مدل نامعتبر است.');
+    const normalized = normalizeOllamaModelName(modelRef);
+    if (!normalized) {
+      throw new Error('شناسه مدل نامعتبر است. از قالب model:tag یا namespace/model:tag استفاده کنید.');
     }
     await this.assertNoActiveJob();
 
