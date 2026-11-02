@@ -106,6 +106,8 @@ jobs:
             if (!csp.includes(origin)) throw new Error('Missing required CSP origin: ' + origin);
           }
           NODE
+      - name: Audit production dependencies for moderate or higher vulnerabilities
+        run: npm audit --omit=dev --audit-level=moderate
       - name: Audit npm dependencies for high-severity vulnerabilities
         run: npm audit --audit-level=high
       - name: Run document ACL and prompt-security regression tests
