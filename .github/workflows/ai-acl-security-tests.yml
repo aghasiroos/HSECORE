@@ -7,6 +7,7 @@ on:
       - security/p0-ai-acl-org-tests
     paths:
       - 'server/modules/ai/**'
+      - 'server.ts'
       - 'server/core/middleware/auth.ts'
       - 'server/core/middleware/security.ts'
       - 'scripts/test-ai-acl.ts'
@@ -105,6 +106,8 @@ jobs:
         run: grep -Fq "minify: 'esbuild'" vite.config.ts
       - name: Verify production server bundles do not emit source maps
         run: '! grep -Fq "esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap" package.json'
+      - name: Verify removed unused legacy service namespace import
+        run: '! grep -Fq "import * as dbServices" server.ts'
       - name: Verify local spreadsheet libraries and restrictive CSP
         run: |
           node -e "const p=require('./package-lock.json').packages; if (p['node_modules/xlsx']?.version !== '0.20.3') process.exit(1)"
