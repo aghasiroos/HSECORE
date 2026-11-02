@@ -59,11 +59,11 @@ ensure_compose_file() {
 
 verify_container_compose_owner() {
   local cid config_files
-  cid="$(docker ps -aq --filter "name=^/@{CONTAINER_NAME}$" | head -n1 || true)"
-  [[ -z "@{cid}" ]] && return 0
-  config_files="$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' "@{cid}" 2>/dev/null || true)"
-  if [[ "@{config_files}" != *"docker-compose.server.yml"* ]]; then
-    echo -e "@{RED}[ERROR] Existing @{CONTAINER_NAME} belongs to a different Compose configuration (@{config_files:-unknown}). No container was changed; plan a separate migration with rollback.@{NC}" >&2
+  cid="$(docker ps -aq --filter "name=^/${CONTAINER_NAME}$" | head -n1 || true)"
+  [[ -z "${cid}" ]] && return 0
+  config_files="$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' "${cid}" 2>/dev/null || true)"
+  if [[ "${config_files}" != *"docker-compose.server.yml"* ]]; then
+    echo -e "${RED}[ERROR] Existing ${CONTAINER_NAME} belongs to a different Compose configuration (${config_files:-unknown}). No container was changed; plan a separate migration with rollback.${NC}" >&2
     return 1
   fi
 }
@@ -158,7 +158,7 @@ cmd_restart() {
 }
 
 cmd_pull() {
-  local model="@{1:-}" allowed chat embed
+  local model="${1:-}" allowed chat embed
   if [[ -z "${model}" || ! "${model}" =~ ^[A-Za-z0-9._/-]+(:[A-Za-z0-9._-]+)?$ ]]; then
     echo -e "${RED}[ERROR] Invalid model reference.${NC}" >&2
     return 1
@@ -167,11 +167,11 @@ cmd_pull() {
   check_docker
   ensure_env_file
   ensure_compose_file
-  allowed="$(grep -E '^AI_ALLOWED_MODELS=' "${ENV_FILE}" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '"\'' ' || true)"
-  chat="$(grep -E '^AI_DEFAULT_CHAT_MODEL=' "${ENV_FILE}" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '"\'' ' || true)"
-  embed="$(grep -E '^AI_DEFAULT_EMBED_MODEL=' "${ENV_FILE}" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '"\'' ' || true)"
-  chat="@{chat:-qwen2.5:1.7b}"
-  embed="@{embed:-bge-m3}"
+  allowed="$(grep -E '^AI_ALLOWED_MODELS=' "${ENV_FILE}" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '[:space:]' || true)"
+  chat="$(grep -E '^AI_DEFAULT_CHAT_MODEL=' "${ENV_FILE}" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '[:space:]' || true)"
+  embed="$(grep -E '^AI_DEFAULT_EMBED_MODEL=' "${ENV_FILE}" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '[:space:]' || true)"
+  chat="${chat:-qwen2.5:1.7b}"
+  embed="${embed:-bge-m3}"
   if [[ "${model}" != "${chat}" && "${model}" != "${embed}" && "${model}" != "${chat}:latest" && "${model}" != "${embed}:latest" && ",${allowed}," != *",${model},"* ]]; then
     echo -e "${RED}[ERROR] Model is not allowlisted. Add its exact reference to AI_ALLOWED_MODELS in .env first.${NC}" >&2
     return 1
@@ -201,16 +201,16 @@ cmd_list() {
 }
 
 cmd_rm() {
-  local model="@{1:-}" chat embed confirm
+  local model="${1:-}" chat embed confirm
   if [[ -z "${model}" || ! "${model}" =~ ^[A-Za-z0-9._/-]+(:[A-Za-z0-9._-]+)?$ ]]; then
     echo -e "${RED}[ERROR] Invalid model reference.${NC}" >&2
     return 1
   fi
   ensure_env_file
-  chat="$(grep -E '^AI_DEFAULT_CHAT_MODEL=' "${ENV_FILE}" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '"\'' ' || true)"
-  embed="$(grep -E '^AI_DEFAULT_EMBED_MODEL=' "${ENV_FILE}" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '"\'' ' || true)"
-  chat="@{chat:-qwen2.5:1.7b}"
-  embed="@{embed:-bge-m3}"
+  chat="$(grep -E '^AI_DEFAULT_CHAT_MODEL=' "${ENV_FILE}" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '[:space:]' || true)"
+  embed="$(grep -E '^AI_DEFAULT_EMBED_MODEL=' "${ENV_FILE}" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '[:space:]' || true)"
+  chat="${chat:-qwen2.5:1.7b}"
+  embed="${embed:-bge-m3}"
   if [[ "${model}" == "${chat}" || "${model}" == "${embed}" || "${model}" == "${chat}:latest" || "${model}" == "${embed}:latest" ]]; then
     echo -e "${RED}[ERROR] Cannot remove a configured default chat or embedding model.${NC}" >&2
     return 1
@@ -290,7 +290,7 @@ cmd_logs() {
 }
 
 cmd_set_default() {
-  local model="@{1:-}"
+  local model="${1:-}"
   if [[ -z "${model}" || ! "${model}" =~ ^[A-Za-z0-9._/-]+(:[A-Za-z0-9._-]+)?$ ]]; then
     echo -e "${RED}[ERROR] Invalid model reference.${NC}" >&2
     return 1
@@ -344,8 +344,8 @@ cmd_update() {
   ensure_env_file
   ensure_compose_file
   local image_tag
-  image_tag="$(grep -E '^OLLAMA_IMAGE=' "${ENV_FILE}" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '"\'' ' || true)"
-  image_tag="@{image_tag:-ollama/ollama:0.40.13}"
+  image_tag="$(grep -E '^OLLAMA_IMAGE=' "${ENV_FILE}" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '[:space:]' || true)"
+  image_tag="${image_tag:-ollama/ollama:0.40.13}"
   if [[ "${image_tag}" == "ollama/ollama" || "${image_tag}" == *":latest" ]]; then
     echo -e "${RED}[ERROR] Floating :latest Ollama images are blocked. Pin an explicit version in .env.${NC}" >&2
     return 1
