@@ -373,74 +373,79 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
 
       const res = await authFetch('/api/v1/ai/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
         body: JSON.stringify({
           message: text,
           assistantId: 'GENERAL_HSE',
           history: historyPayload,
           model: selectedModel,
+          stream: true,
         }),
       });
-
-      const data = await res.json();
-
-      if (data.success && data.reply) {
-        const assistantMsg: ChatMessage = {
-          id: `msg-${Date.now()}`,
-          role: 'assistant',
-          content: data.reply,
-          timestamp: new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }),
-          toolsUsed: data.toolsUsed,
-          citations: data.citations,
-          durationMs: data.durationMs,
-          model: data.model,
-        };
-
-        setSessions(prev =>
-          prev.map(s =>
-            s.id === sessionId ? { ...s, messages: [...updatedMessages, assistantMsg] } : s
-          )
-        );
-
-        try {
-          await authFetch(`/api/v1/ai/sessions/${sessionId}/messages`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              role: 'assistant',
-              content: data.reply,
-              toolsUsed: data.toolsUsed,
-              citations: data.citations,
-              durationMs: data.durationMs,
-              model: data.model,
-            }),
-          });
-        } catch {
-          // non-blocking
-        }
-      } else {
-        const errText =
-          data?.message ||
-          data?.error?.message ||
-          (typeof data?.error === 'string' ? data.error : null) ||
-          'پاسخی از موتور هوش مصنوعی دریافت نشد.';
-        const errorMsg: ChatMessage = {
-          id: `msg-${Date.now()}`,
-          role: 'assistant',
-          content: errText,
-          timestamp: new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }),
-        };
-        setSessions(prev =>
-          prev.map(s =>
-            s.id === sessionId ? { ...s, messages: [...updatedMessages, errorMsg] } : s
-          )
-        );
+      if (!res.ok || !res.body) {
+        const failure = await res.json().catch(() => ({}));
+        throw new Error(failure.message || `خطای سرور هوش مصنوعی: HTTP ${res.status}`);
       }
-    } catch {
+
+      const assistantId = `msg-${Date.now()}`;
+      const timestamp = new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
+      let assistantText = '';
+      let responseModel = selectedModel;
+      let durationMs: number | undefined;
+      const streamingMessage: ChatMessage = {
+        id: assistantId, role: 'assistant', content: '', timestamp, model: selectedModel,
+      };
+      setSessions(prev => prev.map(s =>
+        s.id === sessionId ? { ...s, messages: [...updatedMessages, streamingMessage] } : s
+      ));
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let pending = '';
+      let streamError = '';
+      const applyEvent = (line: string) => {
+        if (!line.startsWith('data:')) return;
+        const payload = JSON.parse(line.slice(5).trim());
+        if (payload.token) {
+          assistantText += payload.token;
+          setSessions(prev => prev.map(s => s.id === sessionId ? {
+            ...s, messages: s.messages.map(m => m.id === assistantId ? { ...m, content: assistantText } : m),
+          } : s));
+        }
+        if (payload.model) responseModel = payload.model;
+        if (payload.durationMs) durationMs = payload.durationMs;
+        if (payload.error) streamError = payload.error;
+      };
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        pending += decoder.decode(value, { stream: true });
+        const lines = pending.split('\\n');
+        pending = lines.pop() || '';
+        for (const line of lines) if (line.trim()) applyEvent(line);
+      }
+      pending += decoder.decode();
+      if (pending.trim()) applyEvent(pending.trim());
+      if (streamError) throw new Error(streamError);
+      if (!assistantText.trim()) throw new Error('پاسخی از موتور هوش مصنوعی دریافت نشد.');
+
+      try {
+        await authFetch(`/api/v1/ai/sessions/${sessionId}/messages`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            role: 'assistant', content: assistantText, toolsUsed: [], citations: [],
+            durationMs, model: responseModel,
+          }),
+        });
+      } catch {
+        // non-blocking
+      }
+    } catch (requestError: any) {
       const networkErrorMsg: ChatMessage = {
         id: `msg-${Date.now()}`,
         role: 'assistant',
-        content: 'خطا در ارتباط با سرور هوش مصنوعی سامانه. لطفاً اتصال شبکه را بررسی فرمایید.',
+        content: requestError?.message || 'خطا در ارتباط با سرور هوش مصنوعی سامانه. لطفاً اتصال شبکه را بررسی فرمایید.',
         timestamp: new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }),
       };
       setSessions(prev =>
@@ -707,7 +712,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
               onChange={e => setInputMessage(e.target.value)}
               onKeyDown={handleKeyDown}
               rows={1}
-              placeholder="سوال خود را درباره ایمنی، بهداشت، محیط زیست یا داده‌های سامانه بنویسید..."
+              placeholder="پیام خود را بنویسید...‎"
               className="flex-1 resize-none bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-indigo-500/30 text-slate-800 dark:text-slate-100 max-h-32"
               disabled={isLoading || sessionsLoading}
             />
