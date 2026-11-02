@@ -20,7 +20,8 @@
     "test:ai-queue": "tsx scripts/test-ai-queue.ts",
     "test:ai-model-pull": "tsx scripts/test-ai-model-pull.ts",
     "test:api-cache-session": "tsx scripts/test-api-cache-session.ts",
-    "test:backup-retention": "tsx scripts/test-backup-retention.ts"
+    "test:backup-retention": "tsx scripts/test-backup-retention.ts",
+    "test:backup-restore-path": "tsx scripts/test-backup-restore-path.ts"
   },
   "dependencies": {
     "@bpmn-io/properties-panel": "^3.48.0",
