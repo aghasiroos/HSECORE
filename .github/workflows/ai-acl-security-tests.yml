@@ -8,6 +8,7 @@ on:
     paths:
       - 'server/modules/ai/**'
       - 'server/core/middleware/auth.ts'
+      - 'server/core/middleware/security.ts'
       - 'scripts/test-ai-acl.ts'
       - 'scripts/test-ai-auth.ts'
       - 'scripts/test-ai-rag-db.ts'
@@ -29,6 +30,7 @@ on:
     paths:
       - 'server/modules/ai/**'
       - 'server/core/middleware/auth.ts'
+      - 'server/core/middleware/security.ts'
       - 'scripts/test-ai-acl.ts'
       - 'scripts/test-ai-auth.ts'
       - 'scripts/test-ai-rag-db.ts'
@@ -89,10 +91,18 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
-      - name: Verify patched spreadsheet dependency
+      - name: Verify local spreadsheet libraries and restrictive CSP
         run: |
           node -e "const p=require('./package-lock.json').packages; if (p['node_modules/xlsx']?.version !== '0.20.3') process.exit(1)"
-          grep -Fq 'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js' index.html
+          grep -Fq "from 'xlsx'" src/services/personnelImportService.ts
+          if grep -Eq '<script[^>]+src=["'\''']https?://' index.html; then
+            echo "Executable third-party libraries must be bundled locally, not loaded from CDNs."
+            exit 1
+          fi
+          grep -Fq 'https://fonts.googleapis.com' server/core/middleware/security.ts
+          grep -Fq 'https://fonts.gstatic.com' server/core/middleware/security.ts
+          grep -Fq 'https://mt0.google.com' server/core/middleware/security.ts
+          grep -Fq 'https://*.tile.openstreetmap.org' server/core/middleware/security.ts
       - name: Audit npm dependencies for high-severity vulnerabilities
         run: npm audit --audit-level=high
       - name: Run document ACL and prompt-security regression tests
