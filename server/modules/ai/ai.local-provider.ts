@@ -298,7 +298,10 @@ export class LocalAIProvider {
   /**
    * Request pulling/downloading a model inside the container
    */
-  async pullModel(modelName: string): Promise<{ success: boolean; message: string }> {
+  async pullModel(
+    modelName: string,
+    onProgress?: (progress: number, message: string) => void | Promise<void>
+  ): Promise<{ success: boolean; message: string }> {
     const normalized = this.normalizeModelName(modelName);
     if (!normalized) {
       return { success: false, message: 'شناسه مدل نامعتبر است.' };
@@ -317,17 +320,63 @@ export class LocalAIProvider {
       const resp = await fetch(`${this.baseUrl}/api/pull`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        // Ollama's /api/pull contract requires the "model" property.
-        body: JSON.stringify({ model: normalized, stream: false }),
+        // Ollama streams manifest and layer download progress as NDJSON events.
+        body: JSON.stringify({ model: normalized, stream: true }),
         signal: controller.signal,
       });
-      const payload = await resp.json().catch(() => null) as { error?: string; status?: string } | null;
-      if (!resp.ok || payload?.error) {
-        const detail = typeof payload?.error === 'string' ? payload.error : `HTTP ${resp.status}`;
-        return { success: false, message: `خطا در دریافت مدل ${normalized}: ${detail}` };
+
+      const reportEvent = async (event: any): Promise<void> => {
+        if (event?.error) throw new Error(String(event.error));
+        const status = typeof event?.status === 'string' ? event.status : 'در حال دریافت مدل';
+        let progress = 5;
+        const total = Number(event?.total);
+        const completed = Number(event?.completed);
+        if (Number.isFinite(total) && total > 0 && Number.isFinite(completed) && completed >= 0) {
+          progress = Math.min(95, Math.max(5, 5 + Math.floor((completed / total) * 90)));
+        }
+        if (status.toLowerCase() === 'success') progress = 100;
+        await onProgress?.(progress, status);
+      };
+
+      let finalStatus = '';
+      let apiError = '';
+      const contentType = resp.headers.get('content-type') || '';
+      if (resp.body && (contentType.includes('ndjson') || contentType.includes('json'))) {
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+          const lines = buffer.split(/\\r?\\n/);
+          buffer = lines.pop() || '';
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            const event = JSON.parse(line);
+            if (typeof event?.status === 'string') finalStatus = event.status;
+            if (typeof event?.error === 'string') apiError = event.error;
+            await reportEvent(event);
+          }
+          if (done) break;
+        }
+        if (buffer.trim()) {
+          const event = JSON.parse(buffer);
+          if (typeof event?.status === 'string') finalStatus = event.status;
+          if (typeof event?.error === 'string') apiError = event.error;
+          await reportEvent(event);
+        }
+      } else {
+        const payload = await resp.json().catch(() => null) as { error?: string; status?: string } | null;
+        if (payload?.status) finalStatus = payload.status;
+        if (payload?.error) apiError = payload.error;
+        await reportEvent(payload);
       }
-      if (payload?.status && payload.status !== 'success') {
-        return { success: false, message: `دریافت مدل ${normalized} کامل نشد: ${payload.status}` };
+
+      if (!resp.ok || apiError) {
+        return { success: false, message: `خطا در دریافت مدل ${normalized}: ${apiError || `HTTP ${resp.status}`}` };
+      }
+      if (finalStatus !== 'success') {
+        return { success: false, message: `دریافت مدل ${normalized} کامل نشد: ${finalStatus || 'پاسخ نهایی معتبر از Ollama دریافت نشد.'}` };
       }
       this.offlineUntil = 0;
       return { success: true, message: `مدل ${normalized} با موفقیت بارگیری شد.` };
@@ -337,7 +386,7 @@ export class LocalAIProvider {
         success: false,
         message: err?.name === 'AbortError'
           ? 'مهلت مجاز دریافت مدل به پایان رسید.'
-          : 'موتور محلی Ollama در دسترس نیست یا دریافت مدل با خطا مواجه شد.',
+          : (err?.message || 'موتور محلی Ollama در دسترس نیست یا دریافت مدل با خطا مواجه شد.'),
       };
     } finally {
       clearTimeout(timeout);
