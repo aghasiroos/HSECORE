@@ -5,7 +5,6 @@ on:
     branches:
       - main
       - security/p0-ai-acl-org-tests
-      - 'refactor/**'
     paths:
       - 'server/modules/ai/**'
       - 'server/core/middleware/auth.ts'
