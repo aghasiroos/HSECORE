@@ -380,7 +380,7 @@ export class LocalAIProvider {
       const resp = await fetch(`${this.baseUrl}/api/delete`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: normalized }),
+        body: JSON.stringify({ model: normalized }),
         signal: controller.signal,
       });
       if (!resp.ok) return { success: false, message: `خطا در حذف مدل: HTTP ${resp.status}` };
