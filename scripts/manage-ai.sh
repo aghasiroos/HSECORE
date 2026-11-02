@@ -315,7 +315,10 @@ cmd_set_default() {
   echo -e "    ${CYAN}sudo docker compose -f docker-compose.server.yml up -d --no-deps hse-app${NC}"
 }
 cmd_toggle() {
+  check_docker
   ensure_env_file
+  ensure_compose_file
+  verify_container_compose_owner || return 1
   local current="true"
   if grep -q "^AI_ENGINE_ENABLED=" "${ENV_FILE}"; then
     current="$(grep "^AI_ENGINE_ENABLED=" "${ENV_FILE}" | tail -n1 | cut -d'=' -f2 | tr -d '[:space:]\"' | tr '[:upper:]' '[:lower:]')"
