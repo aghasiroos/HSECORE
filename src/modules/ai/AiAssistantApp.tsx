@@ -229,7 +229,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `HSECORE_AI_Legal_Report_${Date.now()}.txt`;
+    link.download = `HSECORE_AI_Chat_${Date.now()}.txt`;
     link.click();
     URL.revokeObjectURL(url);
   };
@@ -482,7 +482,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
       <aside className={`w-80 flex-shrink-0 bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 flex flex-col transition-all duration-300 z-20 ${sidebarOpen ? 'fixed inset-y-0 start-0 z-50 md:static' : 'hidden md:flex'}`}>
         <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="p-2 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 rounded-xl">
+            <div className="p-2 bg-violet-50 dark:bg-violet-950/40 text-violet-600 dark:text-violet-400 rounded-xl">
               <Bot className="w-5 h-5" />
             </div>
             <div>
@@ -492,7 +492,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
           </div>
           <button
             onClick={handleNewSession}
-            className="p-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow-sm transition cursor-pointer"
+            className="p-2 bg-violet-600 hover:bg-violet-500 text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow-sm transition cursor-pointer"
             title="گفتگوی جدید"
           >
             <Plus className="w-4 h-4" />
@@ -507,7 +507,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
               value={searchSessionQuery}
               onChange={e => setSearchSessionQuery(e.target.value)}
               placeholder="جستجو در گفتگوها..."
-              className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs py-2 pe-3 ps-9 outline-none focus:ring-2 focus:ring-indigo-500/30 text-slate-700 dark:text-slate-200"
+              className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs py-2 pe-3 ps-9 outline-none focus:ring-2 focus:ring-violet-500/30 text-slate-700 dark:text-slate-200"
             />
           </div>
         </div>
@@ -519,7 +519,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
           {sessionsError && (
             <div className="text-center text-xs text-rose-500 py-4 px-2">
               {sessionsError}
-              <button onClick={loadSessionsFromServer} className="block mx-auto mt-2 text-indigo-500 underline">
+              <button onClick={loadSessionsFromServer} className="block mx-auto mt-2 text-violet-500 underline">
                 تلاش مجدد
               </button>
             </div>
@@ -537,7 +537,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
                   }}
                   className={`group flex items-center gap-2 px-3 py-2.5 rounded-xl cursor-pointer transition ${
                     activeSessionId === session.id
-                      ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300'
+                      ? 'bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300'
                       : 'hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300'
                   }`}
                 >
@@ -607,7 +607,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
         <div className="flex-1 overflow-y-auto px-4 py-5 space-y-4">
           {(!activeSession || activeSession.messages.length === 0) && !isLoading && (
             <div className="max-w-2xl mx-auto text-center space-y-5 pt-8">
-              <div className="inline-flex p-4 rounded-3xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-lg shadow-indigo-500/20">
+              <div className="inline-flex p-4 rounded-3xl bg-gradient-to-br from-violet-500 to-violet-600 text-white shadow-lg shadow-violet-500/20">
                 <Sparkles className="w-8 h-8" />
               </div>
               <div>
@@ -623,7 +623,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
                   <button
                     key={i}
                     onClick={() => handleSendMessage(s)}
-                    className="text-[11px] leading-relaxed p-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:border-indigo-300 dark:hover:border-indigo-600 text-slate-600 dark:text-slate-300 transition text-right"
+                    className="text-[11px] leading-relaxed p-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:border-violet-300 dark:hover:border-violet-600 text-slate-600 dark:text-slate-300 transition text-right"
                   >
                     {s}
                   </button>
@@ -641,7 +641,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
                 className={`flex-shrink-0 w-8 h-8 rounded-xl flex items-center justify-center ${
                   msg.role === 'user'
                     ? 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-200'
-                    : 'bg-indigo-600 text-white'
+                    : 'bg-violet-600 text-white'
                 }`}
               >
                 {msg.role === 'user' ? (
@@ -653,7 +653,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
               <div
                 className={`relative max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-sm ${
                   msg.role === 'user'
-                    ? 'bg-indigo-600 text-white rounded-te-sm'
+                    ? 'bg-violet-600 text-white rounded-te-sm'
                     : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-200 rounded-ts-sm'
                 }`}
               >
@@ -694,7 +694,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
 
           {isLoading && (
             <div className="flex gap-3">
-              <div className="flex-shrink-0 w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center">
+              <div className="flex-shrink-0 w-8 h-8 rounded-xl bg-violet-600 text-white flex items-center justify-center">
                 <Bot className="w-4 h-4 animate-pulse" />
               </div>
               <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl rounded-ts-sm px-4 py-3 text-sm text-slate-400">
@@ -725,7 +725,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
               onKeyDown={handleKeyDown}
               rows={1}
               placeholder="پیام خود را بنویسید...‎"
-              className="flex-1 resize-none bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-indigo-500/30 text-slate-800 dark:text-slate-100 max-h-32"
+              className="flex-1 resize-none bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-violet-500/30 text-slate-800 dark:text-slate-100 max-h-32"
               disabled={isLoading || sessionsLoading}
             />
             {isLoading ? (
@@ -740,7 +740,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
               <button
                 onClick={() => handleSendMessage()}
                 disabled={!inputMessage.trim() || sessionsLoading || !selectedModel}
-                className="p-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-2xl shadow-sm transition"
+                className="p-3 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-2xl shadow-sm transition"
                 title="ارسال پیام"
               >
                 <Send className="w-5 h-5" />
