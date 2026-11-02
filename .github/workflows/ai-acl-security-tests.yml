@@ -98,7 +98,7 @@ jobs:
           node <<'NODE'
           const fs = require('node:fs');
           const html = fs.readFileSync('index.html', 'utf8');
-          if (/<script\\b[^>]*\\bsrc\\s*=\\s*["']https?:\\/\\//i.test(html)) {
+          if (html.includes('<script src="https://') || html.includes("<script src='https://")) {
             throw new Error('Executable third-party libraries must be bundled locally, not loaded from CDNs.');
           }
           const csp = fs.readFileSync('server/core/middleware/security.ts', 'utf8');
