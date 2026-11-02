@@ -47,6 +47,7 @@ try {
   assert.equal(fetchCalls, 2, 'the new session cache must remain isolated');
 
   // A write invalidation must also prevent an older in-flight read from repopulating cache.
+  apiDb.invalidateCache('personnel'); // Remove the valid session-B cache before starting the stale read.
   const staleRead = apiDb.getPersonnel();
   assert.equal(fetchCalls, 3, 'the stale read should start before invalidation');
   apiDb.invalidateCache('personnel');
