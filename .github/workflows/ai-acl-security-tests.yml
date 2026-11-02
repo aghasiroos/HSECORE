@@ -95,14 +95,17 @@ jobs:
         run: |
           node -e "const p=require('./package-lock.json').packages; if (p['node_modules/xlsx']?.version !== '0.20.3') process.exit(1)"
           grep -Fq "from 'xlsx'" src/services/personnelImportService.ts
-          if grep -Eq '<script[^>]+src=["'\''']https?://' index.html; then
-            echo "Executable third-party libraries must be bundled locally, not loaded from CDNs."
-            exit 1
-          fi
-          grep -Fq 'https://fonts.googleapis.com' server/core/middleware/security.ts
-          grep -Fq 'https://fonts.gstatic.com' server/core/middleware/security.ts
-          grep -Fq 'https://mt0.google.com' server/core/middleware/security.ts
-          grep -Fq 'https://*.tile.openstreetmap.org' server/core/middleware/security.ts
+          node <<'NODE'
+          const fs = require('node:fs');
+          const html = fs.readFileSync('index.html', 'utf8');
+          if (/<script\\b[^>]*\\bsrc\\s*=\\s*["']https?:\\/\\//i.test(html)) {
+            throw new Error('Executable third-party libraries must be bundled locally, not loaded from CDNs.');
+          }
+          const csp = fs.readFileSync('server/core/middleware/security.ts', 'utf8');
+          for (const origin of ['https://fonts.googleapis.com', 'https://fonts.gstatic.com', 'https://mt0.google.com', 'https://*.tile.openstreetmap.org']) {
+            if (!csp.includes(origin)) throw new Error('Missing required CSP origin: ' + origin);
+          }
+          NODE
       - name: Audit npm dependencies for high-severity vulnerabilities
         run: npm audit --audit-level=high
       - name: Run document ACL and prompt-security regression tests
