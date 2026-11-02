@@ -12,7 +12,6 @@ export interface AppConfig {
   host: string;
   appUrl: string;
   isProd: boolean;
-  geminiApiKey?: string;
   aiEngine: {
     enabled: boolean;
     url: string;
@@ -169,7 +168,6 @@ export const config: AppConfig = {
   host: '0.0.0.0',
   appUrl: process.env.APP_URL || '',
   isProd,
-  geminiApiKey: process.env.GEMINI_API_KEY || undefined,
   aiEngine: {
     enabled: process.env.AI_ENGINE_ENABLED === 'true' || process.env.AI_ENGINE_ENABLED !== 'false',
     url: (process.env.AI_ENGINE_URL || 'http://hse-ai-engine:11434').trim().replace(/\/$/, ''),

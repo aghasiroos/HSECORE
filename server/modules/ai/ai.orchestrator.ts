@@ -56,7 +56,7 @@ export const COMPREHENSIVE_HSE_ASSISTANT: AIAssistantMetadata = {
   icon: 'BookOpen',
 };
 
-export const HSE_ASSISTANTS: Record<AIAssistantId, AIAssistantMetadata> = {
+export const HSE_ASSISTANTS: Partial<Record<AIAssistantId, AIAssistantMetadata>> = {
   GENERAL_HSE: COMPREHENSIVE_HSE_ASSISTANT,
 };
 
@@ -282,92 +282,6 @@ export class AIOrchestrator {
   }
 
   /**
-   * Build an authoritative, comprehensive legal & regulatory consultation response
-   * when Local Ollama / Cloud AI is offline, combining live HSECORE data, RAG chunks, and legal citations.
-   */
-  private buildComprehensiveLegalConsultation(
-    query: string,
-    toolResults: AIToolResult[],
-    ragChunks: Array<{ docTitle: string; chunkText: string; score: number }>
-  ): string {
-    const norm = normalizePersianText(query);
-    const sections: string[] = [];
-
-    sections.push(`⚖️ **مشاوره جامع HSE و استنادات مراجع قانونی و استانداردهای ملی**`);
-
-    // 1. Live System Data extracted from HSECORE modules
-    if (toolResults.length > 0) {
-      const dataLines = toolResults.map(tr => `🔹 **${tr.titleFa}:**\n${tr.summary}`).join('\n\n');
-      sections.push(`📊 **وضعیت و داده‌های برخط استخراج‌شده از ماژول‌های سامانه HSECORE:**\n${dataLines}`);
-    }
-
-    // 2. Retrieved RAG Knowledge Base documents
-    if (ragChunks.length > 0) {
-      const docLines = ragChunks
-        .map(kc => `• **${kc.docTitle}:** ${kc.chunkText.trim()}`)
-        .join('\n');
-      sections.push(`📚 **مستندات و دستورالعمل‌های بازیابی‌شده از پایگاه دانش سازمان:**\n${docLines}`);
-    }
-
-    // 3. Domain-Specific Legal & Regulatory Consultation (Iranian Labor Law, Technical Protection Council, Ministry of Health, OSHA/ISO)
-    const legalNotes: string[] = [];
-
-    if (norm.includes('استرس گرمایی') || norm.includes('گرما') || norm.includes('دما') || norm.includes('رطوبت') || norm.includes('wbgt')) {
-      legalNotes.push(
-        `• **مرجع قانونی ملی (وزارت بهداشت و قانون کار):** بر اساس **ماده ۸۵ قانون کار جمهوری اسلامی ایران** و **کتاب حدود مجاز مواجهه شغلی (OEL) مرکز سلامت محیط و کار وزارت بهداشت**، پایش تنش حرارتی محیط کار با استفاده از شاخص دمای تر گوی‌سان (**WBGT**) و مطابق با استاندارد **ISO 7243** و معیارهای **ACGIH** الزامی است.\n` +
-        `• **حدود مجاز و رژیم کار و استراحت:** در صورت افزایش شاخص WBGT بالاتر از حد مجاز مواجهه (بسته به بار متابولیکی کار سبک ۳۰۰-۲۰۰ وات، متوسط یا سنگین و وضعیت تطابق‌پذیری فرد)، کارفرما مکلف به اجرای چرخه‌های اجباری کار-استراحت در محیط خنک، تامین آب آشامیدنی خنک و املاح (۱۰ تا ۱۵ درجه سانتی‌گراد)، تهویه موضعی و توقف عملیات غیرضروری در ساعات اوج گرما است.`
-      );
-    }
-
-    if (norm.includes('پروانه') || norm.includes('مجوز') || norm.includes('کار گرم') || norm.includes('فضای بسته') || norm.includes('ارتفاع') || norm.includes('حفاری')) {
-      legalNotes.push(
-        `• **مرجع قانونی ملی (شورای عالی حفاظت فنی):** به استناد **مواد ۸۵ و ۹۱ قانون کار**، **آیین‌نامه ایمنی کار در فضاهای بسته**، **آیین‌نامه ایمنی کار در ارتفاع** و **آیین‌نامه پیشگیری و مبارزه با آتش‌سوزی در کارگاه‌ها** مصوب شورای عالی حفاظت فنی وزارت تعاون، کار و رفاه اجتماعی، انجام هرگونه عملیات پرخطر بدون صدور پروانه کار معتبر (PTW)، گازسنجی مستند (O2 بین ۱۹.۵٪ تا ۲۳.۵٪ و LEL کمتر از ۱۰٪) و ایزولاسیون انرژی (LOTO) ممنوع است.\n` +
-        `• **استانداردهای بین‌المللی:** الزامات **OSHA 29 CFR 1910.146** (فضای بسته) و **OSHA 1910.252** (کار گرم و استقرار دیده‌بان حریق تا حداقل ۳۰ دقیقه پس از اتمام جوشکاری) ملاک عمل ممیزی است.`
-      );
-    }
-
-    if (norm.includes('حادثه') || norm.includes('حوادث') || norm.includes('شبه حادثه') || norm.includes('مصدوم') || norm.includes('دیه') || norm.includes('قصور')) {
-      legalNotes.push(
-        `• **مرجع قانونی ملی (قانون کار و تامین اجتماعی):** بر اساس **ماده ۹۵ قانون کار جمهوری اسلامی ایران**، مسئولیت اجرای مقررات و ضوابط فنی و بهداشت کار بر عهده کارفرما یا مسئولین واحدهاست و هرگاه بر اثر عدم رعایت آیین‌نامه‌ها حادثه‌ای رخ دهد، کارفرما از نظر کیفری و حقوقی مسئول است. همچنین طبق **ماده ۶۵ قانون تامین اجتماعی**، کارفرما موظف است وقوع هرگونه حادثه ناشی از کار را ظرف **۳ روز اداری** کتباً به شعب سازمان تامین اجتماعی و اداره کار محل اطلاع دهد.\n` +
-        `• **استاندارد مدیریتی:** مطابق **بند ۱۰-۲ استاندارد ISO 45001:2018**، تمامی حوادث و شبه‌حوادث باید بدون تاخیر ریشه‌یابی (RCA) شده و اقدامات اصلاحی و پیشگیرانه (CAPA) برای حذف علل ریشه‌ای اجرا گردد.`
-      );
-    }
-
-    if (norm.includes('طب کار') || norm.includes('معاینه') || norm.includes('معاینات') || norm.includes('تغذیه') || norm.includes('چاقی') || norm.includes('bmi') || norm.includes('شنوایی')) {
-      legalNotes.push(
-        `• **مرجع قانونی ملی (مواد ۹۲ و ۹۳ قانون کار):** به موجب **ماده ۹۲ قانون کار جمهوری اسلامی ایران**، کلیه واحدهای مشمول موظفند بر اساس دستورالعمل‌های وزارت بهداشت، درمان و آموزش پزشکی، **حداقل سالی یک‌بار** معاینات ادواری کارگران (شامل معاینات بالینی، آزمایشگاهی، اپتومتری، ادیومتری و اسپیرومتری) را انجام داده و نتایج را در پرونده پزشکی ثبت نمایند.\n` +
-        `• **عدم تناسب شغلی:** در صورت تشخیص بیماری ناشی از کار یا عدم تناسب شغلی توسط پزشک طب کار، کارفرما مکلف است طبق نظر کمیسیون پزشکی، کارگر را بدون کاهش حق السعی در شغل متناسب دیگری بگمارد.`
-      );
-    }
-
-    if (norm.includes('مسئول ایمنی') || norm.includes('کمیته حفاظت') || norm.includes('کمیته فنی') || norm.includes('قانون کار') || norm.includes('وظایف')) {
-      legalNotes.push(
-        `• **مرجع قانونی ملی (ماده ۹۳ قانون کار و آیین‌نامه‌های اجرایی):** به استناد **ماده ۹۳ قانون کار** و **آیین‌نامه کمیته حفاظت فنی و بهداشت کار**، کارگاه‌های دارای ۲۵ نفر کارگر و بیشتر مکلف به تشکیل کمیته حفاظت فنی و بهداشت کار و معرفی **مسئول ایمنی** دارای تاییدیه صلاحیت از وزارت تعاون، کار و رفاه اجتماعی می‌باشند.\n` +
-        `• **وظایف قانونی مسئول ایمنی:** شناسایی خطرات و ارزیابی ریسک، نظارت بر صدور پروانه‌های کار و تحویل PPE استاندارد (ماده ۹۱ قانون کار)، بازرسی مستمر محیط کار، بررسی علل حوادث و ابلاغ کتبی نواقص ایمنی به کارفرما.`
-      );
-    }
-
-    if (norm.includes('حفاظت فردی') || norm.includes('ppe') || norm.includes('کفش') || norm.includes('کلاه') || norm.includes('لباس کار')) {
-      legalNotes.push(
-        `• **مرجع قانونی ملی (ماده ۹۱ قانون کار):** بر اساس **ماده ۹۱ قانون کار جمهوری اسلامی ایران**، کارفرمایان و مسئولان کلیه واحدها مکلفند بر اساس مصوبات شورای عالی حفاظت فنی، وسایل و تجهیزات لازم برای تامین حفاظت و سلامت کارگران را **به صورت رایگان** تهیه و در اختیار آنان قرار داده و چگونگی کاربرد و نگهداری آن‌ها را آموزش دهند؛ کارگران نیز ملزم به استفاده و نگهداری صحیح از تجهیزات تحویلی می‌باشند.`
-      );
-    }
-
-    // Default comprehensive legal reference block if no specific sub-clause was triggered
-    if (legalNotes.length === 0) {
-      legalNotes.push(
-        `• **فصل چهارم قانون کار جمهوری اسلامی ایران (مواد ۸۵ الی ۹۶):** رعایت کلیه مصوبات **شورای عالی حفاظت فنی** (در زمینه ایمنی کارگاه) و ضوابط **وزارت بهداشت، درمان و آموزش پزشکی** (در زمینه بهداشت حرفه‌ای و پیشگیری از بیماری‌های شغلی) برای تمامی کارفرمایان، کارگران، پیمانکاران و کارآموزان الزامی است.\n` +
-        `• **تامین تجهیزات و آموزش (ماده ۹۱ و ۹۵ قانون کار):** کارفرما مکلف به ایمن‌سازی محیط کار، حذف عوامل زیان‌آور در منبع، آموزش مستمر ایمنی و تحویل تجهیزات حفاظت فردی استاندارد بوده و نظارت بر حسن اجرای دستورالعمل‌ها از تکالیف قانونی مدیریت کارگاه است.\n` +
-        `• **انطباق با استانداردهای بین‌المللی:** پیاده‌سازی چرخه PDCA و سلسله‌مراتب کنترل ریسک (حذف، جایگزینی، کنترل‌های مهندسی، کنترل‌های اداری و PPE) بر اساس **ISO 45001:2018**، **ISO 14001:2015** و ضوابط **OSHA / NFPA**.`
-      );
-    }
-
-    sections.push(`🏛️ **استنادات و الزامات مراجع قانونی و استانداردهای تخصصی:**\n${legalNotes.join('\n\n')}`);
-
-    return sections.join('\n\n');
-  }
-
-  /**
    * Main Processing Entry Point
    * Always operates as the Unified Comprehensive HSE & Legal References Consultant (GENERAL_HSE)
    */
@@ -480,24 +394,22 @@ export class AIOrchestrator {
       replyText = aiSecurityService.sanitizeOutput(queueResult.data.text);
       modelName = queueResult.data.model;
     } catch (execErr: any) {
-      logger.debug('[AIOrchestrator] Local engine unreachable, attempting Cloud Gemini or Built-in Legal Engine', {
-        error: execErr.message,
+      logger.warn('[AIOrchestrator] Local Ollama inference failed', { error: execErr?.message });
+      aiAuditService.log({
+        userId: userContext?.id,
+        userUid: userContext?.uid,
+        userName: userContext?.name,
+        role: userContext?.role,
+        assistantId,
+        promptLength: sanitized.length,
+        responseLength: 0,
+        toolsUsed,
+        durationMs: Date.now() - startTime,
+        model: modelName,
+        success: false,
+        timestamp: new Date().toISOString(),
       });
-
-      const cloudPrompt = retrievedReferenceContext
-        ? `${assistant.systemPrompt}\n\n${retrievedReferenceContext}`
-        : assistant.systemPrompt;
-      const cloudRes = config.aiEngine.allowCloudFallback
-        ? await aiService.generateGroundedChatResponse(cloudPrompt, sanitized, request.history)
-        : null;
-
-      if (cloudRes?.text) {
-        replyText = aiSecurityService.sanitizeOutput(cloudRes.text);
-        modelName = cloudRes.model;
-      } else {
-        replyText = this.buildComprehensiveLegalConsultation(sanitized, toolResults, matchedChunks);
-        modelName = 'hsecore-legal-expert-v1';
-      }
+      throw new Error(execErr?.message || 'مدل محلی Ollama در دسترس نیست؛ هیچ پاسخ جایگزینی تولید نشد.');
     }
 
     const durationMs = Date.now() - startTime;

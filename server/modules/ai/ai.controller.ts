@@ -8,6 +8,9 @@ import { aiSessionService } from './ai.sessions.ts';
 import { aiModelManager } from './ai.model-manager.ts';
 import { aiJobManager } from './ai.job-manager.ts';
 import { checkUserHasPermission, type UserContext } from '../../core/middleware/auth.ts';
+import { config } from '../../core/config.ts';
+import { localAIProvider } from './ai.local-provider.ts';
+import { buildAIConversationMessages } from './ai.prompt-security.ts';
 
 export class AIController {
   async getStatus(_req: Request, res: Response) {
@@ -102,38 +105,136 @@ export class AIController {
   }
 
   async chat(req: Request, res: Response) {
-    const { message, assistantId, history, contextModule, allowTools } = req.body;
-    if (!message) {
-      return res.status(400).json({ success: false, message: 'پیام کاربر الزامی است.' });
+    const { message, history, model: requestedModel } = req.body || {};
+    if (typeof message !== 'string' || !message.trim() || message.length > 12000) {
+      return res.status(400).json({ success: false, message: 'متن پیام الزامی است و نباید بیش از ۱۲۰۰۰ نویسه باشد.' });
     }
 
+    const startedAt = Date.now();
+    const user = req.user;
     try {
-      const userContext = req.user
-        ? {
-            id: req.user.id,
-            uid: req.user.uid,
-            name: req.user.name || req.user.username,
-            role: req.user.role,
-            permissions: req.user.permissions,
-            personnelCode: req.user.personnelCode,
-            department: req.user.department,
-          }
-        : undefined;
-
-      const response = await aiOrchestrator.processChat(
-        {
-          message,
-          assistantId,
-          history,
-          contextModule,
-          allowTools,
-        },
-        userContext
+      // General chat intentionally bypasses the HSECORE orchestration/tool engine.
+      // Only installed generative Ollama models are accepted; embedding models are excluded.
+      const installed = await aiService.listInstalledModels();
+      const isGenerativeModel = (item: any) => {
+        const family = String(item?.details?.family || '').toLowerCase();
+        return family !== 'bert' && !/embed|embedding/i.test(String(item?.name || ''));
+      };
+      const candidates = installed.filter(isGenerativeModel);
+      const selectedModel = typeof requestedModel === 'string' && requestedModel.trim()
+        ? requestedModel.trim()
+        : config.aiEngine.defaultChatModel;
+      const modelInfo = candidates.find(item =>
+        [item.name, item.model].some(name => typeof name === 'string' && name.toLowerCase() === selectedModel.toLowerCase())
       );
+      if (!modelInfo) {
+        return res.status(400).json({ success: false, message: 'مدل انتخاب‌شده نصب نیست یا برای گفت‌وگو قابل استفاده نیست. از فهرست مدل‌های نصب‌شده یک مدل زبانی انتخاب کنید.' });
+      }
 
-      return res.json(response);
+      const messages = buildAIConversationMessages({
+        systemPrompt: 'You are a helpful, general-purpose AI assistant. Respond naturally in the language used by the user. Be accurate, clear, and honest about uncertainty. Do not claim access to external systems, live information, or private application data unless it is explicitly provided in the conversation. Do not assume the user is asking about HSE.',
+        history: Array.isArray(history) ? history : [],
+        userMessage: message.trim(),
+      });
+
+      if (req.body?.stream === true) {
+        const abortController = new AbortController();
+        res.on('close', () => {
+          if (!res.writableEnded) abortController.abort();
+        });
+        res.status(200);
+        res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-cache, no-transform');
+        res.setHeader('Connection', 'keep-alive');
+        res.setHeader('X-Accel-Buffering', 'no');
+        res.flushHeaders?.();
+
+        try {
+          const result = await localAIProvider.chatStream(
+            messages,
+            {
+              model: modelInfo.name || modelInfo.model,
+              temperature: 0.4,
+              max_tokens: 1024,
+              timeoutMs: config.aiEngine.timeoutMs,
+            },
+            (token) => {
+              if (!res.destroyed && !res.writableEnded) {
+                res.write(`data: ${JSON.stringify({ token })}\n\n`);
+                (res as any).flush?.();
+              }
+            },
+            abortController.signal,
+          );
+          aiAuditService.log({
+            userId: user?.id, userUid: user?.uid,
+            userName: user?.name || user?.username, role: user?.role,
+            assistantId: 'GENERAL_HSE', promptLength: message.length,
+            responseLength: result.text.length, toolsUsed: [],
+            durationMs: Date.now() - startedAt, model: result.model,
+            success: true, timestamp: new Date().toISOString(),
+          });
+          if (!res.destroyed && !res.writableEnded) {
+            res.write(`data: ${JSON.stringify({ done: true, model: result.model, durationMs: Date.now() - startedAt })}\n\n`);
+            (res as any).flush?.();
+            res.end();
+          }
+        } catch (streamError: any) {
+          aiAuditService.log({
+            userId: user?.id, userUid: user?.uid,
+            userName: user?.name || user?.username, role: user?.role,
+            assistantId: 'GENERAL_HSE', promptLength: message.length,
+            responseLength: 0, toolsUsed: [], durationMs: Date.now() - startedAt,
+            model: modelInfo.name || modelInfo.model, success: false,
+            errorMessage: String(streamError?.message || streamError),
+            timestamp: new Date().toISOString(),
+          });
+          if (!res.destroyed && !res.writableEnded) {
+            res.write(`data: ${JSON.stringify({ error: streamError?.message || 'خطا در تولید پاسخ.' })}\n\n`);
+            (res as any).flush?.();
+            res.end();
+          }
+        }
+        return;
+      }
+
+      const result = await localAIProvider.chat(messages, {
+        model: modelInfo.name || modelInfo.model,
+        temperature: 0.4,
+        max_tokens: 1024,
+        timeoutMs: config.aiEngine.timeoutMs,
+      });
+
+      aiAuditService.log({
+        userId: user?.id, userUid: user?.uid,
+        userName: user?.name || user?.username, role: user?.role,
+        assistantId: 'GENERAL_HSE', promptLength: message.length,
+        responseLength: result.text.length, toolsUsed: [],
+        durationMs: Date.now() - startedAt, model: result.model,
+        success: true, timestamp: new Date().toISOString(),
+      });
+
+      return res.json({
+        success: true,
+        reply: result.text,
+        assistantId: 'GENERAL_HSE',
+        toolsUsed: [],
+        citations: [],
+        durationMs: Date.now() - startedAt,
+        model: result.model,
+      });
     } catch (err: any) {
-      return res.status(400).json({ success: false, message: err.message || 'خطا در پردازش هوش مصنوعی' });
+      aiAuditService.log({
+        userId: user?.id, userUid: user?.uid,
+        userName: user?.name || user?.username, role: user?.role,
+        assistantId: 'GENERAL_HSE', promptLength: message.length,
+        responseLength: 0, toolsUsed: [],
+        durationMs: Date.now() - startedAt,
+        model: typeof requestedModel === 'string' ? requestedModel : config.aiEngine.defaultChatModel,
+        success: false, errorMessage: String(err?.message || err),
+        timestamp: new Date().toISOString(),
+      });
+      return res.status(503).json({ success: false, message: err.message || 'موتور محلی هوش مصنوعی در دسترس نیست.' });
     }
   }
 
@@ -452,9 +553,6 @@ export class AIController {
       return res.status(500).json({ success: false, message: err.message || 'خطا در دریافت گزارش پوشش' });
     }
   }
-}
-
-
 
   async listProviders(_req: Request, res: Response) {
     try {
@@ -589,6 +687,8 @@ export class AIController {
       return res.status(400).json({ success: false, message: err.message || 'خطا در صف‌گذاری حذف مدل' });
     }
   }
+
+}
 
 export const aiController = new AIController();
 

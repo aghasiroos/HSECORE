@@ -13,7 +13,7 @@ import {
   MessageSquare,
   Download,
   Search,
-  Scale,
+  Square,
 } from 'lucide-react';
 import { UserProfile } from '../../types';
 import { authFetch } from '../../services/apiDatabaseClient';
@@ -36,17 +36,16 @@ export interface ChatSession {
   messages: ChatMessage[];
 }
 
-const COMPREHENSIVE_LEGAL_ASSISTANT = {
+const GENERAL_AI_ASSISTANT = {
   id: 'GENERAL_HSE',
-  nameFa: 'مشاور جامع HSE و مراجع قانونی',
-  title: 'مرجع تخصصی قوانین کار، آیین‌نامه‌های شورای عالی حفاظت فنی، وزارت بهداشت و پایش یکپارچه ماژول‌ها',
-  description:
-    'پاسخگویی مستند به فصل چهارم قانون کار، آیین‌نامه‌های حفاظت فنی، حدود مجاز مواجهه شغلی (OEL)، استانداردهای ISO 45001 / ISO 14001 / OSHA و استخراج برخط داده‌های تمامی ماژول‌های سامانه HSECORE.',
+  nameFa: 'دستیار هوش مصنوعی',
+  title: 'گفت‌وگوی عمومی با مدل‌های زبانی محلی نصب‌شده',
+  description: 'هر پرسشی دارید مطرح کنید؛ پاسخ‌ها مستقیماً توسط مدل انتخاب‌شده در موتور محلی Ollama تولید می‌شوند.',
   promptSuggestions: [
-    'از ماژول شاخص استرس گرمایی دمای هوا، رطوبت و شاخص WBGT فعلی را به همراه الزامات قانونی گزارش کن.',
-    'وظایف قانونی کارفرما و مسئول ایمنی طبق فصل چهارم قانون کار و آیین‌نامه شورای عالی حفاظت فنی چیست؟',
-    'وضعیت پروانه‌های کار فعال، حوادث ثبت‌شده و اخطارهای ایمنی در سامانه چگونه است؟',
-    'الزامات قانونی معاینات ادواری طب کار (ماده ۹۲ قانون کار) و آمار تناسب شغلی پرسنل در سامانه چیست؟',
+    'مفهوم هوش مصنوعی مولد را ساده و با مثال توضیح بده.',
+    'برای یادگیری یک مهارت جدید، برنامه ۳۰ روزه طراحی کن.',
+    'این متن را خلاصه کن و نکات کلیدی آن را استخراج کن.',
+    'برای حل یک مسئله پیچیده، مرحله‌به‌مرحله راهنمایی‌ام کن.',
   ],
 };
 
@@ -58,7 +57,8 @@ interface AiAssistantAppProps {
 export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps) {
   const [inputMessage, setInputMessage] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [allowTools, setAllowTools] = useState<boolean>(true);
+  const [installedModels, setInstalledModels] = useState<Array<{ name: string; details?: { family?: string } }>>([]);
+  const [selectedModel, setSelectedModel] = useState<string>('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(false);
   const [sessionsLoading, setSessionsLoading] = useState<boolean>(true);
@@ -73,6 +73,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
   const migratedRef = useRef(false);
   const autoCreateOnceRef = useRef(false);
   const deletingRef = useRef(false);
+  const activeRequestRef = useRef<AbortController | null>(null);
 
   const loadSessionsFromServer = async () => {
     setSessionsLoading(true);
@@ -126,7 +127,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            title: 'مشاوره جامع HSE و مراجع قانونی',
+            title: 'گفت‌وگوی جدید',
             assistantId: 'GENERAL_HSE',
           }),
         });
@@ -182,6 +183,16 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
 
   useEffect(() => {
     loadSessionsFromServer();
+    authFetch('/api/v1/ai/models')
+      .then(response => response.json())
+      .then(data => {
+        const models = Array.isArray(data?.data) ? data.data.filter((model: any) =>
+          String(model?.details?.family || '').toLowerCase() !== 'bert' && !/embed|embedding/i.test(String(model?.name || ''))
+        ) : [];
+        setInstalledModels(models);
+        setSelectedModel((current) => current || models[0]?.name || '');
+      })
+      .catch(() => setInstalledModels([]));
   }, []);
 
   useEffect(() => {
@@ -196,20 +207,20 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
 
   const handleExportSession = () => {
     if (!activeSession || activeSession.messages.length === 0) return;
-    let report = `گزارش استنتاج هوش مصنوعی HSECORE AI\n`;
+    let report = `گزارش گفت‌وگوی هوش مصنوعی HSECORE\n`;
     report += `عنوان گفتگو: ${activeSession.title}\n`;
-    report += `مرجع پاسخگویی: ${COMPREHENSIVE_LEGAL_ASSISTANT.nameFa} (${COMPREHENSIVE_LEGAL_ASSISTANT.title})\n`;
+    report += `مدل: ${selectedModel || 'مدل محلی'}\n`;
     report += `تاریخ ثبت گزارش: ${new Date().toLocaleDateString('fa-IR')} ${new Date().toLocaleTimeString('fa-IR')}\n`;
     report += `========================================================\n\n`;
 
     activeSession.messages.forEach((m, idx) => {
-      const sender = m.role === 'user' ? 'کاربر' : COMPREHENSIVE_LEGAL_ASSISTANT.nameFa;
+      const sender = m.role === 'user' ? 'شما' : GENERAL_AI_ASSISTANT.nameFa;
       report += `[${idx + 1}] ${sender} - ${m.timestamp}\n`;
       if (m.toolsUsed && m.toolsUsed.length > 0) {
-        report += `منابع داده سامانه‌ای: ${m.toolsUsed.join('، ')}\n`;
+        report += `ابزارها و منابع داده: ${m.toolsUsed.join('، ')}\n`;
       }
       if (m.citations && m.citations.length > 0) {
-        report += `مراجع قانونی و اسناد مرجع: ${m.citations.join('، ')}\n`;
+        report += `منابع و ارجاعات: ${m.citations.join('، ')}\n`;
       }
       report += `${m.content}\n\n--------------------------------------------------------\n\n`;
     });
@@ -218,7 +229,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `HSECORE_AI_Legal_Report_${Date.now()}.txt`;
+    link.download = `HSECORE_AI_Chat_${Date.now()}.txt`;
     link.click();
     URL.revokeObjectURL(url);
   };
@@ -230,7 +241,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title: 'مشاوره جدید HSE و مراجع قانونی',
+          title: 'گفت‌وگوی جدید',
           assistantId: 'GENERAL_HSE',
         }),
       });
@@ -303,7 +314,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            title: text.slice(0, 35) || 'مشاوره جدید HSE و مراجع قانونی',
+            title: text.slice(0, 35) || 'گفت‌وگوی جدید',
             assistantId: 'GENERAL_HSE',
           }),
         });
@@ -353,94 +364,132 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
     }
 
     setIsLoading(true);
+    let partialAssistantText = '';
+    let partialAssistantId = '';
+    let partialResponseModel = selectedModel;
+    let partialDurationMs: number | undefined;
 
     try {
-      const historyPayload = updatedMessages.slice(-6).map(m => ({
+      const historyPayload = updatedMessages.slice(0, -1).slice(-6).map(m => ({
         role: m.role,
         content: m.content,
       }));
 
+      const requestController = new AbortController();
+      activeRequestRef.current = requestController;
       const res = await authFetch('/api/v1/ai/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
         body: JSON.stringify({
           message: text,
           assistantId: 'GENERAL_HSE',
           history: historyPayload,
-          allowTools,
+          model: selectedModel,
+          stream: true,
         }),
+        signal: requestController.signal,
       });
+      if (!res.ok || !res.body) {
+        const failure = await res.json().catch(() => ({}));
+        throw new Error(failure.message || `خطای سرور هوش مصنوعی: HTTP ${res.status}`);
+      }
 
-      const data = await res.json();
+      const assistantId = `msg-${Date.now()}`;
+      partialAssistantId = assistantId;
+      const timestamp = new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
+      let assistantText = '';
+      let responseModel = selectedModel;
+      let durationMs: number | undefined;
+      const streamingMessage: ChatMessage = {
+        id: assistantId, role: 'assistant', content: '', timestamp, model: selectedModel,
+      };
+      setSessions(prev => prev.map(s =>
+        s.id === sessionId ? { ...s, messages: [...updatedMessages, streamingMessage] } : s
+      ));
 
-      if (data.success && data.reply) {
-        const assistantMsg: ChatMessage = {
-          id: `msg-${Date.now()}`,
-          role: 'assistant',
-          content: data.reply,
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let pending = '';
+      let streamError = '';
+      const applyEvent = (line: string) => {
+        if (!line.startsWith('data:')) return;
+        const payload = JSON.parse(line.slice(5).trim());
+        if (payload.token) {
+          assistantText += payload.token;
+          partialAssistantText = assistantText;
+          setSessions(prev => prev.map(s => s.id === sessionId ? {
+            ...s, messages: s.messages.map(m => m.id === assistantId ? { ...m, content: assistantText } : m),
+          } : s));
+        }
+        if (payload.model) { responseModel = payload.model; partialResponseModel = responseModel; }
+        if (payload.durationMs) { durationMs = payload.durationMs; partialDurationMs = durationMs; }
+        if (payload.error) streamError = payload.error;
+      };
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        pending += decoder.decode(value, { stream: true });
+        const lines = pending.split('\n');
+        pending = lines.pop() || '';
+        for (const line of lines) if (line.trim()) applyEvent(line);
+      }
+      pending += decoder.decode();
+      if (pending.trim()) applyEvent(pending.trim());
+      if (streamError) throw new Error(streamError);
+      if (!assistantText.trim()) throw new Error('پاسخی از موتور هوش مصنوعی دریافت نشد.');
+
+      try {
+        await authFetch(`/api/v1/ai/sessions/${sessionId}/messages`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            role: 'assistant', content: assistantText, toolsUsed: [], citations: [],
+            durationMs, model: responseModel,
+          }),
+        });
+      } catch {
+        // non-blocking
+      }
+    } catch (requestError: any) {
+      if (partialAssistantText.trim() && partialAssistantId) {
+        const partialMessage: ChatMessage = {
+          id: partialAssistantId, role: 'assistant', content: partialAssistantText,
           timestamp: new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }),
-          toolsUsed: data.toolsUsed,
-          citations: data.citations,
-          durationMs: data.durationMs,
-          model: data.model,
+          model: partialResponseModel, durationMs: partialDurationMs,
         };
-
-        setSessions(prev =>
-          prev.map(s =>
-            s.id === sessionId ? { ...s, messages: [...updatedMessages, assistantMsg] } : s
-          )
-        );
-
+        setSessions(prev => prev.map(s => s.id === sessionId ? {
+          ...s, messages: [...s.messages.filter(m => m.id !== partialAssistantId), partialMessage],
+        } : s));
         try {
           await authFetch(`/api/v1/ai/sessions/${sessionId}/messages`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              role: 'assistant',
-              content: data.reply,
-              toolsUsed: data.toolsUsed,
-              citations: data.citations,
-              durationMs: data.durationMs,
-              model: data.model,
+              role: 'assistant', content: partialAssistantText, toolsUsed: [], citations: [],
+              durationMs: partialDurationMs, model: partialResponseModel,
             }),
           });
-        } catch {
-          // non-blocking
-        }
-      } else {
-        const errText =
-          data?.message ||
-          data?.error?.message ||
-          (typeof data?.error === 'string' ? data.error : null) ||
-          'پاسخی از موتور هوش مصنوعی دریافت نشد.';
-        const errorMsg: ChatMessage = {
-          id: `msg-${Date.now()}`,
-          role: 'assistant',
-          content: errText,
-          timestamp: new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }),
-        };
-        setSessions(prev =>
-          prev.map(s =>
-            s.id === sessionId ? { ...s, messages: [...updatedMessages, errorMsg] } : s
-          )
-        );
+        } catch { /* keep the partial response visible */ }
       }
-    } catch {
+      if (requestError?.name === 'AbortError') return;
       const networkErrorMsg: ChatMessage = {
         id: `msg-${Date.now()}`,
         role: 'assistant',
-        content: 'خطا در ارتباط با سرور هوش مصنوعی سامانه. لطفاً اتصال شبکه را بررسی فرمایید.',
+        content: requestError?.message || 'خطا در ارتباط با سرور هوش مصنوعی سامانه. لطفاً اتصال شبکه را بررسی فرمایید.',
         timestamp: new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }),
       };
-      setSessions(prev =>
-        prev.map(s =>
-          s.id === sessionId ? { ...s, messages: [...updatedMessages, networkErrorMsg] } : s
-        )
-      );
+      setSessions(prev => prev.map(s => s.id === sessionId ? {
+        ...s, messages: [...s.messages.filter(m => m.id !== partialAssistantId), ...(partialAssistantText.trim() ? [{
+          id: partialAssistantId, role: 'assistant' as const, content: partialAssistantText,
+          timestamp: networkErrorMsg.timestamp, model: partialResponseModel, durationMs: partialDurationMs,
+        }] : []), networkErrorMsg],
+      } : s));
     } finally {
+      activeRequestRef.current = null;
       setIsLoading(false);
     }
   };
+
+  const handleStopGeneration = () => activeRequestRef.current?.abort();
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -454,17 +503,17 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
       <aside className={`w-80 flex-shrink-0 bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 flex flex-col transition-all duration-300 z-20 ${sidebarOpen ? 'fixed inset-y-0 start-0 z-50 md:static' : 'hidden md:flex'}`}>
         <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="p-2 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 rounded-xl">
+            <div className="p-2 bg-violet-50 dark:bg-violet-950/40 text-violet-600 dark:text-violet-400 rounded-xl">
               <Bot className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-sm font-black text-slate-800 dark:text-slate-100">هوش مصنوعی HSECORE</h2>
-              <p className="text-[10px] text-slate-400">مشاور جامع HSE و مراجع قانونی</p>
+              <h2 className="text-sm font-black text-slate-800 dark:text-slate-100">دستیار هوش مصنوعی</h2>
+              <p className="text-[10px] text-slate-400">مدل‌های زبانی محلی · Ollama</p>
             </div>
           </div>
           <button
             onClick={handleNewSession}
-            className="p-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow-sm transition cursor-pointer"
+            className="p-2 bg-violet-600 hover:bg-violet-500 text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow-sm transition cursor-pointer"
             title="گفتگوی جدید"
           >
             <Plus className="w-4 h-4" />
@@ -479,7 +528,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
               value={searchSessionQuery}
               onChange={e => setSearchSessionQuery(e.target.value)}
               placeholder="جستجو در گفتگوها..."
-              className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs py-2 pe-3 ps-9 outline-none focus:ring-2 focus:ring-indigo-500/30 text-slate-700 dark:text-slate-200"
+              className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs py-2 pe-3 ps-9 outline-none focus:ring-2 focus:ring-violet-500/30 text-slate-700 dark:text-slate-200"
             />
           </div>
         </div>
@@ -491,7 +540,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
           {sessionsError && (
             <div className="text-center text-xs text-rose-500 py-4 px-2">
               {sessionsError}
-              <button onClick={loadSessionsFromServer} className="block mx-auto mt-2 text-indigo-500 underline">
+              <button onClick={loadSessionsFromServer} className="block mx-auto mt-2 text-violet-500 underline">
                 تلاش مجدد
               </button>
             </div>
@@ -509,7 +558,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
                   }}
                   className={`group flex items-center gap-2 px-3 py-2.5 rounded-xl cursor-pointer transition ${
                     activeSessionId === session.id
-                      ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300'
+                      ? 'bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300'
                       : 'hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300'
                   }`}
                 >
@@ -550,24 +599,15 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
             </button>
             <div className="min-w-0">
               <h3 className="text-sm font-black text-slate-800 dark:text-slate-100 truncate">
-                {activeSession?.title || COMPREHENSIVE_LEGAL_ASSISTANT.nameFa}
+                {activeSession?.title || GENERAL_AI_ASSISTANT.nameFa}
               </h3>
               <p className="text-[10px] text-slate-400 flex items-center gap-1">
-                <Scale className="w-3 h-3" />
-                {COMPREHENSIVE_LEGAL_ASSISTANT.title}
+                <Sparkles className="w-3 h-3" />
+                {GENERAL_AI_ASSISTANT.title}
               </p>
             </div>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
-            <label className="flex items-center gap-1.5 text-[11px] text-slate-500 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={allowTools}
-                onChange={e => setAllowTools(e.target.checked)}
-                className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-              />
-              دسترسی به داده‌های سامانه
-            </label>
             <button
               onClick={handleExportSession}
               className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition"
@@ -588,23 +628,23 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
         <div className="flex-1 overflow-y-auto px-4 py-5 space-y-4">
           {(!activeSession || activeSession.messages.length === 0) && !isLoading && (
             <div className="max-w-2xl mx-auto text-center space-y-5 pt-8">
-              <div className="inline-flex p-4 rounded-3xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-lg shadow-indigo-500/20">
+              <div className="inline-flex p-4 rounded-3xl bg-gradient-to-br from-violet-500 to-violet-600 text-white shadow-lg shadow-violet-500/20">
                 <Sparkles className="w-8 h-8" />
               </div>
               <div>
                 <h3 className="text-lg font-black text-slate-800 dark:text-slate-100">
-                  {COMPREHENSIVE_LEGAL_ASSISTANT.nameFa}
+                  {GENERAL_AI_ASSISTANT.nameFa}
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed max-w-md mx-auto">
-                  {COMPREHENSIVE_LEGAL_ASSISTANT.description}
+                  {GENERAL_AI_ASSISTANT.description}
                 </p>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-start">
-                {COMPREHENSIVE_LEGAL_ASSISTANT.promptSuggestions.map((s, i) => (
+                {GENERAL_AI_ASSISTANT.promptSuggestions.map((s, i) => (
                   <button
                     key={i}
                     onClick={() => handleSendMessage(s)}
-                    className="text-[11px] leading-relaxed p-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:border-indigo-300 dark:hover:border-indigo-600 text-slate-600 dark:text-slate-300 transition text-right"
+                    className="text-[11px] leading-relaxed p-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:border-violet-300 dark:hover:border-violet-600 text-slate-600 dark:text-slate-300 transition text-right"
                   >
                     {s}
                   </button>
@@ -622,7 +662,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
                 className={`flex-shrink-0 w-8 h-8 rounded-xl flex items-center justify-center ${
                   msg.role === 'user'
                     ? 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-200'
-                    : 'bg-indigo-600 text-white'
+                    : 'bg-violet-600 text-white'
                 }`}
               >
                 {msg.role === 'user' ? (
@@ -634,7 +674,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
               <div
                 className={`relative max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-sm ${
                   msg.role === 'user'
-                    ? 'bg-indigo-600 text-white rounded-te-sm'
+                    ? 'bg-violet-600 text-white rounded-te-sm'
                     : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-200 rounded-ts-sm'
                 }`}
               >
@@ -675,11 +715,11 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
 
           {isLoading && (
             <div className="flex gap-3">
-              <div className="flex-shrink-0 w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center">
+              <div className="flex-shrink-0 w-8 h-8 rounded-xl bg-violet-600 text-white flex items-center justify-center">
                 <Bot className="w-4 h-4 animate-pulse" />
               </div>
               <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl rounded-ts-sm px-4 py-3 text-sm text-slate-400">
-                در حال تحلیل و استخراج داده...
+                در حال تولید پاسخ...
               </div>
             </div>
           )}
@@ -687,23 +727,52 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
         </div>
 
         <div className="p-4 border-t border-slate-200 dark:border-slate-800 bg-white/90 dark:bg-slate-900/90 backdrop-blur">
-          <div className="max-w-3xl mx-auto flex items-end gap-2">
+          <div className="max-w-3xl mx-auto flex flex-col gap-2">
+            <div className="flex items-center justify-between gap-2">
+              <label className="text-[11px] text-slate-500">مدل محلی</label>
+              <select
+                value={selectedModel}
+                onChange={e => setSelectedModel(e.target.value)}
+                disabled={isLoading || installedModels.length === 0}
+                className="max-w-[70%] rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-xs text-slate-700 dark:text-slate-200"
+              >
+                {installedModels.length === 0 ? <option value="">مدل گفت‌وگو نصب نیست</option> : installedModels.map(model => <option key={model.name} value={model.name}>{model.name}</option>)}
+              </select>
+            </div>
+            {installedModels.length === 0 && (
+              <div className="rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/20 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
+                هیچ مدل زبانیِ قابل گفت‌وگویی نصب نیست. برای شروع، یک مدل مولد را از مدیریت هوش مصنوعی نصب کنید؛ مدل‌های embedding برای چت قابل استفاده نیستند.
+              </div>
+            )}
+            <div className="flex items-end gap-2">
             <textarea
               value={inputMessage}
               onChange={e => setInputMessage(e.target.value)}
               onKeyDown={handleKeyDown}
               rows={1}
-              placeholder="سوال خود را درباره ایمنی، بهداشت، محیط زیست یا داده‌های سامانه بنویسید..."
-              className="flex-1 resize-none bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-indigo-500/30 text-slate-800 dark:text-slate-100 max-h-32"
+              placeholder="پیام خود را بنویسید...‎"
+              className="flex-1 resize-none bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-violet-500/30 text-slate-800 dark:text-slate-100 max-h-32"
               disabled={isLoading || sessionsLoading}
             />
-            <button
-              onClick={() => handleSendMessage()}
-              disabled={!inputMessage.trim() || isLoading || sessionsLoading}
-              className="p-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-2xl shadow-sm transition"
-            >
-              <Send className="w-5 h-5" />
-            </button>
+            {isLoading ? (
+              <button
+                onClick={handleStopGeneration}
+                className="p-3 bg-slate-700 hover:bg-slate-600 text-white rounded-2xl shadow-sm transition"
+                title="توقف تولید پاسخ"
+              >
+                <Square className="w-5 h-5" />
+              </button>
+            ) : (
+              <button
+                onClick={() => handleSendMessage()}
+                disabled={!inputMessage.trim() || sessionsLoading || !selectedModel}
+                className="p-3 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-2xl shadow-sm transition"
+                title="ارسال پیام"
+              >
+                <Send className="w-5 h-5" />
+              </button>
+            )}
+            </div>
           </div>
         </div>
       </main>

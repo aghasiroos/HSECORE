@@ -9,7 +9,6 @@
 
 import { config } from '../server/core/config.ts';
 import { localAIProvider } from '../server/modules/ai/ai.local-provider.ts';
-import { aiService } from '../server/modules/ai/ai.service.ts';
 
 async function runVerification() {
   console.log('====================================================');
@@ -42,12 +41,14 @@ async function runVerification() {
   }
   console.log('  -> [PASS] Health check executed cleanly without throwing exceptions.\n');
 
-  // Test 3: AIService Integration
-  console.log('[Test 3] Testing AIService Fallback & Offline Chat Message:');
-  const chatReply = await aiService.generateChatResponse('تست اولیه زیرساخت هوش مصنوعی');
-  console.log(`  - Response Length   : ${chatReply.length} chars`);
-  console.log(`  - Sample Response   : "${chatReply.slice(0, 100)}..."`);
-  console.log('  -> [PASS] AIService chat interface operational with proper Persian messaging.\n');
+  // Test 3: Installed local model inventory
+  console.log('[Test 3] Testing local Ollama model inventory:');
+  const models = await localAIProvider.listInstalledModels();
+  console.log(`  - Installed Models  : ${models.length}`);
+  for (const model of models) {
+    console.log(`  - ${model.name || model.model || 'unnamed model'}`);
+  }
+  console.log('  -> [PASS] Local model inventory endpoint handled cleanly. Chat generation is verified by the authenticated streaming route tests.\\n');
 
   console.log('====================================================');
   console.log('ALL PHASE 2 INFRASTRUCTURE TESTS COMPLETED (PASS)');
