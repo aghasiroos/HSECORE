@@ -11,14 +11,7 @@ import { SystemStatusBadge } from './components/SystemStatusBadge';
 import { PrintNotificationModal } from './components/common/PrintNotificationModal';
 import { centralSync } from './services/centralSyncService';
 import { apiDb, getAuthToken } from './services/apiDatabaseClient';
-import {
-  safeLocalStorageSet,
-  safeLocalStorageGet,
-  saveWarningsToStorage,
-  loadWarningsFromStorage,
-  getWarningsSynchronously,
-  deduplicateWarningRecords
-} from './utils/safeStorage';
+import { deduplicateWarningRecords } from './utils/safeStorage';
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
