@@ -31,7 +31,7 @@ export function securityHeadersMiddleware(req: Request, res: Response, next: Nex
       "font-src 'self' data: https://fonts.gstatic.com",
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "script-src 'self'",
-      "connect-src 'self'",
+      "connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com",
       "worker-src 'self' blob:",
       "media-src 'self' blob:",
     ].join('; ');
