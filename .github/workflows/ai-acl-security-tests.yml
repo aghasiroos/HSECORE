@@ -147,6 +147,9 @@ jobs:
           fi
           grep -Fq 'up -d --no-deps hse-ai-engine' scripts/setup-local-ai.sh
           grep -Fq 'AI_ENGINE_ENABLED=false' .env.example
+          grep -Fq 'ensure_env_key "AI_ENGINE_ENABLED" "false"' scripts/setup-local-ai.sh
+          grep -Fq 'local current="false"' scripts/manage-ai.sh
+          grep -Fq 'verify_container_compose_owner || return 1' scripts/manage-ai.sh
           grep -Fq 'profiles:' docker-compose.server.yml
           grep -Fq 'ExecStartPost=/bin/bash' install.sh
           grep -Fq 'AI_ENGINE_ENABLED' scripts/start-ai-if-enabled.sh
