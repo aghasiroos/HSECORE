@@ -31,6 +31,7 @@ export interface AIDeploymentJobView {
 
 /** Only one mutating model job at a time on 8GB hosts */
 let activeJobId: string | null = null;
+let enqueueReservationInProgress = false;
 
 function toView(row: any): AIDeploymentJobView {
   return {
@@ -85,6 +86,23 @@ export class AIJobManager {
       .where(eq(schema.aiDeploymentJobs.id, jobId));
   }
 
+  private async reserveJobSlot(): Promise<void> {
+    if (enqueueReservationInProgress) {
+      throw new Error('درخواست عملیات مدل دیگری در حال ثبت است؛ لحظه‌ای بعد دوباره تلاش کنید.');
+    }
+    enqueueReservationInProgress = true;
+    try {
+      await this.assertNoActiveJob();
+    } catch (error) {
+      enqueueReservationInProgress = false;
+      throw error;
+    }
+  }
+
+  private releaseJobReservation(): void {
+    enqueueReservationInProgress = false;
+  }
+
   private async assertNoActiveJob(): Promise<void> {
     if (activeJobId) {
       throw new Error('یک عملیات مدل در حال اجرا است؛ تا پایان آن صبر کنید.');
@@ -134,25 +152,30 @@ export class AIJobManager {
     if (!normalized) {
       throw new Error('شناسه مدل نامعتبر است. از قالب model:tag یا namespace/model:tag استفاده کنید.');
     }
-    await this.assertNoActiveJob();
+    await this.reserveJobSlot();
 
     const id = randomUUID();
     const now = new Date();
-    await db.insert(schema.aiDeploymentJobs).values({
-      id,
-      jobType: 'pull',
-      providerId: 'ollama',
-      targetRef: normalized,
-      status: 'pending',
-      progress: 0,
-      message: 'در صف دریافت مدل',
-      errorMessage: null,
-      createdBy: createdBy || null,
-      createdAt: now,
-      updatedAt: now,
-    });
-
-    activeJobId = id;
+    try {
+      await db.insert(schema.aiDeploymentJobs).values({
+        id,
+        jobType: 'pull',
+        providerId: 'ollama',
+        targetRef: normalized,
+        status: 'pending',
+        progress: 0,
+        message: 'در صف دریافت مدل',
+        errorMessage: null,
+        createdBy: createdBy || null,
+        createdAt: now,
+        updatedAt: now,
+      });
+      activeJobId = id;
+    } catch (error) {
+      this.releaseJobReservation();
+      throw error;
+    }
+    this.releaseJobReservation();
     setImmediate(() => {
       this.runPullJob(id, normalized).catch((err) => {
         logger.error('runPullJob unhandled', { jobId: id, error: err?.message });
@@ -168,25 +191,30 @@ export class AIJobManager {
     if (!normalized) {
       throw new Error('شناسه مدل نامعتبر است. از قالب model:tag یا namespace/model:tag استفاده کنید.');
     }
-    await this.assertNoActiveJob();
+    await this.reserveJobSlot();
 
     const id = randomUUID();
     const now = new Date();
-    await db.insert(schema.aiDeploymentJobs).values({
-      id,
-      jobType: 'delete',
-      providerId: 'ollama',
-      targetRef: normalized,
-      status: 'pending',
-      progress: 0,
-      message: 'در صف حذف مدل',
-      errorMessage: null,
-      createdBy: createdBy || null,
-      createdAt: now,
-      updatedAt: now,
-    });
-
-    activeJobId = id;
+    try {
+      await db.insert(schema.aiDeploymentJobs).values({
+        id,
+        jobType: 'delete',
+        providerId: 'ollama',
+        targetRef: normalized,
+        status: 'pending',
+        progress: 0,
+        message: 'در صف حذف مدل',
+        errorMessage: null,
+        createdBy: createdBy || null,
+        createdAt: now,
+        updatedAt: now,
+      });
+      activeJobId = id;
+    } catch (error) {
+      this.releaseJobReservation();
+      throw error;
+    }
+    this.releaseJobReservation();
     setImmediate(() => {
       this.runDeleteJob(id, normalized).catch((err) => {
         logger.error('runDeleteJob unhandled', { jobId: id, error: err?.message });
