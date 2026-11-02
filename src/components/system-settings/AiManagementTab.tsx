@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { UserProfile } from '../../types';
 import { authFetch } from '../../services/apiDatabaseClient';
+import { AI_ALLOW_TOOLS_STORAGE_KEY, getAiAllowToolsSetting } from '../../modules/ai/AiAssistantApp';
 
 interface AiManagementTabProps {
   language?: 'fa' | 'en';
@@ -30,9 +31,18 @@ export default function AiManagementTab({ language = 'fa', currentUser }: AiMana
   const [engineStatus, setEngineStatus] = useState<any>(null);
   const [installedModels, setInstalledModels] = useState<any[]>([]);
   const [auditData, setAuditData] = useState<any>(null);
-  const [pullModelName, setPullModelName] = useState<string>('qwen2.5:1.7b');
+  const [pullModelName, setPullModelName] = useState<string>('qwen2.5:1.5b');
   const [isPulling, setIsPulling] = useState<boolean>(false);
   const [actionMessage, setActionMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+  const [allowTools, setAllowTools] = useState<boolean>(getAiAllowToolsSetting);
+
+  const handleToggleAllowTools = () => {
+    const next = !allowTools;
+    setAllowTools(next);
+    try {
+      localStorage.setItem(AI_ALLOW_TOOLS_STORAGE_KEY, String(next));
+    } catch {}
+  };
 
   // RAG Knowledge Base States
   const [knowledgeDocs, setKnowledgeDocs] = useState<any[]>([]);
@@ -218,14 +228,29 @@ export default function AiManagementTab({ language = 'fa', currentUser }: AiMana
           </div>
         </div>
 
-        <button
-          onClick={fetchData}
-          disabled={loading}
-          className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer self-start sm:self-auto"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-indigo-600' : ''}`} />
-          <span>پایش مجدد وضعیت</span>
-        </button>
+        <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
+          <button
+            onClick={handleToggleAllowTools}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer border ${
+              allowTools
+                ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
+                : 'bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700'
+            }`}
+            title="اتصال خودکار به داده‌های زنده تمامی ماژول‌های سامانه جهت پاسخ مستند"
+          >
+            <Database className="w-3.5 h-3.5" />
+            <span>جستجو در تمام ماژول‌ها: {allowTools ? 'فعال' : 'غیرفعال'}</span>
+          </button>
+
+          <button
+            onClick={fetchData}
+            disabled={loading}
+            className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-indigo-600' : ''}`} />
+            <span>پایش مجدد وضعیت</span>
+          </button>
+        </div>
       </div>
 
       {actionMessage && (
@@ -323,7 +348,7 @@ export default function AiManagementTab({ language = 'fa', currentUser }: AiMana
               type="text"
               value={pullModelName}
               onChange={e => setPullModelName(e.target.value)}
-              placeholder="مثال: qwen2.5:1.7b"
+              placeholder="مثال: qwen2.5:1.5b"
               className="px-3 py-1.5 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-mono bg-slate-50 dark:bg-slate-800 w-44"
             />
             <button

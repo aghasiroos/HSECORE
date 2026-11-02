@@ -51,6 +51,7 @@ export interface AIChatRequest {
   history?: Array<{ role: 'user' | 'assistant'; content: string }>;
   contextModule?: string;
   allowTools?: boolean;
+  model?: string;
 }
 
 export interface AIChatResponse {

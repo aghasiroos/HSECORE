@@ -9,29 +9,48 @@ import { logger } from '../logger.ts';
  */
 export function securityHeadersMiddleware(req: Request, res: Response, next: NextFunction) {
   res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+
+  const isPreviewOrDev =
+    process.env.NODE_ENV !== 'production' ||
+    process.env.ALLOW_PREVIEW_ORIGINS === 'true' ||
+    Boolean(process.env.K_SERVICE) ||
+    req.headers.host?.includes('.run.app') ||
+    req.headers.host?.includes('localhost') ||
+    req.headers.host?.includes('127.0.0.1');
+
+  if (!isPreviewOrDev) {
+    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
+  } else {
+    // In AI Studio preview / emulator environment, the application runs inside an iframe
+    res.removeHeader('X-Frame-Options');
+  }
+
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
-  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
   res.setHeader('X-DNS-Prefetch-Control', 'off');
   res.setHeader('X-Download-Options', 'noopen');
   res.setHeader('X-Permitted-Cross-Domain-Policies', 'none');
 
-  // Baseline CSP for SPA + API same-origin deployments (no wildcard script sources)
+  // Baseline CSP for SPA + API
   const cspEnabled = (process.env.CSP_ENABLED || 'true').toLowerCase() !== 'false';
   if (cspEnabled) {
+    const frameAncestors = isPreviewOrDev
+      ? "frame-ancestors 'self' https://*.google.com https://*.run.app https://*.googleusercontent.com https://aistudio.google.com http://localhost:* http://127.0.0.1:*"
+      : "frame-ancestors 'self'";
+
     const csp = [
       "default-src 'self'",
       "base-uri 'self'",
       "form-action 'self'",
-      "frame-ancestors 'self'",
+      frameAncestors,
       "object-src 'none'",
       // Allow only the explicitly used external font and map-tile origins.
       "img-src 'self' data: blob: https://mt0.google.com https://mt1.google.com https://mt2.google.com https://mt3.google.com https://*.tile.openstreetmap.org https://server.arcgisonline.com",
       "font-src 'self' data: https://fonts.gstatic.com",
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-      "script-src 'self'",
-      "connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com",
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+      "connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com ws: wss:",
       "worker-src 'self' blob:",
       "media-src 'self' blob:",
     ].join('; ');
@@ -76,7 +95,13 @@ function isAllowedOrigin(req: Request, origin: string): boolean {
       return true;
     }
 
-    if (allowPreview) {
+    const isAiStudioEnv =
+      !isProd ||
+      allowPreview ||
+      Boolean(process.env.K_SERVICE) ||
+      Boolean(req.headers.host?.includes('.run.app'));
+
+    if (isAiStudioEnv) {
       if (
         hostname.endsWith('.google.com') ||
         hostname.endsWith('.run.app') ||

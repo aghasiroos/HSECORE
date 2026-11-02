@@ -2444,6 +2444,20 @@ step12_start_hsecore() {
   }
   tui_print_completed_task "Prepared persistent uploads storage (${UPLOADS_HOST_DIR})" "$(( $(date +%s) - up_t0 ))"
 
+  # Ensure dedicated internal network and persistent AI volume exist before launching containers
+  docker network inspect hse-network >/dev/null 2>&1 || {
+    docker network create --driver bridge \
+      --label com.docker.compose.network=hse-network \
+      --label com.docker.compose.project=hsecore \
+      hse-network >/dev/null 2>&1 || docker network create --driver bridge hse-network
+  }
+  docker volume inspect hse_ai_models >/dev/null 2>&1 || {
+    docker volume create \
+      --label com.docker.compose.volume=hse_ai_models \
+      --label com.docker.compose.project=hsecore \
+      hse_ai_models >/dev/null 2>&1 || docker volume create hse_ai_models
+  }
+
   tui_run_task \
     "Starting HSECORE application container (hse-app)" \
     "Check port conflicts on ${APP_INTERNAL_PORT:-3000} (ss -tulpn) and inspect docker logs." \
@@ -4090,7 +4104,7 @@ manage_ai_infrastructure() {
         echo -e "${BOLD}${CYAN}==================================================================${NC}"
         echo " 1) نصب زیرساخت هوش مصنوعی (Install / Deploy AI Infrastructure)"
         echo " 2) راه‌اندازی موتور Local LLM (Start AI Engine Container)"
-        echo " 3) دانلود و افزودن مدل جدید (Pull/Download Model - e.g. qwen2.5:1.7b)"
+        echo " 3) دانلود و افزودن مدل جدید (Pull/Download Model - e.g. qwen2.5:1.5b)"
         echo " 4) مشاهده مدل‌های نصب‌شده (List Installed Models in Volume)"
         echo " 5) تغییر مدل پیش‌فرض سامانه (Change Default Model in .env)"
         echo " 6) فعال‌سازی یا غیرفعال‌سازی هوش مصنوعی (Toggle AI Engine Enabled/Disabled)"
@@ -4109,13 +4123,16 @@ manage_ai_infrastructure() {
           1) bash "${setup_script}" ;;
           2) bash "${manage_script}" start ;;
           3)
-            read -r -p "Enter model tag [default: qwen2.5:1.7b]: " target_m
-            target_m="${target_m:-qwen2.5:1.7b}"
+            read -r -p "Enter model tag [default: qwen2.5:1.5b]: " target_m
+            target_m="${target_m:-qwen2.5:1.5b}"
             bash "${manage_script}" pull "${target_m}"
             ;;
           4) bash "${manage_script}" list ;;
           5)
-            read -r -p "Enter new default model name [e.g. qwen2.5:1.7b]: " def_m
+            local cur_model
+            cur_model="$(grep '^AI_DEFAULT_CHAT_MODEL=' "${ENV_FILE}" 2>/dev/null | cut -d'=' -f2 | tr -d '\"' || echo 'qwen2.5:1.5b')"
+            echo -e "Current default model in .env: ${CYAN}${cur_model}${NC}"
+            read -r -p "Enter new default model name [e.g. qwen2.5:1.5b]: " def_m
             if [ -n "${def_m}" ]; then
               bash "${manage_script}" set-default "${def_m}"
             fi
@@ -4126,15 +4143,17 @@ manage_ai_infrastructure() {
           9) bash "${manage_script}" sysinfo ;;
           10) bash "${manage_script}" logs ;;
           11)
-            read -r -p "Enter model name to delete: " del_m
-            if [ -n "${del_m}" ]; then
-              bash "${manage_script}" rm "${del_m}"
-            fi
+            bash "${manage_script}" rm
             ;;
           12) bash "${manage_script}" uninstall ;;
           13) break ;;
           *) echo -e "${RED}Invalid selection. Please choose a number between 1 and 13.${NC}" ;;
         esac
+
+        if [[ "${ai_choice}" != "13" ]]; then
+          echo ""
+          read -r -p "Press [Enter] to return to AI menu..." _
+        fi
       done
       ;;
   esac

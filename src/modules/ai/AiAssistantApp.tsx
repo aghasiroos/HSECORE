@@ -36,6 +36,17 @@ export interface ChatSession {
   messages: ChatMessage[];
 }
 
+export const AI_ALLOW_TOOLS_STORAGE_KEY = 'hsecore_ai_allow_tools';
+
+export function getAiAllowToolsSetting(): boolean {
+  try {
+    const v = localStorage.getItem(AI_ALLOW_TOOLS_STORAGE_KEY);
+    return v === null ? true : v === 'true';
+  } catch {
+    return true;
+  }
+}
+
 const GENERAL_AI_ASSISTANT = {
   id: 'GENERAL_HSE',
   nameFa: 'دستیار هوش مصنوعی',

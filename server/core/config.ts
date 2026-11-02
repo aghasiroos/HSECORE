@@ -171,7 +171,7 @@ export const config: AppConfig = {
   aiEngine: {
     enabled: process.env.AI_ENGINE_ENABLED === 'true' || process.env.AI_ENGINE_ENABLED !== 'false',
     url: (process.env.AI_ENGINE_URL || 'http://hse-ai-engine:11434').trim().replace(/\/$/, ''),
-    defaultChatModel: process.env.AI_DEFAULT_CHAT_MODEL || 'qwen2.5:1.7b',
+    defaultChatModel: process.env.AI_DEFAULT_CHAT_MODEL || 'qwen2.5:1.5b',
     defaultEmbedModel: process.env.AI_DEFAULT_EMBED_MODEL || 'bge-m3',
     maxConcurrency: Number(process.env.AI_MAX_CONCURRENCY) || 1,
     // CPU-only inference on the 8GB VPS needs a realistic generation window.
@@ -180,7 +180,7 @@ export const config: AppConfig = {
     maxQueueLength: Math.min(Math.max(Number(process.env.AI_MAX_QUEUE_LENGTH) || 10, 1), 50),
     // Model pulls are restricted to explicitly configured references plus the active defaults.
     allowedModels: [...new Set([
-      (process.env.AI_DEFAULT_CHAT_MODEL || 'qwen2.5:1.7b').trim(),
+      (process.env.AI_DEFAULT_CHAT_MODEL || 'qwen2.5:1.5b').trim(),
       (process.env.AI_DEFAULT_EMBED_MODEL || 'bge-m3').trim(),
       ...(process.env.AI_ALLOWED_MODELS || '').split(',').map(model => model.trim()).filter(Boolean),
     ])],

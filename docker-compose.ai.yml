@@ -13,7 +13,8 @@ services:
     container_name: hse-ai-engine
     restart: unless-stopped
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       - "OLLAMA_HOST=0.0.0.0:11434"
       - "OLLAMA_NUM_PARALLEL=${AI_NUM_PARALLEL:-1}"
@@ -51,9 +52,9 @@ services:
 networks:
   hse-network:
     name: ${DOCKER_NETWORK_NAME:-hse-network}
-    driver: bridge
+    external: true
 
 volumes:
   hse_ai_models:
     name: hse_ai_models
-    driver: local
+    external: true

@@ -71,7 +71,7 @@ sudo ./install.sh
   ```
 * **بارگیری مدل زبانی جدید:**
   ```bash
-  sudo ./scripts/manage-ai.sh pull qwen2.5:1.7b
+  sudo ./scripts/manage-ai.sh pull qwen2.5:1.5b
   ```
 * **مشاهده مدل‌های مستقر در دیسک:**
   ```bash
@@ -79,7 +79,7 @@ sudo ./install.sh
   ```
 * **تغییر مدل پیش‌فرض در فایل `.env`:**
   ```bash
-  sudo ./scripts/manage-ai.sh set-default qwen2.5:1.7b
+  sudo ./scripts/manage-ai.sh set-default qwen2.5:1.5b
   ```
 * **فعال‌سازی یا غیرفعال‌سازی موقت سرویس هوش مصنوعی:**
   ```bash

@@ -947,7 +947,7 @@ export const automationEventsOutbox = pgTable(
   'automation_events_outbox',
   {
     id: serial('id').primaryKey(),
-    eventId: text('event_id').notNull().unique(),
+    eventId: text('event_id').notNull(),
     eventType: text('event_type').notNull(),
     sourceModule: text('source_module').notNull().default('system'),
     correlationKey: text('correlation_key'),
@@ -974,7 +974,7 @@ export const automationExecutionLogs = pgTable(
   'automation_execution_logs',
   {
     id: serial('id').primaryKey(),
-    logId: text('log_id').notNull().unique(),
+    logId: text('log_id').notNull(),
     eventId: text('event_id').notNull(),
     ruleId: integer('rule_id'),
     ruleCode: text('rule_code').notNull(),

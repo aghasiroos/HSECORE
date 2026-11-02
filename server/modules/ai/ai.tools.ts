@@ -696,7 +696,197 @@ export class AIToolsRegistry {
   }
 
   /**
-   * Tool 16: Universal Cross-Module Deep Search (جستجوی هوشمند رکوردها در تمامی ماژول‌های سامانه)
+   * Tool 16: Non-Conformances & Audit Findings Summary (عدم انطباق‌ها و ممیزی‌ها)
+   */
+  async getNonConformancesSummary(): Promise<AIToolResult> {
+    try {
+      const ncs = await db.select().from(schema.nonConformances).catch(() => []);
+      const total = ncs.length;
+      const open = ncs.filter((n: any) => ['OPEN', 'DRAFT', 'SUBMITTED', 'IN_PROGRESS'].includes(String(n.status || '').toUpperCase())).length;
+      const closed = ncs.filter((n: any) => ['CLOSED', 'RESOLVED', 'VERIFIED'].includes(String(n.status || '').toUpperCase())).length;
+      const major = ncs.filter((n: any) => String(n.severity || '').toUpperCase() === 'MAJOR' || String(n.severity || '').toUpperCase() === 'CRITICAL').length;
+
+      return {
+        toolName: 'non_conformances_summary',
+        titleFa: 'ماژول عدم انطباق‌ها و ممیزی‌های HSE (ISO 45001 / ISO 14001)',
+        summary: [
+          `• کل عدم انطباق‌های ثبت‌شده: ${total} مورد`,
+          `• عدم انطباق‌های باز / در حال پیگیری: ${open} مورد`,
+          `• عدم انطباق‌های مختومه و رفع‌شده: ${closed} مورد`,
+          `• موارد با شدت عمده (Major/Critical): ${major} مورد`,
+        ].join('\n'),
+        data: { total, open, closed, major },
+        timestamp: new Date().toISOString(),
+      };
+    } catch {
+      return {
+        toolName: 'non_conformances_summary',
+        titleFa: 'ماژول عدم انطباق‌ها',
+        summary: 'اطلاعات عدم انطباق‌ها در دسترس نیست.',
+        data: {},
+        timestamp: new Date().toISOString(),
+      };
+    }
+  }
+
+  /**
+   * Tool 17: System Notifications & Alerts Summary (هشدارها و اعلان‌های سامانه)
+   */
+  async getNotificationsAndAlertsSummary(): Promise<AIToolResult> {
+    try {
+      const notifs = await db.select().from(schema.notifications).catch(() => []);
+      const total = notifs.length;
+      const critical = notifs.filter((n: any) => String(n.priority || '').toLowerCase() === 'critical' || String(n.category || '').toLowerCase() === 'critical_hse').length;
+      const high = notifs.filter((n: any) => String(n.priority || '').toLowerCase() === 'high').length;
+      const ackRequired = notifs.filter((n: any) => n.requiresAck && (!Array.isArray(n.acknowledgedBy) || n.acknowledgedBy.length === 0)).length;
+
+      const recentNotifs = notifs.slice(-3).reverse().map((n: any) => `  - [${n.priority || 'medium'}] ${n.title}: ${(n.body || '').slice(0, 50)}...`).join('\n');
+
+      return {
+        toolName: 'notifications_summary',
+        titleFa: 'ماژول هشدارها، رویدادها و اعلان‌های بلادرنگ سامانه',
+        summary: [
+          `• کل اعلان‌ها و هشدارهای ثبت‌شده: ${total} مورد`,
+          `• هشدارهای سطح بحرانی (Critical): ${critical} مورد | هشدارهای اولویت بالا: ${high} مورد`,
+          `• اعلان‌های نیازمند تایید دریافت (Pending Ack): ${ackRequired} مورد`,
+          recentNotifs ? `• آخرین اعلان‌ها:\n${recentNotifs}` : '',
+        ].filter(Boolean).join('\n'),
+        data: { total, critical, high, ackRequired },
+        timestamp: new Date().toISOString(),
+      };
+    } catch {
+      return {
+        toolName: 'notifications_summary',
+        titleFa: 'ماژول اعلان‌ها و هشدارها',
+        summary: 'اطلاعات اعلان‌ها در دسترس نیست.',
+        data: {},
+        timestamp: new Date().toISOString(),
+      };
+    }
+  }
+
+  /**
+   * Tool 18: Users, Roles & RBAC Access Control Summary (کاربران، نقش‌ها و سطوح دسترسی)
+   */
+  async getUsersAndRolesSummary(): Promise<AIToolResult> {
+    try {
+      const userList = await db.select().from(schema.users).catch(() => []);
+      const total = userList.length;
+      const active = userList.filter((u: any) => u.isActive && String(u.accountStatus || 'Active').toLowerCase() === 'active').length;
+      const roleCounts: Record<string, number> = {};
+      for (const u of userList as any[]) {
+        const r = String(u.role || 'User').trim();
+        roleCounts[r] = (roleCounts[r] || 0) + 1;
+      }
+      const roleBreakdown = Object.entries(roleCounts).map(([r, c]) => `${r}: ${c} نفر`).join(' | ');
+
+      return {
+        toolName: 'users_roles_summary',
+        titleFa: 'ماژول مدیریت کاربران، نقش‌ها و مجوزهای دسترسی (RBAC)',
+        summary: [
+          `• کل کاربران تعریف‌شده در سامانه: ${total} نفر (${active} کاربر فعال)`,
+          `• توزیع نقش‌های کاربری: ${roleBreakdown || 'تعریف نشده'}`,
+          `• مکانیزم دسترسی: کنترل دسترسی مبتنی بر نقش (RBAC) با مجوزهای تفکیک‌شده برای هر ماژول`,
+        ].join('\n'),
+        data: { totalUsers: total, activeUsers: active, roleCounts },
+        timestamp: new Date().toISOString(),
+      };
+    } catch {
+      return {
+        toolName: 'users_roles_summary',
+        titleFa: 'ماژول کاربران و نقش‌ها',
+        summary: 'اطلاعات کاربران در دسترس نیست.',
+        data: {},
+        timestamp: new Date().toISOString(),
+      };
+    }
+  }
+
+  /**
+   * Tool 19: System Settings, Configuration & Backup/Restore Status (تنظیمات، پیکربندی و پشتیبان‌گیری)
+   */
+  async getSettingsAndBackupSummary(): Promise<AIToolResult> {
+    try {
+      const [settingsMap, files] = await Promise.all([
+        this.loadSettingsMap(),
+        db.select().from(schema.systemFiles).catch(() => []),
+      ]);
+      const backupSetting = settingsMap.get('hse_system_backup_config') || settingsMap.get('backup_config');
+      const backupSchedule = backupSetting?.schedule || 'روزانه خودکار (ساعت ۰۲:۰۰ بامداد)';
+      const lastBackupDate = backupSetting?.lastBackupDate || 'فعال و ذخیره‌شده در پایگاه داده پایدار PostgreSQL';
+
+      return {
+        toolName: 'settings_backup_summary',
+        titleFa: 'ماژول تنظیمات سامانه، پیکربندی سرور و پشتیبان‌گیری',
+        summary: [
+          `• وضعیت پشتیبان‌گیری دیتابیس: ${backupSchedule}`,
+          `• آخرین وضعیت بکاپ و داده‌های پایدار: ${lastBackupDate}`,
+          `• تعداد فایل‌ها و مستندات سیستمی ذخیره‌شده: ${files.length} فایل`,
+          `• معماری داده: پایگاه داده رابطه‌ای PostgreSQL به همراه مکانیزم همگام‌سازی آفلاین/آنلاین`,
+        ].join('\n'),
+        data: { backupSchedule, lastBackupDate, totalSystemFiles: files.length },
+        timestamp: new Date().toISOString(),
+      };
+    } catch {
+      return {
+        toolName: 'settings_backup_summary',
+        titleFa: 'ماژول تنظیمات و پشتیبان‌گیری',
+        summary: 'اطلاعات تنظیمات و پشتیبان‌گیری در دسترس نیست.',
+        data: {},
+        timestamp: new Date().toISOString(),
+      };
+    }
+  }
+
+  /**
+   * Tool 20: Complete HSECORE System Architecture & Blueprint (معماری جامع، ماژول‌ها، تب‌ها، فرم‌ها و قابلیت‌ها)
+   */
+  async getSystemArchitectureAndCapabilitiesSummary(): Promise<AIToolResult> {
+    return {
+      toolName: 'system_architecture_summary',
+      titleFa: 'نقشه معماری جامع، ساختار ماژول‌ها، تب‌ها، فرم‌ها و قابلیت‌های HSECORE',
+      summary: [
+        `🏛️ **معماری جامع سامانه یکپارچه HSECORE:**`,
+        `۱. **ماژول‌ها و تب‌های عملیاتی سامانه (۲۴ ماژول یکپارچه):**`,
+        `   • داشبورد مدیریتی (Dashboard): تب‌های شاخص‌های کلیدی، نمودارهای TRIR/LTIFR، تقویم HSE، خلاصه وضعیت ایستگاه‌های کاری`,
+        `   • استرس گرمایی (Heat Stress): تب هواشناسی آنلاین، محاسبه دمای تر گوی‌سان (WBGT آفتاب و سایه طبق ISO 7243)، رژیم کار-استراحت، آلارم صوتی`,
+        `   • پروانه کار ایمن (PTW): تب‌های کار گرم، سرد، فضای بسته، ارتفاع، حفاری، ایزولاسیون LOTO، تست گاز و ارجاعات الکترونیکی`,
+        `   • واحد ایمنی (Safety Unit): تب بازرسی‌های کارگاهی، چک‌لیست‌های دوره‌ای، کمیته‌های حفاظت فنی و ایمنی ماشین‌آلات`,
+        `   • آتش‌نشانی و امداد (Fire Dept): تب بازرسی کپسول‌ها، فایرباکس، سناریوهای واکنش در شرایط اضطراری (ERP) و مانورها`,
+        `   • بهداشت و محیط زیست (Health & Env): تب‌های طب کار (معاینات ادواری و بدو استخدام)، ارگونومی، پایش عوامل زیان‌آور فیزیکی/شیمیایی، پسماند و پساب`,
+        `   • ارزیابی ریسک (Risk Assessment): تب متدولوژی‌های JSA, FMEA, HAZOP، ماتریس ۵×۵ و سلسله‌مراتب اقدامات کنترلی`,
+        `   • حوادث و شبه‌حوادث (Incidents): تب ثبت رخداد، ماتریس علل ریشه‌ای (RCA / Fishbone)، اقدامات اصلاحی (CAPA) و آمار خسارات`,
+        `   • اخطارها و ناهنجاری‌ها (Warnings): تب ثبت شرایط و اعمال ناایمن، تعیین مهلت رفع و پیگیری بازرسی‌ها`,
+        `   • عدم انطباق‌ها (Non-Conformances): تب ممیزی داخلی و خارجی، استانداردهای ISO 45001 / ISO 14001 و تاییدیه رفع`,
+        `   • آموزش و صلاحیت (Training): تب تقویم آموزشی سالیانه، ماتریس شایستگی، سوابق دوره‌ها و صدور گواهینامه`,
+        `   • تجهیزات حفاظت فردی (PPE): تب جدول استحقاق، انبارداری اقلام، تاریخ انقضا و فرم‌های تحویل به پرسنل`,
+        `   • پرونده پرسنلی (Personnel): تب مشخصات، سوابق سلامت، حوادث گذشته، جایگاه در چارت سازمانی و مدارک پیوست`,
+        `   • فرآیندها و گردش کار (BPMN): تب دیاگرام‌های فرآیندی استاندارد، کارتابل اسناد، امضاهای دیجیتال چندمرحله‌ای`,
+        `   • کتابخانه مستندات (Documents & RAG): تب خط‌مشی‌ها، آیین‌نامه‌ها، دستورالعمل‌های کاری و جستجوی معنایی هوش مصنوعی`,
+        `   • کاربران و نقش‌ها (User Management & RBAC): تب تعریف کاربران، نقش‌ها (مدیر، کارشناس، پزشک، ناظر) و حدود دسترسی`,
+        `   • تنظیمات سامانه و پشتیبان‌گیری (System Settings): تب پارامترهای سرور، پیکربندی هوش مصنوعی، پایگاه داده و بکاپ خودکار`,
+        `   • هشدارها و اعلان‌ها (Notifications): تب هشدارهای بلادرنگ کارتابل، رویدادهای بحرانی و اعلان‌های درون‌برنامه‌ای`,
+        `۲. **فرم‌های ثبت اطلاعات:**`,
+        `   • فرم صدور PTW، فرم گازسنجی، فرم ایزولاسیون مکانیکی/الکتریکی، فرم گزارش حادثه، فرم JSA، فرم معاینات طب کار، فرم تحویل PPE، فرم بازرسی آتش‌نشانی و فرم‌های ممیزی ۵S`,
+        `۳. **پایگاه داده و جداول:**`,
+        `   • بیش از ۲۵ جدول رابطه‌ای PostgreSQL شامل users, personnel, work_permits, incidents, risk_assessments, notifications, non_conformances, system_settings و audit_logs`,
+        `۴. **قابلیت‌های فعلی و آینده:**`,
+        `   • قابلیت‌های فعلی: همگام‌سازی آفلاین، موتور هوش مصنوعی محلی Ollama، جستجوی عمیق RAG، امضای دیجیتال و محاسبات فیزیک هواشناسی`,
+        `   • قابلیت‌های نقشه راه آینده: اتصال سنسورهای اینترنت اشیاء (IoT) برای گازسنجی آنلاین، هوش مصنوعی بینایی ماشین برای تشخیص PPE و پیش‌بینی ریسک حوادث`,
+      ].join('\n'),
+      data: {
+        totalModules: 24,
+        hasBPMN: true,
+        hasIoTSupport: true,
+        databaseType: 'PostgreSQL with Drizzle ORM',
+        offlineSupport: true,
+      },
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Tool 21: Universal Cross-Module Deep Search (جستجوی هوشمند رکوردها در تمامی ماژول‌های سامانه)
    * Matches colloquial terms, names, codes, locations, or descriptions across all database tables.
    */
   async searchAcrossAllModules(rawQuery: string, includeSensitivePersonnel = true): Promise<AIToolResult | null> {
@@ -716,7 +906,7 @@ export class AIToolsRegistry {
     if (tokens.length === 0) return null;
 
     try {
-      const [permits, incidents, risks, warnings, ncs, fireEq, trainings, envLogs, personnelList] = await Promise.all([
+      const [permits, incidents, risks, warnings, ncs, fireEq, trainings, envLogs, personnelList, notifsList, usersList] = await Promise.all([
         ptwRepository.findAll().catch(() => []),
         incidentRepository.findAll().catch(() => []),
         db.select().from(schema.riskAssessments).catch(() => []),
@@ -726,6 +916,8 @@ export class AIToolsRegistry {
         db.select().from(schema.hseTrainings).catch(() => []),
         db.select().from(schema.environmentalLogs).catch(() => []),
         includeSensitivePersonnel ? db.select().from(schema.personnel).catch(() => []) : Promise.resolve([]),
+        db.select().from(schema.notifications).catch(() => []),
+        includeSensitivePersonnel ? db.select().from(schema.users).catch(() => []) : Promise.resolve([]),
       ]);
 
       const matchesToken = (text: string): number => {
@@ -815,6 +1007,24 @@ export class AIToolsRegistry {
         const blob = `${p.firstName || ''} ${p.lastName || ''} ${p.personnelCode || ''} ${p.nationalCode || ''} ${p.jobTitle || ''}`;
         if (matchesToken(blob) > 0) {
           matchedLines.push(`• [پرونده پرسنلی] نام: ${p.firstName} ${p.lastName} | کد پرسنلی: ${p.personnelCode} | سمت: ${p.jobTitle || '-'} | وضعیت: ${p.status}`);
+          if (matchedLines.length >= 12) break;
+        }
+      }
+
+      // Search Notifications & Alerts
+      for (const n of (notifsList || []) as any[]) {
+        const blob = `${n.title || ''} ${n.body || ''} ${n.sourceModule || ''} ${n.priority || ''}`;
+        if (matchesToken(blob) > 0) {
+          matchedLines.push(`• [اعلان/هشدار] عنوان: ${n.title} | اولویت: ${n.priority || '-'} | مبدأ: ${n.sourceModule || 'سامانه'}`);
+          if (matchedLines.length >= 12) break;
+        }
+      }
+
+      // Search Users & Roles
+      for (const u of (usersList || []) as any[]) {
+        const blob = `${u.username || ''} ${u.fullName || ''} ${u.email || ''} ${u.role || ''} ${u.personnelNumber || ''}`;
+        if (matchesToken(blob) > 0) {
+          matchedLines.push(`• [کاربر سامانه] نام: ${u.fullName || u.username} | نقش: ${u.role} | ایمیل: ${u.email}`);
           if (matchedLines.length >= 12) break;
         }
       }

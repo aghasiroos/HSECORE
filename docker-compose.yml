@@ -39,7 +39,7 @@ services:
       - "BACKUP_DIR=/app/backups"
       - "AI_ENGINE_ENABLED=${AI_ENGINE_ENABLED:-true}"
       - "AI_ENGINE_URL=${AI_ENGINE_URL:-http://hse-ai-engine:11434}"
-      - "AI_DEFAULT_CHAT_MODEL=${AI_DEFAULT_CHAT_MODEL:-qwen2.5:1.7b}"
+      - "AI_DEFAULT_CHAT_MODEL=${AI_DEFAULT_CHAT_MODEL:-qwen2.5:1.5b}"
       - "AI_DEFAULT_EMBED_MODEL=${AI_DEFAULT_EMBED_MODEL:-bge-m3}"
       - "AI_MAX_CONCURRENCY=${AI_MAX_CONCURRENCY:-1}"
       - "AI_REQUEST_TIMEOUT_MS=${AI_REQUEST_TIMEOUT_MS:-60000}"
@@ -157,11 +157,12 @@ services:
 
 networks:
   hse-network:
-    driver: bridge
+    name: ${DOCKER_NETWORK_NAME:-hse-network}
+    external: true
 
 volumes:
   hse_postgres_data:
     driver: local
   hse_ai_models:
     name: hse_ai_models
-    driver: local
+    external: true
