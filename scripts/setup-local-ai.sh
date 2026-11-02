@@ -39,7 +39,7 @@ docker info >/dev/null 2>&1 || fail "Docker daemon is not running."
 [[ -f "${COMPOSE_FILE}" ]] || fail "docker-compose.server.yml is missing."
 
 # Add only missing AI keys; never replace values already configured by the installer.
-ensure_env_key "AI_ENGINE_ENABLED" "true"
+ensure_env_key "AI_ENGINE_ENABLED" "false"
 ensure_env_key "AI_ENGINE_URL" "http://hse-ai-engine:11434"
 ensure_env_key "AI_DEFAULT_CHAT_MODEL" "qwen2.5:1.7b"
 ensure_env_key "AI_DEFAULT_EMBED_MODEL" "bge-m3"
