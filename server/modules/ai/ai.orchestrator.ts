@@ -56,7 +56,7 @@ export const COMPREHENSIVE_HSE_ASSISTANT: AIAssistantMetadata = {
   icon: 'BookOpen',
 };
 
-export const HSE_ASSISTANTS: Record<AIAssistantId, AIAssistantMetadata> = {
+export const HSE_ASSISTANTS: Partial<Record<AIAssistantId, AIAssistantMetadata>> = {
   GENERAL_HSE: COMPREHENSIVE_HSE_ASSISTANT,
 };
 
