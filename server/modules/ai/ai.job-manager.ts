@@ -207,7 +207,12 @@ export class AIJobManager {
 
       // Use one authoritative pull path for validation, API payload, timeout,
       // error handling, and installed-model inventory synchronization.
-      const result = await localAIProvider.pullModel(modelRef);
+      const result = await localAIProvider.pullModel(modelRef, async (progress, status) => {
+        await this.updateJob(jobId, {
+          progress: Math.min(95, Math.max(5, progress)),
+          message: status ? `دریافت مدل: ${status}` : 'در حال دریافت مدل از Ollama',
+        });
+      });
       if (!result.success) {
         await this.updateJob(jobId, {
           status: 'failed',
