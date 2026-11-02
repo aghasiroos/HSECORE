@@ -89,6 +89,8 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
+      - name: Audit npm dependencies for high-severity vulnerabilities
+        run: npm audit --audit-level=high
       - name: Run document ACL and prompt-security regression tests
         run: npm run test:ai-acl
       - name: Run JWT authentication regression tests
