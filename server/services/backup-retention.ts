@@ -1,6 +1,6 @@
 export interface BackupRetentionCandidate {
   backupId: string;
-  tag: 'manual' | 'scheduled' | 'pre_restore_safety' | 'pre_update' | string;
+  tag: string;
 }
 
 /**
