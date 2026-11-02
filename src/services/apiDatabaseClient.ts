@@ -40,7 +40,7 @@ function pruneCache() {
 function getCachedOrFetch<T>(key: string, fetcher: () => Promise<T>, ttlMs = CACHE_TTL_MS): Promise<T> {
   const sessionVersion = authSessionVersion;
   const cacheKeyVersion = cacheKeyVersions.get(key) ?? 0;
-  const inFlightKey = `${sessionVersion}:${key}`;
+  const inFlightKey = `${sessionVersion}:${cacheKeyVersion}:${key}`;
   const cached = queryCache.get(key);
   if (cached && Date.now() < cached.expiry) {
     return Promise.resolve(cached.data);
@@ -72,7 +72,7 @@ function getCachedOrFetch<T>(key: string, fetcher: () => Promise<T>, ttlMs = CAC
       }
       // Keep the invalidation version until every request for this key has settled.
       const hasPendingRequestForKey = Array.from(inFlightPromises.keys()).some(
-        (activeKey) => activeKey.slice(activeKey.indexOf(':') + 1) === key
+        (activeKey) => activeKey.slice(activeKey.indexOf(':', activeKey.indexOf(':') + 1) + 1) === key
       );
       if (!hasPendingRequestForKey) cacheKeyVersions.delete(key);
     });
@@ -264,7 +264,7 @@ function invalidateCacheKeys(...prefixes: string[]) {
   // In-flight keys are prefixed with the auth-session version: "<version>:<cache-key>".
   // Invalidate only matching requests so unrelated modules keep working normally.
   for (const activeKey of inFlightPromises.keys()) {
-    const key = activeKey.slice(activeKey.indexOf(':') + 1);
+    const key = activeKey.slice(activeKey.indexOf(':', activeKey.indexOf(':') + 1) + 1);
     if (matchesPrefix(key)) {
       cacheKeyVersions.set(key, (cacheKeyVersions.get(key) ?? 0) + 1);
     }
