@@ -207,7 +207,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
 
   const handleExportSession = () => {
     if (!activeSession || activeSession.messages.length === 0) return;
-    let report = `گزارش استنتاج هوش مصنوعی HSECORE AI\n`;
+    let report = `گزارش گفت‌وگوی هوش مصنوعی HSECORE\n`;
     report += `عنوان گفتگو: ${activeSession.title}\n`;
     report += `مدل: ${selectedModel || 'مدل محلی'}\n`;
     report += `تاریخ ثبت گزارش: ${new Date().toLocaleDateString('fa-IR')} ${new Date().toLocaleTimeString('fa-IR')}\n`;
@@ -217,10 +217,10 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
       const sender = m.role === 'user' ? 'شما' : COMPREHENSIVE_LEGAL_ASSISTANT.nameFa;
       report += `[${idx + 1}] ${sender} - ${m.timestamp}\n`;
       if (m.toolsUsed && m.toolsUsed.length > 0) {
-        report += `منابع داده سامانه‌ای: ${m.toolsUsed.join('، ')}\n`;
+        report += `ابزارها و منابع داده: ${m.toolsUsed.join('، ')}\n`;
       }
       if (m.citations && m.citations.length > 0) {
-        report += `مراجع قانونی و اسناد مرجع: ${m.citations.join('، ')}\n`;
+        report += `منابع و ارجاعات: ${m.citations.join('، ')}\n`;
       }
       report += `${m.content}\n\n--------------------------------------------------------\n\n`;
     });
@@ -739,6 +739,11 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
                 {installedModels.length === 0 ? <option value="">مدل گفت‌وگو نصب نیست</option> : installedModels.map(model => <option key={model.name} value={model.name}>{model.name}</option>)}
               </select>
             </div>
+            {installedModels.length === 0 && (
+              <div className="rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/20 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
+                هیچ مدل زبانیِ قابل گفت‌وگویی نصب نیست. برای شروع، یک مدل مولد را از مدیریت هوش مصنوعی نصب کنید؛ مدل‌های embedding برای چت قابل استفاده نیستند.
+              </div>
+            )}
             <div className="flex items-end gap-2">
             <textarea
               value={inputMessage}
