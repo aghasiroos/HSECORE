@@ -12,11 +12,15 @@ export interface ApiResponse<T = any> {
   error?: string;
 }
 
-// In-flight request deduplicator and short-lived TTL cache (3.5 seconds)
+// In-flight request deduplicator and short-lived TTL cache.
 const inFlightPromises = new Map<string, Promise<any>>();
 const queryCache = new Map<string, { data: any; expiry: number }>();
 const CACHE_TTL_MS = 15000;
 const MAX_CACHE_ENTRIES = 350;
+
+// Incremented whenever the authenticated session changes. Responses started in an
+// earlier session must never populate or satisfy the current session's cache.
+let authSessionVersion = 0;
 
 function pruneCache() {
   const now = Date.now();
@@ -32,29 +36,36 @@ function pruneCache() {
 }
 
 function getCachedOrFetch<T>(key: string, fetcher: () => Promise<T>, ttlMs = CACHE_TTL_MS): Promise<T> {
+  const sessionVersion = authSessionVersion;
+  const inFlightKey = `${sessionVersion}:${key}`;
   const cached = queryCache.get(key);
   if (cached && Date.now() < cached.expiry) {
     return Promise.resolve(cached.data);
   }
 
-  const existing = inFlightPromises.get(key);
+  const existing = inFlightPromises.get(inFlightKey);
   if (existing) {
     return existing;
   }
 
   const promise = fetcher()
     .then((result) => {
-      if (queryCache.size >= MAX_CACHE_ENTRIES) {
-        pruneCache();
+      // Ignore stale responses that complete after logout or account switching.
+      if (sessionVersion === authSessionVersion) {
+        if (queryCache.size >= MAX_CACHE_ENTRIES) {
+          pruneCache();
+        }
+        queryCache.set(key, { data: result, expiry: Date.now() + ttlMs });
       }
-      queryCache.set(key, { data: result, expiry: Date.now() + ttlMs });
       return result;
     })
     .finally(() => {
-      inFlightPromises.delete(key);
+      if (inFlightPromises.get(inFlightKey) === promise) {
+        inFlightPromises.delete(inFlightKey);
+      }
     });
 
-  inFlightPromises.set(key, promise);
+  inFlightPromises.set(inFlightKey, promise);
   return promise;
 }
 
@@ -63,6 +74,12 @@ function getCachedOrFetch<T>(key: string, fetcher: () => Promise<T>, ttlMs = CAC
 let inMemoryAuthToken: string | null = null;
 
 export function setAuthToken(token: string | null): void {
+  // Clear user-scoped cached data on login, account switch, and every logout.
+  if (token !== inMemoryAuthToken || token === null) {
+    authSessionVersion += 1;
+    queryCache.clear();
+    inFlightPromises.clear();
+  }
   inMemoryAuthToken = token;
   try {
     if (typeof window !== 'undefined') {
