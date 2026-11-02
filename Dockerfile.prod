@@ -64,7 +64,7 @@ RUN apk add --no-cache \
     ttf-dejavu \
     ttf-freefont \
     font-noto-arabic && \
-    fc-cache -f 2>/dev/null || true
+    fc-cache -f
 
 ARG APP_VERSION=0.2.8
 ARG BUILD_ID=unknown
