@@ -36,6 +36,7 @@ async function run() {
   aiOrchestrator.processChat = (async (request: any) => {
     chatCalls++;
     capturedChatRequest = request;
+    if (typeof request.onToken === 'function') request.onToken('گزارش آزمایشی بر پایه داده‌های مجاز');
     return {
       success: true, reply: 'گزارش آزمایشی بر پایه داده‌های مجاز', assistantId: 'GENERAL_HSE',
       toolsUsed: ['ماژول پروانه کار'], citations: ['ماژول پروانه کار'], durationMs: 12,
@@ -186,6 +187,7 @@ async function run() {
     });
     const streamPayload = await allModulesChat.text();
     assert.equal(allModulesChat.status, 200);
+    assert.match(streamPayload, /"token":"گزارش آزمایشی بر پایه داده‌های مجاز"/);
     assert.match(streamPayload, /"toolsUsed":\["ماژول پروانه کار"\]/);
     assert.equal(chatCalls, 2);
     assert.deepEqual(capturedChatRequest.selectedModules, ['all']);
