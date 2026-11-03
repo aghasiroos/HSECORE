@@ -89,7 +89,7 @@ export class AIOrchestrator {
       'همه ماژول های سامانه', 'گزارش همه ماژول ها', 'overall system report',
       'system-wide analysis', 'all modules',
     ];
-    const selectAll = selected.has('all') || allScopeTerms.some(term => norm.includes(normalizePersianText(term)));
+    const selectAll = selected.has('all') || (selected.size === 0 && allScopeTerms.some(term => norm.includes(normalizePersianText(term))));
     const moduleAliases: Record<string, string[]> = {
       'dashboard': ['reports', 'non_conformances'],
       'reports': ['non_conformances'],
@@ -416,12 +416,12 @@ export class AIOrchestrator {
       ? request.selectedModules.map(id => String(id).trim().toLowerCase()).filter(id => /^[a-z0-9_-]{1,80}$/.test(id)).slice(0, 40)
       : [];
     const normalizedRequest = normalizePersianText(sanitized);
-    const requestAllScope = selectedModules.includes('all') || [
+    const requestAllScope = selectedModules.includes('all') || (selectedModules.length === 0 && [
       'گزارش کلی سامانه', 'گزارش جامع سامانه', 'تحلیل کلی سامانه',
       'تحلیل جامع سامانه', 'عملکرد کل سامانه', 'تمام ماژول های سامانه',
       'همه ماژول های سامانه', 'گزارش همه ماژول ها', 'overall system report',
       'system-wide analysis', 'all modules',
-    ].some(term => normalizedRequest.includes(normalizePersianText(term)));
+    ].some(term => normalizedRequest.includes(normalizePersianText(term))));
     const toolResults = await this.resolveToolsToExecute(sanitized, request.allowTools ?? true, userContext, selectedModules);
     const toolsUsed = toolResults.map(t => t.titleFa);
     const citations: string[] = [
