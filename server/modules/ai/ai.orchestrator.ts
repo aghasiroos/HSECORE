@@ -719,6 +719,19 @@ export class AIOrchestrator {
       { moduleId: 'fire-dashboard', moduleNameFa: 'داشبورد واحد آتش‌نشانی', connected: true, tools: toolMap.fire, assistantIds: ['GENERAL_HSE'] },
       { moduleId: 'ai-assistant', moduleNameFa: 'هوش مصنوعی HSECORE', connected: false, tools: [], assistantIds: ['GENERAL_HSE'], notes: 'این بخش محیط گفتگو است، نه منبع داده تحلیلی' },
       { moduleId: 'profile', moduleNameFa: 'شناسنامه و تنظیمات کاربری', connected: false, tools: [], assistantIds: ['GENERAL_HSE'], notes: 'اطلاعات حساب کاربر از تحلیل عمومی مستثناست' },
+      { moduleId: 'comprehensive-dashboard', moduleNameFa: 'داشبورد جامع بهداشت و محیط زیست', connected: true, tools: [...toolMap.health, ...toolMap.environment], assistantIds: ['GENERAL_HSE'], parentModuleId: 'health-env', level: 1 },
+      { moduleId: 'safety-unit-dashboard', moduleNameFa: 'داشبورد واحد ایمنی', connected: true, tools: toolMap.five_s, assistantIds: ['GENERAL_HSE'], parentModuleId: 'safety-unit', level: 1 },
+      { moduleId: 'ptw-audit-dashboard', moduleNameFa: 'داشبورد ممیزی پروانه کار', connected: true, tools: toolMap.ptw, assistantIds: ['GENERAL_HSE'], parentModuleId: 'ptw-audit', level: 1 },
+      { moduleId: 'ptw-audit-list', moduleNameFa: 'فهرست ممیزی‌های پروانه کار', connected: true, tools: toolMap.ptw, assistantIds: ['GENERAL_HSE'], parentModuleId: 'ptw-audit', level: 1 },
+      { moduleId: 'risk-overview', moduleNameFa: 'نمای کلی ارزیابی ریسک', connected: true, tools: toolMap.risks, assistantIds: ['GENERAL_HSE'], parentModuleId: 'risk', level: 1 },
+      { moduleId: 'risk-method-records', moduleNameFa: 'سوابق روش‌های ارزیابی ریسک', connected: true, tools: toolMap.risks, assistantIds: ['GENERAL_HSE'], parentModuleId: 'risk', level: 1 },
+      { moduleId: 'risk-form-new', moduleNameFa: 'فرم ثبت ارزیابی ریسک', connected: false, tools: [], assistantIds: ['GENERAL_HSE'], parentModuleId: 'risk', level: 1, notes: 'فرم عملیاتی ثبت؛ منبع تحلیل مستقل نیست' },
+      { moduleId: 'risk-form-edit', moduleNameFa: 'فرم ویرایش ارزیابی ریسک', connected: false, tools: [], assistantIds: ['GENERAL_HSE'], parentModuleId: 'risk', level: 1, notes: 'فرم عملیاتی ویرایش؛ منبع تحلیل مستقل نیست' },
+      { moduleId: 'process-catalog', moduleNameFa: 'کاتالوگ فرآیندهای HSE', connected: true, tools: toolMap.workflows, assistantIds: ['GENERAL_HSE'], parentModuleId: 'process-management', level: 1 },
+      { moduleId: 'process-tasks', moduleNameFa: 'کارتابل هوشمند و تأییدات', connected: true, tools: toolMap.workflows, assistantIds: ['GENERAL_HSE'], parentModuleId: 'process-management', level: 1 },
+      { moduleId: 'process-tracker', moduleNameFa: 'رهگیری زنده پرونده‌ها', connected: true, tools: toolMap.workflows, assistantIds: ['GENERAL_HSE'], parentModuleId: 'process-management', level: 1 },
+      { moduleId: 'process-designer', moduleNameFa: 'استودیو طراحی فرآیند BPMN', connected: false, tools: [], assistantIds: ['GENERAL_HSE'], parentModuleId: 'process-management', level: 1, notes: 'محیط طراحی/ویرایش؛ منبع داده تحلیلی نیست' },
+      { moduleId: 'process-rules', moduleNameFa: 'قوانین اتوماسیون و SLA', connected: true, tools: toolMap.workflows, assistantIds: ['GENERAL_HSE'], parentModuleId: 'process-management', level: 1 },
 
     ];
 
@@ -737,6 +750,12 @@ export class AIOrchestrator {
       'fire-boxs': 'fire', 'foam-pakages': 'fire', 'fm-200': 'fire',
       'deluge-sprinklers': 'fire', 'gas-detectors': 'fire', 'emergency-eyewash': 'fire',
       'safety-checklists': 'safety-unit',
+      'comprehensive-dashboard': 'health-env',
+      'safety-unit-dashboard': 'safety-unit',
+      'ptw-audit-dashboard': 'ptw-audit', 'ptw-audit-list': 'ptw-audit',
+      'risk-overview': 'risk', 'risk-method-records': 'risk', 'risk-form-new': 'risk', 'risk-form-edit': 'risk',
+      'process-catalog': 'process-management', 'process-tasks': 'process-management',
+      'process-tracker': 'process-management', 'process-designer': 'process-management', 'process-rules': 'process-management',
       'org-procedures': 'documents', 'equipment-certificates': 'documents',
       'org-forms-checklists': 'documents', 'other-hse-docs': 'documents',
       'personnel-history': 'personnel', 'pending-documents': 'workflows',
@@ -799,6 +818,7 @@ export class AIOrchestrator {
 
     addConfiguredTree(persisted.system);
     if (Array.isArray(persisted.healthEnvironment)) {
+      addConfiguredTree(persisted.healthEnvironment.filter((item: any) => item?.group === 'root'), 'health-env');
       addConfiguredTree(persisted.healthEnvironment.filter((item: any) => item?.group === 'health'), 'health');
       addConfiguredTree(persisted.healthEnvironment.filter((item: any) => item?.group === 'env'), 'environment');
       addConfiguredTree(persisted.healthEnvironment.filter((item: any) => !item?.group), 'health');
