@@ -19,6 +19,7 @@ async function run() {
   const originalCanAccess = aiRagService.canAccessDocument;
   const originalDelete = aiRagService.deleteDocument;
   const originalProcessChat = aiOrchestrator.processChat;
+  const originalGetModuleCoverage = aiOrchestrator.getModuleCoverage;
 
   let indexCalls = 0;
   let deleteCalls = 0;
@@ -32,6 +33,11 @@ async function run() {
   }) as typeof aiRagService.indexDocument;
 
   aiRagService.canAccessDocument = (async () => canAccessResult) as typeof aiRagService.canAccessDocument;
+
+  aiOrchestrator.getModuleCoverage = (async () => [
+    { moduleId: 'ptw', moduleNameFa: 'پروانه کار', connected: true, tools: ['ptw_summary'], assistantIds: ['GENERAL_HSE'] },
+    { moduleId: 'ptw-test-tab', moduleNameFa: 'تب آزمون پروانه کار', connected: true, tools: ['ptw_summary'], assistantIds: ['GENERAL_HSE'], parentModuleId: 'ptw', level: 1 },
+  ]) as typeof aiOrchestrator.getModuleCoverage;
 
   aiOrchestrator.processChat = (async (request: any) => {
     chatCalls++;
@@ -164,6 +170,12 @@ async function run() {
     assert.equal(chatCalls, 0);
     console.log('PASS AI analytics chat requires authentication');
 
+    const moduleCoverage = await request('/coverage', { method: 'GET', role: 'ADMIN' });
+    const coveragePayload = await moduleCoverage.json() as any;
+    assert.equal(moduleCoverage.status, 200);
+    assert.equal(coveragePayload.data.some((item: any) => item.moduleId === 'ptw-test-tab' && item.parentModuleId === 'ptw'), true);
+    console.log('PASS slash picker coverage exposes hierarchical module and tab metadata');
+
     const selectedModuleChat = await request('/chat', {
       method: 'POST',
       role: 'ADMIN',
@@ -193,12 +205,13 @@ async function run() {
     console.log('PASS /ALL streaming response includes the orchestrator source metadata');
 
 
-    console.log('AI HTTP route authorization and analytics tests: 11/11 passed');
+    console.log('AI HTTP route authorization and analytics tests: 12/12 passed');
   } finally {
     aiRagService.indexDocument = originalIndex;
     aiRagService.canAccessDocument = originalCanAccess;
     aiRagService.deleteDocument = originalDelete;
     aiOrchestrator.processChat = originalProcessChat;
+    aiOrchestrator.getModuleCoverage = originalGetModuleCoverage;
     await new Promise<void>((resolve, reject) => {
       server.close(error => error ? reject(error) : resolve());
     });
