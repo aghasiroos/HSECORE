@@ -747,7 +747,7 @@ export class AIOrchestrator {
         ['warnings', 'گزارش اخطارها و انضباطی', toolMap.warnings],
         ['trir', 'گزارش حوادث و TRIR', toolMap.incidents],
       ] as const).map(([tab, title, tools]) => ({
-        moduleId: \`reports-\${tab}\`, moduleNameFa: \`گزارشات / \${title}\`,
+        moduleId: `reports-${tab}`, moduleNameFa: `گزارشات / ${title}`,
         connected: true, tools, assistantIds: ['GENERAL_HSE'] as AIAssistantId[],
         parentModuleId: 'reports', level: 1,
         notes: 'این تب از ابزار داده‌خوان ماژول مرجع و خلاصه گزارش مدیریتی والد استفاده می‌کند؛ تفکیک مستقل فقط در صورت وجود داده واقعی اعلام می‌شود.',
@@ -765,7 +765,7 @@ export class AIOrchestrator {
         ['inspections', 'سوابق بازرسی‌ها'], ['referrals', 'سوابق ارجاعات'], ['warnings', 'سوابق اخطارها'],
         ['ppe', 'سوابق تجهیزات حفاظت فردی'], ['attachments', 'پیوست‌های پرونده'], ['audit-logs', 'سوابق ممیزی پرونده'],
       ] as const).map(([tab, title]) => ({
-        moduleId: \`personnel-history-\${tab}\`, moduleNameFa: \`پرونده پرسنل / \${title}\`,
+        moduleId: `personnel-history-${tab}`, moduleNameFa: `پرونده پرسنل / ${title}`,
         connected: false, tools: [], assistantIds: ['GENERAL_HSE'] as AIAssistantId[],
         parentModuleId: 'personnel-history', level: 2,
         notes: 'تب واقعی رابط کاربری شناسایی شده است؛ ابزار داده‌خوان مستقل و مجاز برای این تب هنوز ثبت نشده است.',
@@ -778,7 +778,7 @@ export class AIOrchestrator {
         ['confined-space', 'الحاقی فضای بسته'], ['electrical-isolation', 'الحاقی جداسازی الکتریکی'],
         ['radiation', 'الحاقی منابع پرتوزا'], ['vehicle-crane', 'الحاقی جرثقیل و خودرو'],
       ] as const).map(([tab, title]) => ({
-        moduleId: \`ptw-\${tab}\`, moduleNameFa: \`پروانه کار / \${title}\`,
+        moduleId: `ptw-${tab}`, moduleNameFa: `پروانه کار / ${title}`,
         connected: true, tools: toolMap.ptw, assistantIds: ['GENERAL_HSE'] as AIAssistantId[],
         parentModuleId: 'ptw', level: 2,
         notes: 'ابزار فعلی خلاصه تجمیعی PTW است؛ آمار مستقل این نوع پروانه تا زمان افزودن فیلتر اختصاصی قابل ادعا نیست.',
@@ -788,7 +788,7 @@ export class AIOrchestrator {
       ...([
         ['reports', 'گزارش‌ها و سوابق حوادث'], ['pyramid', 'هرم حوادث'], ['stats', 'آمار و تحلیل حوادث'],
       ] as const).map(([tab, title]) => ({
-        moduleId: \`incidents-\${tab}\`, moduleNameFa: \`حوادث / \${title}\`,
+        moduleId: `incidents-${tab}`, moduleNameFa: `حوادث / ${title}`,
         connected: true, tools: toolMap.incidents, assistantIds: ['GENERAL_HSE'] as AIAssistantId[],
         parentModuleId: 'incidents', level: 1,
         notes: 'ابزار فعلی خلاصه تجمیعی حوادث است؛ تفکیک اختصاصی تب تا زمان افزودن Adapter مستقل تضمین نشده است.',
@@ -806,7 +806,7 @@ export class AIOrchestrator {
         ['needs', 'نیازسنجی آموزشی'], ['course', 'سوابق آموزش پرسنل مجتمع'],
         ['contractor', 'سوابق آموزش شرکت‌ها و پیمانکاران'],
       ] as const).map(([tab, title]) => ({
-        moduleId: \`training-\${tab}\`, moduleNameFa: \`آموزش / \${title}\`,
+        moduleId: `training-${tab}`, moduleNameFa: `آموزش / ${title}`,
         connected: true, tools: toolMap.training, assistantIds: ['GENERAL_HSE'] as AIAssistantId[],
         parentModuleId: 'training', level: 1,
         notes: 'ابزار فعلی خلاصه تجمیعی آموزش است؛ تفکیک اختصاصی تب تا زمان افزودن Adapter مستقل تضمین نشده است.',
@@ -816,7 +816,7 @@ export class AIOrchestrator {
         ['issuance', 'دفتر تحویل و تحول پرسنل'], ['catalog', 'کاتالوگ تجهیزات حفاظت فردی'],
         ['osha-guide', 'راهنما و الزامات استاندارد OSHA'], ['inspections', 'بازرسی تجهیزات حفاظت فردی'],
       ] as const).map(([tab, title]) => ({
-        moduleId: \`ppe-\${tab}\`, moduleNameFa: \`تجهیزات حفاظت فردی / \${title}\`,
+        moduleId: `ppe-${tab}`, moduleNameFa: `تجهیزات حفاظت فردی / ${title}`,
         connected: true, tools: toolMap.ppe, assistantIds: ['GENERAL_HSE'] as AIAssistantId[],
         parentModuleId: 'ppe', level: 1,
         notes: 'ابزار فعلی خلاصه تجمیعی PPE است؛ تفکیک اختصاصی تب تا زمان افزودن Adapter مستقل تضمین نشده است.',
@@ -835,7 +835,7 @@ export class AIOrchestrator {
         ['branding', 'لوگو و آرم رسمی سامانه'], ['main', 'منوی سراسری و گروه‌ها'],
         ['health-env', 'پیکربندی بهداشت و محیط زیست'], ['fire-dept', 'پیکربندی آتش‌نشانی'],
       ] as const).map(([tab, title]) => ({
-        moduleId: \`system-\${tab}\`, moduleNameFa: \`تنظیمات سامانه / \${title}\`,
+        moduleId: `system-${tab}`, moduleNameFa: `تنظیمات سامانه / ${title}`,
         connected: true, tools: toolMap.settings, assistantIds: ['GENERAL_HSE'] as AIAssistantId[],
         parentModuleId: 'system', level: 1,
         notes: 'فقط برای مدیر سامانه؛ ابزار فعلی صرفاً خلاصه تنظیمات و وضعیت پشتیبان‌گیری را ارائه می‌کند.',
@@ -848,7 +848,7 @@ export class AIOrchestrator {
         ['lab', 'آزمایشگاه'], ['bmi', 'شاخص BMI'], ['reports', 'گزارش‌های هوشمند'],
         ['compare', 'مقایسه سنواتی'], ['personcompare', 'مقایسه فردی'],
       ] as const).map(([tab, title]) => ({
-        moduleId: \`periodic-exams-\${tab}\`, moduleNameFa: \`معاینات ادواری / \${title}\`,
+        moduleId: `periodic-exams-${tab}`, moduleNameFa: `معاینات ادواری / ${title}`,
         connected: true, tools: toolMap.health, assistantIds: ['GENERAL_HSE'] as AIAssistantId[],
         parentModuleId: 'periodic-exams', level: 2,
         notes: 'ابزار فعلی در سطح تجمیعی طب کار پاسخ می‌دهد؛ تفکیک مستقل این تب تضمین نشده است.',
