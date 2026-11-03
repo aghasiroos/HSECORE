@@ -54,6 +54,7 @@ export interface AIChatRequest {
   model?: string;
   /** Explicit, permission-checked module/submodule scope selected from the live catalog. */
   selectedModuleIds?: string[];
+  contextTokens?: number;
 }
 
 export interface AIChatResponse {
