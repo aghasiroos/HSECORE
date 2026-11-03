@@ -48,6 +48,7 @@ const TOOL_ACCESS: Record<string, { permission?: string; adminOnly?: boolean; ex
   notifications_summary: { permission: 'notifications:read' },
   users_roles_summary: { adminOnly: true },
   settings_backup_summary: { adminOnly: true },
+  system_architecture_summary: { adminOnly: true },
 };
 
 const DEFAULT_MODULES: ModuleDefinition[] = [
@@ -73,7 +74,7 @@ const DEFAULT_MODULES: ModuleDefinition[] = [
   { id: 'process-management', titleFa: 'مدیریت فرآیندها (BPMN)', titleEn: 'Process Management', tools: ['workflow_referrals_summary'], permission: 'workflows:read' },
   { id: 'notifications', titleFa: 'مدیریت هشدار و اعلان‌ها', titleEn: 'Alerts & Notifications Management', tools: ['notifications_summary'], permission: 'notifications:read' },
   { id: 'user-mgmt', titleFa: 'مدیریت کاربران و دسترسی‌ها', titleEn: 'User Management & RBAC', tools: ['users_roles_summary'], adminOnly: true },
-  { id: 'system', titleFa: 'تنظیمات و ساختار سازمانی', titleEn: 'System Settings & Architecture', tools: ['settings_backup_summary'], adminOnly: true },
+  { id: 'system', titleFa: 'تنظیمات و ساختار سازمانی', titleEn: 'System Settings & Architecture', tools: ['settings_backup_summary', 'system_architecture_summary'], adminOnly: true },
   { id: 'profile', titleFa: 'شناسنامه و تنظیمات کاربری', titleEn: 'My Personal Profile & Security' },
 ];
 
