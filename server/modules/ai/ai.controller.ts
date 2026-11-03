@@ -172,7 +172,7 @@ export class AIController {
               signal: abortController.signal,
               onToken: token => {
                 if (!res.destroyed && !res.writableEnded) {
-                  res.write(`data: ${JSON.stringify({ token })}\\n\\n`);
+                  res.write(`data: ${JSON.stringify({ token })}\n\n`);
                   (res as any).flush?.();
                 }
               },
@@ -184,13 +184,13 @@ export class AIController {
                 durationMs: result.durationMs,
                 toolsUsed: result.toolsUsed,
                 citations: result.citations,
-              })}\\n\\n`);
+              })}\n\n`);
               (res as any).flush?.();
               res.end();
             }
           } catch (analysisError: any) {
             if (!res.destroyed && !res.writableEnded) {
-              res.write(`data: ${JSON.stringify({ error: analysisError?.message || 'تحلیل ماژول‌های انتخاب‌شده ناموفق بود.' })}\\n\\n`);
+              res.write(`data: ${JSON.stringify({ error: analysisError?.message || 'تحلیل ماژول‌های انتخاب‌شده ناموفق بود.' })}\n\n`);
               (res as any).flush?.();
               res.end();
             }
