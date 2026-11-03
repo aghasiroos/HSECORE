@@ -55,8 +55,6 @@ ensure_env_key "AI_NUM_PARALLEL" "1"
 ensure_env_key "AI_MAX_LOADED_MODELS" "1"
 ensure_env_key "AI_KEEP_ALIVE" "5m"
 
-apply_ai_resource_budget "${ENV_FILE}"
-
 AI_ENABLED="$(get_env_value AI_ENGINE_ENABLED | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]\"')"
 if [[ "${AI_ENABLED}" != "true" ]]; then
   if [[ -t 0 ]]; then
@@ -76,6 +74,8 @@ if [[ "${AI_ENABLED}" != "true" ]]; then
     fail "AI_ENGINE_ENABLED is false. Enable it explicitly in the AI management menu or .env before non-interactive setup."
   fi
 fi
+apply_ai_resource_budget "${ENV_FILE}"
+
 PRIMARY_CHAT_MODEL="$(get_env_value AI_DEFAULT_CHAT_MODEL)"
 PRIMARY_EMBED_MODEL="$(get_env_value AI_DEFAULT_EMBED_MODEL)"
 PRIMARY_CHAT_MODEL="${PRIMARY_CHAT_MODEL:-qwen2.5:1.5b}"
