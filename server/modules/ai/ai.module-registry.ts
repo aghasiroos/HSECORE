@@ -60,7 +60,7 @@ const DEFAULT_MODULES: ModuleDefinition[] = [
   { id: 'fire-dept', titleFa: 'واحد آتش‌نشانی و امداد', titleEn: 'Fire Department & Emergency', tools: ['fire_safety_summary'], permission: 'fire:read' },
   { id: 'health-env', titleFa: 'واحد بهداشت و محیط زیست', titleEn: 'Health & Environment Department', tools: ['health_medical_summary', 'nutrition_high_risk_summary', 'environment_summary'] },
   { id: 'permit', titleFa: 'پروانه کار ایمن (PTW)', titleEn: 'Permit to Work (PTW)', tools: ['ptw_summary'], permission: 'ptw:read' },
-  { id: 'ptw-audit', titleFa: 'ممیزی پروانه‌های کار (PTW Audit)', titleEn: 'Permit to Work Audit System', tools: ['ptw_summary'], permission: 'ptw:read' },
+  { id: 'ptw-audit', titleFa: 'ممیزی پروانه‌های کار (PTW Audit)', titleEn: 'Permit to Work Audit System', permission: 'ptw:read' },
   { id: 'risk', titleFa: 'ارزیابی ریسک هوشمند (AI JSA)', titleEn: 'AI Risk Assessment (JSA/FMEA)', tools: ['risk_assessment_summary'], permission: 'risks:read' },
   { id: 'ppe', titleFa: 'تجهیزات حفاظت فردی (PPE)', titleEn: 'PPE Matrix Management', tools: ['ppe_summary'], permission: 'ppe:read' },
   { id: 'incidents', titleFa: 'گزارشات ناهنجاری و حوادث', titleEn: 'Safety Incidents & Anomalies', tools: ['incidents_summary'], permission: 'incidents:read' },
@@ -197,7 +197,7 @@ function toCatalogItem(definition: ModuleDefinition, user: UserContext, parentId
   const notes = !allowed
     ? 'برای مشاهده و تحلیل این بخش، مجوز دسترسی لازم را ندارید.'
     : connected
-      ? (definition.rag ? 'بازیابی مستندات از مسیر RAG انجام می‌شود.' : undefined)
+      ? (definition.rag ? 'بازیابی مستندات از مسیر RAG انجام می‌شود.' : 'خلاصه‌ساز داده متصل است؛ این اتصال لزوماً همه تب‌ها، فرم‌ها و فیلدهای این ماژول را پوشش نمی‌دهد.')
       : 'در حال حاضر Adapter خواندن داده برای این بخش متصل نیست؛ مدل نباید درباره داده‌های آن حدس بزند.';
   return {
     moduleId: parentId ? `${parentId}:${definition.id}` : definition.id,
