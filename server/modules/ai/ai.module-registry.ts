@@ -242,10 +242,14 @@ function canAccessDefinition(user: UserContext, definition: ModuleDefinition): b
 }
 
 function mergeConfiguredDefinitions(defaults: ModuleDefinition[], configured: any[] | null): ModuleDefinition[] {
-  if (!configured) return defaults.map(item => ({ ...item }));
   const byId = new Map(defaults.map(item => [item.id, { ...item }]));
+  if (!configured) return Array.from(byId.values());
+
+  const ordered: ModuleDefinition[] = [];
+  const seen = new Set<string>();
   for (const item of configured) {
-    if (!item || typeof item.key !== 'string' || !item.key.trim()) continue;
+    if (!item || typeof item.key !== 'string' || !item.key.trim() || seen.has(item.key)) continue;
+    seen.add(item.key);
     const current = byId.get(item.key);
     const next: ModuleDefinition = current ? { ...current } : {
       id: item.key,
@@ -255,9 +259,12 @@ function mergeConfiguredDefinitions(defaults: ModuleDefinition[], configured: an
     if (typeof item.titleFa === 'string') next.titleFa = item.titleFa;
     if (typeof item.titleEn === 'string') next.titleEn = item.titleEn;
     if (typeof item.enabled === 'boolean') next.enabled = item.enabled;
-    byId.set(item.key, next);
+    ordered.push(next);
+    byId.delete(item.key);
   }
-  return Array.from(byId.values());
+  // Match the UI merger: preserve saved order, then append newly shipped defaults.
+  ordered.push(...Array.from(byId.values()));
+  return ordered;
 }
 
 function toCatalogItem(definition: ModuleDefinition, user: UserContext, parentId?: string, parentAllowed = true): AIModuleCatalogItem {
