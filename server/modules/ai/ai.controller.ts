@@ -135,6 +135,8 @@ export class AIController {
         history,
         model: typeof body.model === 'string' ? body.model : undefined,
         selectedModules,
+        contextTokens: Number.isInteger(body.contextTokens) && body.contextTokens >= 1024 && body.contextTokens <= 32768
+          ? body.contextTokens : undefined,
         allowTools: true,
       }, req.user);
 
