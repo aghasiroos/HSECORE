@@ -12,6 +12,8 @@ NETWORK_NAME="hse-network"
 COMPOSE_FILE="docker-compose.server.yml"
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${PROJECT_DIR}/.env"
+RESOURCE_BUDGET_SCRIPT="${PROJECT_DIR}/scripts/ai-resource-budget.sh"
+source "${RESOURCE_BUDGET_SCRIPT}"
 
 # Colors
 RED='\033[0;31m'
@@ -97,7 +99,11 @@ cmd_status() {
     docker stats "${CONTAINER_NAME}" --no-stream --format "  CPU: {{.CPUPerc}} | RAM: {{.MemUsage}} ({{.MemPerc}}) | Net: {{.NetIO}}" || true
 
     echo ""
-    echo -e "${BOLD}3. Healthcheck & Model Engine API:${NC}"
+    echo -e "${BOLD}3. Cgroup Memory & OOM Diagnostics:${NC}"
+    docker exec "${CONTAINER_NAME}" sh -c 'for f in /sys/fs/cgroup/memory.max /sys/fs/cgroup/memory.current /sys/fs/cgroup/memory.events; do [ ! -r "$f" ] || { echo "--- $f"; cat "$f"; }; done' 2>/dev/null || true
+    echo ""
+
+    echo -e "${BOLD}4. Healthcheck & Model Engine API:${NC}"
     if docker exec "${CONTAINER_NAME}" ollama list >/dev/null 2>&1; then
       echo -e "  Internal Engine : ${GREEN}HEALTHY (Ollama responding internally)${NC}"
     else
@@ -105,7 +111,7 @@ cmd_status() {
     fi
 
     echo ""
-    echo -e "${BOLD}4. Installed Models in Persistent Storage:${NC}"
+    echo -e "${BOLD}5. Installed Models in Persistent Storage:${NC}"
     docker exec "${CONTAINER_NAME}" ollama list 2>/dev/null || echo "  (None or failed to query)"
   else
     echo -e "  Container : ${RED}${CONTAINER_NAME} (STOPPED or NOT CREATED)${NC}"
@@ -120,6 +126,7 @@ cmd_start() {
   ensure_env_file
   ensure_compose_file
   verify_container_compose_owner || return 1
+  apply_ai_resource_budget "${ENV_FILE}"
   echo -e "${BLUE}[*] Starting HSECORE Local AI Engine container...${NC}"
   docker compose -f "${PROJECT_DIR}/${COMPOSE_FILE}" --env-file "${ENV_FILE}" up -d --no-deps hse-ai-engine
   echo -e "${BLUE}[*] Waiting for engine healthcheck...${NC}"
@@ -383,6 +390,7 @@ cmd_update() {
     return 1
   fi
   verify_container_compose_owner || return 1
+  apply_ai_resource_budget "${ENV_FILE}"
   echo -e "${BLUE}[*] Updating configured Ollama image: ${image_tag}${NC}"
   docker compose -f "${PROJECT_DIR}/${COMPOSE_FILE}" --env-file "${ENV_FILE}" pull hse-ai-engine
   docker compose -f "${PROJECT_DIR}/${COMPOSE_FILE}" --env-file "${ENV_FILE}" up -d --no-deps hse-ai-engine

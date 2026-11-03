@@ -10,6 +10,7 @@ COMPOSE_FILE="${PROJECT_DIR}/docker-compose.server.yml"
 ENV_FILE="${PROJECT_DIR}/.env"
 CONTAINER_NAME="hse-ai-engine"
 APP_CONTAINER_NAME="hse-enterprise-app"
+source "${PROJECT_DIR}/scripts/ai-resource-budget.sh"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -47,6 +48,10 @@ ensure_env_key "AI_DEFAULT_EMBED_MODEL" "bge-m3"
 ensure_env_key "OLLAMA_IMAGE" "ollama/ollama:0.40.13"
 ensure_env_key "AI_BIND_IP" "127.0.0.1"
 ensure_env_key "AI_HOST_PORT" "11434"
+ensure_env_key "AI_CONTEXT_TOKENS" "2048"
+ensure_env_key "AI_NUM_PARALLEL" "1"
+ensure_env_key "AI_MAX_LOADED_MODELS" "1"
+ensure_env_key "AI_KEEP_ALIVE" "5m"
 
 AI_ENABLED="$(get_env_value AI_ENGINE_ENABLED | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]\"')"
 if [[ "${AI_ENABLED}" != "true" ]]; then
@@ -67,6 +72,8 @@ if [[ "${AI_ENABLED}" != "true" ]]; then
     fail "AI_ENGINE_ENABLED is false. Enable it explicitly in the AI management menu or .env before non-interactive setup."
   fi
 fi
+apply_ai_resource_budget "${ENV_FILE}"
+
 PRIMARY_CHAT_MODEL="$(get_env_value AI_DEFAULT_CHAT_MODEL)"
 PRIMARY_EMBED_MODEL="$(get_env_value AI_DEFAULT_EMBED_MODEL)"
 PRIMARY_CHAT_MODEL="${PRIMARY_CHAT_MODEL:-qwen2.5:1.5b}"

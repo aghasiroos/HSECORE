@@ -7,6 +7,7 @@ PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${PROJECT_DIR}/.env"
 COMPOSE_FILE="${PROJECT_DIR}/docker-compose.server.yml"
 CONTAINER_NAME="hse-ai-engine"
+source "${PROJECT_DIR}/scripts/ai-resource-budget.sh"
 
 if [[ ! -f "${ENV_FILE}" ]]; then
   echo "[AI] .env not found; skipping optional local AI startup."
@@ -20,6 +21,7 @@ if [[ "${AI_ENABLED}" != "true" && "${AI_ENABLED}" != "1" && "${AI_ENABLED}" != 
 fi
 
 [[ -f "${COMPOSE_FILE}" ]] || { echo "[AI] docker-compose.server.yml not found." >&2; exit 1; }
+apply_ai_resource_budget "${ENV_FILE}"
 docker compose -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" config --quiet
 
 EXISTING_ID="$(docker ps -aq --filter "name=^/${CONTAINER_NAME}$" | head -n1 || true)"

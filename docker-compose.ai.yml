@@ -19,7 +19,7 @@ services:
       - "OLLAMA_HOST=0.0.0.0:11434"
       - "OLLAMA_NUM_PARALLEL=${AI_NUM_PARALLEL:-1}"
       - "OLLAMA_MAX_LOADED_MODELS=${AI_MAX_LOADED_MODELS:-1}"
-      - "OLLAMA_KEEP_ALIVE=${AI_KEEP_ALIVE:-15m}"
+      - "OLLAMA_KEEP_ALIVE=${AI_KEEP_ALIVE:-5m}"
       - "OLLAMA_FLASH_ATTENTION=0"
       - "OLLAMA_ORIGINS="
       - "OMP_NUM_THREADS=${AI_CPU_THREADS:-4}"
@@ -36,7 +36,7 @@ services:
       resources:
         limits:
           cpus: "${AI_CPU_LIMIT:-4.0}"
-          memory: "${AI_MEMORY_LIMIT:-4608M}"
+          memory: "${AI_MEMORY_LIMIT:-8192M}"
         reservations:
           cpus: "1.0"
           memory: "1024M"

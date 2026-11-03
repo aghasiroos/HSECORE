@@ -43,7 +43,7 @@ services:
       - "AI_DEFAULT_EMBED_MODEL=${AI_DEFAULT_EMBED_MODEL:-bge-m3}"
       - "AI_MAX_CONCURRENCY=${AI_MAX_CONCURRENCY:-1}"
       - "AI_REQUEST_TIMEOUT_MS=${AI_REQUEST_TIMEOUT_MS:-180000}"
-      - "AI_CONTEXT_TOKENS=${AI_CONTEXT_TOKENS:-4096}"
+      - "AI_CONTEXT_TOKENS=${AI_CONTEXT_TOKENS:-2048}"
       - "AI_MAX_QUEUE_LENGTH=${AI_MAX_QUEUE_LENGTH:-10}"
       - "AI_CLOUD_FALLBACK_ENABLED=${AI_CLOUD_FALLBACK_ENABLED:-false}"
     volumes:
@@ -73,7 +73,7 @@ services:
       - "OLLAMA_HOST=0.0.0.0:11434"
       - "OLLAMA_NUM_PARALLEL=${AI_NUM_PARALLEL:-1}"
       - "OLLAMA_MAX_LOADED_MODELS=${AI_MAX_LOADED_MODELS:-1}"
-      - "OLLAMA_KEEP_ALIVE=${AI_KEEP_ALIVE:-15m}"
+      - "OLLAMA_KEEP_ALIVE=${AI_KEEP_ALIVE:-5m}"
       - "OLLAMA_FLASH_ATTENTION=0"
       - "OLLAMA_ORIGINS="
       # Keep Ollama HTTP API private to the Docker network; wildcard CORS is not needed.
@@ -88,7 +88,7 @@ services:
       resources:
         limits:
           cpus: "${AI_CPU_LIMIT:-4.0}"
-          memory: "${AI_MEMORY_LIMIT:-4608M}"
+          memory: "${AI_MEMORY_LIMIT:-8192M}"
         reservations:
           cpus: "1.0"
           memory: "1024M"
