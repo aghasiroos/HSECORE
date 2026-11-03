@@ -324,23 +324,16 @@ cmd_memory_tune() {
   echo -e "vCPU Cores : ${CYAN}${cores}${NC}"
   echo -e "Free Disk  : ${CYAN}${free_disk} GB${NC}"
 
-  if (( ram_mb >= 10000 )); then
-    calc_mem="$((ram_mb - 2560))M"
-  elif (( ram_mb >= 6000 )); then
-    calc_mem="$((ram_mb - 2048))M"
-  else
-    calc_mem="3584M"
-  fi
-
-  echo -e "${BLUE}[*] Calculated optimal AI Container Memory Limit: ${GREEN}${calc_mem}${NC} (leaving reserve for OS & DB)"
-  if grep -q "^AI_MEMORY_LIMIT=" "${ENV_FILE}"; then
-    sed -i "s|^AI_MEMORY_LIMIT=.*|AI_MEMORY_LIMIT=${calc_mem}|" "${ENV_FILE}"
-  else
-    echo "AI_MEMORY_LIMIT=${calc_mem}" >> "${ENV_FILE}"
-  fi
-  echo -e "${GREEN}[✓] Updated AI_MEMORY_LIMIT to ${calc_mem} in ${ENV_FILE}.${NC}"
+  # This is an explicit auto-tune action: mark the limit as managed, then use
+  # the same tested budget calculation as installation and runtime startup.
+  ai_env_set AI_MEMORY_LIMIT_AUTO true "${ENV_FILE}"
+  apply_ai_resource_budget "${ENV_FILE}"
+  calc_mem="$(ai_env_get AI_MEMORY_LIMIT "${ENV_FILE}")"
+  [[ -n "${calc_mem}" ]] || { echo -e "${RED}[ERROR] Could not calculate AI memory budget.${NC}" >&2; return 1; }
+  echo -e "${GREEN}[✓] Updated automatic AI_MEMORY_LIMIT to ${calc_mem}; at least 3GiB is reserved where host RAM permits.${NC}"
   if is_container_running; then
-    echo -e "${BLUE}[*] Recreating container with new memory limit...${NC}"
+    verify_container_compose_owner || return 1
+    echo -e "${BLUE}[*] Recreating container with the updated memory limit...${NC}"
     docker compose -f "${PROJECT_DIR}/${COMPOSE_FILE}" --env-file "${ENV_FILE}" up -d --no-deps hse-ai-engine
     echo -e "${GREEN}[✓] Container reloaded with ${calc_mem} memory limit.${NC}"
   fi
@@ -348,9 +341,11 @@ cmd_memory_tune() {
 
 cmd_swap() {
   print_header
-  local swap_mb free_disk
+  local swap_mb free_disk swap_file
   swap_mb="$(free -m | awk '/^Swap:/ {print $2}' || echo 0)"
+  [[ "${swap_mb}" =~ ^[0-9]+$ ]] || swap_mb=0
   free_disk="$(disk_free_gb)"
+  swap_file="/swapfile.hsecore"
   echo -e "Current Host Swap: ${CYAN}${swap_mb} MB${NC}"
   echo -e "Free Disk Space  : ${CYAN}${free_disk} GB${NC}"
   if (( swap_mb >= 2048 )); then
@@ -362,19 +357,43 @@ cmd_swap() {
     return 1
   fi
   if (( free_disk < 8 )); then
-    echo -e "${RED}[ERROR] Insufficient disk space for swapfile (at least 8GB required).${NC}"
+    echo -e "${RED}[ERROR] Insufficient disk space for a 4GB swapfile (at least 8GB required).${NC}"
     return 1
   fi
-  echo -e "${BLUE}[*] Creating 4GB swapfile (/swapfile) with low swappiness (15) for OOM spike safety...${NC}"
-  (fallocate -l 4G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=4096)
-  chmod 600 /swapfile
-  mkswap /swapfile
-  swapon /swapfile || true
-  if ! grep -q '/swapfile' /etc/fstab; then
-    echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  # Never truncate or reformat an existing /swapfile or another administrator's file.
+  if [[ -e "${swap_file}" || -L "${swap_file}" ]]; then
+    if swapon --show=NAME --noheadings 2>/dev/null | grep -Fxq "${swap_file}"; then
+      echo -e "${YELLOW}[!] HSECORE swapfile already exists and is active; refusing to modify it.${NC}"
+      return 0
+    fi
+    echo -e "${RED}[ERROR] ${swap_file} already exists but is not active. It was not modified; inspect it before retrying.${NC}" >&2
+    return 1
+  fi
+
+  echo -e "${BLUE}[*] Creating dedicated 4GB swapfile (${swap_file}); existing swap files will not be changed...${NC}"
+  if ! fallocate -l 4G "${swap_file}" 2>/dev/null; then
+    if ! dd if=/dev/zero of="${swap_file}" bs=1M count=4096 status=progress; then
+      rm -f "${swap_file}"
+      return 1
+    fi
+  fi
+  chmod 600 "${swap_file}"
+  if ! mkswap "${swap_file}" || ! swapon "${swap_file}"; then
+    echo -e "${RED}[ERROR] Swap activation failed; removing only the newly created HSECORE swapfile.${NC}" >&2
+    rm -f "${swap_file}"
+    return 1
+  fi
+  if ! swapon --show=NAME --noheadings 2>/dev/null | grep -Fxq "${swap_file}"; then
+    echo -e "${RED}[ERROR] Swapfile was not confirmed active; it will not be added to /etc/fstab.${NC}" >&2
+    swapoff "${swap_file}" 2>/dev/null || true
+    rm -f "${swap_file}"
+    return 1
+  fi
+  if ! grep -Fqx "${swap_file} none swap sw 0 0" /etc/fstab; then
+    printf '%s\n' "${swap_file} none swap sw 0 0" >> /etc/fstab
   fi
   sysctl vm.swappiness=15 2>/dev/null || true
-  echo -e "${GREEN}[✓] 4GB swapfile activated successfully. Swappiness set to 15.${NC}"
+  echo -e "${GREEN}[✓] Dedicated 4GB HSECORE swapfile activated and persisted. Existing swap configuration was preserved.${NC}"
 }
 
 cmd_sysinfo() {
