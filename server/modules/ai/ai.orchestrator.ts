@@ -415,7 +415,7 @@ export class AIOrchestrator {
 
     // 3. Resolve Safe Real-Data Tools across all HSECORE modules
     const selectedModules = Array.isArray(request.selectedModules)
-      ? request.selectedModules.map(id => String(id).trim().toLowerCase()).filter(id => /^[a-z0-9_-]{1,80}$/.test(id)).slice(0, 40)
+      ? request.selectedModules.map(id => String(id).trim().toLowerCase()).filter(id => /^[a-z0-9\u0600-\u06ff_-]{1,80}$/.test(id)).slice(0, 40)
       : [];
     if (selectedModules.length > 0 && !selectedModules.includes('all')) {
       const coverage = await this.getModuleCoverage(userContext);
