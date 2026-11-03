@@ -402,7 +402,7 @@ export class AIToolsRegistry {
           byUnit,
           monthlyTrend,
           recentAudits,
-          privacy: 'Aggregate-only output. Signer names, personnel identifiers, signatures, and attachment contents are excluded.',
+          privacy: 'Sanitized read-only records. Signer names, personnel identifiers, signatures, and attachment contents are excluded.',
         },
         timestamp: new Date().toISOString(),
       };
