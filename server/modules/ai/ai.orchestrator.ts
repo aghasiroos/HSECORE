@@ -741,8 +741,13 @@ export class AIOrchestrator {
       for (const raw of items) {
         if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
         const item = raw as Record<string, any>;
-        const id = normalizeId(item.key || item.moduleId || item.id || item.slug);
-        if (!id) continue;
+        const rawId = normalizeId(item.key || item.moduleId || item.id || item.slug);
+        if (!rawId) continue;
+        const id = parentModuleId && ['dashboard', 'overview'].includes(rawId)
+          ? `${parentModuleId}-${rawId}`
+          : parentModuleId === 'safety-unit' && rawId === 'checklists'
+            ? 'safety-checklists'
+            : rawId;
         const parent = parentModuleId ? byId.get(parentModuleId) : undefined;
         const existing = byId.get(id);
         const enabled = item.enabled !== false;
