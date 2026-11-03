@@ -219,13 +219,26 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
   useEffect(() => {
     loadSessionsFromServer();
     void refreshInstalledModels();
-    void authFetch('/api/v1/ai/coverage').then(response => response.json()).then(data => {
-      if (data?.success && Array.isArray(data.data)) setModuleCatalog(data.data);
-    }).catch(() => setModuleCatalog([]));
+    const refreshModuleCatalog = () => {
+      void authFetch('/api/v1/ai/coverage').then(response => response.json()).then(data => {
+        if (data?.success && Array.isArray(data.data)) setModuleCatalog(data.data);
+      }).catch(() => setModuleCatalog([]));
+    };
+    refreshModuleCatalog();
+    const onModuleConfigUpdated = () => refreshModuleCatalog();
+    window.addEventListener('hse_ui_config_updated', onModuleConfigUpdated);
+    window.addEventListener('health_env_config_updated', onModuleConfigUpdated);
+    window.addEventListener('fire_dept_config_updated', onModuleConfigUpdated);
+    window.addEventListener('safety_dept_config_updated', onModuleConfigUpdated);
     // Runtime can be enabled or models can be installed while this module is open.
-    // Refresh from the live backend inventory without requiring a page reload.
     const refreshTimer = window.setInterval(() => { void refreshInstalledModels(); }, 30000);
-    return () => window.clearInterval(refreshTimer);
+    return () => {
+      window.clearInterval(refreshTimer);
+      window.removeEventListener('hse_ui_config_updated', onModuleConfigUpdated);
+      window.removeEventListener('health_env_config_updated', onModuleConfigUpdated);
+      window.removeEventListener('fire_dept_config_updated', onModuleConfigUpdated);
+      window.removeEventListener('safety_dept_config_updated', onModuleConfigUpdated);
+    };
   }, []);
 
   useEffect(() => {
