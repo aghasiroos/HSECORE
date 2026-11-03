@@ -30,6 +30,7 @@ async function run() {
   assert.equal(canUserAccessAITool('users_roles_summary', { uid: 'admin-1', role: 'ADMIN' }), true);
   assert.equal(canUserAccessAITool('settings_backup_summary', { uid: 'admin-1', role: 'ADMIN' }), true);
   assert.equal(canUserAccessAITool('ptw_summary', undefined), false);
+  assert.equal(canUserAccessAITool('unregistered_tool', { uid: 'admin-1', role: 'ADMIN' }), false);
   console.log('PASS AI tool ACL: worker, safety officer, admin, and unauthenticated contexts');
   const originalIndex = aiRagService.indexDocument;
   const originalCanAccess = aiRagService.canAccessDocument;
