@@ -213,7 +213,8 @@ function toCatalogItem(definition: ModuleDefinition, user: UserContext, parentId
   const configuredTools = definition.tools || [];
   const tools = configuredTools.filter(tool => canUseTool(user, tool));
   const enabled = definition.enabled !== false;
-  const allowed = enabled && parentAllowed && canAccessDefinition(user, definition);
+  const allowed = enabled && parentAllowed && canAccessDefinition(user, definition) &&
+    (configuredTools.length === 0 || tools.length > 0 || definition.rag === true);
   const connected = allowed && (tools.length > 0 || definition.rag === true);
   const notes = !allowed
     ? 'برای مشاهده و تحلیل این بخش، مجوز دسترسی لازم را ندارید.'
