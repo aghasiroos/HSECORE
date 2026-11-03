@@ -221,7 +221,10 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
     void refreshInstalledModels();
     const refreshModuleCatalog = () => {
       void authFetch('/api/v1/ai/coverage').then(response => response.json()).then(data => {
-        if (data?.success && Array.isArray(data.data)) setModuleCatalog(data.data);
+        if (data?.success && Array.isArray(data.data)) {
+          setModuleCatalog(data.data);
+          setSelectedModules(current => current.filter(id => id === 'all' || data.data.some((item: any) => item.moduleId === id && item.connected)));
+        }
       }).catch(() => setModuleCatalog([]));
     };
     refreshModuleCatalog();
