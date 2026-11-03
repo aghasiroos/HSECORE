@@ -272,24 +272,26 @@ export default function AiAssistantApp({
     if (!sessionId) return;
     try {
       const res = await authFetch(`/api/v1/ai/sessions/${sessionId}/messages`);
-      const data = await res.json();
-      if (data.success && Array.isArray(data.data)) {
-        const msgs: ChatMessage[] = data.data.map((m: any) => ({
-          id: m.id,
-          role: m.role === 'assistant' ? 'assistant' : 'user',
-          content: m.content,
-          timestamp: m.createdAt
-            ? new Date(m.createdAt).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })
-            : '',
-          toolsUsed: m.toolsUsed,
-          citations: m.citations,
-          durationMs: m.durationMs,
-          model: m.model,
-        }));
-        setSessions(prev => prev.map(s => (s.id === sessionId ? { ...s, messages: msgs } : s)));
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success || !Array.isArray(data.data)) {
+        throw new Error(data.message || `دریافت پیام‌های گفتگو ناموفق بود (HTTP ${res.status})`);
       }
-    } catch {
-      // keep existing
+      const msgs: ChatMessage[] = data.data.map((m: any) => ({
+        id: m.id,
+        role: m.role === 'assistant' ? 'assistant' : 'user',
+        content: m.content,
+        timestamp: m.createdAt
+          ? new Date(m.createdAt).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })
+          : '',
+        toolsUsed: m.toolsUsed,
+        citations: m.citations,
+        durationMs: m.durationMs,
+        model: m.model,
+      }));
+      setSessions(prev => prev.map(s => (s.id === sessionId ? { ...s, messages: msgs } : s)));
+    } catch (err: any) {
+      // Do not replace an existing transcript with an empty one when a fetch fails.
+      setSessionsError(err?.message || 'خواندن سابقه گفتگو از پایگاه داده ناموفق بود.');
     }
   };
 
