@@ -545,29 +545,51 @@ export class AIToolsRegistry {
    */
   async getRiskAssessmentsSummary(): Promise<AIToolResult> {
     try {
-      const risks = await db.select().from(schema.riskAssessments).catch(() => []);
+      const risks = await db.select().from(schema.riskAssessments);
       const total = risks.length;
-      const highRisks = risks.filter((r: any) => ['HIGH', 'EXTREME', 'CRITICAL'].includes(String(r.initialRiskLevel || r.riskLevel || '').toUpperCase())).length;
-      const mediumRisks = risks.filter((r: any) => String(r.initialRiskLevel || r.riskLevel || '').toUpperCase() === 'MEDIUM').length;
+      const highRisks = risks.filter((r: any) => ['HIGH', 'EXTREME', 'CRITICAL'].includes(String(r.initialRiskLevel || '').toUpperCase())).length;
+      const mediumRisks = risks.filter((r: any) => String(r.initialRiskLevel || '').toUpperCase() === 'MEDIUM').length;
       const lowRisks = Math.max(0, total - highRisks - mediumRisks);
-
-      const topHazards = risks.slice(0, 5).map((r: any) => `${r.activityTitle}: ${r.hazardDescription} (سطح ریسک: ${r.initialRiskLevel || 'متوسط'})`);
+      const byMethodMap = new Map<string, { total: number; high: number; medium: number; low: number }>();
+      const byStatusMap = new Map<string, number>();
+      for (const risk of risks as any[]) {
+        const method = String(risk.methodology || 'نامشخص').toUpperCase();
+        const bucket = byMethodMap.get(method) || { total: 0, high: 0, medium: 0, low: 0 };
+        bucket.total += 1;
+        const level = String(risk.initialRiskLevel || '').toUpperCase();
+        if (['HIGH', 'EXTREME', 'CRITICAL'].includes(level)) bucket.high += 1;
+        else if (level === 'MEDIUM') bucket.medium += 1;
+        else bucket.low += 1;
+        byMethodMap.set(method, bucket);
+        const status = String(risk.status || 'نامشخص').toUpperCase();
+        byStatusMap.set(status, (byStatusMap.get(status) || 0) + 1);
+      }
+      const byMethod = Array.from(byMethodMap.entries()).map(([method, value]) => ({ method, ...value }));
+      const byStatus = Array.from(byStatusMap.entries()).map(([status, count]) => ({ status, count }));
+      const residualHighRisks = risks.filter((r: any) => ['HIGH', 'EXTREME', 'CRITICAL'].includes(String(r.residualRiskLevel || '').toUpperCase())).length;
+      const topHazards = (risks as any[]).slice(0, 5).map((r: any) =>
+        `${r.activityTitle || 'فعالیت نامشخص'}: ${r.hazardDescription || 'شرح خطر ثبت نشده'} (ریسک اولیه: ${r.initialRiskLevel || 'نامشخص'}؛ ریسک باقیمانده: ${r.residualRiskLevel || 'ثبت نشده'})`
+      );
 
       return {
         toolName: 'risk_assessment_summary',
-        titleFa: 'ماژول ارزیابی ریسک و شناسایی مخاطرات (JSA / HAZID)',
+        titleFa: 'ماژول ارزیابی ریسک و شناسایی مخاطرات (JSA / FMEA / FTA / HHA)',
         summary: [
-          `• کل ارزیابی‌های ریسک ثبت‌شده: ${total} مورد (${highRisks} ریسک بالا/بحرانی، ${mediumRisks} ریسک متوسط، ${lowRisks} ریسک پایین/کنترل‌شده)`,
+          `• کل ارزیابی‌های ریسک ثبت‌شده: ${total} مورد (${highRisks} بالا/بحرانی، ${mediumRisks} متوسط، ${lowRisks} پایین/سایر)`,
+          `• ریسک‌های باقیمانده بالا/بحرانی: ${residualHighRisks} مورد`,
+          `• تفکیک روش ارزیابی: ${byMethod.map(x => `${x.method}: ${x.total} (بالا/بحرانی ${x.high})`).join('؛ ') || 'داده‌ای ثبت نشده'}`,
+          `• وضعیت گردش کار: ${byStatus.map(x => `${x.status}: ${x.count}`).join('؛ ') || 'داده‌ای ثبت نشده'}`,
           topHazards.length > 0 ? `• نمونه مخاطرات ثبت‌شده: ${topHazards.join(' | ')}` : '',
-        ].filter(Boolean).join('\n'),
-        data: { totalRisks: total, highRisks, mediumRisks, lowRisks, topHazards },
+        ].filter(Boolean).join('\\n'),
+        data: { totalRisks: total, highRisks, mediumRisks, lowRisks, residualHighRisks, byMethod, byStatus, topHazards },
         timestamp: new Date().toISOString(),
       };
-    } catch {
+    } catch (err: any) {
+      logger.warn('[AITools] risk assessment summary unavailable', { error: err?.message });
       return {
         toolName: 'risk_assessment_summary',
         titleFa: 'ماژول ارزیابی ریسک',
-        summary: 'اطلاعات ارزیابی ریسک در دسترس نیست.',
+        summary: 'اطلاعات ارزیابی ریسک در این لحظه از پایگاه داده قابل دریافت نیست؛ هیچ آماری حدس زده نشده است.',
         data: {},
         timestamp: new Date().toISOString(),
       };
