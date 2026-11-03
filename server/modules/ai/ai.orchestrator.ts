@@ -152,6 +152,23 @@ export class AIOrchestrator {
       'system': ['settings'],
       'clinic': ['health'],
       'periodic-exams': ['health'],
+      'periodic-exams-dashboard': ['health'], 'periodic-exams-personnel': ['health'],
+      'periodic-exams-exams': ['health'], 'periodic-exams-lab': ['health'],
+      'periodic-exams-bmi': ['health'], 'periodic-exams-reports': ['health'],
+      'periodic-exams-compare': ['health'], 'periodic-exams-personcompare': ['health'],
+      'ptw-dashboard': ['ptw'], 'ptw-hot': ['ptw'], 'ptw-cold': ['ptw'],
+      'ptw-excavation': ['ptw'], 'ptw-process-mechanical': ['ptw'],
+      'ptw-confined-space': ['ptw'], 'ptw-electrical-isolation': ['ptw'],
+      'ptw-radiation': ['ptw'], 'ptw-vehicle-crane': ['ptw'],
+      'personnel-history-overview': ['personnel'], 'personnel-history-identity': ['personnel'],
+      'personnel-history-health': ['personnel'], 'personnel-history-training': ['personnel'],
+      'personnel-history-permits': ['personnel'], 'personnel-history-incidents': ['personnel'],
+      'personnel-history-capa': ['personnel'], 'personnel-history-risks': ['personnel'],
+      'personnel-history-inspections': ['personnel'], 'personnel-history-referrals': ['personnel'],
+      'personnel-history-warnings': ['personnel'], 'personnel-history-ppe': ['personnel'],
+      'personnel-history-attachments': ['personnel'], 'personnel-history-audit-logs': ['personnel'],
+      'incidents-reports': ['incidents'], 'incidents-pyramid': ['incidents'], 'incidents-stats': ['incidents'],
+      'warnings-records': ['warnings'], 'warnings-charts': ['warnings'],
       'non-periodic-exams': ['health'],
       'nutrition': ['health'],
       'health-env-checklists': ['health'],
@@ -694,15 +711,48 @@ export class AIOrchestrator {
       { moduleId: 'permit', moduleNameFa: 'پروانه کار ایمن (PTW)', connected: true, tools: toolMap.ptw, assistantIds: ['GENERAL_HSE'] },
       { moduleId: 'ptw-audit', moduleNameFa: 'ممیزی پروانه‌های کار (PTW Audit)', connected: true, tools: toolMap.ptw, assistantIds: ['GENERAL_HSE'] },
       { moduleId: 'risk', moduleNameFa: 'ارزیابی ریسک هوشمند (AI JSA)', connected: true, tools: toolMap.risks, assistantIds: ['GENERAL_HSE'] },
-      { moduleId: 'personnel-history', moduleNameFa: 'پرونده جامع ۳۶۰ درجه پرسنل', connected: true, tools: toolMap.personnel, assistantIds: ['GENERAL_HSE'], notes: 'فقط در محدوده مجاز مدیر سامانه' },
+      { moduleId: 'personnel-history', moduleNameFa: 'پرونده جامع ۳۶۰ درجه پرسنل', connected: true, tools: toolMap.personnel, assistantIds: ['GENERAL_HSE'], notes: 'ابزار فعلی فقط خلاصه پرسنلی/ساختار سازمانی ارائه می‌کند و به معنی دسترسی مستقل به همه تب‌های پرونده ۳۶۰ درجه نیست.' },
+      ...([
+        ['overview', 'نمای کلی پرونده پرسنل'], ['identity', 'مشخصات هویتی پرسنل'], ['health', 'سوابق سلامت'],
+        ['training', 'سوابق آموزش'], ['permits', 'سوابق پروانه‌های کار'], ['incidents', 'سوابق حوادث'],
+        ['capa', 'سوابق عدم انطباق و اقدامات اصلاحی'], ['risks', 'سوابق ارزیابی ریسک'],
+        ['inspections', 'سوابق بازرسی‌ها'], ['referrals', 'سوابق ارجاعات'], ['warnings', 'سوابق اخطارها'],
+        ['ppe', 'سوابق تجهیزات حفاظت فردی'], ['attachments', 'پیوست‌های پرونده'], ['audit-logs', 'سوابق ممیزی پرونده'],
+      ] as const).map(([tab, title]) => ({
+        moduleId: \`personnel-history-\${tab}\`, moduleNameFa: \`پرونده پرسنل / \${title}\`,
+        connected: false, tools: [], assistantIds: ['GENERAL_HSE'] as AIAssistantId[],
+        parentModuleId: 'personnel-history', level: 2,
+        notes: 'تب واقعی رابط کاربری شناسایی شده است؛ ابزار داده‌خوان مستقل و مجاز برای این تب هنوز ثبت نشده است.',
+      })),
       { moduleId: 'heat', moduleNameFa: 'پایش استرس گرمایی', connected: true, tools: toolMap.heat, assistantIds: ['GENERAL_HSE'] },
       { moduleId: 'ptw', moduleNameFa: 'پروانه کار ایمن (PTW)', connected: true, tools: toolMap.ptw, assistantIds: ['GENERAL_HSE', 'PTW_SHERPA'] },
+      ...([
+        ['dashboard', 'داشبورد پروانه‌های فعال'], ['hot', 'پروانه کار گرم'], ['cold', 'پروانه کار سرد'],
+        ['excavation', 'الحاقی حفاری'], ['process-mechanical', 'الحاقی جداسازی فرآیندی و مکانیکی'],
+        ['confined-space', 'الحاقی فضای بسته'], ['electrical-isolation', 'الحاقی جداسازی الکتریکی'],
+        ['radiation', 'الحاقی منابع پرتوزا'], ['vehicle-crane', 'الحاقی جرثقیل و خودرو'],
+      ] as const).map(([tab, title]) => ({
+        moduleId: \`ptw-\${tab}\`, moduleNameFa: \`پروانه کار / \${title}\`,
+        connected: true, tools: toolMap.ptw, assistantIds: ['GENERAL_HSE'] as AIAssistantId[],
+        parentModuleId: 'ptw', level: 2,
+        notes: 'ابزار فعلی خلاصه تجمیعی PTW است؛ آمار مستقل این نوع پروانه تا زمان افزودن فیلتر اختصاصی قابل ادعا نیست.',
+      })),
       { moduleId: 'incidents', moduleNameFa: 'گزارشات ناهنجاری و حوادث', connected: true, tools: toolMap.incidents, assistantIds: ['GENERAL_HSE', 'INCIDENT_ANALYSIS'] },
+      ...([
+        ['reports', 'گزارش‌ها و سوابق حوادث'], ['pyramid', 'هرم حوادث'], ['stats', 'آمار و تحلیل حوادث'],
+      ] as const).map(([tab, title]) => ({
+        moduleId: \`incidents-\${tab}\`, moduleNameFa: \`حوادث / \${title}\`,
+        connected: true, tools: toolMap.incidents, assistantIds: ['GENERAL_HSE'] as AIAssistantId[],
+        parentModuleId: 'incidents', level: 1,
+        notes: 'ابزار فعلی خلاصه تجمیعی حوادث است؛ تفکیک اختصاصی تب تا زمان افزودن Adapter مستقل تضمین نشده است.',
+      })),
       { moduleId: 'health', moduleNameFa: 'واحد بهداشت و محیط زیست / طب کار', connected: true, tools: toolMap.health, assistantIds: ['GENERAL_HSE', 'OCCUPATIONAL_HEALTH', 'NUTRITION_LIFESTYLE'] },
       { moduleId: 'risks', moduleNameFa: 'ارزیابی ریسک هوشمند (AI JSA)', connected: true, tools: toolMap.risks, assistantIds: ['GENERAL_HSE', 'RISK_ASSESSMENT'] },
       { moduleId: 'five_s', moduleNameFa: 'نظام آراستگی ۵S و بازرسی‌ها', connected: true, tools: toolMap.five_s, assistantIds: ['GENERAL_HSE', 'INSPECTION_5S'] },
       { moduleId: 'fire', moduleNameFa: 'واحد آتش‌نشانی و امداد', connected: true, tools: toolMap.fire, assistantIds: ['GENERAL_HSE'] },
       { moduleId: 'warnings', moduleNameFa: 'ثبت و پیگیری اخطارها', connected: true, tools: toolMap.warnings, assistantIds: ['GENERAL_HSE'] },
+      { moduleId: 'warnings-records', moduleNameFa: 'اخطارها / سوابق ثبت و پیگیری', connected: true, tools: toolMap.warnings, assistantIds: ['GENERAL_HSE'], parentModuleId: 'warnings', level: 1, notes: 'ابزار فعلی خلاصه تجمیعی اخطارها است؛ تفکیک اختصاصی تب تضمین نشده است.' },
+      { moduleId: 'warnings-charts', moduleNameFa: 'اخطارها / نمودارهای تحلیلی', connected: true, tools: toolMap.warnings, assistantIds: ['GENERAL_HSE'], parentModuleId: 'warnings', level: 1, notes: 'ابزار فعلی خلاصه تجمیعی اخطارها است؛ تفکیک اختصاصی تب تضمین نشده است.' },
       { moduleId: 'training', moduleNameFa: 'مدیریت و تقویم آموزش', connected: true, tools: toolMap.training, assistantIds: ['GENERAL_HSE', 'TRAINING_COMPLIANCE'] },
       { moduleId: 'ppe', moduleNameFa: 'تجهیزات حفاظت فردی (PPE)', connected: true, tools: toolMap.ppe, assistantIds: ['GENERAL_HSE'] },
       { moduleId: 'environment', moduleNameFa: 'محیط زیست و پسماند', connected: true, tools: toolMap.environment, assistantIds: ['GENERAL_HSE', 'ENVIRONMENT_WASTE'] },
@@ -716,6 +766,17 @@ export class AIOrchestrator {
 
       { moduleId: 'clinic', moduleNameFa: 'بهداری و مراجعات سرپایی', connected: true, tools: toolMap.health, assistantIds: ['GENERAL_HSE'] },
       { moduleId: 'periodic-exams', moduleNameFa: 'معاینات ادواری طب کار', connected: true, tools: toolMap.health, assistantIds: ['GENERAL_HSE'] },
+      ...([
+        ['dashboard', 'داشبورد سلامت'], ['personnel', 'پرونده پرسنل'], ['exams', 'معاینات ادواری'],
+        ['lab', 'آزمایشگاه'], ['bmi', 'شاخص BMI'], ['reports', 'گزارش‌های هوشمند'],
+        ['compare', 'مقایسه سنواتی'], ['personcompare', 'مقایسه فردی'],
+      ] as const).map(([tab, title]) => ({
+        moduleId: \`periodic-exams-\${tab}\`, moduleNameFa: \`معاینات ادواری / \${title}\`,
+        connected: true, tools: toolMap.health, assistantIds: ['GENERAL_HSE'] as AIAssistantId[],
+        parentModuleId: 'periodic-exams', level: 2,
+        notes: 'ابزار فعلی در سطح تجمیعی طب کار پاسخ می‌دهد؛ تفکیک مستقل این تب تضمین نشده است.',
+      })),
+      { moduleId: 'periodic-exams-import', moduleNameFa: 'معاینات ادواری / ورود اطلاعات', connected: false, tools: [], assistantIds: ['GENERAL_HSE'], parentModuleId: 'periodic-exams', level: 2, notes: 'تب ورود اطلاعات عملیاتی است و ابزار تحلیل فقط‌خواندنی مستقلی ندارد.' },
       { moduleId: 'nutrition', moduleNameFa: 'کارشناس تغذیه و رژیم‌درمانی', connected: true, tools: toolMap.health, assistantIds: ['GENERAL_HSE'] },
       { moduleId: 'env-monitoring', moduleNameFa: 'پایش‌های محیط‌زیستی', connected: true, tools: toolMap.environment, assistantIds: ['GENERAL_HSE'] },
       { moduleId: 'waste-management', moduleNameFa: 'مدیریت پسماند (EMP)', connected: true, tools: toolMap.environment, assistantIds: ['GENERAL_HSE'] },
@@ -808,11 +869,20 @@ export class AIOrchestrator {
         const item = raw as Record<string, any>;
         const rawId = normalizeId(item.key || item.moduleId || item.id || item.slug);
         if (!rawId) continue;
-        const id = parentModuleId && ['dashboard', 'overview'].includes(rawId)
+        const fireCategoryIdentity = String(rawId) + ' ' + String(item.key || '') + ' ' + String(item.titleFa || '') + ' ' + String(item.titleEn || '');
+        const fireCategoryAliases: Array<[RegExp, string]> = [
+          [/دليج|دلویج|deluge|sprinkler/i, 'deluge-sprinklers'],
+          [/گازياب|گاز.*دتکتور|gas.?detector/i, 'gas-detectors'],
+          [/دوش|چشم.?شوی|eyewash|safety.?shower/i, 'emergency-eyewash'],
+        ];
+        const fireAlias = parentModuleId === 'fire'
+          ? fireCategoryAliases.find(([pattern]) => pattern.test(fireCategoryIdentity))?.[1]
+          : undefined;
+        const id = fireAlias || (parentModuleId && ['dashboard', 'overview'].includes(rawId)
           ? `${parentModuleId}-${rawId}`
           : parentModuleId === 'safety-unit' && rawId === 'checklists'
             ? 'safety-checklists'
-            : rawId;
+            : rawId);
         const parent = parentModuleId ? byId.get(parentModuleId) : undefined;
         const existing = byId.get(id);
         const enabled = item.enabled !== false;
