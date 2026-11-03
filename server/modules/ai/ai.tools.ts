@@ -889,7 +889,7 @@ export class AIToolsRegistry {
    * Tool 21: Universal Cross-Module Deep Search (جستجوی هوشمند رکوردها در تمامی ماژول‌های سامانه)
    * Matches colloquial terms, names, codes, locations, or descriptions across all database tables.
    */
-  async searchAcrossAllModules(rawQuery: string, includeSensitivePersonnel = true): Promise<AIToolResult | null> {
+  async searchAcrossAllModules(rawQuery: string): Promise<AIToolResult | null> {
     const normalizedQ = normalizePersianText(rawQuery);
     const stopWords = new Set([
       'از', 'به', 'در', 'با', 'برای', 'چه', 'چند', 'چطور', 'کجا', 'کی', 'ماژول', 'بخش', 'قسمت',
@@ -906,7 +906,7 @@ export class AIToolsRegistry {
     if (tokens.length === 0) return null;
 
     try {
-      const [permits, incidents, risks, warnings, ncs, fireEq, trainings, envLogs, personnelList, notifsList, usersList] = await Promise.all([
+      const [permits, incidents, risks, warnings, ncs, fireEq, trainings, envLogs, notifsList] = await Promise.all([
         ptwRepository.findAll().catch(() => []),
         incidentRepository.findAll().catch(() => []),
         db.select().from(schema.riskAssessments).catch(() => []),
@@ -915,9 +915,7 @@ export class AIToolsRegistry {
         db.select().from(schema.fireEquipment).catch(() => []),
         db.select().from(schema.hseTrainings).catch(() => []),
         db.select().from(schema.environmentalLogs).catch(() => []),
-        includeSensitivePersonnel ? db.select().from(schema.personnel).catch(() => []) : Promise.resolve([]),
         db.select().from(schema.notifications).catch(() => []),
-        includeSensitivePersonnel ? db.select().from(schema.users).catch(() => []) : Promise.resolve([]),
       ]);
 
       const matchesToken = (text: string): number => {
@@ -1002,29 +1000,11 @@ export class AIToolsRegistry {
         }
       }
 
-      // Search Personnel
-      for (const p of personnelList as any[]) {
-        const blob = `${p.firstName || ''} ${p.lastName || ''} ${p.personnelCode || ''} ${p.nationalCode || ''} ${p.jobTitle || ''}`;
-        if (matchesToken(blob) > 0) {
-          matchedLines.push(`• [پرونده پرسنلی] نام: ${p.firstName} ${p.lastName} | کد پرسنلی: ${p.personnelCode} | سمت: ${p.jobTitle || '-'} | وضعیت: ${p.status}`);
-          if (matchedLines.length >= 12) break;
-        }
-      }
-
       // Search Notifications & Alerts
       for (const n of (notifsList || []) as any[]) {
         const blob = `${n.title || ''} ${n.body || ''} ${n.sourceModule || ''} ${n.priority || ''}`;
         if (matchesToken(blob) > 0) {
           matchedLines.push(`• [اعلان/هشدار] عنوان: ${n.title} | اولویت: ${n.priority || '-'} | مبدأ: ${n.sourceModule || 'سامانه'}`);
-          if (matchedLines.length >= 12) break;
-        }
-      }
-
-      // Search Users & Roles
-      for (const u of (usersList || []) as any[]) {
-        const blob = `${u.username || ''} ${u.fullName || ''} ${u.email || ''} ${u.role || ''} ${u.personnelNumber || ''}`;
-        if (matchesToken(blob) > 0) {
-          matchedLines.push(`• [کاربر سامانه] نام: ${u.fullName || u.username} | نقش: ${u.role} | ایمیل: ${u.email}`);
           if (matchedLines.length >= 12) break;
         }
       }
