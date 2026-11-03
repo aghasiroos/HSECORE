@@ -21,7 +21,11 @@ export class AIController {
         success: true,
         data: {
           ...engineStatus,
-          queue: aiRequestQueue.telemetry,
+          queue: {
+            activeRequests: engineStatus.activeRequests,
+            queuedRequests: engineStatus.queuedRequests,
+            maxConcurrency: config.aiEngine.maxConcurrency || 1,
+          },
         },
       });
     } catch (err: any) {
