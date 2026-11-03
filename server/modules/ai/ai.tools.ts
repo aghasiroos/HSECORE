@@ -826,7 +826,7 @@ export class AIToolsRegistry {
             ? `• آخرین زمان بکاپ ثبت‌شده در تنظیمات: ${lastBackupDate} (صرفاً metadata؛ نه تأیید صحت فایل بکاپ)`
             : '• زمان آخرین بکاپ در تنظیمات ثبت نشده است.',
           `• تعداد فایل‌های سیستمی ثبت‌شده در پایگاه داده: ${files.length} فایل`,
-        ].join('\\n'),
+        ].join('\n'),
         data: {
           hasBackupConfig: Boolean(backupSetting),
           backupSchedule,
