@@ -349,6 +349,27 @@ export class AIToolsRegistry {
             : null,
         }))
         .sort((a, b) => a.month.localeCompare(b.month));
+      const recentAudits = metrics
+        .slice()
+        .sort((a, b) => `${String(b.audit.auditDate || '')} ${String(b.audit.auditTime || '')}`
+          .localeCompare(`${String(a.audit.auditDate || '')} ${String(a.audit.auditTime || '')}`))
+        .slice(0, 20)
+        .map(item => ({
+          auditDate: item.audit.auditDate,
+          auditTime: item.audit.auditTime,
+          unitName: item.audit.unitName,
+          subUnitName: item.audit.subUnitName || null,
+          permitNumber: item.audit.permitNumber,
+          permitType: item.audit.permitType,
+          attachedPermitType: item.audit.attachedPermitType || 'NONE',
+          status: item.audit.status,
+          complianceScore: item.score,
+          passedCount: item.passedCount,
+          defectsCount: item.defects,
+          missedHazards: item.missedHazards,
+          missedPpe: item.missedPpe,
+          missedPrecautions: item.missedPrecautions,
+        }));
 
       return {
         toolName: 'ptw_audit_summary',
@@ -359,6 +380,7 @@ export class AIToolsRegistry {
           `• میانگین امتیاز انطباق: ${avgComplianceScore === null ? 'داده کافی موجود نیست' : `${avgComplianceScore}٪`}`,
           `• نوع پروانه ممیزی‌شده: ${hotPermitCount} گرم، ${coldPermitCount} سرد، ${confinedSpacePermitCount} فضای بسته؛ پروانه الحاقی: ${attachedPermitCount}`,
           `• عدم انطباق‌های اقلام جانبی: خطرات ${totalMissedHazards}، PPE ${totalMissedPpe}، تمهیدات ${totalMissedPrecautions}`,
+          `• ${recentAudits.length} رکورد آخر ممیزی به‌صورت خلاصه و بدون نام امضاکنندگان در داده مرجع موجود است.`,
         ].join('\n'),
         data: {
           totalAudits,
@@ -379,6 +401,7 @@ export class AIToolsRegistry {
           topDefectCategories,
           byUnit,
           monthlyTrend,
+          recentAudits,
           privacy: 'Aggregate-only output. Signer names, personnel identifiers, signatures, and attachment contents are excluded.',
         },
         timestamp: new Date().toISOString(),
