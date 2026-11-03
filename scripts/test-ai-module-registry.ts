@@ -4,6 +4,18 @@ import {
   getSelectedModuleDescriptions,
   type AIModuleCatalogItem,
 } from '../server/modules/ai/ai.module-registry.ts';
+import {
+  HSECORE_SYSTEM_MODULES,
+  HSECORE_HEALTH_ENV_SUBITEMS,
+  HSECORE_FIRE_DEPT_SUBITEMS,
+  HSECORE_SAFETY_DEPT_SUBITEMS,
+} from '../shared/hsecore-module-catalog.ts';
+
+assert.equal(HSECORE_SYSTEM_MODULES.length, 24, 'the shared navigation manifest must contain all configured main modules');
+assert.equal(new Set(HSECORE_SYSTEM_MODULES.map(module => module.key)).size, HSECORE_SYSTEM_MODULES.length, 'main module IDs must be unique');
+assert.ok(HSECORE_HEALTH_ENV_SUBITEMS.length >= 12, 'health and environment submodules must come from the shared catalog');
+assert.ok(HSECORE_FIRE_DEPT_SUBITEMS.length >= 10, 'fire department categories must come from the shared catalog');
+assert.ok(HSECORE_SAFETY_DEPT_SUBITEMS.length >= 2, 'safety department tabs must come from the shared catalog');
 
 const catalog: AIModuleCatalogItem[] = [
   {
