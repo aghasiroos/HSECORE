@@ -618,7 +618,7 @@ export class AIOrchestrator {
    * AI Module Registry — coverage report across HSECORE modules.
    * Reflects which modules have live read-only tools wired into the orchestrator.
    */
-  getModuleCoverage(_userContext?: UserContext): import('./ai.types.ts').AIModuleCoverage[] {
+  async getModuleCoverage(_userContext?: UserContext): Promise<import('./ai.types.ts').AIModuleCoverage[]> {
     const toolMap: Record<string, string[]> = {
       heat: ['heat_weather_summary'],
       ptw: ['ptw_summary'],
@@ -698,7 +698,61 @@ export class AIOrchestrator {
 
     ];
 
-    return modules;
+    // Merge persisted navigation metadata so newly configured modules/tabs appear
+    // automatically. Unknown nodes remain visible but disabled until a safe data tool is wired.
+    const persisted = await aiToolsRegistry.getPersistedModuleConfigs().catch(() => ({}));
+    const byId = new Map(modules.map(item => [item.moduleId, item]));
+    const normalizeId = (value: unknown): string => String(value || '')
+      .trim().toLowerCase()
+      .replace(/[^a-z0-9\\u0600-\\u06ff_-]+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 80);
+    const addConfiguredTree = (items: unknown, parentModuleId?: string, level = 0) => {
+      if (!Array.isArray(items)) return;
+      for (const raw of items) {
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+        const item = raw as Record<string, any>;
+        const id = normalizeId(item.key || item.moduleId || item.id || item.slug);
+        if (!id) continue;
+        const parent = parentModuleId ? byId.get(parentModuleId) : undefined;
+        const existing = byId.get(id);
+        const enabled = item.enabled !== false;
+        if (existing) {
+          if (typeof item.titleFa === 'string' && item.titleFa.trim()) existing.moduleNameFa = item.titleFa.trim();
+          if (!enabled) existing.connected = false;
+          if (parentModuleId) existing.parentModuleId = parentModuleId;
+          existing.level = level;
+        } else {
+          const entry: import('./ai.types.ts').AIModuleCoverage = {
+            moduleId: id,
+            moduleNameFa: String(item.titleFa || item.nameFa || item.title || item.name || id).slice(0, 180),
+            connected: enabled && Boolean(parent?.connected),
+            tools: parent?.tools || [],
+            assistantIds: ['GENERAL_HSE'],
+            parentModuleId,
+            level,
+            notes: enabled
+              ? 'این گره از پیکربندی ناوبری سامانه شناسایی شده؛ ابزار تحلیلی مستقل آن هنوز ثبت نشده است.'
+              : 'این بخش در پیکربندی سامانه غیرفعال است.',
+          };
+          modules.push(entry);
+          byId.set(id, entry);
+        }
+        const children = [item.submodules, item.subItems, item.children, item.tabs, item.subTabs, item.items]
+          .filter(Array.isArray)
+          .flat();
+        if (children.length > 0) addConfiguredTree(children, id, level + 1);
+      }
+    };
+
+    addConfiguredTree(persisted.system);
+    addConfiguredTree(persisted.healthEnvironment, 'health');
+    addConfiguredTree(persisted.fireDepartment, 'fire');
+    addConfiguredTree(persisted.safetyDepartment, 'safety-unit');
+
+    // Ensure the tree is deterministic for the slash picker.
+    return modules.sort((a, b) => (a.level || 0) - (b.level || 0) || a.moduleNameFa.localeCompare(b.moduleNameFa, 'fa'));
   }
 }
 
