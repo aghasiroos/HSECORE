@@ -80,7 +80,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string>('');
   const [searchSessionQuery, setSearchSessionQuery] = useState<string>('');
-  const [moduleCatalog, setModuleCatalog] = useState<Array<{ moduleId: string; moduleNameFa: string; connected: boolean; tools?: string[]; notes?: string; parentModuleId?: string; level?: number }>>([]);
+  const [moduleCatalog, setModuleCatalog] = useState<Array<{ moduleId: string; moduleNameFa: string; connected: boolean; tools?: string[]; notes?: string; parentModuleId?: string; level?: number; internal?: boolean }>>([]);
   const [selectedModules, setSelectedModules] = useState<string[]>([]);
   const [showModulePicker, setShowModulePicker] = useState(false);
 
@@ -222,8 +222,9 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
     const refreshModuleCatalog = () => {
       void authFetch('/api/v1/ai/coverage').then(response => response.json()).then(data => {
         if (data?.success && Array.isArray(data.data)) {
-          setModuleCatalog(data.data);
-          setSelectedModules(current => current.filter(id => id === 'all' || data.data.some((item: any) => item.moduleId === id && item.connected)));
+          const visibleModules = data.data.filter((item: any) => !item.internal);
+          setModuleCatalog(visibleModules);
+          setSelectedModules(current => current.filter(id => id === 'all' || visibleModules.some((item: any) => item.moduleId === id && item.connected)));
         }
       }).catch(() => setModuleCatalog([]));
     };
