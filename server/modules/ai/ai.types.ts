@@ -37,6 +37,8 @@ export interface AIModuleCoverage {
   notes?: string;
   parentModuleId?: string;
   level?: number;
+  /** Internal tool-group alias; retained for backend routing but hidden from the user picker. */
+  internal?: boolean;
 }
 
 export interface AIChatMessage {
