@@ -447,6 +447,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
       id: `msg-${Date.now()}`,
       role: 'user',
       content: text,
+      moduleScope: [...selectedModuleNames],
       timestamp: new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }),
     };
 
@@ -536,8 +537,18 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
         }
         if (payload.model) { responseModel = payload.model; partialResponseModel = responseModel; }
         if (payload.durationMs) { durationMs = payload.durationMs; partialDurationMs = durationMs; }
-        if (Array.isArray(payload.toolsUsed)) responseToolsUsed = payload.toolsUsed;
-        if (Array.isArray(payload.citations)) responseCitations = payload.citations;
+        if (Array.isArray(payload.toolsUsed)) {
+          responseToolsUsed = payload.toolsUsed;
+          setSessions(prev => prev.map(s => s.id === sessionId ? {
+            ...s, messages: s.messages.map(m => m.id === assistantId ? { ...m, toolsUsed: responseToolsUsed } : m),
+          } : s));
+        }
+        if (Array.isArray(payload.citations)) {
+          responseCitations = payload.citations;
+          setSessions(prev => prev.map(s => s.id === sessionId ? {
+            ...s, messages: s.messages.map(m => m.id === assistantId ? { ...m, citations: responseCitations } : m),
+          } : s));
+        }
         if (payload.error) streamError = payload.error;
       };
       while (true) {
@@ -571,6 +582,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
           id: partialAssistantId, role: 'assistant', content: partialAssistantText,
           timestamp: new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }),
           model: partialResponseModel, durationMs: partialDurationMs,
+          toolsUsed: responseToolsUsed, citations: responseCitations,
         };
         setSessions(prev => prev.map(s => s.id === sessionId ? {
           ...s, messages: [...s.messages.filter(m => m.id !== partialAssistantId), partialMessage],
@@ -793,6 +805,9 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
                     : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-200 rounded-ts-sm'
                 }`}
               >
+                {msg.moduleScope && msg.moduleScope.length > 0 && (
+                  <div className="mb-2 text-[10px] text-violet-100/90">دامنه تحلیل: {msg.moduleScope.join('، ')}</div>
+                )}
                 <div className="whitespace-pre-wrap">{msg.content}</div>
                 {(msg.toolsUsed?.length || msg.citations?.length) ? (
                   <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-800 space-y-1">
