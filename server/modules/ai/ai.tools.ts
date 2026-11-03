@@ -517,8 +517,7 @@ export class AIToolsRegistry {
    */
   async getNutritionHighRiskSummary(): Promise<AIToolResult> {
     try {
-      const [nutritionRecords, dbExams, settingsMap] = await Promise.all([
-        db.select().from(schema.nutritionRecords).catch(() => []),
+      const [dbExams, settingsMap] = await Promise.all([
         db.select().from(schema.periodicMedicalExams).catch(() => []),
         this.loadSettingsMap(),
       ]);
@@ -526,6 +525,7 @@ export class AIToolsRegistry {
         const value = settingsMap.get(key);
         return Array.isArray(value) ? value : [];
       };
+      const nutritionRecords = settingsArray('hse_nutrition_records_v1');
       const occData = settingsMap.get('OCC_HEALTH_EXAMS_DATA_V2');
       const occExams: any[] = Array.isArray(occData)
         ? occData
