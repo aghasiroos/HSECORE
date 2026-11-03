@@ -25,6 +25,7 @@ interface ModuleDefinition {
   adminOnly?: boolean;
   rag?: boolean;
   enabled?: boolean;
+  explicitPermission?: boolean;
 }
 
 const TOOL_ACCESS: Record<string, { permission?: string; adminOnly?: boolean; explicitPermission?: boolean }> = {
@@ -79,9 +80,9 @@ const DEFAULT_MODULES: ModuleDefinition[] = [
 const DEFAULT_CHILDREN: Record<string, ModuleDefinition[]> = {
   'health-env': [
     { id: 'clinic', titleFa: 'بهداری و مراجعات سرپایی', titleEn: 'Clinic Visits' },
-    { id: 'periodic-exams', titleFa: 'سامانه معاینات ادواری طب کار', titleEn: 'Periodic Medical Exams', tools: ['health_medical_summary'], permission: 'health:read', adminOnly: true },
-    { id: 'non-periodic-exams', titleFa: 'معاینات غیر دوره‌ای', titleEn: 'Non-Periodic Exams', tools: ['health_medical_summary'], permission: 'health:read', adminOnly: true },
-    { id: 'nutrition', titleFa: 'کارشناس تغذیه و رژیم‌درمانی', titleEn: 'Nutrition Specialist', tools: ['nutrition_high_risk_summary'], permission: 'health:read', adminOnly: true },
+    { id: 'periodic-exams', titleFa: 'سامانه معاینات ادواری طب کار', titleEn: 'Periodic Medical Exams', tools: ['health_medical_summary'], permission: 'health:read', adminOnly: true, explicitPermission: true },
+    { id: 'non-periodic-exams', titleFa: 'معاینات غیر دوره‌ای', titleEn: 'Non-Periodic Exams', tools: ['health_medical_summary'], permission: 'health:read', adminOnly: true, explicitPermission: true },
+    { id: 'nutrition', titleFa: 'کارشناس تغذیه و رژیم‌درمانی', titleEn: 'Nutrition Specialist', tools: ['nutrition_high_risk_summary'], permission: 'health:read', adminOnly: true, explicitPermission: true },
     { id: 'health-env-checklists', titleFa: 'چک‌لیست‌های عملیاتی بهداشت و محیط زیست', titleEn: 'Health & Environment Checklists' },
     { id: 'env-dashboard', titleFa: 'داشبورد محیط‌زیست', titleEn: 'Environment Dashboard', tools: ['environment_summary'], permission: 'environment:read' },
     { id: 'env-monitoring', titleFa: 'پایش‌های محیط‌زیستی', titleEn: 'Environmental Monitoring', tools: ['environment_summary'], permission: 'environment:read' },
@@ -105,6 +106,31 @@ const DEFAULT_CHILDREN: Record<string, ModuleDefinition[]> = {
     { id: 'EQUIPMENT_CERTIFICATES', titleFa: 'گواهینامه‌ها و سرتیفیکیت تجهیزات', titleEn: 'Equipment Certificates', rag: true },
     { id: 'ORG_FORMS_CHECKLISTS', titleFa: 'فرم‌ها و چک‌لیست‌های سازمانی', titleEn: 'Organizational Forms & Checklists', rag: true },
     { id: 'OTHER_HSE_DOCS', titleFa: 'سایر مستندات مرتبط با HSE', titleEn: 'Other HSE Documents', rag: true },
+  ],
+};
+
+const DEFAULT_GRANDCHILDREN: Record<string, ModuleDefinition[]> = {
+  'health-env:periodic-exams': [
+    { id: 'dashboard', titleFa: 'داشبورد معاینات ادواری', titleEn: 'Periodic Exams Dashboard', tools: ['health_medical_summary'], permission: 'health:read', adminOnly: true, explicitPermission: true },
+    { id: 'exams', titleFa: 'سوابق معاینات', titleEn: 'Medical Exam Records', tools: ['health_medical_summary'], permission: 'health:read', adminOnly: true, explicitPermission: true },
+    { id: 'lab', titleFa: 'آزمایشگاه', titleEn: 'Laboratory Results', tools: ['health_medical_summary'], permission: 'health:read', adminOnly: true, explicitPermission: true },
+    { id: 'bmi', titleFa: 'شاخص توده بدنی (BMI)', titleEn: 'BMI Analytics', tools: ['health_medical_summary'], permission: 'health:read', adminOnly: true, explicitPermission: true },
+    { id: 'annual-compare', titleFa: 'مقایسه سالانه', titleEn: 'Annual Comparison', tools: ['health_medical_summary'], permission: 'health:read', adminOnly: true, explicitPermission: true },
+    { id: 'import-excel', titleFa: 'ورود اطلاعات از اکسل', titleEn: 'Excel Import', permission: 'health:read', adminOnly: true, explicitPermission: true },
+    { id: 'smart-reports', titleFa: 'گزارش‌های هوشمند', titleEn: 'Smart Reports', tools: ['health_medical_summary'], permission: 'health:read', adminOnly: true, explicitPermission: true },
+    { id: 'person-compare', titleFa: 'مقایسه وضعیت افراد', titleEn: 'Personnel Comparison', tools: ['health_medical_summary'], permission: 'health:read', adminOnly: true, explicitPermission: true },
+    { id: 'personnel-dossier', titleFa: 'پرونده سلامت پرسنل', titleEn: 'Personnel Health Dossier', tools: ['health_medical_summary'], permission: 'health:read', adminOnly: true, explicitPermission: true },
+  ],
+  'health-env:nutrition': [
+    { id: 'high-risk', titleFa: 'افراد پرخطر و پیگیری', titleEn: 'High-Risk Personnel & Follow-up', tools: ['nutrition_high_risk_summary'], permission: 'health:read', adminOnly: true, explicitPermission: true },
+    { id: 'care-plans', titleFa: 'برنامه‌های مراقبتی', titleEn: 'Nutrition Care Plans', permission: 'health:read', adminOnly: true, explicitPermission: true },
+  ],
+  'fire-dept:vehicles': [
+    { id: 'vehicle-dashboard', titleFa: 'داشبورد ناوگان', titleEn: 'Fleet Dashboard' },
+    { id: 'vehicle-inspections', titleFa: 'بازرسی خودروها', titleEn: 'Vehicle Inspections' },
+    { id: 'vehicle-maintenance', titleFa: 'تعمیر و نگهداری', titleEn: 'Vehicle Maintenance' },
+    { id: 'vehicle-defects', titleFa: 'نواقص و عیوب', titleEn: 'Vehicle Defects' },
+    { id: 'vehicle-certificates', titleFa: 'گواهینامه‌ها و مدارک', titleEn: 'Vehicle Certificates' },
   ],
 };
 
@@ -138,7 +164,8 @@ function canUseTool(user: UserContext, toolName: string): boolean {
 function canAccessDefinition(user: UserContext, definition: ModuleDefinition): boolean {
   const globalAdmin = isGlobalAdminUser(user);
   if (definition.adminOnly && !globalAdmin) return false;
-  if (definition.permission && !globalAdmin && !checkUserHasPermission(user, definition.permission)) return false;
+  if (definition.explicitPermission && (!definition.permission || !checkUserHasPermission(user, definition.permission))) return false;
+  if (definition.permission && !definition.explicitPermission && !globalAdmin && !checkUserHasPermission(user, definition.permission)) return false;
   return true;
 }
 
@@ -210,7 +237,14 @@ export async function getAIModuleCatalog(user?: UserContext): Promise<AIModuleCa
     const parent = toCatalogItem(module, user);
     const defaults = DEFAULT_CHILDREN[module.id] || [];
     const configured = childSettings[module.id] ? parseSetting(setting(childSettings[module.id])) : null;
-    const children = mergeConfiguredDefinitions(defaults, configured).map(child => toCatalogItem(child, user, module.id));
+    const children = mergeConfiguredDefinitions(defaults, configured).map(child => {
+      const childItem = toCatalogItem(child, user, module.id);
+      const grandchildDefaults = DEFAULT_GRANDCHILDREN[childItem.moduleId] || [];
+      if (grandchildDefaults.length) {
+        childItem.children = grandchildDefaults.map(grandchild => toCatalogItem(grandchild, user, childItem.moduleId));
+      }
+      return childItem;
+    });
     if (children.length) parent.children = children;
     return parent;
   });
@@ -219,12 +253,11 @@ export async function getAIModuleCatalog(user?: UserContext): Promise<AIModuleCa
 export function getAIModuleToolNames(selectedModuleIds: string[], catalog: AIModuleCatalogItem[]): string[] {
   const selected = new Set(selectedModuleIds);
   const toolNames = new Set<string>();
-  for (const module of catalog) {
-    if (selected.has(module.moduleId) && module.allowed) module.tools.forEach(tool => toolNames.add(tool));
-    for (const child of module.children || []) {
-      if (selected.has(child.moduleId) && child.allowed) child.tools.forEach(tool => toolNames.add(tool));
-    }
-  }
+  const visit = (item: AIModuleCatalogItem) => {
+    if (selected.has(item.moduleId) && item.allowed) item.tools.forEach(tool => toolNames.add(tool));
+    (item.children || []).forEach(visit);
+  };
+  catalog.forEach(visit);
   return Array.from(toolNames);
 }
 
@@ -234,7 +267,12 @@ export function getSelectedModuleDescriptions(selectedModuleIds: string[], catal
   unavailable: string[];
 } {
   const selectedIds = new Set(selectedModuleIds);
-  const entries = catalog.flatMap(module => [module, ...(module.children || [])]).filter(item => selectedIds.has(item.moduleId));
+  const entries: AIModuleCatalogItem[] = [];
+  const visit = (item: AIModuleCatalogItem) => {
+    if (selectedIds.has(item.moduleId)) entries.push(item);
+    (item.children || []).forEach(visit);
+  };
+  catalog.forEach(visit);
   return {
     selected: entries.map(item => item.moduleNameFa),
     connected: entries.filter(item => item.allowed && item.connected).map(item => item.moduleNameFa),
