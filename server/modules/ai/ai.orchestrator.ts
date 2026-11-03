@@ -19,6 +19,10 @@ import { logger } from '../../core/logger.ts';
 import { checkUserHasPermission, isGlobalAdminUser, type UserContext } from '../../core/middleware/auth.ts';
 import { buildAIConversationMessages } from './ai.prompt-security.ts';
 
+export function isExplicitAllModulesCommand(message: string): boolean {
+  return /(?:^|\s)\/\s*all(?:\s|$)/i.test(String(message || '').trim());
+}
+
 const ALL_MODULE_TOOLS = [
   'heat_weather_summary',
   'ptw_summary',
@@ -91,7 +95,7 @@ export class AIOrchestrator {
       'کل سامانه', 'گزارش کل سامانه', 'تحلیل کل سامانه', 'گزارش کلی', 'تحلیل کلی', 'گزارش جامع', 'تحلیل جامع', 'همه ماژول ها', 'تمام ماژول ها',
       'کل سامانه', 'گزارش کل سامانه', 'تحلیل کل سامانه', 'گزارش کلی', 'تحلیل کلی', 'گزارش جامع', 'تحلیل جامع',
     ];
-    const hasExplicitAllCommand = /(?:^|\s)\/\s*all(?:\s|$)/i.test(message.trim());
+    const hasExplicitAllCommand = isExplicitAllModulesCommand(message);
     const selectAll = selected.has('all') || hasExplicitAllCommand || (selected.size === 0 && allScopeTerms.some(term => norm.includes(normalizePersianText(term))));
     const moduleAliases: Record<string, string[]> = {
       'dashboard': ['reports', 'non_conformances'],
@@ -435,7 +439,7 @@ export class AIOrchestrator {
     }
 
     const normalizedRequest = normalizePersianText(sanitized);
-    const hasExplicitAllCommand = /(?:^|\s)\/\s*all(?:\s|$)/i.test(sanitized.trim());
+    const hasExplicitAllCommand = isExplicitAllModulesCommand(sanitized);
     const requestAllScope = selectedModules.includes('all') || hasExplicitAllCommand || (selectedModules.length === 0 && [
       'گزارش کلی سامانه', 'گزارش جامع سامانه', 'تحلیل کلی سامانه',
       'تحلیل جامع سامانه', 'عملکرد کل سامانه', 'تمام ماژول های سامانه',
