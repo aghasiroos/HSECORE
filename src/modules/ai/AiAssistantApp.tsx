@@ -38,6 +38,8 @@ interface AIModulePickerItem {
   moduleNameFa: string;
   connected: boolean;
   allowed: boolean;
+  enabled?: boolean;
+  parentId?: string;
   notes?: string;
   children?: AIModulePickerItem[];
 }
@@ -867,7 +869,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
                           />
                           <span className="flex-1 text-slate-700 dark:text-slate-200">{item.moduleNameFa}</span>
                           <span className={`text-[10px] ${item.connected ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
-                            {!item.allowed ? 'بدون مجوز' : item.connected ? 'داده متصل' : 'بدون اتصال داده'}
+                            {!item.enabled ? 'غیرفعال' : !item.allowed ? 'بدون مجوز' : item.connected ? 'داده متصل' : 'بدون اتصال داده'}
                           </span>
                         </label>
                       ))}
