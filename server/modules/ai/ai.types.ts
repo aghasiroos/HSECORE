@@ -35,6 +35,8 @@ export interface AIModuleCoverage {
   tools: string[];
   assistantIds: AIAssistantId[];
   notes?: string;
+  parentModuleId?: string;
+  level?: number;
 }
 
 export interface AIChatMessage {
