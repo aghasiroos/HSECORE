@@ -73,8 +73,6 @@ export class AISessionService {
               created_at TIMESTAMP DEFAULT NOW() NOT NULL,
               updated_at TIMESTAMP DEFAULT NOW() NOT NULL
             );
-          `);
-          await db.execute(sql`
             ALTER TABLE ai_chat_sessions
               ADD COLUMN IF NOT EXISTS user_id INTEGER,
               ADD COLUMN IF NOT EXISTS user_uid TEXT,
@@ -82,8 +80,6 @@ export class AISessionService {
               ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb,
               ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW() NOT NULL,
               ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW() NOT NULL;
-          `);
-          await db.execute(sql`
             CREATE TABLE IF NOT EXISTS ai_chat_messages (
               id TEXT PRIMARY KEY,
               session_id TEXT NOT NULL REFERENCES ai_chat_sessions(id) ON DELETE CASCADE,
@@ -95,8 +91,6 @@ export class AISessionService {
               model TEXT,
               created_at TIMESTAMP DEFAULT NOW() NOT NULL
             );
-          `);
-          await db.execute(sql`
             ALTER TABLE ai_chat_messages
               ADD COLUMN IF NOT EXISTS tools_used JSONB,
               ADD COLUMN IF NOT EXISTS citations JSONB,
