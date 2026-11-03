@@ -35,6 +35,11 @@ const ALL_MODULE_TOOLS = [
   'personnel_org_summary',
   'workflow_referrals_summary',
   'kpi_management_summary',
+  'non_conformances_summary',
+  'notifications_summary',
+  'users_roles_summary',
+  'settings_backup_summary',
+  'system_architecture_summary',
   'universal_search',
 ];
 
@@ -75,7 +80,45 @@ export class AIOrchestrator {
 
     const selected = new Set(selectedModules.map(id => String(id).trim().toLowerCase()).filter(Boolean));
     const selectAll = selected.has('all');
-    const isSelected = (moduleId: string) => selectAll || selected.has(moduleId.toLowerCase());
+    const moduleAliases: Record<string, string[]> = {
+      'dashboard': ['reports'],
+      'hse-ms': ['reports'],
+      'safety-unit': ['five_s'],
+      'fire-dept': ['fire'],
+      'health-env': ['health', 'environment'],
+      'permit': ['ptw'],
+      'ptw-audit': ['ptw'],
+      'risk': ['risks'],
+      'personnel-history': ['personnel'],
+      'documents': ['documents'],
+      'pending-documents': ['workflows'],
+      'non-conformances': ['non_conformances'],
+      'process-management': ['workflows'],
+      'notifications': ['notifications'],
+      'user-mgmt': ['users'],
+      'system': ['settings', 'system_architecture'],
+      'clinic': ['health'],
+      'periodic-exams': ['health'],
+      'non-periodic-exams': ['health'],
+      'nutrition': ['health'],
+      'health-env-checklists': ['health'],
+      'env-dashboard': ['environment'],
+      'env-monitoring': ['environment'],
+      'waste-management': ['environment'],
+      'wastewater': ['environment'],
+      'air-water-soil': ['environment'],
+      'five-s': ['five_s'],
+      'env-reports': ['environment'],
+      'daily-report': ['fire'],
+      'vehicles': ['fire'],
+      'checklists': ['five_s'],
+      'org-procedures': ['documents'],
+      'equipment-certificates': ['documents'],
+      'org-forms-checklists': ['documents'],
+      'other-hse-docs': ['documents'],
+    };
+    const isSelected = (moduleId: string) => selectAll || selected.has(moduleId.toLowerCase()) ||
+      Object.entries(moduleAliases).some(([alias, targets]) => selected.has(alias) && targets.includes(moduleId.toLowerCase()));
     const norm = normalizePersianText(message);
     const results: AIToolResult[] = [];
     const executedToolNames = new Set<string>();
@@ -98,12 +141,20 @@ export class AIOrchestrator {
       personnel_org_summary: 'personnel:read',
       workflow_referrals_summary: 'workflows:read',
       kpi_management_summary: 'reports:read',
+      non_conformances_summary: 'reports:read',
+      notifications_summary: 'notifications:read',
+      users_roles_summary: '',
+      settings_backup_summary: '',
+      system_architecture_summary: '',
     };
 
     const sensitiveToolsRequiringGlobalScope = new Set([
       'health_medical_summary',
       'nutrition_high_risk_summary',
       'personnel_org_summary',
+      'users_roles_summary',
+      'settings_backup_summary',
+      'system_architecture_summary',
     ]);
 
     const checkAndExecute = async (toolName: string, execFn: () => Promise<AIToolResult>) => {
@@ -490,7 +541,11 @@ export class AIOrchestrator {
       environment: ['environment_summary'],
       personnel: ['personnel_org_summary'],
       workflows: ['workflow_referrals_summary'],
-      reports: ['kpi_management_summary'],
+      reports: ['kpi_management_summary', 'non_conformances_summary'],
+      non_conformances: ['non_conformances_summary'],
+      notifications: ['notifications_summary'],
+      users: ['users_roles_summary'],
+      settings: ['settings_backup_summary', 'system_architecture_summary'],
       search: ['universal_search'],
     };
 
@@ -510,6 +565,11 @@ export class AIOrchestrator {
       { moduleId: 'personnel', moduleNameFa: 'پرونده جامع پرسنل / ساختار سازمانی', connected: true, tools: toolMap.personnel, assistantIds: ['GENERAL_HSE'] },
       { moduleId: 'workflows', moduleNameFa: 'کارتابل اسناد و فرآیندها', connected: true, tools: toolMap.workflows, assistantIds: ['GENERAL_HSE'] },
       { moduleId: 'documents', moduleNameFa: 'دستورالعمل‌ها و مستندات (RAG)', connected: true, tools: [], assistantIds: ['GENERAL_HSE'], notes: 'از طریق پایگاه دانش RAG' },
+      { moduleId: 'non-conformances', moduleNameFa: 'مدیریت عدم انطباق‌ها (CAPA)', connected: true, tools: toolMap.non_conformances, assistantIds: ['GENERAL_HSE'] },
+      { moduleId: 'notifications', moduleNameFa: 'مدیریت هشدار و اعلان‌ها', connected: true, tools: toolMap.notifications, assistantIds: ['GENERAL_HSE'] },
+      { moduleId: 'user-mgmt', moduleNameFa: 'مدیریت کاربران و دسترسی‌ها', connected: true, tools: toolMap.users, assistantIds: ['GENERAL_HSE'], notes: 'فقط برای مدیر سامانه' },
+      { moduleId: 'system', moduleNameFa: 'تنظیمات و ساختار سازمانی', connected: true, tools: toolMap.settings, assistantIds: ['GENERAL_HSE'], notes: 'فقط برای مدیر سامانه' },
+
     ];
 
     return modules;
