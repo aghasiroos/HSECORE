@@ -335,8 +335,9 @@ export default function AiAssistantApp({
           )
         : [];
       setInstalledModels(models);
+      // Never auto-select the first installed model; the user must choose explicitly.
       setSelectedModel(current =>
-        models.some((model: any) => model.name === current) ? current : models[0]?.name || ''
+        models.some((model: any) => model.name === current) ? current : ''
       );
     } catch {
       setInstalledModels([]);
