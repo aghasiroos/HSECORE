@@ -30,6 +30,14 @@ run_budget() {
   PATH="${MOCK_BIN}:${PATH}" MOCK_RAM_MB="$ram" bash -c 'source "$1"; apply_ai_resource_budget "$2"' _ "$HELPER" "$file"
 }
 
+# Fresh installation: missing resource keys are initialized in automatic mode.
+: > "${TMP}/fresh.env"
+run_budget 8192 "${TMP}/fresh.env" >/dev/null
+assert_value "${TMP}/fresh.env" AI_MEMORY_LIMIT_AUTO true
+assert_value "${TMP}/fresh.env" AI_MEMORY_LIMIT 5120M
+assert_value "${TMP}/fresh.env" AI_CONTEXT_TOKENS_AUTO true
+assert_value "${TMP}/fresh.env" AI_CONTEXT_TOKENS 2048
+
 # 8GiB host: 70% is capped to RAM minus the 3GiB system/application reserve.
 cat > "${TMP}/eight-gib.env" <<'ENV'
 AI_MEMORY_LIMIT_AUTO=true
