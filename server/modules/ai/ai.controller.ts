@@ -124,6 +124,20 @@ export class AIController {
       ? body.selectedModules.filter((id: unknown) => typeof id === 'string').slice(0, 40)
       : [];
     const startedAt = Date.now();
+    const streaming = body.stream === true;
+    const abortController = new AbortController();
+
+    if (streaming) {
+      res.status(200);
+      res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no');
+      res.flushHeaders?.();
+      res.on('close', () => {
+        if (!res.writableEnded) abortController.abort();
+      });
+    }
 
     try {
       // All user-facing chat now goes through the HSECORE orchestrator.
@@ -136,18 +150,18 @@ export class AIController {
         selectedModules,
         contextTokens: Number.isInteger(body.contextTokens) && body.contextTokens >= 1024 && body.contextTokens <= 32768
           ? body.contextTokens : undefined,
+        onToken: streaming ? (token: string) => {
+          if (!res.destroyed && !res.writableEnded) {
+            res.write(`data: ${JSON.stringify({ token })}\\n\\n`);
+            (res as any).flush?.();
+          }
+        } : undefined,
+        signal: streaming ? abortController.signal : undefined,
         allowTools: true,
       }, req.user);
 
-      if (body.stream === true) {
-        res.status(200);
-        res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-        res.setHeader('Cache-Control', 'no-cache, no-transform');
-        res.setHeader('Connection', 'keep-alive');
-        res.setHeader('X-Accel-Buffering', 'no');
-        res.flushHeaders?.();
+      if (streaming) {
         if (!res.destroyed && !res.writableEnded) {
-          res.write(`data: ${JSON.stringify({ token: result.reply })}\\n\\n`);
           res.write(`data: ${JSON.stringify({
             done: true,
             model: result.model,
@@ -190,6 +204,14 @@ export class AIController {
         errorMessage: messageText,
         timestamp: new Date().toISOString(),
       });
+      if (streaming) {
+        if (!res.destroyed && !res.writableEnded) {
+          res.write(`data: ${JSON.stringify({ error: messageText })}\\n\\n`);
+          (res as any).flush?.();
+          res.end();
+        }
+        return;
+      }
       return res.status(messageText.includes('دسترسی') || messageText.includes('قابل‌دسترسی') ? 403 : 503)
         .json({ success: false, message: messageText });
     }
