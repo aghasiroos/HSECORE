@@ -131,7 +131,7 @@ echo -e "${GREEN}[✓] Ollama is running and its host binding is loopback-only (
 echo -e "\n${BOLD}[3/4] Checking configured models (no downloads are performed)...${NC}"
 MODEL_LIST="$(docker exec "${CONTAINER_NAME}" ollama list)"
 if [[ -n "${PRIMARY_CHAT_MODEL}" ]]; then
-  if printf '%s\\n' "${MODEL_LIST}" | awk 'NR > 1 {print $1}' | grep -Fxq "${PRIMARY_CHAT_MODEL}"; then
+  if printf '%s\n' "${MODEL_LIST}" | awk 'NR > 1 {print $1}' | grep -Fxq "${PRIMARY_CHAT_MODEL}"; then
     echo -e "${GREEN}[✓] Configured chat model is installed: ${PRIMARY_CHAT_MODEL}${NC}"
     echo -e "${CYAN}Running a short inference check...${NC}"
     TEST_PROMPT="لطفاً در یک جمله کاربرد سامانه HSECORE را توضیح بده."
@@ -145,7 +145,7 @@ else
 fi
 
 if [[ -n "${PRIMARY_EMBED_MODEL}" ]]; then
-  if printf '%s\\n' "${MODEL_LIST}" | awk 'NR > 1 {print $1}' | grep -Fxq "${PRIMARY_EMBED_MODEL}"; then
+  if printf '%s\n' "${MODEL_LIST}" | awk 'NR > 1 {print $1}' | grep -Fxq "${PRIMARY_EMBED_MODEL}"; then
     echo -e "${GREEN}[✓] Configured embedding model is installed: ${PRIMARY_EMBED_MODEL}${NC}"
   else
     echo -e "${YELLOW}[NOTE] Configured embedding model is not installed: ${PRIMARY_EMBED_MODEL}. Install/select it explicitly when RAG is enabled.${NC}"
