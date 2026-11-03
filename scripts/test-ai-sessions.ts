@@ -55,6 +55,7 @@ async function run() {
       role: 'user',
       content: 'Test user prompt',
     });
+    await new Promise(resolve => setTimeout(resolve, 20));
     await service.appendMessage(sessionId, userA, {
       id: `assistant-message-${suffix}`,
       role: 'assistant',
