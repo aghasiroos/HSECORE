@@ -114,14 +114,21 @@ export class AISessionService {
     record: { userId?: number | null; userUid?: string | null; username?: string | null },
     identity: { userId: number | null; userUid: string | null; username: string | null }
   ): boolean {
-    if (identity.userId != null && record.userId != null && Number(record.userId) === identity.userId) {
-      return true;
+    const recordHasStableIdentity = record.userId != null || Boolean(record.userUid?.trim());
+    const identityHasStableIdentity = identity.userId != null || Boolean(identity.userUid?.trim());
+
+    // Stable identifiers are authoritative: any available stable-identity mismatch denies access.
+    if (identity.userId != null && record.userId != null && Number(record.userId) !== identity.userId) return false;
+    if (identity.userUid && record.userUid && record.userUid.trim() !== identity.userUid) return false;
+
+    if (recordHasStableIdentity && identityHasStableIdentity) {
+      return (identity.userId != null && record.userId != null && Number(record.userId) === identity.userId) ||
+        Boolean(identity.userUid && record.userUid && record.userUid.trim() === identity.userUid);
     }
-    if (identity.userUid && record.userUid && record.userUid.trim() === identity.userUid) {
-      return true;
-    }
-    if (identity.username && record.username && record.username.trim().toLowerCase() === identity.username) {
-      return true;
+
+    // Username matching is reserved for genuinely legacy rows with no stable owner identifiers.
+    if (!recordHasStableIdentity && identity.username && record.username) {
+      return record.username.trim().toLowerCase() === identity.username;
     }
     return false;
   }
@@ -145,7 +152,7 @@ export class AISessionService {
         conditions.push(eq(schema.aiChatSessions.userUid, userUid));
       }
       if (username) {
-        conditions.push(sql`LOWER(COALESCE(${schema.aiChatSessions.metadata}->>'username', '')) = ${username}`);
+        conditions.push(sql`user_id IS NULL AND user_uid IS NULL AND LOWER(COALESCE(${schema.aiChatSessions.metadata}->>'username', '')) = ${username}`);
       }
 
       if (conditions.length > 0) {
@@ -248,15 +255,6 @@ export class AISessionService {
       messageCount: 0,
     };
 
-    const existingMem = this.inMemorySessions.get(id);
-    this.inMemorySessions.set(id, {
-      ...summary,
-      userId,
-      userUid,
-      username,
-      messages: existingMem?.messages || [],
-    });
-
     try {
       await db
         .insert(schema.aiChatSessions)
@@ -270,17 +268,49 @@ export class AISessionService {
           createdAt: now,
           updatedAt: now,
         })
-        .onConflictDoUpdate({
-          target: schema.aiChatSessions.id,
-          set: { updatedAt: now },
-        });
-    } catch (err: any) {
-      this.inMemorySessions.delete(id);
-      logger.error('[AISessionService] Database error creating session', { error: err?.message || err });
-      throw new Error('ایجاد گفت‌وگو در پایگاه داده انجام نشد؛ لطفاً اتصال پایگاه داده را بررسی کنید.');
-    }
+        .onConflictDoNothing({ target: schema.aiChatSessions.id });
 
-    return summary;
+      const rows = await db.select({
+        userId: schema.aiChatSessions.userId,
+        userUid: schema.aiChatSessions.userUid,
+        metadata: schema.aiChatSessions.metadata,
+        title: schema.aiChatSessions.title,
+        assistantId: schema.aiChatSessions.assistantId,
+        createdAt: schema.aiChatSessions.createdAt,
+        updatedAt: schema.aiChatSessions.updatedAt,
+      }).from(schema.aiChatSessions).where(eq(schema.aiChatSessions.id, id)).limit(1);
+      const row = rows[0];
+      if (!row || !this.matchesUser({
+        userId: row.userId,
+        userUid: row.userUid,
+        username: (row.metadata as any)?.username || null,
+      }, { userId, userUid, username })) {
+        throw new Error('شناسه گفت‌وگو قبلاً به کاربر دیگری تعلق دارد.');
+      }
+
+      const actualUsername = (row.metadata as any)?.username || username;
+      this.inMemorySessions.set(id, {
+        id,
+        userId: row.userId ?? null,
+        userUid: row.userUid ?? null,
+        username: actualUsername ?? null,
+        title: row.title,
+        assistantId: row.assistantId || 'GENERAL_HSE',
+        createdAt: row.createdAt?.toISOString?.() ?? String(row.createdAt),
+        updatedAt: row.updatedAt?.toISOString?.() ?? String(row.updatedAt),
+        messages: this.inMemorySessions.get(id)?.messages || [],
+      });
+      return {
+        ...summary,
+        title: row.title,
+        assistantId: row.assistantId || 'GENERAL_HSE',
+        createdAt: row.createdAt?.toISOString?.() ?? String(row.createdAt),
+        updatedAt: row.updatedAt?.toISOString?.() ?? String(row.updatedAt),
+      };
+    } catch (err: any) {
+      logger.error('[AISessionService] Database error creating session', { error: err?.message || err });
+      throw new Error(err?.message?.includes('تعلق') ? err.message : 'ایجاد گفت‌وگو در پایگاه داده انجام نشد؛ لطفاً اتصال پایگاه داده را بررسی کنید.');
+    }
   }
 
   /**
