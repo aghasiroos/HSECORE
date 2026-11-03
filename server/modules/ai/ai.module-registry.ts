@@ -102,7 +102,7 @@ const HEALTH_CHILD_ADAPTERS: Record<string, Partial<ModuleDefinition>> = {
   nutrition: { tools: ['nutrition_high_risk_summary'], permission: 'health:read', adminOnly: true, explicitPermission: true },
   'health-env-checklists': { permission: 'health:read', adminOnly: true, explicitPermission: true },
   'env-dashboard': { tools: ['environment_summary'], permissions: ['environment:read', 'health:read', 'reports:read'] },
-  'env-monitoring': { tools: ['environment_summary'], permission: 'environment:read' },
+  'env-monitoring': { tools: ['environment_summary'], permissions: ['environment:read', 'health:read', 'reports:read'] },
   'waste-management': { tools: ['environment_summary'], permission: 'environment:read' },
   wastewater: { tools: ['environment_summary'], permission: 'environment:read' },
   'air-water-soil': { tools: ['environment_summary'], permission: 'environment:read' },
@@ -124,7 +124,7 @@ const FIRE_CHILD_ADAPTERS: Record<string, Partial<ModuleDefinition>> = {
 const DEFAULT_CHILDREN: Record<string, ModuleDefinition[]> = {
   risk: [
     { id: 'overview', titleFa: 'داشبورد جامع ارزیابی ریسک', titleEn: 'Risk Assessment Dashboard', tools: ['risk_assessment_summary'], permissions: ['risks:read', 'reports:read'] },
-    { id: 'JSA', titleFa: 'تحلیل ایمنی شغلی (JSA)', titleEn: 'Job Safety Analysis', tools: ['risk_assessment_summary'], permission: 'risks:read' },
+    { id: 'JSA', titleFa: 'تحلیل ایمنی شغلی (JSA)', titleEn: 'Job Safety Analysis', tools: ['risk_assessment_summary'], permissions: ['risks:read', 'reports:read'] },
     { id: 'FMEA', titleFa: 'تحلیل حالات خرابی و آثار آن (FMEA)', titleEn: 'Failure Mode and Effects Analysis', tools: ['risk_assessment_summary'], permission: 'risks:read' },
     { id: 'FTA', titleFa: 'تحلیل درخت خطا (FTA)', titleEn: 'Fault Tree Analysis', tools: ['risk_assessment_summary'], permission: 'risks:read' },
     { id: 'HHA', titleFa: 'تحلیل خطرات بهداشتی (HHA)', titleEn: 'Health Hazard Analysis', tools: ['risk_assessment_summary'], permission: 'risks:read' },
