@@ -470,8 +470,11 @@ export class AIOrchestrator {
         if (wants('environment', 'health-env', 'env-dashboard', 'env-monitoring', 'waste-management', 'wastewater', 'air-water-soil', 'env-reports')) {
           selectedCategories.add('ENVIRONMENT');
         }
-        for (let index = allowedKnowledgeCategories.length - 1; index >= 0; index--) {
-          if (!selectedCategories.has(allowedKnowledgeCategories[index])) allowedKnowledgeCategories.splice(index, 1);
+        const documentScopeSelected = wants('documents', 'org-procedures', 'equipment-certificates', 'org-forms-checklists', 'other-hse-docs');
+        if (!documentScopeSelected) {
+          for (let index = allowedKnowledgeCategories.length - 1; index >= 0; index--) {
+            if (!selectedCategories.has(allowedKnowledgeCategories[index])) allowedKnowledgeCategories.splice(index, 1);
+          }
         }
       }
 
