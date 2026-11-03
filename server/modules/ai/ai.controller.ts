@@ -153,6 +153,7 @@ export class AIController {
           history: Array.isArray(history) ? history : [],
           model: modelInfo.name || modelInfo.model,
           selectedModuleIds,
+          contextTokens: typeof (req.body?.num_ctx || req.body?.contextTokens) === 'number' ? Number(req.body?.num_ctx || req.body?.contextTokens) : undefined,
           allowTools: true,
         };
         if (req.body?.stream === true) {
