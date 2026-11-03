@@ -53,8 +53,7 @@ export interface AIChatRequest {
   /** Explicit module IDs selected from the server-provided AI coverage catalog. */
   selectedModules?: string[];
   contextTokens?: number;
-  /** Internal-only streaming hooks supplied by the authenticated HTTP controller. */
-  onToken?: (token: string) => void;
+  /** Internal-only cancellation signal supplied by the authenticated HTTP controller. */
   signal?: AbortSignal;
   allowTools?: boolean;
   model?: string;
