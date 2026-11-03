@@ -29,8 +29,10 @@ const insertFunction = `hsecore_reject_ai_message_${suffix}`;
 const insertTrigger = `hsecore_reject_ai_message_trigger_${suffix}`;
 const deleteFunction = `hsecore_reject_ai_session_delete_${suffix}`;
 const deleteTrigger = `hsecore_reject_ai_session_delete_trigger_${suffix}`;
-const userA: UserContext = { uid: `ai-session-user-a-${suffix}`, role: 'SAFETY_OFFICER', permissions: [] };
-const userB: UserContext = { uid: `ai-session-user-b-${suffix}`, role: 'SAFETY_OFFICER', permissions: [] };
+const sharedLegacyUsername = `same-login-${suffix}`;
+const sharedNumericId = 900000 + (Number.parseInt(suffix.slice(0, 8), 16) % 90000);
+const userA: UserContext = { id: sharedNumericId, uid: `ai-session-user-a-${suffix}`, username: sharedLegacyUsername, role: 'SAFETY_OFFICER', permissions: [] };
+const userB: UserContext = { id: sharedNumericId, uid: `ai-session-user-b-${suffix}`, username: sharedLegacyUsername, role: 'SAFETY_OFFICER', permissions: [] };
 
 async function cleanup() {
   await db.execute(sql.raw(`DROP TRIGGER IF EXISTS ${insertTrigger} ON ai_chat_messages`)).catch(() => undefined);
@@ -48,20 +50,22 @@ async function run() {
     assert.equal(created.id, sessionId);
     assert.equal((await service.listSessions(userA)).some(item => item.id === sessionId), true);
     assert.equal((await service.listSessions(userB)).some(item => item.id === sessionId), false);
-    console.log('PASS session creation and per-user session listing');
+    await assert.rejects(service.createSession(userB, 'Attempted session takeover', 'GENERAL_HSE', sessionId), /تعلق/);
+    console.log('PASS stable-identity isolation, shared-username denial, and session-ID takeover prevention');
 
     await service.appendMessage(sessionId, userA, {
       id: `user-message-${suffix}`,
       role: 'user',
       content: 'Test user prompt',
+      createdAt: '2024-01-01T10:00:00.000Z',
     });
-    await new Promise(resolve => setTimeout(resolve, 20));
     await service.appendMessage(sessionId, userA, {
       id: `assistant-message-${suffix}`,
       role: 'assistant',
       content: 'Test assistant response',
       model: 'test-model',
       durationMs: 123,
+      createdAt: '2024-01-01T10:01:00.000Z',
     });
 
     const restored = await freshService.getMessages(sessionId, userA);
@@ -69,6 +73,8 @@ async function run() {
     assert.equal(restored[1].content, 'Test assistant response');
     assert.equal(restored[1].model, 'test-model');
     assert.equal(restored[1].durationMs, 123);
+    assert.equal(restored[0].createdAt, '2024-01-01T10:00:00.000Z');
+    assert.equal(restored[1].createdAt, '2024-01-01T10:01:00.000Z');
     console.log('PASS user and assistant messages survive a fresh service instance');
 
     await assert.rejects(freshService.getMessages(sessionId, userB), /دسترسی/);

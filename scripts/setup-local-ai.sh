@@ -43,8 +43,6 @@ docker info >/dev/null 2>&1 || fail "Docker daemon is not running."
 # Add only missing AI keys; never replace values already configured by the installer.
 ensure_env_key "AI_ENGINE_ENABLED" "false"
 ensure_env_key "AI_ENGINE_URL" "http://hse-ai-engine:11434"
-ensure_env_key "AI_DEFAULT_CHAT_MODEL" "qwen2.5:1.5b"
-ensure_env_key "AI_DEFAULT_EMBED_MODEL" "bge-m3"
 ensure_env_key "OLLAMA_IMAGE" "ollama/ollama:0.40.13"
 ensure_env_key "AI_BIND_IP" "127.0.0.1"
 ensure_env_key "AI_HOST_PORT" "11434"
@@ -76,8 +74,6 @@ apply_ai_resource_budget "${ENV_FILE}"
 
 PRIMARY_CHAT_MODEL="$(get_env_value AI_DEFAULT_CHAT_MODEL)"
 PRIMARY_EMBED_MODEL="$(get_env_value AI_DEFAULT_EMBED_MODEL)"
-PRIMARY_CHAT_MODEL="${PRIMARY_CHAT_MODEL:-qwen2.5:1.5b}"
-PRIMARY_EMBED_MODEL="${PRIMARY_EMBED_MODEL:-bge-m3}"
 
 # Resource and disk preflight.
 TOTAL_RAM_MB="$(free -m | awk '/^Mem:/ {print $2}')"
@@ -134,20 +130,28 @@ echo -e "${GREEN}[✓] Ollama is running and its host binding is loopback-only (
 
 echo -e "\n${BOLD}[3/4] Checking configured models (no downloads are performed)...${NC}"
 MODEL_LIST="$(docker exec "${CONTAINER_NAME}" ollama list)"
-if printf '%s\n' "${MODEL_LIST}" | awk 'NR > 1 {print $1}' | grep -Fxq "${PRIMARY_CHAT_MODEL}"; then
-  echo -e "${GREEN}[✓] Chat model is installed: ${PRIMARY_CHAT_MODEL}${NC}"
-  echo -e "${CYAN}Running a short inference check...${NC}"
-  TEST_PROMPT="لطفاً در یک جمله کاربرد سامانه HSECORE را توضیح بده."
-  TEST_OUTPUT="$(docker exec "${CONTAINER_NAME}" ollama run "${PRIMARY_CHAT_MODEL}" "${TEST_PROMPT}" 2>&1)" || fail "Inference test failed for ${PRIMARY_CHAT_MODEL}: ${TEST_OUTPUT}"
-  echo -e "Inference response: ${TEST_OUTPUT:0:200}"
+if [[ -n "${PRIMARY_CHAT_MODEL}" ]]; then
+  if printf '%s\n' "${MODEL_LIST}" | awk 'NR > 1 {print $1}' | grep -Fxq "${PRIMARY_CHAT_MODEL}"; then
+    echo -e "${GREEN}[✓] Configured chat model is installed: ${PRIMARY_CHAT_MODEL}${NC}"
+    echo -e "${CYAN}Running a short inference check...${NC}"
+    TEST_PROMPT="لطفاً در یک جمله کاربرد سامانه HSECORE را توضیح بده."
+    TEST_OUTPUT="$(docker exec "${CONTAINER_NAME}" ollama run "${PRIMARY_CHAT_MODEL}" "${TEST_PROMPT}" 2>&1)" || fail "Inference test failed for ${PRIMARY_CHAT_MODEL}: ${TEST_OUTPUT}"
+    echo -e "Inference response: ${TEST_OUTPUT:0:200}"
+  else
+    fail "Configured chat model is not installed: ${PRIMARY_CHAT_MODEL}. Install/select any supported model through HSECORE AI Model Management. No model was downloaded or changed."
+  fi
 else
-  fail "Configured chat model is not installed: ${PRIMARY_CHAT_MODEL}. Install any supported chat model from HSECORE AI Model Management, set AI_DEFAULT_CHAT_MODEL to its exact Ollama tag, then rerun this verification. No model was downloaded or changed."
+  echo -e "${YELLOW}[NOTE] No default chat model is configured. Select or install any supported model in HSECORE AI Model Management; model verification is skipped.${NC}"
 fi
 
-if printf '%s\n' "${MODEL_LIST}" | awk 'NR > 1 {print $1}' | grep -Fxq "${PRIMARY_EMBED_MODEL}"; then
-  echo -e "${GREEN}[✓] Embedding model is installed: ${PRIMARY_EMBED_MODEL}${NC}"
+if [[ -n "${PRIMARY_EMBED_MODEL}" ]]; then
+  if printf '%s\n' "${MODEL_LIST}" | awk 'NR > 1 {print $1}' | grep -Fxq "${PRIMARY_EMBED_MODEL}"; then
+    echo -e "${GREEN}[✓] Configured embedding model is installed: ${PRIMARY_EMBED_MODEL}${NC}"
+  else
+    echo -e "${YELLOW}[NOTE] Configured embedding model is not installed: ${PRIMARY_EMBED_MODEL}. Install/select it explicitly when RAG is enabled.${NC}"
+  fi
 else
-  echo -e "${YELLOW}[NOTE] Embedding model is not installed: ${PRIMARY_EMBED_MODEL}. Install it explicitly when RAG is enabled.${NC}"
+  echo -e "${YELLOW}[NOTE] No default embedding model is configured; select one only when required by the chosen RAG workflow.${NC}"
 fi
 
 echo -e "\n${BOLD}[4/4] Applying AI settings to the HSECORE application... ${NC}"
@@ -174,34 +178,38 @@ fetch(base + "/api/tags", { signal: AbortSignal.timeout(8000) })
 
 # Verify real inference from inside the HSECORE app container, not only from
 # inside the Ollama container. This catches wrong model tags and app-network issues.
-docker exec "${APP_CONTAINER_NAME}" node -e '
-const base = (process.env.AI_ENGINE_URL || "").replace(/\/$/, "");
-const model = (process.env.AI_DEFAULT_CHAT_MODEL || "").trim();
-if (!base || !model) throw new Error("AI_ENGINE_URL or AI_DEFAULT_CHAT_MODEL is empty");
-fetch(base + "/api/chat", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    model,
-    messages: [{ role: "user", content: "Reply with the single word OK." }],
-    stream: false,
-    options: { num_predict: 8, num_ctx: 1024, temperature: 0 }
-  }),
-  signal: AbortSignal.timeout(120000)
-}).then(async response => {
-  if (!response.ok) throw new Error("Ollama chat returned HTTP " + response.status + ": " + (await response.text()));
-  const payload = await response.json();
-  const answer = payload?.message?.content?.trim();
-  if (!answer) throw new Error("Ollama returned an empty chat response");
-  console.log("HSECORE app-to-Ollama inference: OK");
-  console.log("Model: " + (payload.model || model));
-  console.log("Test response: " + answer.slice(0, 120));
-}).catch(error => { console.error("HSECORE app-to-Ollama inference failed: " + error.message); process.exit(1); });
-' || fail "Ollama is reachable but real inference from HSECORE failed. Check model availability, RAM/swap, and Ollama logs."
+if [[ -n "${PRIMARY_CHAT_MODEL}" ]]; then
+  docker exec "${APP_CONTAINER_NAME}" node -e '
+  const base = (process.env.AI_ENGINE_URL || "").replace(/\/$/, "");
+  const model = (process.env.AI_DEFAULT_CHAT_MODEL || "").trim();
+  if (!base || !model) throw new Error("Configured chat model or AI_ENGINE_URL is empty");
+  fetch(base + "/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model,
+      messages: [{ role: "user", content: "Reply with the single word OK." }],
+      stream: false,
+      options: { num_predict: 8, num_ctx: 1024, temperature: 0 }
+    }),
+    signal: AbortSignal.timeout(120000)
+  }).then(async response => {
+    if (!response.ok) throw new Error("Ollama chat returned HTTP " + response.status + ": " + (await response.text()));
+    const payload = await response.json();
+    const answer = payload?.message?.content?.trim();
+    if (!answer) throw new Error("Ollama returned an empty chat response");
+    console.log("HSECORE app-to-Ollama inference: OK");
+    console.log("Model: " + (payload.model || model));
+    console.log("Test response: " + answer.slice(0, 120));
+  }).catch(error => { console.error("HSECORE app-to-Ollama inference failed: " + error.message); process.exit(1); });
+  ' || fail "Ollama is reachable but real inference from HSECORE failed. Check selected model availability, RAM/swap, and Ollama logs."
+else
+  echo -e "${YELLOW}[NOTE] No chat model selected; application connectivity was verified, while inference awaits an explicit model selection.${NC}"
+fi
 
 echo -e "\n${BOLD}${GREEN}Local AI runtime verification completed.${NC}"
 echo "Container : ${CONTAINER_NAME}"
 echo "Application: ${APP_CONTAINER_NAME} (recreated to apply AI settings)"
-echo "Chat model: ${PRIMARY_CHAT_MODEL}"
-echo "Embed model: ${PRIMARY_EMBED_MODEL}"
+echo "Chat model: ${PRIMARY_CHAT_MODEL:-not selected}"
+echo "Embed model: ${PRIMARY_EMBED_MODEL:-not selected}"
 echo -e "${YELLOW}No model was downloaded or deleted. Existing model data and volumes were preserved.${NC}"

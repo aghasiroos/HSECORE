@@ -170,8 +170,8 @@ export const config: AppConfig = {
   aiEngine: {
     enabled: (process.env.AI_ENGINE_ENABLED ?? 'false').trim().toLowerCase() === 'true',
     url: (process.env.AI_ENGINE_URL || 'http://hse-ai-engine:11434').trim().replace(/\/$/, ''),
-    defaultChatModel: process.env.AI_DEFAULT_CHAT_MODEL || 'qwen2.5:1.5b',
-    defaultEmbedModel: process.env.AI_DEFAULT_EMBED_MODEL || 'bge-m3',
+    defaultChatModel: (process.env.AI_DEFAULT_CHAT_MODEL || '').trim(),
+    defaultEmbedModel: (process.env.AI_DEFAULT_EMBED_MODEL || '').trim(),
     maxConcurrency: Number(process.env.AI_MAX_CONCURRENCY) || 1,
     // Conservative CPU-only default; deployments may explicitly raise this after memory validation.
     timeoutMs: Math.min(Math.max(Number(process.env.AI_REQUEST_TIMEOUT_MS) || 180000, 30000), 600000),

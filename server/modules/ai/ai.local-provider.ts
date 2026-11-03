@@ -95,6 +95,16 @@ export class LocalAIProvider {
     return this.activeUrl || config.aiEngine.url;
   }
 
+  private requireModel(requested: string | undefined, kind: 'chat' | 'embedding'): string {
+    const model = (requested || (kind === 'chat' ? config.aiEngine.defaultChatModel : config.aiEngine.defaultEmbedModel) || '').trim();
+    if (!model) {
+      throw new Error(kind === 'chat'
+        ? 'هیچ مدل گفتگویی انتخاب نشده است؛ ابتدا یک مدل را از مدیریت مدل‌های هوش مصنوعی انتخاب کنید.'
+        : 'هیچ مدل embedding انتخاب نشده است؛ برای استفاده از RAG ابتدا یک مدل embedding انتخاب کنید.');
+    }
+    return model;
+  }
+
   private getCandidateUrls(): string[] {
     const urls = [config.aiEngine.url];
     if (config.aiEngine.url.includes('hse-ai-engine')) {
@@ -592,7 +602,7 @@ export class LocalAIProvider {
       }
 
       const startTime = Date.now();
-      const model = options?.model || config.aiEngine.defaultChatModel;
+      const model = this.requireModel(options?.model, 'chat');
       const timeoutMs = Math.min(options?.timeoutMs || config.aiEngine.timeoutMs || 180000, remainingMs);
 
       // Evict any other loaded models from RAM to prevent concurrent model residency OOM
@@ -672,7 +682,7 @@ export class LocalAIProvider {
 
     return this.enqueue(async (remainingMs) => {
       const startedAt = Date.now();
-      const model = options.model || config.aiEngine.defaultChatModel;
+      const model = this.requireModel(options.model, 'chat');
 
       // Evict any other loaded models from RAM to prevent concurrent model residency OOM
       await this.evictOtherLoadedModels(model);
@@ -845,7 +855,7 @@ export class LocalAIProvider {
       }
 
       const startTime = Date.now();
-      const model = modelName || config.aiEngine.defaultEmbedModel;
+      const model = this.requireModel(modelName, 'embedding');
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), Math.min(30000, remainingMs));
 

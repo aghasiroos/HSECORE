@@ -4154,9 +4154,10 @@ manage_ai_infrastructure() {
           4) bash "${manage_script}" list ;;
           5)
             local cur_model
-            cur_model="$(grep '^AI_DEFAULT_CHAT_MODEL=' "${ENV_FILE}" 2>/dev/null | cut -d'=' -f2 | tr -d '\"' || echo 'qwen2.5:1.5b')"
-            echo -e "Current default model in .env: ${CYAN}${cur_model}${NC}"
-            read -r -p "Enter new default model name [e.g. qwen2.5:1.5b]: " def_m
+            cur_model="$(grep '^AI_DEFAULT_CHAT_MODEL=' "${ENV_FILE}" 2>/dev/null | tail -n1 | cut -d'=' -f2- | tr -d '\"' || true)"
+            cur_model="${cur_model:-not selected}"
+            echo -e "Current default chat model in .env: ${CYAN}${cur_model}${NC}"
+            read -r -p "Enter an installed chat model name (leave blank to cancel): " def_m
             if [ -n "${def_m}" ]; then
               bash "${manage_script}" set-default "${def_m}"
             fi
