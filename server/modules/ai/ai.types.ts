@@ -52,6 +52,7 @@ export interface AIChatRequest {
   contextModule?: string;
   /** Explicit module IDs selected from the server-provided AI coverage catalog. */
   selectedModules?: string[];
+  contextTokens?: number;
   allowTools?: boolean;
   model?: string;
 }
