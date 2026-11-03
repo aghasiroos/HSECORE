@@ -171,9 +171,23 @@ export class AIOrchestrator {
       const isGlobalAdmin = isGlobalAdminUser(userContext);
 
       if (sensitiveToolsRequiringGlobalScope.has(toolName) && !isGlobalAdmin) {
+        results.push({
+          toolName: `access_denied_${toolName}`,
+          titleFa: `محدودیت دسترسی: ${toolName}`,
+          summary: 'این بخش به دلیل محرمانگی اطلاعات فقط برای مدیر مجاز سامانه قابل تحلیل است؛ هیچ داده‌ای از این بخش استخراج نشده است.',
+          data: { accessDenied: true },
+          timestamp: new Date().toISOString(),
+        });
         return;
       }
       if (requiredPerm && !isGlobalAdmin && !checkUserHasPermission(userContext, requiredPerm)) {
+        results.push({
+          toolName: `access_denied_${toolName}`,
+          titleFa: `محدودیت دسترسی: ${toolName}`,
+          summary: 'کاربر مجوز مشاهده این ماژول را ندارد؛ هیچ داده‌ای از این بخش استخراج نشده است.',
+          data: { accessDenied: true },
+          timestamp: new Date().toISOString(),
+        });
         return;
       }
 
@@ -453,7 +467,7 @@ export class AIOrchestrator {
       logger.warn('[AIOrchestrator] RAG retrieval skipped or failed', { error: String(ragErr) });
     }
 
-    if (selectedModules.length > 0 && toolResults.length === 0 && matchedChunks.length === 0) {
+    if (selectedModules.length > 0 && (toolResults.length === 0 || toolResults.every(item => item.data?.accessDenied === true)) && matchedChunks.length === 0) {
       throw new Error('برای ماژول‌های انتخاب‌شده داده قابل‌دسترسی یا ابزار تحلیلی فعال پیدا نشد. دسترسی کاربر و پوشش تحلیلی ماژول را بررسی کنید.');
     }
 
@@ -631,6 +645,19 @@ export class AIOrchestrator {
       { moduleId: 'equipment-certificates', moduleNameFa: 'گواهینامه‌ها و سرتیفیکیت تجهیزات', connected: true, tools: [], assistantIds: ['GENERAL_HSE'], notes: 'پایگاه دانش RAG' },
       { moduleId: 'org-forms-checklists', moduleNameFa: 'فرم‌ها و چک‌لیست‌های سازمانی', connected: true, tools: [], assistantIds: ['GENERAL_HSE'], notes: 'پایگاه دانش RAG' },
       { moduleId: 'other-hse-docs', moduleNameFa: 'سایر مستندات HSE', connected: true, tools: [], assistantIds: ['GENERAL_HSE'], notes: 'پایگاه دانش RAG' },
+      { moduleId: 'env-reports', moduleNameFa: 'گزارش‌های محیط‌زیست', connected: true, tools: toolMap.environment, assistantIds: ['GENERAL_HSE'] },
+      { moduleId: 'safety-checklists', moduleNameFa: 'سوابق و اجرای بازرسی‌های ایمنی', connected: true, tools: toolMap.five_s, assistantIds: ['GENERAL_HSE'] },
+      { moduleId: 'fire-dashboard', moduleNameFa: 'داشبورد واحد آتش‌نشانی', connected: true, tools: toolMap.fire, assistantIds: ['GENERAL_HSE'] },
+      { moduleId: 'fire-extinguisher-capsol', moduleNameFa: 'کپسول‌های اطفاء حریق', connected: true, tools: toolMap.fire, assistantIds: ['GENERAL_HSE'] },
+      { moduleId: 'hydrants-monitors', moduleNameFa: 'هایدرانت‌ها و مانیتورهای آب/فوم', connected: true, tools: toolMap.fire, assistantIds: ['GENERAL_HSE'] },
+      { moduleId: 'fire-boxs', moduleNameFa: 'جعبه‌های هوزریل و هوزباکس', connected: true, tools: toolMap.fire, assistantIds: ['GENERAL_HSE'] },
+      { moduleId: 'foam-pakages', moduleNameFa: 'پکیج‌ها و مخازن فوم', connected: true, tools: toolMap.fire, assistantIds: ['GENERAL_HSE'] },
+      { moduleId: 'fm-200', moduleNameFa: 'سیستم‌های اطفاء گازی FM 200', connected: true, tools: toolMap.fire, assistantIds: ['GENERAL_HSE'] },
+      { moduleId: 'deluge-sprinklers', moduleNameFa: 'دلویج ولو و اسپرینکلر', connected: true, tools: toolMap.fire, assistantIds: ['GENERAL_HSE'] },
+      { moduleId: 'gas-detectors', moduleNameFa: 'گازیاب‌ها و دتکتورها', connected: true, tools: toolMap.fire, assistantIds: ['GENERAL_HSE'] },
+      { moduleId: 'emergency-eyewash', moduleNameFa: 'دوش و چشم‌شوی اضطراری', connected: true, tools: toolMap.fire, assistantIds: ['GENERAL_HSE'] },
+      { moduleId: 'ai-assistant', moduleNameFa: 'هوش مصنوعی HSECORE', connected: false, tools: [], assistantIds: ['GENERAL_HSE'], notes: 'این بخش محیط گفتگو است، نه منبع داده تحلیلی' },
+      { moduleId: 'profile', moduleNameFa: 'شناسنامه و تنظیمات کاربری', connected: false, tools: [], assistantIds: ['GENERAL_HSE'], notes: 'اطلاعات حساب کاربر از تحلیل عمومی مستثناست' },
 
     ];
 
