@@ -72,9 +72,9 @@ async function run() {
       assert.equal(actualCoverage.filter(item => item.moduleId === id).length, 1, 'duplicate fire category: ' + id);
     }
     assert.equal(coverageIds.has('future-module'), true, 'persisted future module must appear');
-    assert.equal(coverageIds.has('documents-nested-secret-tab'), true, 'nested document tab must appear');
+    assert.equal(coverageIds.has('nested-secret-tab'), true, 'nested document tab must appear');
     const restrictedCoverage = await aiOrchestrator.getModuleCoverage({ uid: 'restricted-user', role: 'CUSTOM_ROLE' });
-    assert.equal(restrictedCoverage.find(item => item.moduleId === 'documents-nested-secret-tab')?.connected, false, 'nested document tab must inherit documents:read ACL');
+    assert.equal(restrictedCoverage.find(item => item.moduleId === 'nested-secret-tab')?.connected, false, 'nested document tab must inherit documents:read ACL');
     assert.equal(restrictedCoverage.find(item => item.moduleId === 'user-mgmt')?.connected, false, 'user management must remain administrator-only');
     console.log('PASS module catalog covers all 24 main modules, known nested tabs, canonical fire categories, and future persisted modules');
   } finally {
