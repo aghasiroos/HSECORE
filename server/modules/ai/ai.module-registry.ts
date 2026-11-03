@@ -3,6 +3,7 @@ import { inArray } from 'drizzle-orm';
 import { checkUserHasPermission, isGlobalAdminUser, type UserContext } from '../../core/middleware/auth.ts';
 import {
   HSECORE_SYSTEM_MODULES,
+  HSECORE_HEALTH_ENV_OVERVIEW,
   HSECORE_DOCUMENTS_SUBITEMS,
   HSECORE_HEALTH_ENV_SUBITEMS,
   HSECORE_FIRE_DEPT_SUBITEMS,
@@ -132,15 +133,25 @@ const DEFAULT_CHILDREN: Record<string, ModuleDefinition[]> = {
     { id: 'electrical', titleFa: 'پروانه برق و ایزولاسیون', titleEn: 'Electrical Isolation Permit', tools: ['ptw_summary'] },
   ],
   'ptw-audit': [
-    { id: 'audit-summary', titleFa: 'خلاصه ممیزی پروانه کار', titleEn: 'PTW Audit Summary', tools: ['ptw_summary'], notes: 'فقط تعداد ممیزی‌ها در منبع فعلی موجود است؛ جزئیات و یافته‌های ممیزی هنوز Adapter مستقل ندارند.' },
+    { id: 'dashboard', titleFa: 'داشبورد ممیزی پروانه کار', titleEn: 'PTW Audit Dashboard', tools: ['ptw_audit_summary'] },
+    { id: 'list', titleFa: 'فهرست و سوابق ممیزی‌ها', titleEn: 'PTW Audit Records', tools: ['ptw_audit_summary'] },
   ],
-  'health-env': HSECORE_HEALTH_ENV_SUBITEMS.map(item => ({
+  'health-env': [
+    {
+      id: HSECORE_HEALTH_ENV_OVERVIEW.key,
+      titleFa: HSECORE_HEALTH_ENV_OVERVIEW.titleFa,
+      titleEn: HSECORE_HEALTH_ENV_OVERVIEW.titleEn,
+      tools: ['health_medical_summary', 'nutrition_high_risk_summary', 'environment_summary', 'five_s_inspections_summary'],
+      notes: 'داشبورد تجمیعی؛ فقط منابعی که برای کاربر جاری مجاز و واقعاً متصل هستند تحلیل می‌شوند.',
+    },
+    ...HSECORE_HEALTH_ENV_SUBITEMS.map(item => ({
     id: item.key,
     titleFa: item.titleFa,
     titleEn: item.titleEn,
     enabled: item.enabled,
     ...(HEALTH_CHILD_ADAPTERS[item.key] || {}),
   })),
+  ],
   'fire-dept': HSECORE_FIRE_DEPT_SUBITEMS.map(item => ({
     id: item.key,
     titleFa: item.titleFa,
@@ -166,26 +177,28 @@ const DEFAULT_CHILDREN: Record<string, ModuleDefinition[]> = {
 
 const DEFAULT_GRANDCHILDREN: Record<string, ModuleDefinition[]> = {
   'health-env:periodic-exams': [
-    { id: 'dashboard', titleFa: 'داشبورد معاینات ادواری', titleEn: 'Periodic Exams Dashboard', tools: ['health_medical_summary'], permission: 'health:read', adminOnly: true, explicitPermission: true },
-    { id: 'exams', titleFa: 'سوابق معاینات', titleEn: 'Medical Exam Records', tools: ['health_medical_summary'], permission: 'health:read', adminOnly: true, explicitPermission: true },
-    { id: 'lab', titleFa: 'آزمایشگاه', titleEn: 'Laboratory Results', tools: ['health_medical_summary'], permission: 'health:read', adminOnly: true, explicitPermission: true },
-    { id: 'bmi', titleFa: 'شاخص توده بدنی (BMI)', titleEn: 'BMI Analytics', tools: ['health_medical_summary'], permission: 'health:read', adminOnly: true, explicitPermission: true },
-    { id: 'annual-compare', titleFa: 'مقایسه سالانه', titleEn: 'Annual Comparison', tools: ['health_medical_summary'], permission: 'health:read', adminOnly: true, explicitPermission: true },
-    { id: 'import-excel', titleFa: 'ورود اطلاعات از اکسل', titleEn: 'Excel Import', permission: 'health:read', adminOnly: true, explicitPermission: true },
-    { id: 'smart-reports', titleFa: 'گزارش‌های هوشمند', titleEn: 'Smart Reports', tools: ['health_medical_summary'], permission: 'health:read', adminOnly: true, explicitPermission: true },
-    { id: 'person-compare', titleFa: 'مقایسه وضعیت افراد', titleEn: 'Personnel Comparison', tools: ['health_medical_summary'], permission: 'health:read', adminOnly: true, explicitPermission: true },
-    { id: 'personnel-dossier', titleFa: 'پرونده سلامت پرسنل', titleEn: 'Personnel Health Dossier', tools: ['health_medical_summary'], permission: 'health:read', adminOnly: true, explicitPermission: true },
+    { id: 'dashboard', titleFa: 'داشبورد سلامت', titleEn: 'Health Dashboard', tools: ['health_medical_summary'], permission: 'health:read', adminOnly: true, explicitPermission: true },
+    { id: 'personnel', titleFa: 'پرونده پرسنل', titleEn: 'Personnel Dossier', tools: ['health_medical_summary'], permission: 'health:read', adminOnly: true, explicitPermission: true },
+    { id: 'exams', titleFa: 'معاینات ادواری', titleEn: 'Periodic Exams', tools: ['health_medical_summary'], permission: 'health:read', adminOnly: true, explicitPermission: true },
+    { id: 'lab', titleFa: 'آزمایشگاه', titleEn: 'Laboratory', tools: ['health_medical_summary'], permission: 'health:read', adminOnly: true, explicitPermission: true },
+    { id: 'bmi', titleFa: 'شاخص BMI', titleEn: 'BMI', tools: ['health_medical_summary'], permission: 'health:read', adminOnly: true, explicitPermission: true },
+    { id: 'reports', titleFa: 'گزارش‌های هوشمند', titleEn: 'Smart Reports', tools: ['health_medical_summary'], permission: 'health:read', adminOnly: true, explicitPermission: true },
+    { id: 'compare', titleFa: 'مقایسه سنواتی', titleEn: 'Annual Comparison', tools: ['health_medical_summary'], permission: 'health:read', adminOnly: true, explicitPermission: true },
+    { id: 'personcompare', titleFa: 'مقایسه فردی', titleEn: 'Personnel Comparison', tools: ['health_medical_summary'], permission: 'health:read', adminOnly: true, explicitPermission: true },
+    { id: 'import', titleFa: 'ورود اطلاعات', titleEn: 'Import Data', permission: 'health:read', adminOnly: true, explicitPermission: true },
   ],
   'health-env:nutrition': [
-    { id: 'high-risk', titleFa: 'افراد پرخطر و پیگیری', titleEn: 'High-Risk Personnel & Follow-up', tools: ['nutrition_high_risk_summary'], permission: 'health:read', adminOnly: true, explicitPermission: true },
-    { id: 'care-plans', titleFa: 'برنامه‌های مراقبتی', titleEn: 'Nutrition Care Plans', permission: 'health:read', adminOnly: true, explicitPermission: true },
+    { id: 'table', titleFa: 'فهرست پرونده‌ها و مراجعات', titleEn: 'Nutrition Records & Visits', permission: 'health:read', adminOnly: true, explicitPermission: true },
+    { id: 'analytics', titleFa: 'داشبورد و تحلیل شاخص‌ها', titleEn: 'Nutrition Analytics', permission: 'health:read', adminOnly: true, explicitPermission: true },
+    { id: 'high_risk', titleFa: 'بیماری‌های پرخطر و پیگیری', titleEn: 'High-Risk Personnel & Follow-up', tools: ['nutrition_high_risk_summary'], permission: 'health:read', adminOnly: true, explicitPermission: true },
   ],
   'fire-dept:vehicles': [
-    { id: 'vehicle-dashboard', titleFa: 'داشبورد ناوگان', titleEn: 'Fleet Dashboard' },
-    { id: 'vehicle-inspections', titleFa: 'بازرسی خودروها', titleEn: 'Vehicle Inspections' },
-    { id: 'vehicle-maintenance', titleFa: 'تعمیر و نگهداری', titleEn: 'Vehicle Maintenance' },
-    { id: 'vehicle-defects', titleFa: 'نواقص و عیوب', titleEn: 'Vehicle Defects' },
-    { id: 'vehicle-certificates', titleFa: 'گواهینامه‌ها و مدارک', titleEn: 'Vehicle Certificates' },
+    { id: 'dashboard', titleFa: 'داشبورد ناوگان', titleEn: 'Fleet Dashboard', tools: ['fire_safety_summary'], notes: 'فقط تعداد ناوگان در منبع فعلی موجود است؛ جزئیات کامل ناوگان متصل نیست.' },
+    { id: 'vehicles', titleFa: 'فهرست خودروها', titleEn: 'Vehicles Directory', tools: ['fire_safety_summary'], notes: 'فقط تعداد خودروها در منبع فعلی موجود است؛ رکوردهای خودرو متصل نیست.' },
+    { id: 'inspect', titleFa: 'ثبت بازرسی چک‌لیست', titleEn: 'Vehicle Inspections' },
+    { id: 'defects', titleFa: 'نواقص و عیوب', titleEn: 'Vehicle Defects' },
+    { id: 'standards', titleFa: 'استانداردها و الزامات', titleEn: 'Vehicle Standards' },
+    { id: 'profile', titleFa: 'پروفایل خودرو', titleEn: 'Vehicle Profile' },
   ],
 };
 
