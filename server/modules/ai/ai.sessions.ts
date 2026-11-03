@@ -145,10 +145,18 @@ export class AISessionService {
 
     try {
       const conditions = [];
-      if (userId != null) {
+      if (userId != null && userUid) {
+        // When both stable identifiers exist on both sides, require consistency.
+        // Permit matching legacy rows that contain only one stable identifier.
+        conditions.push(sql`(
+          (${schema.aiChatSessions.userId} = ${userId} AND
+            (${schema.aiChatSessions.userUid} IS NULL OR ${schema.aiChatSessions.userUid} = ${userUid}))
+          OR
+          (${schema.aiChatSessions.userUid} = ${userUid} AND ${schema.aiChatSessions.userId} IS NULL)
+        )`);
+      } else if (userId != null) {
         conditions.push(eq(schema.aiChatSessions.userId, userId));
-      }
-      if (userUid) {
+      } else if (userUid) {
         conditions.push(eq(schema.aiChatSessions.userUid, userUid));
       }
       if (username) {
