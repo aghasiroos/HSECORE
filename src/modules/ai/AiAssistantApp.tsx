@@ -369,6 +369,21 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
     (item.children || []).forEach(appendCatalogTree);
   };
   moduleCatalog.forEach(appendCatalogTree);
+  useEffect(() => {
+    if (moduleCatalogLoading || moduleCatalog.length === 0 ||
+        !/(?:^|\\s)\\/all\\s*$/i.test(inputMessage)) return;
+    const allItems: AIModulePickerItem[] = [];
+    const visit = (item: AIModulePickerItem) => {
+      allItems.push(item);
+      (item.children || []).forEach(visit);
+    };
+    moduleCatalog.forEach(visit);
+    setSelectedModuleIds(allItems.filter(item => item.allowed).map(item => item.moduleId));
+    setInputMessage(current => current.replace(/(?:^|\\s)\\/all\\s*$/i, '').trimStart());
+    setModulePickerOpen(false);
+    setModuleSearch('');
+  }, [moduleCatalogLoading, moduleCatalog, inputMessage]);
+
 
   const handleComposerChange = (value: string) => {
     const slashMatch = value.match(/(?:^|\s)\/([^\s]*)$/);
