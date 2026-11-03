@@ -92,11 +92,11 @@ const DEFAULT_CHILDREN: Record<string, ModuleDefinition[]> = {
     { id: 'audit-summary', titleFa: 'خلاصه ممیزی پروانه کار', titleEn: 'PTW Audit Summary', tools: ['ptw_summary'], notes: 'فقط تعداد ممیزی‌ها در منبع فعلی موجود است؛ جزئیات و یافته‌های ممیزی هنوز Adapter مستقل ندارند.' },
   ],
   'health-env': [
-    { id: 'clinic', titleFa: 'بهداری و مراجعات سرپایی', titleEn: 'Clinic Visits' },
+    { id: 'clinic', titleFa: 'بهداری و مراجعات سرپایی', titleEn: 'Clinic Visits', permission: 'health:read', adminOnly: true, explicitPermission: true },
     { id: 'periodic-exams', titleFa: 'سامانه معاینات ادواری طب کار', titleEn: 'Periodic Medical Exams', tools: ['health_medical_summary'], permission: 'health:read', adminOnly: true, explicitPermission: true },
     { id: 'non-periodic-exams', titleFa: 'معاینات غیر دوره‌ای', titleEn: 'Non-Periodic Exams', tools: ['health_medical_summary'], permission: 'health:read', adminOnly: true, explicitPermission: true },
     { id: 'nutrition', titleFa: 'کارشناس تغذیه و رژیم‌درمانی', titleEn: 'Nutrition Specialist', tools: ['nutrition_high_risk_summary'], permission: 'health:read', adminOnly: true, explicitPermission: true },
-    { id: 'health-env-checklists', titleFa: 'چک‌لیست‌های عملیاتی بهداشت و محیط زیست', titleEn: 'Health & Environment Checklists' },
+    { id: 'health-env-checklists', titleFa: 'چک‌لیست‌های عملیاتی بهداشت و محیط زیست', titleEn: 'Health & Environment Checklists', permission: 'health:read', adminOnly: true, explicitPermission: true },
     { id: 'env-dashboard', titleFa: 'داشبورد محیط‌زیست', titleEn: 'Environment Dashboard', tools: ['environment_summary'], permission: 'environment:read' },
     { id: 'env-monitoring', titleFa: 'پایش‌های محیط‌زیستی', titleEn: 'Environmental Monitoring', tools: ['environment_summary'], permission: 'environment:read' },
     { id: 'waste-management', titleFa: 'مدیریت پسماند (EMP)', titleEn: 'Waste Management', tools: ['environment_summary'], permission: 'environment:read' },
@@ -209,11 +209,11 @@ function mergeConfiguredDefinitions(defaults: ModuleDefinition[], configured: an
   return Array.from(byId.values());
 }
 
-function toCatalogItem(definition: ModuleDefinition, user: UserContext, parentId?: string): AIModuleCatalogItem {
+function toCatalogItem(definition: ModuleDefinition, user: UserContext, parentId?: string, parentAllowed = true): AIModuleCatalogItem {
   const configuredTools = definition.tools || [];
   const tools = configuredTools.filter(tool => canUseTool(user, tool));
   const enabled = definition.enabled !== false;
-  const allowed = enabled && canAccessDefinition(user, definition);
+  const allowed = enabled && parentAllowed && canAccessDefinition(user, definition);
   const connected = allowed && (tools.length > 0 || definition.rag === true);
   const notes = !allowed
     ? 'برای مشاهده و تحلیل این بخش، مجوز دسترسی لازم را ندارید.'
@@ -261,10 +261,10 @@ export async function getAIModuleCatalog(user?: UserContext): Promise<AIModuleCa
     const defaults = DEFAULT_CHILDREN[module.id] || [];
     const configured = childSettings[module.id] ? parseSetting(setting(childSettings[module.id])) : null;
     const children = mergeConfiguredDefinitions(defaults, configured).map(child => {
-      const childItem = toCatalogItem(child, user, module.id);
+      const childItem = toCatalogItem(child, user, module.id, parent.allowed);
       const grandchildDefaults = DEFAULT_GRANDCHILDREN[childItem.moduleId] || [];
       if (grandchildDefaults.length) {
-        childItem.children = grandchildDefaults.map(grandchild => toCatalogItem(grandchild, user, childItem.moduleId));
+        childItem.children = grandchildDefaults.map(grandchild => toCatalogItem(grandchild, user, childItem.moduleId, childItem.allowed));
       }
       return childItem;
     });
