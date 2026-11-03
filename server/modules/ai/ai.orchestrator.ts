@@ -732,7 +732,8 @@ export class AIOrchestrator {
     }
     const normalizeId = (value: unknown): string => String(value || '')
       .trim().toLowerCase()
-      .replace(/[^a-z0-9\u0600-\u06ff_-]+/g, '-')
+      .replace(/_/g, '-')
+      .replace(/[^a-z0-9\u0600-\u06ff-]+/g, '-')
       .replace(/-+/g, '-')
       .replace(/^-|-$/g, '')
       .slice(0, 80);
