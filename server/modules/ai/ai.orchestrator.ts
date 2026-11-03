@@ -94,25 +94,33 @@ export class AIOrchestrator {
     const toolPermissions: Record<string, string> = {
       heat_weather_summary: '', // Meteorological & WBGT station telemetry available to all authenticated users
       ptw_summary: 'ptw:read',
-      ptw_audit_summary: 'audit:read',
+      ptw_audit_summary: '',
       incidents_summary: 'incidents:read',
       health_medical_summary: 'health:read',
       nutrition_high_risk_summary: 'health:read',
-      risk_assessment_summary: 'risks:read',
+      risk_assessment_summary: '',
       five_s_inspections_summary: 'five_s:read',
-      fire_safety_summary: 'fire:read',
+      fire_safety_summary: 'fire_equipment:read',
       warnings_anomalies_summary: 'warnings:read',
-      training_summary: 'training:read',
-      ppe_summary: 'ppe:read',
-      environment_summary: 'environment:read',
+      training_summary: '',
+      ppe_summary: '',
+      environment_summary: '',
       personnel_org_summary: 'personnel:read',
-      workflow_referrals_summary: 'workflows:read',
+      workflow_referrals_summary: 'workflow:read',
       kpi_management_summary: 'reports:read',
       non_conformances_summary: 'audit:read',
       notifications_summary: 'notifications:read',
       users_roles_summary: '',
       settings_backup_summary: '',
       system_architecture_summary: '',
+    };
+
+    const toolPermissionAlternatives: Record<string, string[]> = {
+      ptw_audit_summary: ['audit:read', 'ptw:read'],
+      risk_assessment_summary: ['risks:read', 'reports:read'],
+      training_summary: ['training:read', 'personnel:read', 'reports:read'],
+      ppe_summary: ['ppe:read', 'safety_equipment:read', 'reports:read'],
+      environment_summary: ['environment:read', 'health:read', 'reports:read'],
     };
 
     const sensitiveToolsRequiringGlobalScope = new Set([
@@ -139,7 +147,12 @@ export class AIOrchestrator {
       if (sensitiveToolsRequiringGlobalScope.has(toolName) && !isGlobalAdmin) {
         return;
       }
-      if (requiredPerm && !isMedicalTool && !isGlobalAdmin && !checkUserHasPermission(userContext, requiredPerm)) {
+      const permissionAlternatives = toolPermissionAlternatives[toolName];
+      if (permissionAlternatives?.length) {
+        if (!isGlobalAdmin && !permissionAlternatives.some(permission => checkUserHasPermission(userContext, permission))) {
+          return;
+        }
+      } else if (requiredPerm && !isMedicalTool && !isGlobalAdmin && !checkUserHasPermission(userContext, requiredPerm)) {
         return;
       }
 
