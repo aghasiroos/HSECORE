@@ -29,20 +29,6 @@ const catalog: AIModuleCatalogItem[] = [
     enabled: true,
     tools: ['ptw_summary'],
     assistantIds: ['GENERAL_HSE'],
-    children: [
-      {
-        moduleId: 'ptw:ptw-audit',
-        moduleNameFa: 'ممیزی پروانه کار',
-        titleEn: 'PTW Audit',
-        parentId: 'ptw',
-        connected: false,
-        allowed: true,
-        enabled: true,
-        tools: [],
-        assistantIds: ['GENERAL_HSE'],
-        notes: 'Adapter اختصاصی ممیزی متصل نیست.',
-      },
-    ],
   },
   {
     moduleId: 'ptw-audit',
@@ -110,6 +96,18 @@ const catalog: AIModuleCatalogItem[] = [
             tools: ['health_medical_summary'],
             assistantIds: ['GENERAL_HSE'],
           },
+          {
+            moduleId: 'health-env:periodic-exams:import',
+            moduleNameFa: 'ورود اطلاعات',
+            titleEn: 'Import Data',
+            parentId: 'health-env:periodic-exams',
+            connected: false,
+            allowed: true,
+            enabled: true,
+            tools: [],
+            assistantIds: ['GENERAL_HSE'],
+            notes: 'Adapter ورود فایل متصل نیست.',
+          },
         ],
       },
     ],
@@ -129,9 +127,12 @@ const catalog: AIModuleCatalogItem[] = [
 
 const selectedIds = [
   'ptw',
-  'ptw:ptw-audit',
+  'ptw-audit',
+  'ptw-audit:dashboard',
+  'ptw-audit:list',
   'health-env:periodic-exams',
   'health-env:periodic-exams:lab',
+  'health-env:periodic-exams:import',
   'user-mgmt',
 ];
 
@@ -149,6 +150,7 @@ assert.deepEqual(descriptions.selected, [
   'فهرست و سوابق ممیزی‌ها',
   'معاینات ادواری',
   'آزمایشگاه',
+  'ورود اطلاعات',
   'مدیریت کاربران',
 ]);
 assert.deepEqual(descriptions.connected, [
@@ -160,7 +162,7 @@ assert.deepEqual(descriptions.connected, [
   'آزمایشگاه',
 ]);
 assert.equal(descriptions.unavailable.length, 2);
-assert.ok(descriptions.unavailable.includes('ممیزی پروانه کار'));
+assert.ok(descriptions.unavailable.includes('ورود اطلاعات'));
 assert.ok(descriptions.unavailable.includes('مدیریت کاربران'));
 
 console.log('PASS AI module registry: recursive selection, adapter deduplication, and access-aware coverage.');
