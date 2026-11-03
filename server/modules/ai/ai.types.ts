@@ -35,6 +35,10 @@ export interface AIModuleCoverage {
   tools: string[];
   assistantIds: AIAssistantId[];
   notes?: string;
+  parentModuleId?: string;
+  level?: number;
+  /** Internal tool-group alias; retained for backend routing but hidden from the user picker. */
+  internal?: boolean;
 }
 
 export interface AIChatMessage {
@@ -50,6 +54,11 @@ export interface AIChatRequest {
   assistantId?: AIAssistantId;
   history?: Array<{ role: 'user' | 'assistant'; content: string }>;
   contextModule?: string;
+  /** Explicit module IDs selected from the server-provided AI coverage catalog. */
+  selectedModules?: string[];
+  contextTokens?: number;
+  /** Internal-only cancellation signal supplied by the authenticated HTTP controller. */
+  signal?: AbortSignal;
   allowTools?: boolean;
   model?: string;
 }

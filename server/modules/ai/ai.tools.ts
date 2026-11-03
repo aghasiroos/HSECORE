@@ -52,6 +52,17 @@ export class AIToolsRegistry {
     return map;
   }
 
+  /** Read the persisted navigation/module metadata used by the system UI. */
+  async getPersistedModuleConfigs(): Promise<Record<string, unknown>> {
+    const settings = await this.loadSettingsMap();
+    return {
+      system: settings.get('hse_ui_config_v3'),
+      healthEnvironment: settings.get('hse_health_env_ui_config'),
+      fireDepartment: settings.get('hse_fire_dept_ui_config'),
+      safetyDepartment: settings.get('hse_safety_dept_ui_config'),
+    };
+  }
+
   /**
    * Tool 1: Live Heat Stress Monitor & Meteorological Telemetry (دما، رطوبت، WBGT، استرس گرمایی)
    */
@@ -812,19 +823,27 @@ export class AIToolsRegistry {
         db.select().from(schema.systemFiles).catch(() => []),
       ]);
       const backupSetting = settingsMap.get('hse_system_backup_config') || settingsMap.get('backup_config');
-      const backupSchedule = backupSetting?.schedule || 'روزانه خودکار (ساعت ۰۲:۰۰ بامداد)';
-      const lastBackupDate = backupSetting?.lastBackupDate || 'فعال و ذخیره‌شده در پایگاه داده پایدار PostgreSQL';
+      const backupSchedule = typeof backupSetting?.schedule === 'string' ? backupSetting.schedule : null;
+      const lastBackupDate = typeof backupSetting?.lastBackupDate === 'string' ? backupSetting.lastBackupDate : null;
 
       return {
         toolName: 'settings_backup_summary',
-        titleFa: 'ماژول تنظیمات سامانه، پیکربندی سرور و پشتیبان‌گیری',
+        titleFa: 'ماژول تنظیمات سامانه و وضعیت پیکربندی پشتیبان‌گیری',
         summary: [
-          `• وضعیت پشتیبان‌گیری دیتابیس: ${backupSchedule}`,
-          `• آخرین وضعیت بکاپ و داده‌های پایدار: ${lastBackupDate}`,
-          `• تعداد فایل‌ها و مستندات سیستمی ذخیره‌شده: ${files.length} فایل`,
-          `• معماری داده: پایگاه داده رابطه‌ای PostgreSQL به همراه مکانیزم همگام‌سازی آفلاین/آنلاین`,
+          backupSetting
+            ? `• تنظیمات پشتیبان‌گیری ثبت شده است؛ برنامه زمان‌بندی: ${backupSchedule || 'در تنظیمات ثبت نشده'}`
+            : '• تنظیمات پشتیبان‌گیری در کلیدهای پیکربندی شناخته‌شده پیدا نشد؛ فعال بودن بکاپ قابل تأیید نیست.',
+          lastBackupDate
+            ? `• آخرین زمان بکاپ ثبت‌شده در تنظیمات: ${lastBackupDate} (صرفاً metadata؛ نه تأیید صحت فایل بکاپ)`
+            : '• زمان آخرین بکاپ در تنظیمات ثبت نشده است.',
+          `• تعداد فایل‌های سیستمی ثبت‌شده در پایگاه داده: ${files.length} فایل`,
         ].join('\n'),
-        data: { backupSchedule, lastBackupDate, totalSystemFiles: files.length },
+        data: {
+          hasBackupConfig: Boolean(backupSetting),
+          backupSchedule,
+          lastBackupDate,
+          totalSystemFiles: files.length,
+        },
         timestamp: new Date().toISOString(),
       };
     } catch {

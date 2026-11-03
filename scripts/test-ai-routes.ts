@@ -8,19 +8,99 @@ import jwt from 'jsonwebtoken';
 import { config } from '../server/core/config.ts';
 import { aiRagService } from '../server/modules/ai/ai.rag.service.ts';
 import aiRoutes from '../server/modules/ai/ai.routes.ts';
+import { aiOrchestrator, canUserAccessAITool, isExplicitAllModulesCommand } from '../server/modules/ai/ai.orchestrator.ts';
+import { aiToolsRegistry } from '../server/modules/ai/ai.tools.ts';
 
 function tokenFor(uid: string, role: string): string {
   return jwt.sign({ uid, role }, config.security.jwtSecret, { expiresIn: '5m' });
 }
 
 async function run() {
+  assert.equal(isExplicitAllModulesCommand('/ALL'), true);
+  assert.equal(isExplicitAllModulesCommand('/all گزارش جامع'), true);
+  assert.equal(isExplicitAllModulesCommand('  / ALL  '), true);
+  assert.equal(isExplicitAllModulesCommand('/ptw'), false);
+  assert.equal(isExplicitAllModulesCommand('گزارش کلی سامانه'), false);
+  console.log('PASS typed /ALL command parser accepts case/spacing variants without matching other slash commands');
+  assert.equal(canUserAccessAITool('ptw_summary', { uid: 'worker-1', role: 'WORKER' }), true);
+  assert.equal(canUserAccessAITool('health_medical_summary', { uid: 'worker-1', role: 'WORKER' }), false);
+  assert.equal(canUserAccessAITool('users_roles_summary', { uid: 'worker-1', role: 'WORKER' }), false);
+  assert.equal(canUserAccessAITool('fire_safety_summary', { uid: 'safety-1', role: 'SAFETY_OFFICER' }), true);
+  assert.equal(canUserAccessAITool('health_medical_summary', { uid: 'safety-1', role: 'SAFETY_OFFICER' }), false);
+  assert.equal(canUserAccessAITool('workflow_referrals_summary', { uid: 'safety-1', role: 'SAFETY_OFFICER' }), true);
+  assert.equal(canUserAccessAITool('users_roles_summary', { uid: 'admin-1', role: 'ADMIN' }), true);
+  assert.equal(canUserAccessAITool('settings_backup_summary', { uid: 'admin-1', role: 'ADMIN' }), true);
+  assert.equal(canUserAccessAITool('ptw_summary', undefined), false);
+  assert.equal(canUserAccessAITool('unregistered_tool', { uid: 'admin-1', role: 'ADMIN' }), false);
+  console.log('PASS AI tool ACL: worker, safety officer, admin, and unauthenticated contexts');
+  const originalGetPersistedModuleConfigs = aiToolsRegistry.getPersistedModuleConfigs;
+  aiToolsRegistry.getPersistedModuleConfigs = (async () => ({
+    system: [
+      { key: 'future-module', titleFa: 'ماژول آینده', enabled: true },
+      { key: 'documents', titleFa: 'مستندات', enabled: true, children: [{ key: 'nested-secret-tab', titleFa: 'تب محرمانه مستندات', enabled: true }] },
+    ],
+    fireDepartment: [
+      { key: 'دليج ولواسپرينكلرon,off ولو', titleFa: 'دلویج ولو و اسپرینکلر', titleEn: 'Deluge & Sprinklers', enabled: true },
+      { key: 'گازيابها', titleFa: 'گازیاب‌ها و دتکتورها', titleEn: 'Gas Detectors', enabled: true },
+      { key: 'دوش و چشم شوی اضطراری', titleFa: 'دوش و چشم‌شوی اضطراری', titleEn: 'Emergency Eyewash', enabled: true },
+    ],
+  })) as typeof aiToolsRegistry.getPersistedModuleConfigs;
+  try {
+    const actualCoverage = await aiOrchestrator.getModuleCoverage({ uid: 'catalog-admin', role: 'ADMIN' });
+    const coverageIds = new Set(actualCoverage.map(item => item.moduleId));
+    const requiredMainModules = [
+      'dashboard','heat','hse-ms','reports','ai-assistant','safety-unit','fire-dept','health-env',
+      'permit','ptw-audit','risk','ppe','incidents','warnings','personnel-history','training',
+      'documents','pending-documents','non-conformances','process-management','notifications',
+      'user-mgmt','system','profile',
+    ];
+    for (const id of requiredMainModules) assert.equal(coverageIds.has(id), true, 'missing main module: ' + id);
+    assert.equal(actualCoverage.length >= 139, true, 'catalog must include all static nodes plus dynamic persisted entries');
+    for (const id of ['ptw','health','risks','five_s','fire','environment','personnel','workflows']) {
+      assert.equal(actualCoverage.find(item => item.moduleId === id)?.internal, true, 'tool alias must be marked internal: ' + id);
+    }
+    for (const id of [
+      'periodic-exams-dashboard','periodic-exams-personnel','periodic-exams-exams','periodic-exams-lab',
+      'periodic-exams-bmi','periodic-exams-reports','periodic-exams-compare','periodic-exams-personcompare',
+      'periodic-exams-import','ptw-hot','ptw-cold','ptw-excavation','ptw-process-mechanical',
+      'ptw-confined-space','ptw-electrical-isolation','ptw-radiation','ptw-vehicle-crane',
+      'personnel-history-overview','personnel-history-identity','personnel-history-health',
+      'personnel-history-training','personnel-history-permits','personnel-history-incidents',
+      'personnel-history-capa','personnel-history-risks','personnel-history-inspections',
+      'personnel-history-referrals','personnel-history-warnings','personnel-history-ppe',
+      'personnel-history-attachments','personnel-history-audit-logs',
+      'incidents-reports','incidents-pyramid','incidents-stats','warnings-records','warnings-charts',
+      'incidents-osha-300','training-dashboard','training-calendar','training-course_def',
+      'training-needs','training-course','training-contractor','ppe-issuance','ppe-catalog',
+      'ppe-osha-guide','ppe-inspections','user-mgmt-users','user-mgmt-permissions',
+      'system-branding','system-main','system-health-env','system-fire-dept',
+      'reports-ptw','reports-safety','reports-five-s','reports-health','reports-env',
+      'reports-fire','reports-training','reports-risk','reports-warnings','reports-trir',
+    ]) assert.equal(coverageIds.has(id), true, 'missing nested tab: ' + id);
+    for (const id of ['deluge-sprinklers','gas-detectors','emergency-eyewash']) {
+      assert.equal(coverageIds.has(id), true, 'missing canonical fire category: ' + id);
+      assert.equal(actualCoverage.filter(item => item.moduleId === id).length, 1, 'duplicate fire category: ' + id);
+    }
+    assert.equal(coverageIds.has('future-module'), true, 'persisted future module must appear');
+    assert.equal(coverageIds.has('nested-secret-tab'), true, 'nested document tab must appear');
+    const restrictedCoverage = await aiOrchestrator.getModuleCoverage({ uid: 'restricted-user', role: 'CUSTOM_ROLE' });
+    assert.equal(restrictedCoverage.find(item => item.moduleId === 'nested-secret-tab')?.connected, false, 'nested document tab must inherit documents:read ACL');
+    assert.equal(restrictedCoverage.find(item => item.moduleId === 'user-mgmt')?.connected, false, 'user management must remain administrator-only');
+    console.log('PASS module catalog covers all 24 main modules, known nested tabs, canonical fire categories, and future persisted modules');
+  } finally {
+    aiToolsRegistry.getPersistedModuleConfigs = originalGetPersistedModuleConfigs;
+  }
   const originalIndex = aiRagService.indexDocument;
   const originalCanAccess = aiRagService.canAccessDocument;
   const originalDelete = aiRagService.deleteDocument;
+  const originalProcessChat = aiOrchestrator.processChat;
+  const originalGetModuleCoverage = aiOrchestrator.getModuleCoverage;
 
   let indexCalls = 0;
   let deleteCalls = 0;
   let canAccessResult = false;
+  let chatCalls = 0;
+  let capturedChatRequest: any = null;
 
   aiRagService.indexDocument = (async () => {
     indexCalls++;
@@ -28,6 +108,21 @@ async function run() {
   }) as typeof aiRagService.indexDocument;
 
   aiRagService.canAccessDocument = (async () => canAccessResult) as typeof aiRagService.canAccessDocument;
+
+  aiOrchestrator.getModuleCoverage = (async () => [
+    { moduleId: 'ptw', moduleNameFa: 'پروانه کار', connected: true, tools: ['ptw_summary'], assistantIds: ['GENERAL_HSE'] },
+    { moduleId: 'ptw-test-tab', moduleNameFa: 'تب آزمون پروانه کار', connected: true, tools: ['ptw_summary'], assistantIds: ['GENERAL_HSE'], parentModuleId: 'ptw', level: 1 },
+  ]) as typeof aiOrchestrator.getModuleCoverage;
+
+  aiOrchestrator.processChat = (async (request: any) => {
+    chatCalls++;
+    capturedChatRequest = request;
+    return {
+      success: true, reply: 'گزارش آزمایشی بر پایه داده‌های مجاز', assistantId: 'GENERAL_HSE',
+      toolsUsed: ['ماژول پروانه کار'], citations: ['ماژول پروانه کار'], durationMs: 12,
+      model: 'test-model', queueWaitMs: 0,
+    };
+  }) as typeof aiOrchestrator.processChat;
 
   aiRagService.deleteDocument = (async () => {
     deleteCalls++;
@@ -145,11 +240,53 @@ async function run() {
     assert.equal(deleteCalls, 1);
     console.log('PASS authorized HSE manager can delete an ACL-accessible document');
 
-    console.log('AI HTTP route authorization tests: 8/8 passed');
+    const unauthenticatedChat = await request('/chat', { method: 'POST', body: { message: 'تحلیل سامانه' } });
+    assert.equal(unauthenticatedChat.status, 401);
+    assert.equal(chatCalls, 0);
+    console.log('PASS AI analytics chat requires authentication');
+
+    const moduleCoverage = await request('/coverage', { method: 'GET', role: 'ADMIN' });
+    const coveragePayload = await moduleCoverage.json() as any;
+    assert.equal(moduleCoverage.status, 200);
+    assert.equal(coveragePayload.data.some((item: any) => item.moduleId === 'ptw-test-tab' && item.parentModuleId === 'ptw'), true);
+    console.log('PASS slash picker coverage exposes hierarchical module and tab metadata');
+
+    const selectedModuleChat = await request('/chat', {
+      method: 'POST',
+      role: 'ADMIN',
+      body: { message: 'گزارش مدیریتی', selectedModules: ['ptw', 'incidents'], model: 'test-model', contextTokens: 4096, stream: false },
+    });
+    const selectedModulePayload = await selectedModuleChat.json() as any;
+    assert.equal(selectedModuleChat.status, 200);
+    assert.equal(selectedModulePayload.success, true);
+    assert.equal(chatCalls, 1);
+    assert.deepEqual(capturedChatRequest.selectedModules, ['ptw', 'incidents']);
+    assert.equal(capturedChatRequest.model, 'test-model');
+    assert.equal(capturedChatRequest.contextTokens, 4096);
+    assert.deepEqual(selectedModulePayload.toolsUsed, ['ماژول پروانه کار']);
+    console.log('PASS selected modules are forwarded to the secure orchestrator and source metadata is returned');
+
+    const allModulesChat = await request('/chat', {
+      method: 'POST',
+      role: 'ADMIN',
+      body: { message: 'گزارش کلی سامانه', selectedModules: ['all'], stream: true },
+    });
+    const streamPayload = await allModulesChat.text();
+    assert.equal(allModulesChat.status, 200);
+    assert.match(streamPayload, /"token":"گزارش آزمایشی بر پایه داده‌های مجاز"/);
+    assert.match(streamPayload, /"toolsUsed":\["ماژول پروانه کار"\]/);
+    assert.equal(chatCalls, 2);
+    assert.deepEqual(capturedChatRequest.selectedModules, ['all']);
+    console.log('PASS /ALL streaming response includes the orchestrator source metadata');
+
+
+    console.log('AI HTTP route authorization and analytics tests: 12/12 passed');
   } finally {
     aiRagService.indexDocument = originalIndex;
     aiRagService.canAccessDocument = originalCanAccess;
     aiRagService.deleteDocument = originalDelete;
+    aiOrchestrator.processChat = originalProcessChat;
+    aiOrchestrator.getModuleCoverage = originalGetModuleCoverage;
     await new Promise<void>((resolve, reject) => {
       server.close(error => error ? reject(error) : resolve());
     });
