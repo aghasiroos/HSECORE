@@ -1,4 +1,5 @@
 import { db, schema } from '../../core/db.ts';
+import { inArray } from 'drizzle-orm';
 import { checkUserHasPermission, isGlobalAdminUser, type UserContext } from '../../core/middleware/auth.ts';
 
 export interface AIModuleCatalogItem {
@@ -11,6 +12,7 @@ export interface AIModuleCatalogItem {
   tools: string[];
   assistantIds: string[];
   notes?: string;
+  enabled: boolean;
   children?: AIModuleCatalogItem[];
 }
 
@@ -22,6 +24,7 @@ interface ModuleDefinition {
   permission?: string;
   adminOnly?: boolean;
   rag?: boolean;
+  enabled?: boolean;
 }
 
 const TOOL_ACCESS: Record<string, { permission?: string; adminOnly?: boolean; explicitPermission?: boolean }> = {
@@ -152,6 +155,7 @@ function mergeConfiguredDefinitions(defaults: ModuleDefinition[], configured: an
     };
     if (typeof item.titleFa === 'string') next.titleFa = item.titleFa;
     if (typeof item.titleEn === 'string') next.titleEn = item.titleEn;
+    if (typeof item.enabled === 'boolean') next.enabled = item.enabled;
     byId.set(item.key, next);
   }
   return Array.from(byId.values());
@@ -160,7 +164,8 @@ function mergeConfiguredDefinitions(defaults: ModuleDefinition[], configured: an
 function toCatalogItem(definition: ModuleDefinition, user: UserContext, parentId?: string): AIModuleCatalogItem {
   const configuredTools = definition.tools || [];
   const tools = configuredTools.filter(tool => canUseTool(user, tool));
-  const allowed = canAccessDefinition(user, definition);
+  const enabled = definition.enabled !== false;
+  const allowed = enabled && canAccessDefinition(user, definition);
   const connected = allowed && (tools.length > 0 || definition.rag === true);
   const notes = !allowed
     ? 'برای مشاهده و تحلیل این بخش، مجوز دسترسی لازم را ندارید.'
@@ -172,6 +177,7 @@ function toCatalogItem(definition: ModuleDefinition, user: UserContext, parentId
     moduleNameFa: definition.titleFa,
     titleEn: definition.titleEn,
     parentId,
+    enabled,
     connected,
     allowed,
     tools,
@@ -184,8 +190,9 @@ export async function getAIModuleCatalog(user?: UserContext): Promise<AIModuleCa
   if (!user) return [];
   let settings: any[] = [];
   try {
-    const rows = await db.select().from(schema.systemSettings);
-    settings = rows.filter((row: any) => SETTING_KEYS.has(String(row.key))).map((row: any) => ({
+    const rows = await db.select().from(schema.systemSettings)
+      .where(inArray(schema.systemSettings.key, Array.from(SETTING_KEYS)));
+    settings = rows.map((row: any) => ({
       key: String(row.key),
       value: row.value,
     }));
