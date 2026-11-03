@@ -8,6 +8,7 @@ import jwt from 'jsonwebtoken';
 import { config } from '../server/core/config.ts';
 import { aiRagService } from '../server/modules/ai/ai.rag.service.ts';
 import aiRoutes from '../server/modules/ai/ai.routes.ts';
+import { aiOrchestrator } from '../server/modules/ai/ai.orchestrator.ts';
 
 function tokenFor(uid: string, role: string): string {
   return jwt.sign({ uid, role }, config.security.jwtSecret, { expiresIn: '5m' });
@@ -17,10 +18,13 @@ async function run() {
   const originalIndex = aiRagService.indexDocument;
   const originalCanAccess = aiRagService.canAccessDocument;
   const originalDelete = aiRagService.deleteDocument;
+  const originalProcessChat = aiOrchestrator.processChat;
 
   let indexCalls = 0;
   let deleteCalls = 0;
   let canAccessResult = false;
+  let chatCalls = 0;
+  let capturedChatRequest: any = null;
 
   aiRagService.indexDocument = (async () => {
     indexCalls++;
@@ -28,6 +32,16 @@ async function run() {
   }) as typeof aiRagService.indexDocument;
 
   aiRagService.canAccessDocument = (async () => canAccessResult) as typeof aiRagService.canAccessDocument;
+
+  aiOrchestrator.processChat = (async (request: any) => {
+    chatCalls++;
+    capturedChatRequest = request;
+    return {
+      success: true, reply: 'گزارش آزمایشی بر پایه داده‌های مجاز', assistantId: 'GENERAL_HSE',
+      toolsUsed: ['ماژول پروانه کار'], citations: ['ماژول پروانه کار'], durationMs: 12,
+      model: 'test-model', queueWaitMs: 0,
+    };
+  }) as typeof aiOrchestrator.processChat;
 
   aiRagService.deleteDocument = (async () => {
     deleteCalls++;
@@ -145,11 +159,43 @@ async function run() {
     assert.equal(deleteCalls, 1);
     console.log('PASS authorized HSE manager can delete an ACL-accessible document');
 
-    console.log('AI HTTP route authorization tests: 8/8 passed');
+    const unauthenticatedChat = await request('/chat', { method: 'POST', body: { message: 'تحلیل سامانه' } });
+    assert.equal(unauthenticatedChat.status, 401);
+    assert.equal(chatCalls, 0);
+    console.log('PASS AI analytics chat requires authentication');
+
+    const selectedModuleChat = await request('/chat', {
+      method: 'POST',
+      role: 'ADMIN',
+      body: { message: 'گزارش مدیریتی', selectedModules: ['ptw', 'incidents'], stream: false },
+    });
+    const selectedModulePayload = await selectedModuleChat.json() as any;
+    assert.equal(selectedModuleChat.status, 200);
+    assert.equal(selectedModulePayload.success, true);
+    assert.equal(chatCalls, 1);
+    assert.deepEqual(capturedChatRequest.selectedModules, ['ptw', 'incidents']);
+    assert.deepEqual(selectedModulePayload.toolsUsed, ['ماژول پروانه کار']);
+    console.log('PASS selected modules are forwarded to the secure orchestrator and source metadata is returned');
+
+    const allModulesChat = await request('/chat', {
+      method: 'POST',
+      role: 'ADMIN',
+      body: { message: 'گزارش کلی سامانه', selectedModules: ['all'], stream: true },
+    });
+    const streamPayload = await allModulesChat.text();
+    assert.equal(allModulesChat.status, 200);
+    assert.match(streamPayload, /"toolsUsed":\["ماژول پروانه کار"\]/);
+    assert.equal(chatCalls, 2);
+    assert.deepEqual(capturedChatRequest.selectedModules, ['all']);
+    console.log('PASS /ALL streaming response includes the orchestrator source metadata');
+
+
+    console.log('AI HTTP route authorization and analytics tests: 11/11 passed');
   } finally {
     aiRagService.indexDocument = originalIndex;
     aiRagService.canAccessDocument = originalCanAccess;
     aiRagService.deleteDocument = originalDelete;
+    aiOrchestrator.processChat = originalProcessChat;
     await new Promise<void>((resolve, reject) => {
       server.close(error => error ? reject(error) : resolve());
     });
