@@ -754,28 +754,73 @@ export class AIToolsRegistry {
         db.select().from(schema.trainingAttendances).catch(() => []),
         this.loadSettingsMap(),
       ]);
-      const settingCourses: any[] = Array.isArray(settingsMap.get('hse_training_courses_v2')) ? settingsMap.get('hse_training_courses_v2') : [];
-      const totalCourses = Math.max(courses.length, new Set(settingCourses.map((c: any) => c.courseCode || c.title)).size);
-      const totalAttendances = Math.max(attendances.length, settingCourses.length);
-      const totalHours = (courses as any[]).reduce((s: number, c: any) => s + Number(c.durationHours || 0), 0) + settingCourses.reduce((s: number, c: any) => s + Number(c.hours || 0), 0);
-      const courseNames = courses.slice(0, 5).map((c: any) => c.courseTitle);
+      const settingAttendanceRecords: any[] = Array.isArray(settingsMap.get('hse_training_courses_v2'))
+        ? settingsMap.get('hse_training_courses_v2') : [];
+      const courseDefinitions: any[] = Array.isArray(settingsMap.get('hse_training_course_defs'))
+        ? settingsMap.get('hse_training_course_defs') : [];
+      const trainingNeeds: any[] = Array.isArray(settingsMap.get('hse_training_needs'))
+        ? settingsMap.get('hse_training_needs') : [];
+      const contractors: any[] = Array.isArray(settingsMap.get('hse_training_contractors'))
+        ? settingsMap.get('hse_training_contractors') : [];
+      const calendarEvents: any[] = Array.isArray(settingsMap.get('hse_training_calendar_events'))
+        ? settingsMap.get('hse_training_calendar_events') : [];
+
+      const uniqueCourseCodes = new Set(settingAttendanceRecords
+        .map((record: any) => String(record.courseCode || '').trim())
+        .filter(Boolean));
+      const totalCourses = Math.max(courses.length, courseDefinitions.length, uniqueCourseCodes.size);
+      // The UI's hse_training_courses_v2 records are person-course attendance rows.
+      // Use the larger of the settings and normalized DB representations to avoid double-counting.
+      const totalAttendanceRecords = Math.max(attendances.length, settingAttendanceRecords.length);
+      const settingAttendeeHours = settingAttendanceRecords.reduce(
+        (sum: number, record: any) => sum + Math.max(0, Number(record.hours || 0)), 0
+      );
+      const courseHoursById = new Map((courses as any[]).map(course => [Number(course.id), Number(course.durationHours || 0)]));
+      const normalizedAttendeeHours = (attendances as any[]).reduce(
+        (sum: number, attendance: any) => sum + Math.max(0, Number(courseHoursById.get(Number(attendance.trainingId)) || 0)), 0
+      );
+      const totalAttendeeHours = settingAttendanceRecords.length > 0 ? settingAttendeeHours : normalizedAttendeeHours;
+      const courseDurationHours = courseDefinitions.length > 0
+        ? courseDefinitions.reduce((sum: number, course: any) => sum + Math.max(0, Number(course.duration || course.durationHours || 0)), 0)
+        : (courses as any[]).reduce((sum: number, course: any) => sum + Math.max(0, Number(course.durationHours || 0)), 0);
+      const courseNames = Array.from(new Set([
+        ...courseDefinitions.map((course: any) => String(course.title || course.name || '').trim()),
+        ...(courses as any[]).map((course: any) => String(course.courseTitle || '').trim()),
+      ].filter(Boolean))).slice(0, 10);
 
       return {
         toolName: 'training_summary',
         titleFa: 'ماژول آموزش‌های ایمنی و ماتریس شایستگی کارکنان',
         summary: [
-          `• کل دوره‌های آموزشی تعریف‌شده: ${totalCourses} دوره | مجموع حضور در دوره‌ها: ${totalAttendances} نفر-دوره`,
-          `• مجموع ساعات آموزشی ثبت‌شده: ${totalHours} ساعت`,
-          courseNames.length > 0 ? `• عناوین دوره‌های فعال: ${courseNames.join('، ')}` : '',
+          `• دوره‌های آموزشی تعریف‌شده: ${totalCourses} دوره`,
+          `• سوابق حضور ثبت‌شده: ${totalAttendanceRecords} نفر-دوره`,
+          `• مجموع ساعات حضور-نفر ثبت‌شده: ${totalAttendeeHours} ساعت`,
+          `• مجموع مدت دوره‌های تعریف‌شده: ${courseDurationHours} ساعت`,
+          `• نیازهای آموزشی: ${trainingNeeds.length} مورد؛ پیمانکاران آموزشی: ${contractors.length}؛ رویدادهای تقویم: ${calendarEvents.length}`,
+          courseNames.length > 0 ? `• عناوین دوره‌های تعریف‌شده: ${courseNames.join('، ')}` : '',
         ].filter(Boolean).join('\n'),
-        data: { totalCourses, totalAttendances, totalHours, courseNames },
+        data: {
+          totalCourses,
+          totalAttendanceRecords,
+          totalAttendeeHours,
+          courseDurationHours,
+          trainingNeedsCount: trainingNeeds.length,
+          contractorsCount: contractors.length,
+          calendarEventsCount: calendarEvents.length,
+          courseNames,
+          sourceCoverage: {
+            attendanceRecords: settingAttendanceRecords.length > 0 ? 'hse_training_courses_v2' : 'training_attendances',
+            courseDefinitions: courseDefinitions.length > 0 ? 'hse_training_course_defs' : 'hse_trainings',
+          },
+        },
         timestamp: new Date().toISOString(),
       };
-    } catch {
+    } catch (err: any) {
+      logger.warn('[AITools] training summary unavailable', { error: err?.message });
       return {
         toolName: 'training_summary',
         titleFa: 'ماژول آموزش‌های ایمنی',
-        summary: 'اطلاعات آموزش در دسترس نیست.',
+        summary: 'اطلاعات آموزش در این لحظه از پایگاه داده قابل دریافت نیست؛ هیچ آماری حدس زده نشده است.',
         data: {},
         timestamp: new Date().toISOString(),
       };
