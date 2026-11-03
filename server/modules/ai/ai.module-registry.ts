@@ -40,6 +40,7 @@ interface ModuleDefinition {
 const TOOL_ACCESS: Record<string, { permission?: string; adminOnly?: boolean; explicitPermission?: boolean }> = {
   heat_weather_summary: {},
   ptw_summary: { permission: 'ptw:read' },
+  ptw_audit_summary: { permission: 'audit:read' },
   incidents_summary: { permission: 'incidents:read' },
   health_medical_summary: { permission: 'health:read', adminOnly: true, explicitPermission: true },
   nutrition_high_risk_summary: { permission: 'health:read', adminOnly: true, explicitPermission: true },
@@ -69,11 +70,7 @@ const MODULE_ADAPTERS: Record<string, Partial<ModuleDefinition>> = {
   'fire-dept': { tools: ['fire_safety_summary'], permission: 'fire:read' },
   'health-env': { tools: ['health_medical_summary', 'nutrition_high_risk_summary', 'environment_summary'] },
   permit: { tools: ['ptw_summary'], permission: 'ptw:read' },
-  'ptw-audit': {
-    tools: ['ptw_summary'],
-    permission: 'ptw:read',
-    notes: 'Adapter فعلی فقط تعداد ممیزی‌ها را گزارش می‌کند؛ جزئیات رکوردهای ممیزی به‌صورت مستقل متصل نیست.',
-  },
+  'ptw-audit': { tools: ['ptw_audit_summary'], permission: 'audit:read' },
   risk: { tools: ['risk_assessment_summary'], permission: 'risks:read' },
   ppe: { tools: ['ppe_summary'], permission: 'ppe:read' },
   incidents: { tools: ['incidents_summary'], permission: 'incidents:read' },
