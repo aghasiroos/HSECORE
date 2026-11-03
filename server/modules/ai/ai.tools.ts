@@ -298,7 +298,7 @@ export class AIToolsRegistry {
 
         const date = String(audit.auditDate || '');
         const dateParts = date.split('/');
-        if (dateParts.length >= 2 && /^\\d{4}$/.test(dateParts[0]) && /^\\d{1,2}$/.test(dateParts[1])) {
+        if (dateParts.length >= 2 && /^\d{4}$/.test(dateParts[0]) && /^\d{1,2}$/.test(dateParts[1])) {
           const monthKey = `${dateParts[0]}/${String(Number(dateParts[1])).padStart(2, '0')}`;
           const month = monthMap.get(monthKey) || { total: 0, defective: 0, defects: 0, scores: [] };
           month.total += 1;
@@ -359,7 +359,7 @@ export class AIToolsRegistry {
           `• میانگین امتیاز انطباق: ${avgComplianceScore === null ? 'داده کافی موجود نیست' : `${avgComplianceScore}٪`}`,
           `• نوع پروانه ممیزی‌شده: ${hotPermitCount} گرم، ${coldPermitCount} سرد، ${confinedSpacePermitCount} فضای بسته؛ پروانه الحاقی: ${attachedPermitCount}`,
           `• عدم انطباق‌های اقلام جانبی: خطرات ${totalMissedHazards}، PPE ${totalMissedPpe}، تمهیدات ${totalMissedPrecautions}`,
-        ].join('\\n'),
+        ].join('\n'),
         data: {
           totalAudits,
           finalizedCount,
