@@ -142,7 +142,7 @@ export class AIController {
 
       const rawModuleIds = req.body?.selectedModuleIds;
       if (rawModuleIds !== undefined && (!Array.isArray(rawModuleIds) ||
-          rawModuleIds.length > 80 || rawModuleIds.some((id: unknown) => typeof id !== 'string' || id.length > 180))) {
+          rawModuleIds.length > 250 || rawModuleIds.some((id: unknown) => typeof id !== 'string' || id.length > 180))) {
         return res.status(400).json({ success: false, message: 'فهرست ماژول‌های انتخاب‌شده معتبر نیست.' });
       }
       const selectedModuleIds = Array.isArray(rawModuleIds)
