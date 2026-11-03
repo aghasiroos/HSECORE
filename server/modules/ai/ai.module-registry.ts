@@ -121,6 +121,13 @@ const FIRE_CHILD_ADAPTERS: Record<string, Partial<ModuleDefinition>> = {
 };
 
 const DEFAULT_CHILDREN: Record<string, ModuleDefinition[]> = {
+  risk: [
+    { id: 'overview', titleFa: 'داشبورد جامع ارزیابی ریسک', titleEn: 'Risk Assessment Dashboard', tools: ['risk_assessment_summary'], permission: 'risks:read' },
+    { id: 'JSA', titleFa: 'تحلیل ایمنی شغلی (JSA)', titleEn: 'Job Safety Analysis', tools: ['risk_assessment_summary'], permission: 'risks:read' },
+    { id: 'FMEA', titleFa: 'تحلیل حالات خرابی و آثار آن (FMEA)', titleEn: 'Failure Mode and Effects Analysis', tools: ['risk_assessment_summary'], permission: 'risks:read' },
+    { id: 'FTA', titleFa: 'تحلیل درخت خطا (FTA)', titleEn: 'Fault Tree Analysis', tools: ['risk_assessment_summary'], permission: 'risks:read' },
+    { id: 'HHA', titleFa: 'تحلیل خطرات بهداشتی (HHA)', titleEn: 'Health Hazard Analysis', tools: ['risk_assessment_summary'], permission: 'risks:read' },
+  ],
   permit: [
     { id: 'hot-work', titleFa: 'پروانه کار گرم', titleEn: 'Hot Work Permit', tools: ['ptw_summary'] },
     { id: 'cold-work', titleFa: 'پروانه کار سرد', titleEn: 'Cold Work Permit', tools: ['ptw_summary'] },
