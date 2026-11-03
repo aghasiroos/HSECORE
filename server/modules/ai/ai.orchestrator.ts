@@ -186,12 +186,10 @@ export class AIOrchestrator {
 
     // Keep module-picker availability aligned with the exact permissions enforced
     // immediately before tool execution below.
-    const toolPermissions: Record<string, string> = AI_TOOL_REQUIRED_PERMISSIONS;
     const sensitiveToolsRequiringGlobalScope = AI_ADMIN_ONLY_TOOLS;
 
     const checkAndExecute = async (toolName: string, execFn: () => Promise<AIToolResult>) => {
       if (executedToolNames.has(toolName)) return;
-      const requiredPerm = toolPermissions[toolName];
       const isGlobalAdmin = isGlobalAdminUser(userContext);
 
       if (sensitiveToolsRequiringGlobalScope.has(toolName) && !isGlobalAdmin) {
