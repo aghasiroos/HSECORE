@@ -52,6 +52,17 @@ export class AIToolsRegistry {
     return map;
   }
 
+  /** Read the persisted navigation/module metadata used by the system UI. */
+  async getPersistedModuleConfigs(): Promise<Record<string, unknown>> {
+    const settings = await this.loadSettingsMap();
+    return {
+      system: settings.get('hse_ui_config_v3'),
+      healthEnvironment: settings.get('hse_health_env_ui_config'),
+      fireDepartment: settings.get('hse_fire_dept_ui_config'),
+      safetyDepartment: settings.get('hse_safety_dept_ui_config'),
+    };
+  }
+
   /**
    * Tool 1: Live Heat Stress Monitor & Meteorological Telemetry (دما، رطوبت، WBGT، استرس گرمایی)
    */
