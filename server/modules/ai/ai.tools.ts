@@ -543,9 +543,15 @@ export class AIToolsRegistry {
   /**
    * Tool 6: Risk Assessment & Hazard Identification (ارزیابی ریسک و مخاطرات)
    */
-  async getRiskAssessmentsSummary(): Promise<AIToolResult> {
+  async getRiskAssessmentsSummary(selectedMethodologies?: string[]): Promise<AIToolResult> {
     try {
-      const risks = await db.select().from(schema.riskAssessments);
+      const allRisks = await db.select().from(schema.riskAssessments);
+      const selectedMethods = Array.isArray(selectedMethodologies)
+        ? selectedMethodologies.map(method => String(method).toUpperCase()).filter(Boolean)
+        : [];
+      const risks = selectedMethods.length
+        ? allRisks.filter((risk: any) => selectedMethods.includes(String(risk.methodology || '').toUpperCase()))
+        : allRisks;
       const total = risks.length;
       const highRisks = risks.filter((r: any) => ['HIGH', 'EXTREME', 'CRITICAL'].includes(String(r.initialRiskLevel || '').toUpperCase())).length;
       const mediumRisks = risks.filter((r: any) => String(r.initialRiskLevel || '').toUpperCase() === 'MEDIUM').length;
@@ -575,13 +581,14 @@ export class AIToolsRegistry {
         toolName: 'risk_assessment_summary',
         titleFa: 'ماژول ارزیابی ریسک و شناسایی مخاطرات (JSA / FMEA / FTA / HHA)',
         summary: [
+          `• روش‌های انتخاب‌شده: ${selectedMethods.join('، ') || 'همه روش‌ها'}`,
           `• کل ارزیابی‌های ریسک ثبت‌شده: ${total} مورد (${highRisks} بالا/بحرانی، ${mediumRisks} متوسط، ${lowRisks} پایین/سایر)`,
           `• ریسک‌های باقیمانده بالا/بحرانی: ${residualHighRisks} مورد`,
           `• تفکیک روش ارزیابی: ${byMethod.map(x => `${x.method}: ${x.total} (بالا/بحرانی ${x.high})`).join('؛ ') || 'داده‌ای ثبت نشده'}`,
           `• وضعیت گردش کار: ${byStatus.map(x => `${x.status}: ${x.count}`).join('؛ ') || 'داده‌ای ثبت نشده'}`,
           topHazards.length > 0 ? `• نمونه مخاطرات ثبت‌شده: ${topHazards.join(' | ')}` : '',
-        ].filter(Boolean).join('\\n'),
-        data: { totalRisks: total, highRisks, mediumRisks, lowRisks, residualHighRisks, byMethod, byStatus, topHazards },
+        ].filter(Boolean).join('\n'),
+        data: { selectedMethodologies: selectedMethods, totalRisks: total, highRisks, mediumRisks, lowRisks, residualHighRisks, byMethod, byStatus, topHazards },
         timestamp: new Date().toISOString(),
       };
     } catch (err: any) {
