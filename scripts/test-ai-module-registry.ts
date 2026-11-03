@@ -45,6 +45,40 @@ const catalog: AIModuleCatalogItem[] = [
     ],
   },
   {
+    moduleId: 'ptw-audit',
+    moduleNameFa: 'ممیزی پروانه کار',
+    titleEn: 'PTW Audit',
+    connected: true,
+    allowed: true,
+    enabled: true,
+    tools: ['ptw_audit_summary'],
+    assistantIds: ['GENERAL_HSE'],
+    children: [
+      {
+        moduleId: 'ptw-audit:dashboard',
+        moduleNameFa: 'داشبورد ممیزی پروانه کار',
+        titleEn: 'PTW Audit Dashboard',
+        parentId: 'ptw-audit',
+        connected: true,
+        allowed: true,
+        enabled: true,
+        tools: ['ptw_audit_summary'],
+        assistantIds: ['GENERAL_HSE'],
+      },
+      {
+        moduleId: 'ptw-audit:list',
+        moduleNameFa: 'فهرست و سوابق ممیزی‌ها',
+        titleEn: 'PTW Audit Records',
+        parentId: 'ptw-audit',
+        connected: true,
+        allowed: true,
+        enabled: true,
+        tools: ['ptw_audit_summary'],
+        assistantIds: ['GENERAL_HSE'],
+      },
+    ],
+  },
+  {
     moduleId: 'health-env',
     moduleNameFa: 'بهداشت و محیط زیست',
     titleEn: 'Health & Environment',
@@ -103,7 +137,7 @@ const selectedIds = [
 
 assert.deepEqual(
   getAIModuleToolNames(selectedIds, catalog),
-  ['ptw_summary', 'health_medical_summary'],
+  ['ptw_summary', 'ptw_audit_summary', 'health_medical_summary'],
   'nested selections must resolve tools recursively, deduplicate adapters, and exclude denied modules',
 );
 
@@ -111,12 +145,17 @@ const descriptions = getSelectedModuleDescriptions(selectedIds, catalog);
 assert.deepEqual(descriptions.selected, [
   'پروانه کار ایمن',
   'ممیزی پروانه کار',
+  'داشبورد ممیزی پروانه کار',
+  'فهرست و سوابق ممیزی‌ها',
   'معاینات ادواری',
   'آزمایشگاه',
   'مدیریت کاربران',
 ]);
 assert.deepEqual(descriptions.connected, [
   'پروانه کار ایمن',
+  'ممیزی پروانه کار',
+  'داشبورد ممیزی پروانه کار',
+  'فهرست و سوابق ممیزی‌ها',
   'معاینات ادواری',
   'آزمایشگاه',
 ]);
