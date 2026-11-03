@@ -80,7 +80,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string>('');
   const [searchSessionQuery, setSearchSessionQuery] = useState<string>('');
-  const [moduleCatalog, setModuleCatalog] = useState<Array<{ moduleId: string; moduleNameFa: string; connected: boolean; notes?: string }>>([]);
+  const [moduleCatalog, setModuleCatalog] = useState<Array<{ moduleId: string; moduleNameFa: string; connected: boolean; notes?: string; parentModuleId?: string; level?: number }>>([]);
   const [selectedModules, setSelectedModules] = useState<string[]>([]);
   const [showModulePicker, setShowModulePicker] = useState(false);
 
@@ -335,6 +335,20 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
     setTimeout(() => setCopiedId(null), 2000);
   };
 
+  const getSelectedModuleScope = (): string[] => {
+    const scope = new Set(selectedModules);
+    for (const selectedId of selectedModules) {
+      let parentId = moduleCatalog.find(item => item.moduleId === selectedId)?.parentModuleId;
+      let depth = 0;
+      while (parentId && depth < 8) {
+        scope.add(parentId);
+        parentId = moduleCatalog.find(item => item.moduleId === parentId)?.parentModuleId;
+        depth++;
+      }
+    }
+    return Array.from(scope);
+  };
+
   const handleSendMessage = async (textToSend?: string) => {
     const text = (textToSend || inputMessage).trim();
     if (!text || isLoading) return;
@@ -421,7 +435,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
           assistantId: 'GENERAL_HSE',
           history: historyPayload,
           model: selectedModel,
-          selectedModules,
+          selectedModules: getSelectedModuleScope(),
           stream: true,
           num_ctx: selectedContext === 'auto' ? undefined : Number(selectedContext),
           contextTokens: selectedContext === 'auto' ? undefined : Number(selectedContext),
@@ -802,7 +816,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
                         setShowModulePicker(false);
                       }}
                       className="w-full flex items-center justify-between gap-2 text-right px-3 py-2 rounded-lg text-xs hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed" title={item.notes || item.moduleNameFa}>
-                      <span>{item.moduleNameFa}</span>
+                      <span className={item.parentModuleId ? 'pr-4' : ''}>{item.parentModuleId ? '↳ ' : ''}{item.moduleNameFa}</span>
                       <span className="text-[10px] text-slate-400">{item.connected ? 'اتصال تحلیلی' : 'پوشش محدود / بدون ابزار'}</span>
                     </button>
                   ))}
