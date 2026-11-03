@@ -57,14 +57,15 @@ async function run() {
       id: `user-message-${suffix}`,
       role: 'user',
       content: 'Test user prompt',
+      createdAt: '2024-01-01T10:00:00.000Z',
     });
-    await new Promise(resolve => setTimeout(resolve, 20));
     await service.appendMessage(sessionId, userA, {
       id: `assistant-message-${suffix}`,
       role: 'assistant',
       content: 'Test assistant response',
       model: 'test-model',
       durationMs: 123,
+      createdAt: '2024-01-01T10:01:00.000Z',
     });
 
     const restored = await freshService.getMessages(sessionId, userA);
@@ -72,6 +73,8 @@ async function run() {
     assert.equal(restored[1].content, 'Test assistant response');
     assert.equal(restored[1].model, 'test-model');
     assert.equal(restored[1].durationMs, 123);
+    assert.equal(restored[0].createdAt, '2024-01-01T10:00:00.000Z');
+    assert.equal(restored[1].createdAt, '2024-01-01T10:01:00.000Z');
     console.log('PASS user and assistant messages survive a fresh service instance');
 
     await assert.rejects(freshService.getMessages(sessionId, userB), /دسترسی/);
