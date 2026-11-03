@@ -156,7 +156,7 @@ export class AIController {
 
       if (streaming) {
         if (!res.destroyed && !res.writableEnded) {
-          res.write(`data: ${JSON.stringify({ token: result.reply })}\\n\\n`);
+          res.write(`data: ${JSON.stringify({ token: result.reply })}\n\n`);
           res.write(`data: ${JSON.stringify({
             done: true,
             model: result.model,
@@ -165,7 +165,7 @@ export class AIController {
             citations: result.citations,
             queueWaitMs: result.queueWaitMs,
             assistantId: result.assistantId,
-          })}\\n\\n`);
+          })}\n\n`);
           (res as any).flush?.();
           res.end();
         }
@@ -201,7 +201,7 @@ export class AIController {
       });
       if (streaming) {
         if (!res.destroyed && !res.writableEnded) {
-          res.write(`data: ${JSON.stringify({ error: messageText })}\\n\\n`);
+          res.write(`data: ${JSON.stringify({ error: messageText })}\n\n`);
           (res as any).flush?.();
           res.end();
         }
