@@ -643,6 +643,14 @@ export class AIOrchestrator {
 
     const modules: import('./ai.types.ts').AIModuleCoverage[] = [
       { moduleId: 'dashboard', moduleNameFa: 'داشبورد جامع مدیریتی', connected: true, tools: toolMap.reports, assistantIds: ['GENERAL_HSE', 'MANAGEMENT_ANALYTICS'] },
+      { moduleId: 'hse-ms', moduleNameFa: 'پایش نرخ رویدادها (TRIR)', connected: true, tools: toolMap.reports, assistantIds: ['GENERAL_HSE'] },
+      { moduleId: 'reports', moduleNameFa: 'گزارشات و تحلیل‌های آماری', connected: true, tools: toolMap.reports, assistantIds: ['GENERAL_HSE'] },
+      { moduleId: 'fire-dept', moduleNameFa: 'واحد آتش‌نشانی و امداد', connected: true, tools: toolMap.fire, assistantIds: ['GENERAL_HSE'] },
+      { moduleId: 'health-env', moduleNameFa: 'واحد بهداشت و محیط زیست', connected: true, tools: [...toolMap.health, ...toolMap.environment], assistantIds: ['GENERAL_HSE'] },
+      { moduleId: 'permit', moduleNameFa: 'پروانه کار ایمن (PTW)', connected: true, tools: toolMap.ptw, assistantIds: ['GENERAL_HSE'] },
+      { moduleId: 'ptw-audit', moduleNameFa: 'ممیزی پروانه‌های کار (PTW Audit)', connected: true, tools: toolMap.ptw, assistantIds: ['GENERAL_HSE'] },
+      { moduleId: 'risk', moduleNameFa: 'ارزیابی ریسک هوشمند (AI JSA)', connected: true, tools: toolMap.risks, assistantIds: ['GENERAL_HSE'] },
+      { moduleId: 'personnel-history', moduleNameFa: 'پرونده جامع ۳۶۰ درجه پرسنل', connected: true, tools: toolMap.personnel, assistantIds: ['GENERAL_HSE'], notes: 'فقط در محدوده مجاز مدیر سامانه' },
       { moduleId: 'heat', moduleNameFa: 'پایش استرس گرمایی', connected: true, tools: toolMap.heat, assistantIds: ['GENERAL_HSE'] },
       { moduleId: 'ptw', moduleNameFa: 'پروانه کار ایمن (PTW)', connected: true, tools: toolMap.ptw, assistantIds: ['GENERAL_HSE', 'PTW_SHERPA'] },
       { moduleId: 'incidents', moduleNameFa: 'گزارشات ناهنجاری و حوادث', connected: true, tools: toolMap.incidents, assistantIds: ['GENERAL_HSE', 'INCIDENT_ANALYSIS'] },
@@ -702,9 +710,29 @@ export class AIOrchestrator {
     // automatically. Unknown nodes remain visible but disabled until a safe data tool is wired.
     const persisted = await aiToolsRegistry.getPersistedModuleConfigs().catch(() => ({}));
     const byId = new Map(modules.map(item => [item.moduleId, item]));
+    const staticParents: Record<string, string> = {
+      'clinic': 'health', 'periodic-exams': 'health', 'nutrition': 'health',
+      'non-periodic-exams': 'health', 'health-env-checklists': 'health',
+      'env-dashboard': 'environment', 'env-monitoring': 'environment',
+      'waste-management': 'environment', 'wastewater': 'environment',
+      'air-water-soil': 'environment', 'five-s': 'environment', 'env-reports': 'environment',
+      'fire-dashboard': 'fire', 'daily-report': 'fire', 'vehicles': 'fire',
+      'fire-extinguisher-capsol': 'fire', 'hydrants-monitors': 'fire',
+      'fire-boxs': 'fire', 'foam-pakages': 'fire', 'fm-200': 'fire',
+      'deluge-sprinklers': 'fire', 'gas-detectors': 'fire', 'emergency-eyewash': 'fire',
+      'safety-checklists': 'safety-unit',
+      'org-procedures': 'documents', 'equipment-certificates': 'documents',
+      'org-forms-checklists': 'documents', 'other-hse-docs': 'documents',
+      'personnel-history': 'personnel', 'pending-documents': 'workflows',
+      'process-management': 'workflows',
+    };
+    for (const [childId, parentId] of Object.entries(staticParents)) {
+      const child = byId.get(childId);
+      if (child) { child.parentModuleId = parentId; child.level = 1; }
+    }
     const normalizeId = (value: unknown): string => String(value || '')
       .trim().toLowerCase()
-      .replace(/[^a-z0-9\\u0600-\\u06ff_-]+/g, '-')
+      .replace(/[^a-z0-9\u0600-\u06ff_-]+/g, '-')
       .replace(/-+/g, '-')
       .replace(/^-|-$/g, '')
       .slice(0, 80);
@@ -747,7 +775,11 @@ export class AIOrchestrator {
     };
 
     addConfiguredTree(persisted.system);
-    addConfiguredTree(persisted.healthEnvironment, 'health');
+    if (Array.isArray(persisted.healthEnvironment)) {
+      addConfiguredTree(persisted.healthEnvironment.filter((item: any) => item?.group === 'health'), 'health');
+      addConfiguredTree(persisted.healthEnvironment.filter((item: any) => item?.group === 'env'), 'environment');
+      addConfiguredTree(persisted.healthEnvironment.filter((item: any) => !item?.group), 'health');
+    }
     addConfiguredTree(persisted.fireDepartment, 'fire');
     addConfiguredTree(persisted.safetyDepartment, 'safety-unit');
 
