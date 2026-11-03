@@ -8,7 +8,6 @@
 import { AIAssistantId, AIAssistantMetadata, AIChatRequest, AIChatResponse, AIToolResult } from './ai.types.ts';
 import { aiModelManager } from './ai.model-manager.ts';
 import { aiSecurityService } from './ai.security.ts';
-import { aiRequestQueue } from './ai.queue.ts';
 import { aiToolsRegistry, normalizePersianText } from './ai.tools.ts';
 import { localAIProvider } from './ai.local-provider.ts';
 import { aiService } from './ai.service.ts';
@@ -451,34 +450,23 @@ export class AIOrchestrator {
 
     // 5. Execute locally by default. Cloud fallback is explicitly opt-in to protect organizational data.
     let replyText = '';
-    let queueWaitMs = 0;
     let modelName = request.model || config.aiEngine.defaultChatModel;
 
     try {
-      const queueResult = await aiRequestQueue.enqueue(
-        async (remainingMs) => {
-          const options = {
-            model: request.model,
-            num_ctx: request.contextTokens,
-            temperature: 0.3,
-            max_tokens: 1500,
-            timeoutMs: remainingMs,
-          };
-          if (streamOptions?.onToken) {
-            return await localAIProvider.chatStream(messages, options, streamOptions.onToken, streamOptions.signal);
-          }
-          return await localAIProvider.chat(messages, options);
-        },
-        {
-          userId: userContext?.id,
-          role: userContext?.role,
-          timeoutMs: (config.aiEngine.timeoutMs || 180000) + 5000,
-        }
-      );
-
-      queueWaitMs = queueResult.queueWaitMs;
-      replyText = aiSecurityService.sanitizeOutput(queueResult.data.text);
-      modelName = queueResult.data.model;
+      // All chat paths share the LocalAIProvider's single bounded inference queue.
+      // Do not wrap this in aiRequestQueue: that would create a second nested queue.
+      const options = {
+        model: request.model,
+        num_ctx: request.contextTokens,
+        temperature: 0.3,
+        max_tokens: 1500,
+        timeoutMs: config.aiEngine.timeoutMs || 180000,
+      };
+      const inferenceResult = streamOptions?.onToken
+        ? await localAIProvider.chatStream(messages, options, streamOptions.onToken, streamOptions.signal)
+        : await localAIProvider.chat(messages, options);
+      replyText = aiSecurityService.sanitizeOutput(inferenceResult.text);
+      modelName = inferenceResult.model;
     } catch (execErr: any) {
       logger.warn('[AIOrchestrator] Local Ollama inference failed', { error: execErr?.message });
       aiAuditService.log({
@@ -524,7 +512,6 @@ export class AIOrchestrator {
       citations,
       durationMs,
       model: modelName,
-      queueWaitMs,
     };
   }
 
