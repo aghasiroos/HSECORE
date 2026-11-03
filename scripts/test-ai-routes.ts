@@ -66,6 +66,12 @@ async function run() {
       'personnel-history-referrals','personnel-history-warnings','personnel-history-ppe',
       'personnel-history-attachments','personnel-history-audit-logs',
       'incidents-reports','incidents-pyramid','incidents-stats','warnings-records','warnings-charts',
+      'incidents-osha-300','training-dashboard','training-calendar','training-course_def',
+      'training-needs','training-course','training-contractor','ppe-issuance','ppe-catalog',
+      'ppe-osha-guide','ppe-inspections','user-mgmt-users','user-mgmt-permissions',
+      'system-branding','system-main','system-health-env','system-fire-dept',
+      'reports-ptw','reports-safety','reports-five-s','reports-health','reports-env',
+      'reports-fire','reports-training','reports-risk','reports-warnings','reports-trir',
     ]) assert.equal(coverageIds.has(id), true, 'missing nested tab: ' + id);
     for (const id of ['deluge-sprinklers','gas-detectors','emergency-eyewash']) {
       assert.equal(coverageIds.has(id), true, 'missing canonical fire category: ' + id);
