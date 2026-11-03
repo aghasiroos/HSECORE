@@ -88,6 +88,7 @@ export class AIOrchestrator {
     const toolPermissions: Record<string, string> = {
       heat_weather_summary: '', // Meteorological & WBGT station telemetry available to all authenticated users
       ptw_summary: 'ptw:read',
+      ptw_audit_summary: 'audit:read',
       incidents_summary: 'incidents:read',
       health_medical_summary: 'health:read',
       nutrition_high_risk_summary: 'health:read',
@@ -151,6 +152,7 @@ export class AIOrchestrator {
       const executors: Record<string, () => Promise<AIToolResult>> = {
         heat_weather_summary: () => aiToolsRegistry.getHeatStressAndWeatherSummary(),
         ptw_summary: () => aiToolsRegistry.getPTWSummary(),
+        ptw_audit_summary: () => aiToolsRegistry.getPTWAuditSummary(),
         incidents_summary: () => aiToolsRegistry.getIncidentSummary(),
         health_medical_summary: () => aiToolsRegistry.getHealthAndExamsSummary(),
         nutrition_high_risk_summary: () => aiToolsRegistry.getNutritionHighRiskSummary(),
