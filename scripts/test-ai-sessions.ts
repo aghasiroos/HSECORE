@@ -30,7 +30,7 @@ const insertTrigger = `hsecore_reject_ai_message_trigger_${suffix}`;
 const deleteFunction = `hsecore_reject_ai_session_delete_${suffix}`;
 const deleteTrigger = `hsecore_reject_ai_session_delete_trigger_${suffix}`;
 const sharedLegacyUsername = `same-login-${suffix}`;
-const sharedNumericId = 900000 + Math.floor(Math.random() * 99999);
+const sharedNumericId = 900000 + (Number.parseInt(suffix.slice(0, 8), 16) % 90000);
 const userA: UserContext = { id: sharedNumericId, uid: `ai-session-user-a-${suffix}`, username: sharedLegacyUsername, role: 'SAFETY_OFFICER', permissions: [] };
 const userB: UserContext = { id: sharedNumericId, uid: `ai-session-user-b-${suffix}`, username: sharedLegacyUsername, role: 'SAFETY_OFFICER', permissions: [] };
 
