@@ -1,25 +1,17 @@
 import { Request } from 'express';
 
 /**
- * Accurately extracts the real client IP address behind reverse proxies (Nginx, Cloud Run)
+ * Returns the client address resolved by Express using the application's
+ * configured trust-proxy policy. Never trust raw forwarding headers here:
+ * clients can supply X-Forwarded-For themselves unless a trusted proxy
+ * sanitizes and appends the chain correctly.
  */
 export function getClientIp(req: Request): string {
-  const forwarded = req.headers['x-forwarded-for'];
-  if (typeof forwarded === 'string') {
-    const parts = forwarded.split(',').map(s => s.trim());
-    if (parts[0] && parts[0] !== '::1' && parts[0] !== '127.0.0.1') {
-      return parts[0];
-    }
-    if (parts[0]) return parts[0];
-  } else if (Array.isArray(forwarded) && forwarded.length > 0) {
-    const first = forwarded[0].trim();
-    if (first) return first;
-  }
+  const trustedIp = req.ip?.trim();
+  if (trustedIp) return trustedIp;
 
-  const realIp = req.headers['x-real-ip'];
-  if (typeof realIp === 'string' && realIp.trim()) {
-    return realIp.trim();
-  }
+  const socketIp = req.socket?.remoteAddress?.trim();
+  if (socketIp) return socketIp;
 
-  return req.socket?.remoteAddress || req.ip || '127.0.0.1';
+  return '127.0.0.1';
 }

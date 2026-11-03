@@ -5,16 +5,28 @@ on:
     branches:
       - main
       - security/p0-ai-acl-org-tests
+      - refactor/comprehensive-code-audit
     paths:
       - 'server/modules/ai/**'
+      - 'server.ts'
       - 'server/core/middleware/auth.ts'
       - 'server/core/middleware/security.ts'
+      - 'server/core/ip.ts'
+      - 'server/modules/files/**'
+      - 'server/services/backup-retention.ts'
+      - 'server/services/backup-restore-path.ts'
+      - 'server/services/backup.service.ts'
+      - 'scripts/test-backup-retention.ts'
+      - 'scripts/test-backup-restore-path.ts'
       - 'scripts/test-ai-acl.ts'
       - 'scripts/test-ai-auth.ts'
       - 'scripts/test-ai-rag-db.ts'
       - 'scripts/test-ai-routes.ts'
       - 'scripts/test-ai-queue.ts'
       - 'scripts/test-ai-model-pull.ts'
+      - 'scripts/test-api-cache-session.ts'
+      - 'scripts/test-client-ip-trust.ts'
+      - 'src/services/apiDatabaseClient.ts'
       - 'index.html'
       - '.env.example'
       - 'install.sh'
@@ -26,6 +38,7 @@ on:
       - 'docker-compose*.yml'
       - 'package.json'
       - 'package-lock.json'
+      - 'vite.config.ts'
       - '.github/workflows/ai-acl-security-tests.yml'
       - 'docs/PHASE2_SPARK_X2_6_DEPLOYMENT.md'
   pull_request:
@@ -33,14 +46,24 @@ on:
       - main
     paths:
       - 'server/modules/ai/**'
+      - 'server/services/backup-restore-path.ts'
+      - 'scripts/test-backup-restore-path.ts'
       - 'server/core/middleware/auth.ts'
       - 'server/core/middleware/security.ts'
+      - 'server/core/ip.ts'
+      - 'server/modules/files/**'
+      - 'server/services/backup-retention.ts'
+      - 'server/services/backup.service.ts'
+      - 'scripts/test-backup-retention.ts'
       - 'scripts/test-ai-acl.ts'
       - 'scripts/test-ai-auth.ts'
       - 'scripts/test-ai-rag-db.ts'
       - 'scripts/test-ai-routes.ts'
       - 'scripts/test-ai-queue.ts'
       - 'scripts/test-ai-model-pull.ts'
+      - 'scripts/test-api-cache-session.ts'
+      - 'scripts/test-client-ip-trust.ts'
+      - 'src/services/apiDatabaseClient.ts'
       - 'index.html'
       - '.env.example'
       - 'install.sh'
@@ -52,6 +75,7 @@ on:
       - 'docker-compose*.yml'
       - 'package.json'
       - 'package-lock.json'
+      - 'vite.config.ts'
       - '.github/workflows/ai-acl-security-tests.yml'
       - 'docs/PHASE2_SPARK_X2_6_DEPLOYMENT.md'
   workflow_dispatch:
@@ -99,6 +123,22 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
+      - name: Verify API cache isolation across authenticated sessions
+        run: npm run test:api-cache-session
+      - name: Verify backup retention preserves manual and safety backups
+        run: npm run test:backup-retention
+      - name: Verify backup restore rejects path traversal
+        run: npm run test:backup-restore-path
+      - name: Verify rate limiting uses Express-trusted client IP
+        run: npx tsx scripts/test-client-ip-trust.ts
+      - name: Verify authenticated PDF pages are never shared-cacheable
+        run: grep -Fq "Cache-Control', 'private, no-store, max-age=0" server/modules/files/file.controller.ts
+      - name: Verify production JavaScript minification is enabled
+        run: grep -Fq "minify: 'esbuild'" vite.config.ts
+      - name: Verify production server bundles do not emit source maps
+        run: '! grep -Fq "esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap" package.json'
+      - name: Verify removed unused legacy service namespace import
+        run: '! grep -Fq "import * as dbServices" server.ts'
       - name: Verify local spreadsheet libraries and restrictive CSP
         run: |
           node -e "const p=require('./package-lock.json').packages; if (p['node_modules/xlsx']?.version !== '0.20.3') process.exit(1)"

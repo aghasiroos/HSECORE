@@ -28,7 +28,6 @@ const APP_VERSION = process.env.APP_VERSION || '0.2.8';
 const BUILD_ID = process.env.BUILD_ID || '20260913-001';
 const RELEASE_ID = process.env.RELEASE_ID || 'dev-release';
 
-import * as dbServices from './server/db-services.ts';
 export { runMigrations } from './server/migrate.ts';
 
 async function startServer() {

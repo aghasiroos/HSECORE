@@ -7,6 +7,8 @@ import * as schema from '../../src/db/schema.ts';
 import { eq } from 'drizzle-orm';
 import { logger } from '../core/logger.ts';
 import { broadcastDataMutation } from '../core/socket.ts';
+import { selectScheduledBackupsForRetention } from './backup-retention.ts';
+import { resolveBackupRestorePath } from './backup-restore-path.ts';
 
 export type BackupTag = 'manual' | 'scheduled' | 'pre_restore_safety' | 'pre_update';
 
@@ -1672,21 +1674,21 @@ export async function executeRealRestore(
 
     try {
       for (const f of files) {
-        const safeRel = path.normalize(f.relativePath || f.fileName).replace(/^(\.\.(\/|\\|$))+/, '');
-        const stagePath = path.join(stageDir, safeRel);
+        const archivePath = f.relativePath || f.fileName;
+        const stagePath = resolveBackupRestorePath(stageDir, archivePath);
         fs.mkdirSync(path.dirname(stagePath), { recursive: true });
         const buf = Buffer.from(f.contentBase64 || '', 'base64');
         if (f.sha256 && sha256Hex(buf) !== f.sha256) {
-          throw new Error(`عدم تطابق هش فایل پیوست ${safeRel}`);
+          throw new Error(`عدم تطابق هش فایل پیوست ${archivePath}`);
         }
         fs.writeFileSync(stagePath, buf);
       }
 
       // Move verified staged files into live uploads directory
       for (const f of files) {
-        const safeRel = path.normalize(f.relativePath || f.fileName).replace(/^(\.\.(\/|\\|$))+/, '');
-        const stagePath = path.join(stageDir, safeRel);
-        const destPath = path.join(uploadsDir, safeRel);
+        const archivePath = f.relativePath || f.fileName;
+        const stagePath = resolveBackupRestorePath(stageDir, archivePath);
+        const destPath = resolveBackupRestorePath(uploadsDir, archivePath);
         fs.mkdirSync(path.dirname(destPath), { recursive: true });
         fs.renameSync(stagePath, destPath);
         filesRestored++;
@@ -1793,13 +1795,11 @@ export async function enforceBackupRetentionPolicy(): Promise<{ prunedIds: strin
     encryptBackups: false,
   });
 
-  const maxCount = Math.max(2, Number(config.retentionCount) || 10);
   const allBackups = listServerBackups();
-  const scheduledBackups = allBackups.filter((b) => b.tag === 'scheduled' || b.tag === 'manual');
+  const toRemove = selectScheduledBackupsForRetention(allBackups, config.retentionCount);
 
   const prunedIds: string[] = [];
-  if (scheduledBackups.length > maxCount) {
-    const toRemove = scheduledBackups.slice(maxCount);
+  if (toRemove.length > 0) {
     for (const item of toRemove) {
       try {
         await deleteServerBackup(item.backupId, 'SYSTEM_RETENTION_POLICY');

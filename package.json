@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "NODE_OPTIONS='--max-old-space-size=2048' vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs && esbuild server/migrate.ts --bundle --platform=node --format=cjs --packages=external --outfile=dist/migrate.cjs && esbuild scripts/test-db-connection.ts --bundle --platform=node --format=cjs --packages=external --outfile=dist/diagnose-db.cjs",
+    "build": "NODE_OPTIONS='--max-old-space-size=2048' vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --outfile=dist/server.cjs && esbuild server/migrate.ts --bundle --platform=node --format=cjs --packages=external --outfile=dist/migrate.cjs && esbuild scripts/test-db-connection.ts --bundle --platform=node --format=cjs --packages=external --outfile=dist/diagnose-db.cjs",
     "start": "node dist/server.cjs",
     "db:diagnose": "tsx scripts/test-db-connection.ts",
     "db:migrate": "tsx server/migrate.ts",
@@ -18,7 +18,10 @@
     "test:ai-rag-db": "tsx scripts/test-ai-rag-db.ts",
     "test:ai-routes": "tsx scripts/test-ai-routes.ts",
     "test:ai-queue": "tsx scripts/test-ai-queue.ts",
-    "test:ai-model-pull": "tsx scripts/test-ai-model-pull.ts"
+    "test:ai-model-pull": "tsx scripts/test-ai-model-pull.ts",
+    "test:api-cache-session": "tsx scripts/test-api-cache-session.ts",
+    "test:backup-retention": "tsx scripts/test-backup-retention.ts",
+    "test:backup-restore-path": "tsx scripts/test-backup-restore-path.ts"
   },
   "dependencies": {
     "@bpmn-io/properties-panel": "^3.48.0",

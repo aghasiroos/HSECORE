@@ -12,11 +12,17 @@ export interface ApiResponse<T = any> {
   error?: string;
 }
 
-// In-flight request deduplicator and short-lived TTL cache (3.5 seconds)
+// In-flight request deduplicator and short-lived TTL cache.
 const inFlightPromises = new Map<string, Promise<any>>();
 const queryCache = new Map<string, { data: any; expiry: number }>();
+// Tracks invalidations that happen while a request for the same key is in flight.
+const cacheKeyVersions = new Map<string, number>();
 const CACHE_TTL_MS = 15000;
 const MAX_CACHE_ENTRIES = 350;
+
+// Incremented whenever the authenticated session changes. Responses started in an
+// earlier session must never populate or satisfy the current session's cache.
+let authSessionVersion = 0;
 
 function pruneCache() {
   const now = Date.now();
@@ -32,18 +38,28 @@ function pruneCache() {
 }
 
 function getCachedOrFetch<T>(key: string, fetcher: () => Promise<T>, ttlMs = CACHE_TTL_MS): Promise<T> {
+  const sessionVersion = authSessionVersion;
+  const cacheKeyVersion = cacheKeyVersions.get(key) ?? 0;
+  const inFlightKey = `${sessionVersion}:${cacheKeyVersion}:${key}`;
   const cached = queryCache.get(key);
   if (cached && Date.now() < cached.expiry) {
     return Promise.resolve(cached.data);
   }
 
-  const existing = inFlightPromises.get(key);
+  const existing = inFlightPromises.get(inFlightKey);
   if (existing) {
     return existing;
   }
 
   const promise = fetcher()
     .then((result) => {
+      // Never deliver data from an earlier account to a caller in the new session.
+      if (sessionVersion !== authSessionVersion) {
+        throw new Error('API request discarded because the authenticated session changed');
+      }
+      if (cacheKeyVersion !== (cacheKeyVersions.get(key) ?? 0)) {
+        throw new Error('API request discarded because cached data was invalidated');
+      }
       if (queryCache.size >= MAX_CACHE_ENTRIES) {
         pruneCache();
       }
@@ -51,10 +67,17 @@ function getCachedOrFetch<T>(key: string, fetcher: () => Promise<T>, ttlMs = CAC
       return result;
     })
     .finally(() => {
-      inFlightPromises.delete(key);
+      if (inFlightPromises.get(inFlightKey) === promise) {
+        inFlightPromises.delete(inFlightKey);
+      }
+      // Keep the invalidation version until every request for this key has settled.
+      const hasPendingRequestForKey = Array.from(inFlightPromises.keys()).some(
+        (activeKey) => activeKey.slice(activeKey.indexOf(':', activeKey.indexOf(':') + 1) + 1) === key
+      );
+      if (!hasPendingRequestForKey) cacheKeyVersions.delete(key);
     });
 
-  inFlightPromises.set(key, promise);
+  inFlightPromises.set(inFlightKey, promise);
   return promise;
 }
 
@@ -63,6 +86,13 @@ function getCachedOrFetch<T>(key: string, fetcher: () => Promise<T>, ttlMs = CAC
 let inMemoryAuthToken: string | null = null;
 
 export function setAuthToken(token: string | null): void {
+  // Clear user-scoped cached data on login, account switch, and every logout.
+  if (token !== inMemoryAuthToken || token === null) {
+    authSessionVersion += 1;
+    queryCache.clear();
+    inFlightPromises.clear();
+    cacheKeyVersions.clear();
+  }
   inMemoryAuthToken = token;
   try {
     if (typeof window !== 'undefined') {
@@ -228,14 +258,25 @@ export async function safeFetchJson<T = ApiResponse>(
 }
 
 function invalidateCacheKeys(...prefixes: string[]) {
-  if (prefixes.length === 0 || prefixes.some((p) => !p || p === '*' || p === 'all')) {
+  const invalidateAll = prefixes.length === 0 || prefixes.some((p) => !p || p === '*' || p === 'all');
+  const matchesPrefix = (key: string) =>
+    invalidateAll || prefixes.some((p) => key === p || key.startsWith(`${p}:`) || key.startsWith(p));
+
+  // In-flight keys include the auth-session version, cache-key invalidation version, and cache key.
+  // Invalidate only matching requests so unrelated modules keep working normally.
+  for (const activeKey of inFlightPromises.keys()) {
+    const key = activeKey.slice(activeKey.indexOf(':', activeKey.indexOf(':') + 1) + 1);
+    if (matchesPrefix(key)) {
+      cacheKeyVersions.set(key, (cacheKeyVersions.get(key) ?? 0) + 1);
+    }
+  }
+
+  if (invalidateAll) {
     queryCache.clear();
     return;
   }
   for (const key of Array.from(queryCache.keys())) {
-    if (prefixes.some((p) => key === p || key.startsWith(`${p}:`) || key.startsWith(p))) {
-      queryCache.delete(key);
-    }
+    if (matchesPrefix(key)) queryCache.delete(key);
   }
 }
 

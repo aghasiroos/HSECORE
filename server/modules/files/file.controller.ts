@@ -98,7 +98,7 @@ export class FileController {
 
     res.setHeader('Content-Type', 'image/png');
     res.setHeader('X-Total-Pages', String(totalPages));
-    res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
+    res.setHeader('Cache-Control', 'private, no-store, max-age=0');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.send(buffer);
   }

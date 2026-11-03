@@ -48,7 +48,7 @@ export default defineConfig(() => {
       sourcemap: false,
       reportCompressedSize: false,
       chunkSizeWarningLimit: 4000,
-      minify: false,
+      minify: 'esbuild',
       cssCodeSplit: true,
       rollupOptions: {
         maxParallelFileOps: 24,
