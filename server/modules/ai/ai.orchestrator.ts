@@ -826,8 +826,31 @@ export class AIOrchestrator {
     addConfiguredTree(persisted.fireDepartment, 'fire');
     addConfiguredTree(persisted.safetyDepartment, 'safety-unit');
 
-    // Ensure the tree is deterministic for the slash picker.
-    return modules.sort((a, b) => (a.level || 0) - (b.level || 0) || a.moduleNameFa.localeCompare(b.moduleNameFa, 'fa'));
+    // Return a stable parent-first tree so the slash picker displays modules,
+    // submodules, tabs and subtabs together rather than as a flat alphabetic list.
+    const childrenByParent = new Map<string, import('./ai.types.ts').AIModuleCoverage[]>();
+    for (const item of modules) {
+      if (!item.parentModuleId) continue;
+      const children = childrenByParent.get(item.parentModuleId) || [];
+      children.push(item);
+      childrenByParent.set(item.parentModuleId, children);
+    }
+    const ordered: import('./ai.types.ts').AIModuleCoverage[] = [];
+    const visited = new Set<string>();
+    const walk = (item: import('./ai.types.ts').AIModuleCoverage, depth: number) => {
+      if (visited.has(item.moduleId)) return;
+      visited.add(item.moduleId);
+      item.level = depth;
+      ordered.push(item);
+      const children = (childrenByParent.get(item.moduleId) || [])
+        .sort((a, b) => a.moduleNameFa.localeCompare(b.moduleNameFa, 'fa'));
+      for (const child of children) walk(child, depth + 1);
+    };
+    const roots = modules.filter(item => !item.parentModuleId || !byId.has(item.parentModuleId))
+      .sort((a, b) => a.moduleNameFa.localeCompare(b.moduleNameFa, 'fa'));
+    for (const root of roots) walk(root, 0);
+    for (const item of modules) if (!visited.has(item.moduleId)) walk(item, 0);
+    return ordered;
   }
 }
 
