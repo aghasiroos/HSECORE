@@ -173,9 +173,9 @@ export const config: AppConfig = {
     defaultChatModel: process.env.AI_DEFAULT_CHAT_MODEL || 'qwen2.5:1.5b',
     defaultEmbedModel: process.env.AI_DEFAULT_EMBED_MODEL || 'bge-m3',
     maxConcurrency: Number(process.env.AI_MAX_CONCURRENCY) || 1,
-    // CPU-only inference on the 8GB VPS needs a realistic generation window.
+    // Conservative CPU-only default; deployments may explicitly raise this after memory validation.
     timeoutMs: Math.min(Math.max(Number(process.env.AI_REQUEST_TIMEOUT_MS) || 180000, 30000), 600000),
-    contextTokens: Math.min(Math.max(Number(process.env.AI_CONTEXT_TOKENS) || 4096, 1024), 16384),
+    contextTokens: Math.min(Math.max(Number(process.env.AI_CONTEXT_TOKENS) || 2048, 1024), 16384),
     maxQueueLength: Math.min(Math.max(Number(process.env.AI_MAX_QUEUE_LENGTH) || 10, 1), 50),
     modelPullTimeoutMs: Math.min(Math.max(Number(process.env.AI_MODEL_PULL_TIMEOUT_MS) || 30 * 60 * 1000, 60 * 1000), 60 * 60 * 1000),
     // Cloud processing is opt-in; organization data remains local by default.
