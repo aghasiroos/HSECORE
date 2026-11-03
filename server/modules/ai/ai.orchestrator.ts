@@ -325,7 +325,32 @@ export class AIOrchestrator {
       await checkAndExecute('kpi_management_summary', () => aiToolsRegistry.getManagementKPISummary());
     }
 
-    // 16. Universal Deep Search across records when specific terms/names/codes are queried or no specific summary matched
+    // 16. Non-conformances and CAPA
+    if (isSelected('non_conformances') || hasAnyTerm(['عدم انطباق', 'capa', 'اقدام اصلاحی', 'اقدام پیشگیرانه'])) {
+      await checkAndExecute('non_conformances_summary', () => aiToolsRegistry.getNonConformancesSummary());
+    }
+
+    // 17. Notifications and alerts
+    if (isSelected('notifications') || hasAnyTerm(['هشدار', 'اعلان', 'notification', 'alert'])) {
+      await checkAndExecute('notifications_summary', () => aiToolsRegistry.getNotificationsAndAlertsSummary());
+    }
+
+    // 18. Users and access governance — administrator-only data
+    if (isSelected('users') || hasAnyTerm(['کاربران سامانه', 'نقش‌های کاربری', 'مدیریت کاربران', 'سطح دسترسی'])) {
+      await checkAndExecute('users_roles_summary', () => aiToolsRegistry.getUsersAndRolesSummary());
+    }
+
+    // 19. System settings and backup governance — administrator-only data
+    if (isSelected('settings') || hasAnyTerm(['تنظیمات سامانه', 'پشتیبان‌گیری', 'بازیابی پایگاه داده'])) {
+      await checkAndExecute('settings_backup_summary', () => aiToolsRegistry.getSettingsAndBackupSummary());
+    }
+
+    // 20. System architecture and enabled capabilities — administrator-only data
+    if (isSelected('system_architecture') || hasAnyTerm(['معماری سامانه', 'قابلیت‌های سامانه', 'ماژول‌های فعال'])) {
+      await checkAndExecute('system_architecture_summary', () => aiToolsRegistry.getSystemArchitectureAndCapabilitiesSummary());
+    }
+
+    // 21. Universal Deep Search across records when specific terms/names/codes are queried or no specific summary matched
     if (isGlobalAdminUser(userContext)) {
       const deepSearchResult = await aiToolsRegistry.searchAcrossAllModules(message, true);
       if (deepSearchResult) {
@@ -420,7 +445,7 @@ export class AIOrchestrator {
       logger.warn('[AIOrchestrator] RAG retrieval skipped or failed', { error: String(ragErr) });
     }
 
-    if (selectedModules.length > 0 && toolResults.length === 0) {
+    if (selectedModules.length > 0 && toolResults.length === 0 && matchedChunks.length === 0) {
       throw new Error('برای ماژول‌های انتخاب‌شده داده قابل‌دسترسی یا ابزار تحلیلی فعال پیدا نشد. دسترسی کاربر و پوشش تحلیلی ماژول را بررسی کنید.');
     }
 
@@ -569,6 +594,20 @@ export class AIOrchestrator {
       { moduleId: 'notifications', moduleNameFa: 'مدیریت هشدار و اعلان‌ها', connected: true, tools: toolMap.notifications, assistantIds: ['GENERAL_HSE'] },
       { moduleId: 'user-mgmt', moduleNameFa: 'مدیریت کاربران و دسترسی‌ها', connected: true, tools: toolMap.users, assistantIds: ['GENERAL_HSE'], notes: 'فقط برای مدیر سامانه' },
       { moduleId: 'system', moduleNameFa: 'تنظیمات و ساختار سازمانی', connected: true, tools: toolMap.settings, assistantIds: ['GENERAL_HSE'], notes: 'فقط برای مدیر سامانه' },
+
+      { moduleId: 'clinic', moduleNameFa: 'بهداری و مراجعات سرپایی', connected: true, tools: toolMap.health, assistantIds: ['GENERAL_HSE'] },
+      { moduleId: 'periodic-exams', moduleNameFa: 'معاینات ادواری طب کار', connected: true, tools: toolMap.health, assistantIds: ['GENERAL_HSE'] },
+      { moduleId: 'nutrition', moduleNameFa: 'کارشناس تغذیه و رژیم‌درمانی', connected: true, tools: toolMap.health, assistantIds: ['GENERAL_HSE'] },
+      { moduleId: 'env-monitoring', moduleNameFa: 'پایش‌های محیط‌زیستی', connected: true, tools: toolMap.environment, assistantIds: ['GENERAL_HSE'] },
+      { moduleId: 'waste-management', moduleNameFa: 'مدیریت پسماند (EMP)', connected: true, tools: toolMap.environment, assistantIds: ['GENERAL_HSE'] },
+      { moduleId: 'wastewater', moduleNameFa: 'مدیریت پساب (ETP)', connected: true, tools: toolMap.environment, assistantIds: ['GENERAL_HSE'] },
+      { moduleId: 'air-water-soil', moduleNameFa: 'پایش دودکش، آب و خاک', connected: true, tools: toolMap.environment, assistantIds: ['GENERAL_HSE'] },
+      { moduleId: 'daily-report', moduleNameFa: 'گزارش روزانه آتش‌نشانی', connected: true, tools: toolMap.fire, assistantIds: ['GENERAL_HSE'] },
+      { moduleId: 'vehicles', moduleNameFa: 'مدیریت و بازرسی خودروهای آتش‌نشانی', connected: true, tools: toolMap.fire, assistantIds: ['GENERAL_HSE'] },
+      { moduleId: 'safety-unit', moduleNameFa: 'واحد ایمنی و بازرسی‌ها', connected: true, tools: toolMap.five_s, assistantIds: ['GENERAL_HSE'] },
+      { moduleId: 'documents', moduleNameFa: 'دستورالعمل‌ها و مستندات', connected: true, tools: [], assistantIds: ['GENERAL_HSE'], notes: 'از طریق پایگاه دانش RAG؛ فقط اسناد مجاز' },
+      { moduleId: 'pending-documents', moduleNameFa: 'کارتابل و اسناد در انتظار اقدام', connected: true, tools: toolMap.workflows, assistantIds: ['GENERAL_HSE'] },
+      { moduleId: 'process-management', moduleNameFa: 'مدیریت فرآیندها (BPMN)', connected: true, tools: toolMap.workflows, assistantIds: ['GENERAL_HSE'] },
 
     ];
 
