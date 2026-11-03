@@ -832,26 +832,95 @@ export class AIToolsRegistry {
    */
   async getPPESummary(): Promise<AIToolResult> {
     try {
-      const ppeList = await db.select().from(schema.ppeIssuances).catch(() => []);
-      const total = ppeList.length;
-      const totalQty = (ppeList as any[]).reduce((s: number, p: any) => s + Number(p.quantity || 1), 0);
-      const recentItems = ppeList.slice(0, 5).map((p: any) => `${p.itemName} (${p.itemCategory} - تعداد: ${p.quantity})`);
+      const [settingsMap, normalizedIssuances] = await Promise.all([
+        this.loadSettingsMap(),
+        db.select().from(schema.ppeIssuances).catch(() => []),
+      ]);
+      const ppeItems: any[] = Array.isArray(settingsMap.get('hse_ppe_items')) ? settingsMap.get('hse_ppe_items') : [];
+      const settingIssuances: any[] = Array.isArray(settingsMap.get('hse_ppe_issuance')) ? settingsMap.get('hse_ppe_issuance') : [];
+      const categories: any[] = Array.isArray(settingsMap.get('hse_ppe_categories')) ? settingsMap.get('hse_ppe_categories') : [];
+      const issuanceRecords: any[] = settingIssuances.length > 0 ? settingIssuances : normalizedIssuances as any[];
+      const totalIssuances = Math.max(settingIssuances.length, normalizedIssuances.length);
+      const totalQuantity = issuanceRecords.reduce((sum, record) => sum + Math.max(0, Number(record.quantity || 1)), 0);
+
+      const byStatusMap = new Map<string, { records: number; quantity: number }>();
+      const byCategoryMap = new Map<string, { records: number; quantity: number }>();
+      const byDepartmentMap = new Map<string, number>();
+      for (const record of issuanceRecords) {
+        const status = String(record.status || 'نامشخص');
+        const category = String(record.category || 'دسته‌بندی نامشخص');
+        const department = String(record.department || 'واحد نامشخص');
+        const quantity = Math.max(0, Number(record.quantity || 1));
+        const statusBucket = byStatusMap.get(status) || { records: 0, quantity: 0 };
+        statusBucket.records += 1;
+        statusBucket.quantity += quantity;
+        byStatusMap.set(status, statusBucket);
+        const categoryBucket = byCategoryMap.get(category) || { records: 0, quantity: 0 };
+        categoryBucket.records += 1;
+        categoryBucket.quantity += quantity;
+        byCategoryMap.set(category, categoryBucket);
+        byDepartmentMap.set(department, (byDepartmentMap.get(department) || 0) + quantity);
+      }
+
+      const byStatus = Array.from(byStatusMap.entries()).map(([status, value]) => ({ status, ...value }));
+      const byCategory = Array.from(byCategoryMap.entries()).map(([category, value]) => ({ category, ...value }));
+      const byDepartment = Array.from(byDepartmentMap.entries())
+        .map(([department, quantity]) => ({ department, quantity }))
+        .sort((a, b) => b.quantity - a.quantity)
+        .slice(0, 10);
+      const expiredCount = byStatusMap.get('Expired')?.records || 0;
+      const dueForReplacementCount = byStatusMap.get('Due for Replacement')?.records || 0;
+      const activeCount = byStatusMap.get('Active')?.records || 0;
+      const damagedCount = byStatusMap.get('Damaged/Replaced')?.records || 0;
+      const returnedCount = byStatusMap.get('Returned')?.records || 0;
+      const recentIssuances = issuanceRecords
+        .slice()
+        .sort((a, b) => String(b.issueDate || '').localeCompare(String(a.issueDate || '')))
+        .slice(0, 10)
+        .map(record => ({
+          issueDate: record.issueDate,
+          itemName: record.ppeItemName || 'نام قلم ثبت نشده',
+          category: record.category || 'نامشخص',
+          quantity: Math.max(0, Number(record.quantity || 1)),
+          status: record.status || 'نامشخص',
+          department: record.department || 'نامشخص',
+        }));
 
       return {
         toolName: 'ppe_summary',
         titleFa: 'ماژول مدیریت تجهیزات حفاظت فردی (PPE)',
         summary: [
-          `• کل رکوردهای تحویل تجهیزات حفاظت فردی: ${total} نوبت (مجموع اقلام توزیع‌شده: ${totalQty} عدد)`,
-          recentItems.length > 0 ? `• آخرین اقلام تحویلی: ${recentItems.join(' | ')}` : '',
-        ].filter(Boolean).join('\n'),
-        data: { totalIssuances: total, totalQuantity: totalQty, recentItems },
+          `• اقلام تعریف‌شده در کاتالوگ: ${ppeItems.length} قلم؛ دسته‌بندی‌های سفارشی: ${categories.length}`,
+          `• سوابق تحویل: ${totalIssuances} نوبت؛ مجموع اقلام تحویلی: ${totalQuantity} عدد`,
+          `• وضعیت تحویل: فعال ${activeCount}، منقضی ${expiredCount}، نیازمند تعویض ${dueForReplacementCount}، آسیب‌دیده/جایگزین‌شده ${damagedCount}، مرجوعی ${returnedCount}`,
+          `• تفکیک دسته‌های PPE: ${byCategory.map(item => `${item.category}: ${item.records} رکورد / ${item.quantity} عدد`).join('؛ ') || 'داده‌ای ثبت نشده'}`,
+          `• واحدهای دارای بیشترین تحویل: ${byDepartment.map(item => `${item.department}: ${item.quantity} عدد`).join('؛ ') || 'داده‌ای ثبت نشده'}`,
+        ].join('\n'),
+        data: {
+          catalogItemCount: ppeItems.length,
+          customCategoryCount: categories.length,
+          totalIssuances,
+          totalQuantity,
+          activeCount,
+          expiredCount,
+          dueForReplacementCount,
+          damagedCount,
+          returnedCount,
+          byStatus,
+          byCategory,
+          byDepartment,
+          recentIssuances,
+          privacy: 'Personnel names, personnel codes, issuer names, serial numbers, and free-text notes are excluded from AI output.',
+          sourceCoverage: settingIssuances.length > 0 ? 'hse_ppe_issuance' : 'ppe_issuances',
+        },
         timestamp: new Date().toISOString(),
       };
-    } catch {
+    } catch (err: any) {
+      logger.warn('[AITools] PPE summary unavailable', { error: err?.message });
       return {
         toolName: 'ppe_summary',
         titleFa: 'ماژول تجهیزات حفاظت فردی (PPE)',
-        summary: 'اطلاعات تجهیزات حفاظت فردی در دسترس نیست.',
+        summary: 'اطلاعات تجهیزات حفاظت فردی در این لحظه از پایگاه داده قابل دریافت نیست؛ هیچ آماری حدس زده نشده است.',
         data: {},
         timestamp: new Date().toISOString(),
       };
