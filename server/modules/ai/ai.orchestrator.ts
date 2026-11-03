@@ -504,6 +504,7 @@ export class AIOrchestrator {
           if (requestedModel && !modelInfo) throw new Error('مدل انتخاب‌شده نصب نیست یا در دسترس نیست.');
           return await localAIProvider.chat(messages, {
             model: modelInfo?.name || modelInfo?.model,
+            num_ctx: request.contextTokens,
             temperature: 0.3,
             max_tokens: 1500,
             timeoutMs: remainingMs,
