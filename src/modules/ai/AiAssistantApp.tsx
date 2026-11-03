@@ -880,7 +880,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
                     {!moduleCatalogLoading && flatModuleCatalog
                       .filter(item => !moduleSearch || item.moduleNameFa.toLowerCase().includes(moduleSearch.toLowerCase()) || item.moduleId.toLowerCase().includes(moduleSearch.toLowerCase()))
                       .map(item => (
-                        <label key={item.moduleId} className={`flex items-center gap-2 rounded-lg px-2 py-2 text-xs ${item.allowed ? 'cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800' : 'opacity-45 cursor-not-allowed'}`}>
+                        <label key={item.moduleId} title={item.notes || item.moduleId} className={`flex items-center gap-2 rounded-lg px-2 py-2 text-xs ${item.allowed ? 'cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800' : 'opacity-45 cursor-not-allowed'}`}>
                           <input
                             type="checkbox"
                             checked={selectedModuleIds.includes(item.moduleId)}
