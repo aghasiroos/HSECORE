@@ -932,27 +932,107 @@ export class AIToolsRegistry {
    */
   async getEnvironmentSummary(): Promise<AIToolResult> {
     try {
-      const envLogs = await db.select().from(schema.environmentalLogs).orderBy(desc(schema.environmentalLogs.createdAt)).catch(() => []);
-      const total = envLogs.length;
-      const compliant = envLogs.filter((e: any) => e.isCompliant !== false).length;
-      const nonCompliant = total - compliant;
-      const recentParams = envLogs.slice(0, 5).map((e: any) => `${e.parameterName || e.category}: ${e.measuredValue ?? '-'} ${e.unit || ''} (${e.isCompliant ? 'منطبق با استاندارد' : 'فراتر از حد مجاز'})`);
+      const [settingsMap, environmentalLogs] = await Promise.all([
+        this.loadSettingsMap(),
+        db.select().from(schema.environmentalLogs).orderBy(desc(schema.environmentalLogs.createdAt)).catch(() => []),
+      ]);
+      const settingArray = (key: string): any[] => {
+        const value = settingsMap.get(key);
+        return Array.isArray(value) ? value : [];
+      };
+      const mergeById = (base: any[], additions: any[]) => {
+        const map = new Map<string, any>();
+        [...base, ...additions].forEach((item: any, index: number) => {
+          if (!item || typeof item !== 'object') return;
+          const id = String(item.id || `fallback-${index}`);
+          map.set(id, { ...(map.get(id) || {}), ...item });
+        });
+        return Array.from(map.values());
+      };
+      const logs = environmentalLogs as any[];
+      const fromLogCategory = (category: string) => logs
+        .filter(log => String(log.category || '').toUpperCase() === category)
+        .map(log => log.extraData && typeof log.extraData === 'object' ? { ...log.extraData, id: log.extraData.id || log.id } : log)
+        .filter(item => item && item.id);
+
+      const monitoring = mergeById(settingArray('hse_env_monitoring_v5'), fromLogCategory('MONITORING'));
+      const waste = mergeById(settingArray('hse_waste_records_v5'), fromLogCategory('WASTE'));
+      const wastewater = mergeById(settingArray('hse_wastewater_records_v5'), fromLogCategory('WASTEWATER'));
+      const airQuality = mergeById(settingArray('hse_air_quality_v5'), fromLogCategory('AIR_EMISSIONS'));
+      const waterSoil = mergeById(settingArray('hse_water_soil_v5'), fromLogCategory('SOIL'));
+      const nonConformances = mergeById(settingArray('hse_env_health_nc_v5'), fromLogCategory('NON_CONFORMANCE'));
+
+      const categories = [
+        { category: 'پایش‌های محیط‌زیستی', records: monitoring },
+        { category: 'مدیریت پسماند', records: waste },
+        { category: 'مدیریت پساب', records: wastewater },
+        { category: 'پایش آلاینده‌های هوا و دودکش', records: airQuality },
+        { category: 'پایش آب و خاک', records: waterSoil },
+        { category: 'عدم انطباق‌های محیط‌زیستی', records: nonConformances },
+      ].map(group => ({
+        category: group.category,
+        total: group.records.length,
+        nonCompliant: group.records.filter((record: any) => record.isCompliant === false || record.status === 'NON_COMPLIANT').length,
+      }));
+      const totalRecords = categories.reduce((sum, item) => sum + item.total, 0);
+      const nonCompliantRecords = categories.reduce((sum, item) => sum + item.nonCompliant, 0);
+      const complianceKnownRecords = [...monitoring, ...waste, ...wastewater, ...airQuality, ...waterSoil]
+        .filter((record: any) => typeof record.isCompliant === 'boolean').length;
+      const compliantRecords = [...monitoring, ...waste, ...wastewater, ...airQuality, ...waterSoil]
+        .filter((record: any) => record.isCompliant === true).length;
+      const unknownComplianceRecords = Math.max(0, totalRecords - nonConformances.length - complianceKnownRecords);
+
+      const recentRecords = [
+        ...monitoring.map(record => ({ ...record, sourceCategory: 'پایش محیط‌زیستی' })),
+        ...waste.map(record => ({ ...record, sourceCategory: 'پسماند' })),
+        ...wastewater.map(record => ({ ...record, sourceCategory: 'پساب' })),
+        ...airQuality.map(record => ({ ...record, sourceCategory: 'هوا و دودکش' })),
+        ...waterSoil.map(record => ({ ...record, sourceCategory: 'آب و خاک' })),
+      ].sort((a, b) => String(b.date || b.sampleDate || b.createdAt || '').localeCompare(String(a.date || a.sampleDate || a.createdAt || '')))
+        .slice(0, 10)
+        .map(record => ({
+          category: record.sourceCategory,
+          date: record.date || record.sampleDate || record.createdAt || null,
+          parameter: record.parameterName || record.parameter || record.wasteType || record.testName || 'شاخص ثبت‌شده',
+          measuredValue: record.measuredValue ?? record.value ?? null,
+          unit: record.unit || null,
+          isCompliant: typeof record.isCompliant === 'boolean' ? record.isCompliant : null,
+        }));
 
       return {
         toolName: 'environment_summary',
         titleFa: 'ماژول پایش محیط زیست، پساب و مدیریت پسماند',
         summary: [
-          `• کل رکوردهای پایش زیست‌محیطی و پسماند: ${total} مورد (${compliant} منطبق با استاندارد، ${nonCompliant} عدم انطباق زیست‌محیطی)`,
-          recentParams.length > 0 ? `• آخرین سنجش‌ها: ${recentParams.join(' | ')}` : '',
-        ].filter(Boolean).join('\n'),
-        data: { totalLogs: total, compliant, nonCompliant, recentParams },
+          `• مجموع رکوردهای محیط‌زیستی متصل: ${totalRecords} مورد`,
+          `• تفکیک بخش‌ها: ${categories.map(item => `${item.category}: ${item.total} (عدم انطباق ثبت‌شده: ${item.nonCompliant})`).join('؛ ')}`,
+          `• رکوردهای دارای وضعیت انطباق مشخص: ${complianceKnownRecords}؛ منطبق: ${compliantRecords}؛ وضعیت نامشخص: ${unknownComplianceRecords}`,
+          `• عدم انطباق‌های ثبت‌شده در چک‌لیست/سامانه: ${nonConformances.length} مورد`,
+        ].join('\n'),
+        data: {
+          totalRecords,
+          nonCompliantRecords,
+          complianceKnownRecords,
+          compliantRecords,
+          unknownComplianceRecords,
+          categories,
+          recentRecords,
+          sourceCoverage: {
+            monitoring: monitoring.length,
+            waste: waste.length,
+            wastewater: wastewater.length,
+            airQuality: airQuality.length,
+            waterSoil: waterSoil.length,
+            nonConformances: nonConformances.length,
+          },
+        },
         timestamp: new Date().toISOString(),
       };
-    } catch {
+    } catch (err: any) {
+      logger.warn('[AITools] environment summary unavailable', { error: err?.message });
       return {
         toolName: 'environment_summary',
         titleFa: 'ماژول محیط زیست و پسماند',
-        summary: 'اطلاعات محیط زیست در دسترس نیست.',
+        summary: 'اطلاعات محیط زیست در این لحظه از پایگاه داده قابل دریافت نیست؛ هیچ آماری حدس زده نشده است.',
         data: {},
         timestamp: new Date().toISOString(),
       };
