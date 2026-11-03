@@ -642,26 +642,77 @@ export class AIToolsRegistry {
       ]);
 
       const settingFiveS: any[] = Array.isArray(settingsMap.get('hse_5s_inspections_v3')) ? settingsMap.get('hse_5s_inspections_v3') : [];
+      const settingFiveSNc: any[] = Array.isArray(settingsMap.get('hse_5s_nc_v3')) ? settingsMap.get('hse_5s_nc_v3') : [];
+      const settingFiveSSchedules: any[] = Array.isArray(settingsMap.get('hse_5s_schedules_v3')) ? settingsMap.get('hse_5s_schedules_v3') : [];
       const settingInsp: any[] = Array.isArray(settingsMap.get('hse_safety_dept_inspections_v1')) ? settingsMap.get('hse_safety_dept_inspections_v1') : [];
-
+      const fiveSRecords: any[] = settingFiveS.length > 0 ? settingFiveS : fiveSRows as any[];
       const totalFiveS = Math.max(fiveSRows.length, settingFiveS.length);
       const totalInsp = Math.max(inspections.length, settingInsp.length);
-      const avgFiveS = fiveSRows.length > 0
-        ? Math.round((fiveSRows as any[]).reduce((s: number, r: any) => s + Number(r.totalScore || 0), 0) / fiveSRows.length)
-        : 0;
+      const scores = fiveSRecords
+        .map((record: any) => Number(record.scores?.total ?? record.totalScore ?? record.score))
+        .filter((score: number) => Number.isFinite(score) && score >= 0 && score <= 100);
+      const avgFiveS = scores.length
+        ? Number((scores.reduce((sum: number, score: number) => sum + score, 0) / scores.length).toFixed(1))
+        : null;
+      const statusMap = new Map<string, number>();
+      const ratingMap = new Map<string, number>();
+      const departmentMap = new Map<string, number>();
+      for (const record of fiveSRecords) {
+        const status = String(record.status || 'نامشخص');
+        const rating = String(record.generalRating || 'نامشخص');
+        const department = String(record.department || 'واحد نامشخص');
+        statusMap.set(status, (statusMap.get(status) || 0) + 1);
+        ratingMap.set(rating, (ratingMap.get(rating) || 0) + 1);
+        departmentMap.set(department, (departmentMap.get(department) || 0) + 1);
+      }
+      const openActionsCount = settingFiveSNc.filter((item: any) =>
+        ['open', 'in_progress', 'overdue'].includes(String(item.status || '').toLowerCase())
+      ).length + fiveSRecords.reduce((sum: number, record: any) => sum + Math.max(0, Number(record.openActionsCount || 0)), 0);
+      const totalFiveSNc = Math.max(
+        settingFiveSNc.length,
+        fiveSRecords.reduce((sum: number, record: any) => sum + Math.max(0, Number(record.nonConformancesCount || 0)), 0)
+      );
+      const byInspectionType = new Map<string, number>();
+      const byInspectionStatus = new Map<string, number>();
+      for (const record of (settingInsp.length > 0 ? settingInsp : inspections) as any[]) {
+        const type = String(record.inspectionType || record.type || 'نوع نامشخص');
+        const status = String(record.status || 'وضعیت نامشخص');
+        byInspectionType.set(type, (byInspectionType.get(type) || 0) + 1);
+        byInspectionStatus.set(status, (byInspectionStatus.get(status) || 0) + 1);
+      }
 
       return {
         toolName: 'five_s_inspections_summary',
         titleFa: 'ماژول نظام آراستگی ۵S و بازرسی‌های فنی ایمنی',
-        summary: `• مجموع ممیزی‌های نظام آراستگی ۵S: ${totalFiveS} مورد (میانگین امتیاز: ${avgFiveS}%)\n• مجموع بازرسی‌های فنی و چک‌لیست‌های ایمنی (تجهیزات، داربست، جرثقیل، برق و حفاری): ${totalInsp} مورد`,
-        data: { totalFiveSAudits: totalFiveS, averageFiveSScore: avgFiveS, totalInspections: totalInsp },
+        summary: [
+          `• ممیزی‌های ۵S: ${totalFiveS} مورد؛ میانگین امتیاز: ${avgFiveS === null ? 'امتیاز ثبت‌شده کافی نیست' : `${avgFiveS}٪`}`,
+          `• وضعیت ممیزی‌ها: ${Array.from(statusMap.entries()).map(([status, count]) => `${status}: ${count}`).join('؛ ') || 'ثبت نشده'}`,
+          `• رتبه‌بندی عمومی: ${Array.from(ratingMap.entries()).map(([rating, count]) => `${rating}: ${count}`).join('؛ ') || 'ثبت نشده'}`,
+          `• عدم انطباق‌های ۵S: ${totalFiveSNc} مورد؛ اقدامات باز/درحال انجام/معوق: ${openActionsCount}`,
+          `• بازرسی‌های عملیاتی ایمنی: ${totalInsp} مورد؛ برنامه‌های زمان‌بندی ۵S: ${settingFiveSSchedules.length}`,
+          `• تفکیک نوع بازرسی ایمنی: ${Array.from(byInspectionType.entries()).map(([type, count]) => `${type}: ${count}`).join('؛ ') || 'ثبت نشده'}`,
+        ].join('\n'),
+        data: {
+          totalFiveSAudits: totalFiveS,
+          averageFiveSScore: avgFiveS,
+          fiveSStatus: Array.from(statusMap.entries()).map(([status, count]) => ({ status, count })),
+          fiveSRatings: Array.from(ratingMap.entries()).map(([rating, count]) => ({ rating, count })),
+          fiveSByDepartment: Array.from(departmentMap.entries()).map(([department, count]) => ({ department, count })),
+          fiveSNonConformances: totalFiveSNc,
+          fiveSOpenActions: openActionsCount,
+          fiveSSchedules: settingFiveSSchedules.length,
+          totalSafetyInspections: totalInsp,
+          safetyInspectionsByType: Array.from(byInspectionType.entries()).map(([type, count]) => ({ type, count })),
+          safetyInspectionsByStatus: Array.from(byInspectionStatus.entries()).map(([status, count]) => ({ status, count })),
+        },
         timestamp: new Date().toISOString(),
       };
-    } catch {
+    } catch (err: any) {
+      logger.warn('[AITools] 5S and safety inspections summary unavailable', { error: err?.message });
       return {
         toolName: 'five_s_inspections_summary',
         titleFa: 'ماژول ۵S و بازرسی‌های ایمنی',
-        summary: 'اطلاعات بازرسی و ۵S در دسترس نیست.',
+        summary: 'اطلاعات بازرسی و ۵S در این لحظه از پایگاه داده قابل دریافت نیست؛ هیچ آماری حدس زده نشده است.',
         data: {},
         timestamp: new Date().toISOString(),
       };
