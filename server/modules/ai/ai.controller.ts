@@ -136,6 +136,70 @@ export class AIController {
         return res.status(400).json({ success: false, message: 'مدل انتخاب‌شده نصب نیست یا برای گفت‌وگو قابل استفاده نیست. از فهرست مدل‌های نصب‌شده یک مدل زبانی انتخاب کنید.' });
       }
 
+      const rawModuleIds = req.body?.selectedModuleIds;
+      if (rawModuleIds !== undefined && (!Array.isArray(rawModuleIds) ||
+          rawModuleIds.length > 80 || rawModuleIds.some((id: unknown) => typeof id !== 'string' || id.length > 180))) {
+        return res.status(400).json({ success: false, message: 'فهرست ماژول‌های انتخاب‌شده معتبر نیست.' });
+      }
+      const selectedModuleIds = Array.isArray(rawModuleIds)
+        ? Array.from(new Set(rawModuleIds.map((id: string) => id.trim()).filter(Boolean)))
+        : [];
+
+      // Keep ordinary chat direct and fast. Only an explicit module selection invokes
+      // the read-only, permission-aware HSECORE data orchestrator.
+      if (selectedModuleIds.length > 0) {
+        const request = {
+          message: message.trim(),
+          history: Array.isArray(history) ? history : [],
+          model: modelInfo.name || modelInfo.model,
+          selectedModuleIds,
+          allowTools: true,
+        };
+        if (req.body?.stream === true) {
+          const abortController = new AbortController();
+          res.on('close', () => {
+            if (!res.writableEnded) abortController.abort();
+          });
+          res.status(200);
+          res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+          res.setHeader('Cache-Control', 'no-cache, no-transform');
+          res.setHeader('Connection', 'keep-alive');
+          res.setHeader('X-Accel-Buffering', 'no');
+          res.flushHeaders?.();
+          try {
+            const result = await aiOrchestrator.processChat(request, user, {
+              signal: abortController.signal,
+              onToken: token => {
+                if (!res.destroyed && !res.writableEnded) {
+                  res.write(`data: ${JSON.stringify({ token })}\\n\\n`);
+                  (res as any).flush?.();
+                }
+              },
+            });
+            if (!res.destroyed && !res.writableEnded) {
+              res.write(`data: ${JSON.stringify({
+                done: true,
+                model: result.model,
+                durationMs: result.durationMs,
+                toolsUsed: result.toolsUsed,
+                citations: result.citations,
+              })}\\n\\n`);
+              (res as any).flush?.();
+              res.end();
+            }
+          } catch (analysisError: any) {
+            if (!res.destroyed && !res.writableEnded) {
+              res.write(`data: ${JSON.stringify({ error: analysisError?.message || 'تحلیل ماژول‌های انتخاب‌شده ناموفق بود.' })}\\n\\n`);
+              (res as any).flush?.();
+              res.end();
+            }
+          }
+          return;
+        }
+        const result = await aiOrchestrator.processChat(request, user);
+        return res.json(result);
+      }
+
       const messages = buildAIConversationMessages({
         systemPrompt: 'You are a helpful, general-purpose AI assistant. Respond naturally in the language used by the user. Be accurate, clear, and honest about uncertainty. Do not claim access to external systems, live information, or private application data unless it is explicitly provided in the conversation. Do not assume the user is asking about HSE.',
         history: Array.isArray(history) ? history : [],
@@ -554,7 +618,7 @@ export class AIController {
 
   async getModuleCoverage(req: Request, res: Response) {
     try {
-      const coverage = aiOrchestrator.getModuleCoverage(req.user);
+      const coverage = await aiOrchestrator.getModuleCoverage(req.user);
       return res.json({ success: true, data: coverage });
     } catch (err: any) {
       return res.status(500).json({ success: false, message: err.message || 'خطا در دریافت گزارش پوشش' });
