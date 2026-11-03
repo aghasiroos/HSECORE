@@ -820,7 +820,9 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
                     className="w-full text-right px-3 py-2 mb-1 rounded-lg text-xs font-bold bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-900/50">
                     /ALL — تحلیل همه ماژول‌ها (با اعلام بخش‌های فاقد اتصال)
                   </button>
-                  {moduleCatalog.map(item => (
+                  {moduleCatalog.map(item => {
+                    const hasVisibleParent = Boolean(item.parentModuleId && moduleCatalog.some(parent => parent.moduleId === item.parentModuleId));
+                    return (
                     <button key={item.moduleId} type="button" disabled={!item.connected}
                       onClick={() => {
                         setSelectedModules(current => {
@@ -833,10 +835,11 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
                         setShowModulePicker(false);
                       }}
                       className="w-full flex items-center justify-between gap-2 text-right px-3 py-2 rounded-lg text-xs hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed" title={item.notes || item.moduleNameFa}>
-                      <span style={{ paddingRight: item.parentModuleId ? `${Math.min(item.level || 1, 4) * 12}px` : '0px' }}>{item.parentModuleId ? '↳ ' : ''}{item.moduleNameFa}</span>
+                      <span style={{ paddingRight: hasVisibleParent ? `${Math.min(item.level || 1, 4) * 12}px` : '0px' }}>{hasVisibleParent ? '↳ ' : ''}{item.moduleNameFa}</span>
                       <span className="text-[10px] text-slate-400">{item.connected ? (item.tools?.length ? 'ابزار داده‌خوان' : 'پایگاه دانش RAG') : (item.notes?.includes('مجوز') ? 'محدودیت دسترسی' : 'فاقد ابزار داده‌خوان')}</span>
                     </button>
-                  ))}
+                    );
+                  })}
                   {moduleCatalog.length === 0 && <p className="text-xs text-slate-400 py-2">فهرست ماژول‌ها در دسترس نیست.</p>}
                 </div>
               )}
