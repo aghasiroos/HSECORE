@@ -72,4 +72,9 @@ run_budget 8192 "${TMP}/manual.env" >/dev/null
 assert_value "${TMP}/manual.env" AI_MEMORY_LIMIT 5120M
 assert_value "${TMP}/manual.env" AI_CONTEXT_TOKENS 8192
 
+if grep -Fq 'ensure_env_key "AI_CONTEXT_TOKENS" "2048"' "${ROOT}/scripts/setup-local-ai.sh"; then
+  echo "[FAIL] Local AI setup must not pre-create context values before automatic budget initialization." >&2
+  exit 1
+fi
+
 echo "[PASS] AI resource budget: 8GiB, 11.7GiB, manual preservation, and explicit auto-tune."
