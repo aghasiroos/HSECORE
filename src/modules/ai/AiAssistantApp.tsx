@@ -371,12 +371,12 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
   moduleCatalog.forEach(appendCatalogTree);
 
   const handleComposerChange = (value: string) => {
-    const slashMatch = value.match(/(?:^|\\s)\\/([^\\s]*)$/);
+    const slashMatch = value.match(/(?:^|\s)\/([^\s]*)$/);
     if (slashMatch) {
       const query = slashMatch[1] || '';
       if (/^all$/i.test(query)) {
         setSelectedModuleIds(flatModuleCatalog.filter(item => item.allowed).map(item => item.moduleId));
-        setInputMessage(value.replace(/(?:^|\\s)\\/all\\s*$/i, '').trimStart());
+        setInputMessage(value.replace(/(?:^|\s)\/all\s*$/i, '').trimStart());
         setModulePickerOpen(false);
         setModuleSearch('');
         return;
@@ -394,12 +394,12 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
     setSelectedModuleIds(current => current.includes(moduleId)
       ? current.filter(id => id !== moduleId)
       : [...current, moduleId]);
-    setInputMessage(current => current.replace(/(?:^|\\s)\\/[^\\s]*$/, '').trimEnd());
+    setInputMessage(current => current.replace(/(?:^|\s)\/[^\s]*$/, '').trimEnd());
     setModulePickerOpen(true);
   };
 
   const clearSlashCommand = () => {
-    setInputMessage(current => current.replace(/(?:^|\\s)\\/[^\\s]*$/, '').trimEnd());
+    setInputMessage(current => current.replace(/(?:^|\s)\/[^\s]*$/, '').trimEnd());
     setModulePickerOpen(false);
     setModuleSearch('');
   };
@@ -409,7 +409,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
     .filter((name): name is string => Boolean(name));
 
   const handleSendMessage = async (textToSend?: string) => {
-    const text = (textToSend || inputMessage).replace(/(?:^|\\s)\\/[^\\s]*$/, '').trim();
+    const text = (textToSend || inputMessage).replace(/(?:^|\s)\/[^\s]*$/, '').trim();
     if (!text || isLoading) return;
 
     // If user deleted all sessions, create one on first send
