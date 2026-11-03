@@ -36,7 +36,6 @@ async function run() {
   aiOrchestrator.processChat = (async (request: any) => {
     chatCalls++;
     capturedChatRequest = request;
-    if (typeof request.onToken === 'function') request.onToken('گزارش آزمایشی بر پایه داده‌های مجاز');
     return {
       success: true, reply: 'گزارش آزمایشی بر پایه داده‌های مجاز', assistantId: 'GENERAL_HSE',
       toolsUsed: ['ماژول پروانه کار'], citations: ['ماژول پروانه کار'], durationMs: 12,
