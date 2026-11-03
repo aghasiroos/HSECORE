@@ -866,7 +866,43 @@ export class AIOrchestrator {
       .sort((a, b) => a.moduleNameFa.localeCompare(b.moduleNameFa, 'fa'));
     for (const root of roots) walk(root, 0);
     for (const item of modules) if (!visited.has(item.moduleId)) walk(item, 0);
-    return ordered;
+
+    // The picker is a discovery surface, not an authorization boundary. Still,
+    // hide unavailable modules here and independently enforce the same ACL
+    // again when a tool is executed.
+    const globalAdmin = Boolean(_userContext && isGlobalAdminUser(_userContext));
+    const requiredPermissionByModule: Record<string, string> = {
+      dashboard: 'reports:read', 'hse-ms': 'reports:read', reports: 'reports:read',
+      'fire-dept': 'fire_equipment:read', fire: 'fire_equipment:read',
+      'health-env': 'health:read', health: 'health:read', clinic: 'health:read',
+      'periodic-exams': 'health:read', 'non-periodic-exams': 'health:read',
+      nutrition: 'health:read', 'health-env-checklists': 'health:read',
+      'comprehensive-dashboard': 'health:read',
+      permit: 'ptw:read', ptw: 'ptw:read', 'ptw-audit': 'ptw:read',
+      incidents: 'incidents:read', risk: 'reports:read', risks: 'reports:read',
+      'risk-overview': 'reports:read', 'risk-method-records': 'reports:read',
+      'safety-unit': 'five_s:read', 'safety-unit-dashboard': 'five_s:read',
+      'safety-checklists': 'five_s:read', 'five-s': 'five_s:read', five_s: 'five_s:read',
+      warnings: 'warnings:read', training: 'reports:read', ppe: 'safety_equipment:read',
+      environment: 'reports:read', 'env-dashboard': 'reports:read', 'env-monitoring': 'reports:read',
+      'waste-management': 'reports:read', wastewater: 'reports:read', 'air-water-soil': 'reports:read',
+      'env-reports': 'reports:read', personnel: 'personnel:read', 'personnel-history': 'personnel:read',
+      workflows: 'workflow:action', 'pending-documents': 'workflow:action',
+      'process-management': 'workflow:action', 'process-catalog': 'workflow:action',
+      'process-tasks': 'workflow:action', 'process-tracker': 'workflow:action', 'process-rules': 'workflow:action',
+      'non-conformances': 'reports:read', notifications: 'notifications:read',
+      documents: 'documents:read', 'org-procedures': 'documents:read',
+      'equipment-certificates': 'documents:read', 'org-forms-checklists': 'documents:read',
+      'other-hse-docs': 'documents:read',
+    };
+    const adminOnlyModules = new Set(['users', 'user-mgmt', 'settings', 'system']);
+    return ordered.map(item => {
+      const permission = requiredPermissionByModule[item.moduleId];
+      const permitted = globalAdmin ||
+        (!adminOnlyModules.has(item.moduleId) &&
+          (!permission || Boolean(_userContext && checkUserHasPermission(_userContext, permission))));
+      return permitted ? item : { ...item, connected: false };
+    });
   }
 }
 
