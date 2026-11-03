@@ -236,7 +236,7 @@ export default function AiAssistantApp({
                 }
               }
 
-              const res2 = await authFetch('/api/v1/ai/sessions');
+              const res2 = await authFetch('/api/v1/ai/sessions?limit=100');
               const data2 = await res2.json().catch(() => ({}));
               if (!res2.ok || !data2.success || !Array.isArray(data2.data)) {
                 throw new Error('تأیید تاریخچه منتقل‌شده از پایگاه داده ناموفق بود.');
