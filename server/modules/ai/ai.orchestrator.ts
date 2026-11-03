@@ -42,6 +42,15 @@ const AI_TOOL_REQUIRED_PERMISSIONS: Record<string, string> = {
 };
 const AI_ADMIN_ONLY_TOOLS = new Set(['users_roles_summary', 'settings_backup_summary']);
 
+export function canUserAccessAITool(toolName: string, userContext?: UserContext): boolean {
+  if (!userContext) return false;
+  const globalAdmin = isGlobalAdminUser(userContext);
+  if (AI_ADMIN_ONLY_TOOLS.has(toolName)) return globalAdmin;
+  const permission = AI_TOOL_REQUIRED_PERMISSIONS[toolName];
+  return globalAdmin || !permission || checkUserHasPermission(userContext, permission);
+}
+
+
 export function isExplicitAllModulesCommand(message: string): boolean {
   return /(?:^|\s)\/\s*all(?:\s|$)/i.test(String(message || '').trim());
 }
@@ -195,7 +204,7 @@ export class AIOrchestrator {
         });
         return;
       }
-      if (requiredPerm && !isGlobalAdmin && !checkUserHasPermission(userContext, requiredPerm)) {
+      if (!canUserAccessAITool(toolName, userContext)) {
         results.push({
           toolName: `access_denied_${toolName}`,
           titleFa: `محدودیت دسترسی: ${toolName}`,
@@ -880,12 +889,7 @@ export class AIOrchestrator {
       'org-forms-checklists', 'other-hse-docs',
     ]);
     return ordered.map(item => {
-      const permittedTools = item.tools.filter(toolName => {
-        if (AI_ADMIN_ONLY_TOOLS.has(toolName)) return globalAdmin;
-        const permission = AI_TOOL_REQUIRED_PERMISSIONS[toolName];
-        return globalAdmin || !permission ||
-          Boolean(_userContext && checkUserHasPermission(_userContext, permission));
-      });
+      const permittedTools = item.tools.filter(toolName => canUserAccessAITool(toolName, _userContext));
       const permittedKnowledge = documentOnlyModules.has(item.moduleId) &&
         Boolean(_userContext && (globalAdmin || checkUserHasPermission(_userContext, 'documents:read')));
       const permitted = item.connected &&
