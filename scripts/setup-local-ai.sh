@@ -91,27 +91,8 @@ echo "Free disk  : ${FREE_DISK_GB} GB"
 [[ "${FREE_DISK_GB}" =~ ^[0-9]+$ ]] || fail "Could not determine available disk space."
 (( FREE_DISK_GB >= 3 )) || fail "At least 3GB free disk space is required for the runtime image."
 
-# Dynamic Memory Sizing: Calculate safe AI container memory limit based on real host RAM
-# Reserving 2560MB for host OS, PostgreSQL, and Node.js
-if (( TOTAL_RAM_MB >= 10000 )); then
-  CALC_AI_MEM="$((TOTAL_RAM_MB - 2560))M"
-elif (( TOTAL_RAM_MB >= 6000 )); then
-  CALC_AI_MEM="$((TOTAL_RAM_MB - 2048))M"
-else
-  CALC_AI_MEM="3584M"
-fi
-
-CURRENT_MEM_LIMIT="$(get_env_value AI_MEMORY_LIMIT)"
-if [[ -z "${CURRENT_MEM_LIMIT}" || "${CURRENT_MEM_LIMIT}" == "4608M" ]]; then
-  if grep -q "^AI_MEMORY_LIMIT=" "${ENV_FILE}"; then
-    sed -i "s|^AI_MEMORY_LIMIT=.*|AI_MEMORY_LIMIT=${CALC_AI_MEM}|" "${ENV_FILE}"
-  else
-    echo "AI_MEMORY_LIMIT=${CALC_AI_MEM}" >> "${ENV_FILE}"
-  fi
-  echo -e "${GREEN}[✓] Dynamically optimized AI_MEMORY_LIMIT to ${CALC_AI_MEM} based on host RAM (${TOTAL_RAM_MB} MB).${NC}"
-else
-  echo "AI_MEMORY_LIMIT: ${CURRENT_MEM_LIMIT} (existing setting preserved)"
-fi
+# The shared resource-budget helper above is the sole source of automatic sizing.
+# Do not recalculate or overwrite a manually configured memory ceiling here.
 
 if (( SWAP_MB < 2048 )); then
   echo -e "${YELLOW}[NOTE] Host swap is low or zero (${SWAP_MB} MB). To prevent sudden kernel OOM kills on big models, consider running: sudo ./scripts/manage-ai.sh swap${NC}"
