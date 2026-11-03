@@ -754,8 +754,9 @@ export class AIOrchestrator {
       .replace(/^-|-$/g, '')
       .slice(0, 80);
     const addConfiguredTree = (items: unknown, parentModuleId?: string, level = 0) => {
-      if (!Array.isArray(items)) return;
+      if (!Array.isArray(items) || level > 8 || modules.length >= 250) return;
       for (const raw of items) {
+        if (modules.length >= 250) break;
         if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
         const item = raw as Record<string, any>;
         const rawId = normalizeId(item.key || item.moduleId || item.id || item.slug);
