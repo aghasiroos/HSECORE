@@ -91,6 +91,11 @@ router.get('/coverage', requireAuth, (req, res, next) => {
   aiController.getModuleCoverage(req, res).catch(next);
 });
 
+// Dynamic module registry with full hierarchical grouping
+router.get('/registry', requireAuth, (req, res, next) => {
+  aiController.getModuleRegistry(req, res).catch(next);
+});
+
 // AI Audit logs & telemetry (Admins and HSE Managers)
 router.get('/audit', requireAuth, requirePermission('audit:read'), (req, res, next) => {
   aiController.getAuditLogs(req, res).catch(next);

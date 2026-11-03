@@ -32,10 +32,13 @@ export interface SessionMessage {
 }
 
 export class AISessionService {
+  private schemaReadyPromise: Promise<void> | null = null;
+
   private inMemorySessions: Map<string, {
     id: string;
     userId: number | null;
     userUid: string | null;
+    username: string | null;
     title: string;
     assistantId: string;
     createdAt: string;
@@ -43,83 +46,183 @@ export class AISessionService {
     messages: SessionMessage[];
   }> = new Map();
 
+  private resolveUserIdentity(user: UserContext): {
+    userId: number | null;
+    userUid: string | null;
+    username: string | null;
+  } {
+    const rawId = user?.id != null ? Number(user.id) : NaN;
+    const userId = Number.isInteger(rawId) && rawId > 0 ? rawId : null;
+    const userUid = user?.uid ? String(user.uid).trim() : null;
+    const username = (user?.username || user?.name || '').trim().toLowerCase() || null;
+    return { userId, userUid, username };
+  }
+
+  private async ensureSchema(): Promise<void> {
+    if (!this.schemaReadyPromise) {
+      this.schemaReadyPromise = (async () => {
+        try {
+          await db.execute(sql`
+            CREATE TABLE IF NOT EXISTS ai_chat_sessions (
+              id TEXT PRIMARY KEY,
+              user_id INTEGER,
+              user_uid TEXT,
+              title TEXT NOT NULL,
+              assistant_id TEXT DEFAULT 'GENERAL_HSE' NOT NULL,
+              metadata JSONB DEFAULT '{}'::jsonb,
+              created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+              updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+            );
+          `);
+          await db.execute(sql`
+            ALTER TABLE ai_chat_sessions
+              ADD COLUMN IF NOT EXISTS user_id INTEGER,
+              ADD COLUMN IF NOT EXISTS user_uid TEXT,
+              ADD COLUMN IF NOT EXISTS assistant_id TEXT DEFAULT 'GENERAL_HSE' NOT NULL,
+              ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb,
+              ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+              ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW() NOT NULL;
+          `);
+          await db.execute(sql`
+            CREATE TABLE IF NOT EXISTS ai_chat_messages (
+              id TEXT PRIMARY KEY,
+              session_id TEXT NOT NULL REFERENCES ai_chat_sessions(id) ON DELETE CASCADE,
+              role TEXT NOT NULL,
+              content TEXT NOT NULL,
+              tools_used JSONB,
+              citations JSONB,
+              duration_ms INTEGER,
+              model TEXT,
+              created_at TIMESTAMP DEFAULT NOW() NOT NULL
+            );
+          `);
+          await db.execute(sql`
+            ALTER TABLE ai_chat_messages
+              ADD COLUMN IF NOT EXISTS tools_used JSONB,
+              ADD COLUMN IF NOT EXISTS citations JSONB,
+              ADD COLUMN IF NOT EXISTS duration_ms INTEGER,
+              ADD COLUMN IF NOT EXISTS model TEXT,
+              ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW() NOT NULL;
+          `);
+        } catch (err: any) {
+          logger.warn('[AISessionService] Schema verification notice', { error: err?.message || err });
+        }
+      })();
+    }
+    return this.schemaReadyPromise;
+  }
+
+  private matchesUser(
+    record: { userId?: number | null; userUid?: string | null; username?: string | null },
+    identity: { userId: number | null; userUid: string | null; username: string | null }
+  ): boolean {
+    if (identity.userId != null && record.userId != null && Number(record.userId) === identity.userId) {
+      return true;
+    }
+    if (identity.userUid && record.userUid && record.userUid.trim() === identity.userUid) {
+      return true;
+    }
+    if (identity.username && record.username && record.username.trim().toLowerCase() === identity.username) {
+      return true;
+    }
+    return false;
+  }
+
   /**
    * List sessions belonging to the authenticated user only.
    */
   async listSessions(user: UserContext, limit = 50): Promise<SessionSummary[]> {
-    const userId = user.id != null ? Number(user.id) : null;
-    const userUid = user.uid || null;
+    await this.ensureSchema();
+    const identity = this.resolveUserIdentity(user);
+    const { userId, userUid, username } = identity;
+
+    const mergedMap = new Map<string, SessionSummary>();
 
     try {
-      // Match sessions owned by this user via userId OR userUid (not AND).
       const conditions = [];
-      if (userId != null && !Number.isNaN(userId)) {
+      if (userId != null) {
         conditions.push(eq(schema.aiChatSessions.userId, userId));
       }
       if (userUid) {
         conditions.push(eq(schema.aiChatSessions.userUid, userUid));
       }
-      if (conditions.length === 0) {
-        return [];
+      if (username) {
+        conditions.push(sql`LOWER(COALESCE(${schema.aiChatSessions.metadata}->>'username', '')) = ${username}`);
       }
 
-      const whereClause = conditions.length === 1 ? conditions[0] : or(...conditions);
+      if (conditions.length > 0) {
+        const whereClause = conditions.length === 1 ? conditions[0] : or(...conditions);
 
-      const rows = await db
-        .select({
-          id: schema.aiChatSessions.id,
-          title: schema.aiChatSessions.title,
-          assistantId: schema.aiChatSessions.assistantId,
-          createdAt: schema.aiChatSessions.createdAt,
-          updatedAt: schema.aiChatSessions.updatedAt,
-        })
-        .from(schema.aiChatSessions)
-        .where(whereClause!)
-        .orderBy(desc(schema.aiChatSessions.updatedAt))
-        .limit(Math.min(Math.max(limit, 1), 100));
+        const rows = await db
+          .select({
+            id: schema.aiChatSessions.id,
+            title: schema.aiChatSessions.title,
+            assistantId: schema.aiChatSessions.assistantId,
+            createdAt: schema.aiChatSessions.createdAt,
+            updatedAt: schema.aiChatSessions.updatedAt,
+            messageCount: sql<number>`(SELECT COUNT(*)::int FROM ai_chat_messages m WHERE m.session_id = ${schema.aiChatSessions.id})`,
+          })
+          .from(schema.aiChatSessions)
+          .where(whereClause!)
+          .orderBy(desc(schema.aiChatSessions.updatedAt))
+          .limit(Math.min(Math.max(limit, 1), 100));
 
-      const list = rows.map((r) => ({
-        id: r.id,
-        title: r.title,
-        assistantId: r.assistantId || 'GENERAL_HSE',
-        createdAt: r.createdAt?.toISOString?.() ?? String(r.createdAt),
-        updatedAt: r.updatedAt?.toISOString?.() ?? String(r.updatedAt),
-      }));
+        for (const r of rows) {
+          const existingMem = this.inMemorySessions.get(r.id);
+          const createdAtStr = r.createdAt?.toISOString?.() ?? String(r.createdAt);
+          const updatedAtStr = r.updatedAt?.toISOString?.() ?? String(r.updatedAt);
+          const dbMsgCount = Number(r.messageCount || 0);
+          const memMsgCount = existingMem?.messages?.length || 0;
 
-      // Keep in-memory cache synchronized
-      for (const item of list) {
-        if (!this.inMemorySessions.has(item.id)) {
-          this.inMemorySessions.set(item.id, {
-            ...item,
-            userId,
-            userUid,
-            messages: [],
-          });
+          const item: SessionSummary = {
+            id: r.id,
+            title: existingMem?.title && existingMem.title !== 'گفت‌وگوی جدید' && r.title === 'گفت‌وگوی جدید'
+              ? existingMem.title
+              : r.title,
+            assistantId: r.assistantId || 'GENERAL_HSE',
+            createdAt: createdAtStr,
+            updatedAt: existingMem && new Date(existingMem.updatedAt).getTime() > new Date(updatedAtStr).getTime()
+              ? existingMem.updatedAt
+              : updatedAtStr,
+            messageCount: Math.max(dbMsgCount, memMsgCount),
+          };
+          mergedMap.set(item.id, item);
+
+          if (!existingMem) {
+            this.inMemorySessions.set(item.id, {
+              ...item,
+              userId,
+              userUid,
+              username,
+              messages: [],
+            });
+          } else {
+            existingMem.title = item.title;
+            existingMem.updatedAt = item.updatedAt;
+          }
         }
       }
-
-      return list;
     } catch (err: any) {
       logger.warn('[AISessionService] Database error listing sessions, using in-memory store fallback', { error: err?.message || err });
-      const memList: SessionSummary[] = [];
-      for (const item of this.inMemorySessions.values()) {
-        const match =
-          (userId != null && item.userId === userId) ||
-          (userUid && item.userUid === userUid);
-        if (match) {
-          memList.push({
-            id: item.id,
-            title: item.title,
-            assistantId: item.assistantId,
-            createdAt: item.createdAt,
-            updatedAt: item.updatedAt,
-            messageCount: item.messages.length,
-          });
-        }
-      }
-      memList.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-      return memList.slice(0, limit);
     }
+
+    // Merge any in-memory sessions not yet reflected in DB query
+    for (const item of this.inMemorySessions.values()) {
+      if (this.matchesUser(item, identity) && !mergedMap.has(item.id)) {
+        mergedMap.set(item.id, {
+          id: item.id,
+          title: item.title,
+          assistantId: item.assistantId,
+          createdAt: item.createdAt,
+          updatedAt: item.updatedAt,
+          messageCount: item.messages.length,
+        });
+      }
+    }
+
+    const result = Array.from(mergedMap.values());
+    result.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    return result.slice(0, limit);
   }
 
   /**
@@ -128,13 +231,14 @@ export class AISessionService {
   async createSession(
     user: UserContext,
     title?: string,
-    assistantId: string = 'GENERAL_HSE'
+    assistantId: string = 'GENERAL_HSE',
+    customId?: string
   ): Promise<SessionSummary> {
-    const id = randomUUID();
+    await this.ensureSchema();
+    const id = customId && customId.trim() ? customId.trim() : randomUUID();
     const now = new Date();
     const sessionTitle = (title || 'مشاوره جدید HSE').slice(0, 200);
-    const userId = user.id != null ? Number(user.id) : null;
-    const userUid = user.uid || null;
+    const { userId, userUid, username } = this.resolveUserIdentity(user);
 
     const summary: SessionSummary = {
       id,
@@ -142,26 +246,35 @@ export class AISessionService {
       assistantId: assistantId || 'GENERAL_HSE',
       createdAt: now.toISOString(),
       updatedAt: now.toISOString(),
+      messageCount: 0,
     };
 
+    const existingMem = this.inMemorySessions.get(id);
     this.inMemorySessions.set(id, {
       ...summary,
       userId,
       userUid,
-      messages: [],
+      username,
+      messages: existingMem?.messages || [],
     });
 
     try {
-      await db.insert(schema.aiChatSessions).values({
-        id,
-        userId,
-        userUid,
-        title: sessionTitle,
-        assistantId: assistantId || 'GENERAL_HSE',
-        metadata: {},
-        createdAt: now,
-        updatedAt: now,
-      });
+      await db
+        .insert(schema.aiChatSessions)
+        .values({
+          id,
+          userId,
+          userUid,
+          title: sessionTitle,
+          assistantId: assistantId || 'GENERAL_HSE',
+          metadata: username ? { username } : {},
+          createdAt: now,
+          updatedAt: now,
+        })
+        .onConflictDoUpdate({
+          target: schema.aiChatSessions.id,
+          set: { updatedAt: now },
+        });
     } catch (err: any) {
       logger.warn('[AISessionService] Database error creating session, session cached in memory', { error: err?.message || err });
     }
@@ -170,17 +283,30 @@ export class AISessionService {
   }
 
   /**
-   * Ensure the session belongs to the requesting user (fail-closed).
+   * Check session ownership status: 'owned' | 'forbidden' | 'not_found' (fail-closed).
    */
-  private async assertSessionOwnership(sessionId: string, user: UserContext): Promise<boolean> {
-    const userId = user.id != null ? Number(user.id) : null;
-    const userUid = user.uid || null;
+  private async checkSessionOwnership(
+    sessionId: string,
+    user: UserContext
+  ): Promise<'owned' | 'forbidden' | 'not_found'> {
+    await this.ensureSchema();
+    const identity = this.resolveUserIdentity(user);
+
+    const mem = this.inMemorySessions.get(sessionId);
+    if (mem) {
+      return this.matchesUser(mem, identity) ? 'owned' : 'forbidden';
+    }
 
     try {
       const rows = await db
         .select({
           userId: schema.aiChatSessions.userId,
           userUid: schema.aiChatSessions.userUid,
+          metadata: schema.aiChatSessions.metadata,
+          title: schema.aiChatSessions.title,
+          assistantId: schema.aiChatSessions.assistantId,
+          createdAt: schema.aiChatSessions.createdAt,
+          updatedAt: schema.aiChatSessions.updatedAt,
         })
         .from(schema.aiChatSessions)
         .where(eq(schema.aiChatSessions.id, sessionId))
@@ -188,31 +314,42 @@ export class AISessionService {
 
       if (rows.length > 0) {
         const row = rows[0];
-        if (userId != null && row.userId != null && Number(row.userId) === userId) return true;
-        if (userUid && row.userUid && row.userUid === userUid) return true;
-        return false;
+        const rowUsername = (row.metadata as any)?.username || null;
+        if (this.matchesUser({ userId: row.userId, userUid: row.userUid, username: rowUsername }, identity)) {
+          this.inMemorySessions.set(sessionId, {
+            id: sessionId,
+            userId: row.userId ?? identity.userId,
+            userUid: row.userUid ?? identity.userUid,
+            username: rowUsername ?? identity.username,
+            title: row.title,
+            assistantId: row.assistantId || 'GENERAL_HSE',
+            createdAt: row.createdAt?.toISOString?.() ?? String(row.createdAt),
+            updatedAt: row.updatedAt?.toISOString?.() ?? String(row.updatedAt),
+            messages: [],
+          });
+          return 'owned';
+        }
+        return 'forbidden';
       }
     } catch (err: any) {
       logger.warn('[AISessionService] Database error checking ownership, checking in-memory cache', { error: err?.message || err });
     }
 
-    const mem = this.inMemorySessions.get(sessionId);
-    if (mem) {
-      if (userId != null && mem.userId != null && mem.userId === userId) return true;
-      if (userUid && mem.userUid && mem.userUid === userUid) return true;
-    }
-
-    return false;
+    return 'not_found';
   }
 
   /**
-   * Get messages of a session (ownership-checked).
+   * Get messages of a session (ownership-checked), merging DB and in-memory state so no reply is lost.
    */
   async getMessages(sessionId: string, user: UserContext, limit = 200): Promise<SessionMessage[]> {
-    const owned = await this.assertSessionOwnership(sessionId, user);
-    if (!owned) {
+    const status = await this.checkSessionOwnership(sessionId, user);
+    if (status !== 'owned') {
       throw new Error('دسترسی به این گفتگو مجاز نیست یا گفتگو یافت نشد.');
     }
+
+    const mem = this.inMemorySessions.get(sessionId);
+    const memMessages = mem?.messages || [];
+    const mergedById = new Map<string, SessionMessage>();
 
     try {
       const rows = await db
@@ -222,36 +359,78 @@ export class AISessionService {
         .orderBy(schema.aiChatMessages.createdAt)
         .limit(Math.min(Math.max(limit, 1), 500));
 
-      const list = rows.map((r) => ({
-        id: r.id,
-        sessionId: r.sessionId,
-        role: r.role as 'user' | 'assistant' | 'system',
-        content: r.content,
-        toolsUsed: (r.toolsUsed as string[]) || undefined,
-        citations: (r.citations as string[]) || undefined,
-        durationMs: r.durationMs ?? undefined,
-        model: r.model ?? undefined,
-        createdAt: r.createdAt?.toISOString?.() ?? String(r.createdAt),
-      }));
-
-      const mem = this.inMemorySessions.get(sessionId);
-      if (mem) mem.messages = list;
-
-      return list;
+      for (const r of rows) {
+        mergedById.set(r.id, {
+          id: r.id,
+          sessionId: r.sessionId,
+          role: r.role as 'user' | 'assistant' | 'system',
+          content: r.content,
+          toolsUsed: Array.isArray(r.toolsUsed) ? (r.toolsUsed as string[]) : undefined,
+          citations: Array.isArray(r.citations) ? (r.citations as string[]) : undefined,
+          durationMs: r.durationMs ?? undefined,
+          model: r.model ?? undefined,
+          createdAt: r.createdAt?.toISOString?.() ?? String(r.createdAt),
+        });
+      }
     } catch (err: any) {
       logger.warn('[AISessionService] Database error fetching messages, using in-memory store fallback', { error: err?.message || err });
-      const mem = this.inMemorySessions.get(sessionId);
-      return mem?.messages || [];
     }
+
+    // Merge any in-memory messages that might not have been flushed to DB yet
+    const unsyncedMessages: SessionMessage[] = [];
+    for (const m of memMessages) {
+      const existing = mergedById.get(m.id);
+      if (!existing || (m.content.length > existing.content.length)) {
+        mergedById.set(m.id, m);
+        if (!existing) unsyncedMessages.push(m);
+      }
+    }
+
+    // Best-effort background flush of any in-memory message that was missing in DB
+    if (unsyncedMessages.length > 0) {
+      void (async () => {
+        for (const m of unsyncedMessages) {
+          try {
+            await db
+              .insert(schema.aiChatMessages)
+              .values({
+                id: m.id,
+                sessionId,
+                role: m.role,
+                content: m.content,
+                toolsUsed: m.toolsUsed || null,
+                citations: m.citations || null,
+                durationMs: m.durationMs != null ? Math.round(Number(m.durationMs)) : null,
+                model: m.model ?? null,
+                createdAt: new Date(m.createdAt || Date.now()),
+              })
+              .onConflictDoNothing();
+          } catch {
+            // ignore background sync error
+          }
+        }
+      })();
+    }
+
+    const list = Array.from(mergedById.values()).sort(
+      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+    );
+
+    if (mem) {
+      mem.messages = list;
+    }
+
+    return list;
   }
 
   /**
-   * Append a message to a session and touch updatedAt.
+   * Append or update a message in a session (idempotent by message.id) and touch updatedAt.
    */
   async appendMessage(
     sessionId: string,
     user: UserContext,
     message: {
+      id?: string;
       role: 'user' | 'assistant' | 'system';
       content: string;
       toolsUsed?: string[];
@@ -260,49 +439,99 @@ export class AISessionService {
       model?: string;
     }
   ): Promise<SessionMessage> {
-    const owned = await this.assertSessionOwnership(sessionId, user);
-    if (!owned) {
+    const status = await this.checkSessionOwnership(sessionId, user);
+    if (status === 'forbidden') {
       throw new Error('دسترسی به این گفتگو مجاز نیست یا گفتگو یافت نشد.');
     }
+    if (status === 'not_found') {
+      await this.createSession(user, 'گفت‌وگوی جدید', 'GENERAL_HSE', sessionId);
+    }
 
-    const id = randomUUID();
+    const id = message.id && message.id.trim() ? message.id.trim() : randomUUID();
     const now = new Date();
+    const safeDurationMs =
+      message.durationMs != null && Number.isFinite(Number(message.durationMs))
+        ? Math.round(Number(message.durationMs))
+        : undefined;
 
     const newMsg: SessionMessage = {
       id,
       sessionId,
       role: message.role,
       content: message.content,
-      toolsUsed: message.toolsUsed,
-      citations: message.citations,
-      durationMs: message.durationMs,
+      toolsUsed: Array.isArray(message.toolsUsed) && message.toolsUsed.length > 0 ? message.toolsUsed : undefined,
+      citations: Array.isArray(message.citations) && message.citations.length > 0 ? message.citations : undefined,
+      durationMs: safeDurationMs,
       model: message.model,
       createdAt: now.toISOString(),
     };
 
     const mem = this.inMemorySessions.get(sessionId);
     if (mem) {
-      mem.messages.push(newMsg);
+      const existingIdx = mem.messages.findIndex((m) => m.id === id);
+      if (existingIdx >= 0) {
+        newMsg.createdAt = mem.messages[existingIdx].createdAt || newMsg.createdAt;
+        mem.messages[existingIdx] = newMsg;
+      } else {
+        // Also deduplicate if the exact same role + content was appended within the last 3 seconds
+        const recentDupIdx = mem.messages.findIndex(
+          (m) =>
+            m.role === message.role &&
+            m.content === message.content &&
+            Math.abs(new Date(m.createdAt).getTime() - now.getTime()) < 3000
+        );
+        if (recentDupIdx >= 0) {
+          mem.messages[recentDupIdx] = { ...mem.messages[recentDupIdx], ...newMsg, id: mem.messages[recentDupIdx].id };
+          return mem.messages[recentDupIdx];
+        }
+        mem.messages.push(newMsg);
+      }
       mem.updatedAt = now.toISOString();
     }
 
     try {
-      await db.insert(schema.aiChatMessages).values({
-        id,
-        sessionId,
-        role: message.role,
-        content: message.content,
-        toolsUsed: message.toolsUsed || null,
-        citations: message.citations || null,
-        durationMs: message.durationMs ?? null,
-        model: message.model ?? null,
-        createdAt: now,
-      });
+      const identity = this.resolveUserIdentity(user);
+      // Ensure parent session exists in PostgreSQL before inserting message
+      await db
+        .insert(schema.aiChatSessions)
+        .values({
+          id: sessionId,
+          userId: identity.userId,
+          userUid: identity.userUid,
+          title: mem?.title || 'گفت‌وگوی جدید',
+          assistantId: mem?.assistantId || 'GENERAL_HSE',
+          metadata: identity.username ? { username: identity.username } : {},
+          createdAt: mem?.createdAt ? new Date(mem.createdAt) : now,
+          updatedAt: now,
+        })
+        .onConflictDoUpdate({
+          target: schema.aiChatSessions.id,
+          set: { updatedAt: now },
+        });
 
       await db
-        .update(schema.aiChatSessions)
-        .set({ updatedAt: now })
-        .where(eq(schema.aiChatSessions.id, sessionId));
+        .insert(schema.aiChatMessages)
+        .values({
+          id,
+          sessionId,
+          role: message.role,
+          content: message.content,
+          toolsUsed: newMsg.toolsUsed || null,
+          citations: newMsg.citations || null,
+          durationMs: safeDurationMs ?? null,
+          model: message.model ?? null,
+          createdAt: now,
+        })
+        .onConflictDoUpdate({
+          target: schema.aiChatMessages.id,
+          set: {
+            content: message.content,
+            toolsUsed: newMsg.toolsUsed || null,
+            citations: newMsg.citations || null,
+            durationMs: safeDurationMs ?? null,
+            model: message.model ?? null,
+          },
+        });
 
       // Auto-title from first user message if still default
       if (message.role === 'user' && message.content.trim()) {
@@ -312,11 +541,13 @@ export class AISessionService {
             .from(schema.aiChatSessions)
             .where(eq(schema.aiChatSessions.id, sessionId))
             .limit(1);
-          const currentTitle = sessions[0]?.title || '';
+          const currentTitle = (sessions[0]?.title || '').trim();
           if (
+            !currentTitle ||
             currentTitle.startsWith('مشاوره جدید') ||
             currentTitle.startsWith('مشاوره جامع') ||
-            currentTitle === 'گفتگوی جدید'
+            currentTitle === 'گفتگوی جدید' ||
+            currentTitle === 'گفت‌وگوی جدید'
           ) {
             const autoTitle = message.content.trim().slice(0, 80);
             await db
@@ -340,8 +571,8 @@ export class AISessionService {
    * Delete a session and its messages (cascade) — ownership-checked.
    */
   async deleteSession(sessionId: string, user: UserContext): Promise<void> {
-    const owned = await this.assertSessionOwnership(sessionId, user);
-    if (!owned) {
+    const status = await this.checkSessionOwnership(sessionId, user);
+    if (status !== 'owned') {
       throw new Error('دسترسی به این گفتگو مجاز نیست یا گفتگو یافت نشد.');
     }
     this.inMemorySessions.delete(sessionId);
@@ -359,9 +590,11 @@ export class AISessionService {
   async importLocalSessions(
     user: UserContext,
     payload: Array<{
+      id?: string;
       title?: string;
       assistantId?: string;
       messages?: Array<{
+        id?: string;
         role: 'user' | 'assistant';
         content: string;
         toolsUsed?: string[];
@@ -375,11 +608,12 @@ export class AISessionService {
     if (!Array.isArray(payload) || payload.length === 0) return { imported: 0 };
     let imported = 0;
     for (const item of payload.slice(0, 30)) {
-      const session = await this.createSession(user, item.title, item.assistantId || 'GENERAL_HSE');
+      const session = await this.createSession(user, item.title, item.assistantId || 'GENERAL_HSE', item.id);
       const msgs = Array.isArray(item.messages) ? item.messages.slice(0, 100) : [];
       for (const m of msgs) {
         if (!m.content || (m.role !== 'user' && m.role !== 'assistant')) continue;
         await this.appendMessage(session.id, user, {
+          id: m.id,
           role: m.role,
           content: String(m.content).slice(0, 50000),
           toolsUsed: m.toolsUsed,

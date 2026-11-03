@@ -46,11 +46,12 @@ export function securityHeadersMiddleware(req: Request, res: Response, next: Nex
       frameAncestors,
       "object-src 'none'",
       // Allow only the explicitly used external font and map-tile origins.
-      "img-src 'self' data: blob: https://mt0.google.com https://mt1.google.com https://mt2.google.com https://mt3.google.com https://*.tile.openstreetmap.org https://server.arcgisonline.com",
+      "img-src 'self' data: blob: https://mt0.google.com https://mt1.google.com https://mt2.google.com https://mt3.google.com https://*.google.com https://*.tile.openstreetmap.org https://tile.openstreetmap.org https://server.arcgisonline.com https://*.basemaps.cartocdn.com",
+      "frame-src 'self' https://www.openstreetmap.org",
       "font-src 'self' data: https://fonts.gstatic.com",
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-      "connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com ws: wss:",
+      "connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com https://*.tile.openstreetmap.org https://server.arcgisonline.com ws: wss:",
       "worker-src 'self' blob:",
       "media-src 'self' blob:",
     ].join('; ');

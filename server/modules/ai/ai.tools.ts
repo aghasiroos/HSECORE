@@ -5,12 +5,14 @@
  */
 
 import { db, schema } from '../../core/db.ts';
-import { desc } from 'drizzle-orm';
+import { desc, eq, or, ilike } from 'drizzle-orm';
 import { ptwRepository } from '../ptw/ptw.repository.ts';
 import { incidentRepository } from '../incidents/incident.repository.ts';
 import { weatherService } from '../../weather/service.ts';
 import { AIToolResult } from './ai.types.ts';
 import { logger } from '../../core/logger.ts';
+import { UserContext, checkUserHasPermission, isGlobalAdminUser } from '../../core/middleware/auth.ts';
+import { aiModuleRegistry } from './ai.module-registry.ts';
 
 /**
  * Normalize Persian/Arabic characters, digits, and spacing for colloquial & cross-script matching
@@ -1060,6 +1062,324 @@ export class AIToolsRegistry {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Tool 22: Hierarchical Module Browser (درخت سلسله‌مراتبی ماژول‌ها و تب‌ها برای دستور /)
+   */
+  async getModuleHierarchyTree(userContext?: UserContext): Promise<AIToolResult> {
+    const treeText = aiModuleRegistry.getHierarchyTreeText(userContext);
+    return {
+      toolName: 'module_hierarchy_tree',
+      titleFa: 'ساختار سلسله‌مراتبی ماژول‌ها و وضعیت هوش مصنوعی (/ )',
+      summary: treeText,
+      data: {
+        totalModules: aiModuleRegistry.getAllModules().length,
+        grouped: aiModuleRegistry.getGroupedModules(userContext),
+      },
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Tool 23: Comprehensive 360° Personnel Dossier (پرونده جامع سلامت، آموزش، پروانه‌ها و اخطارهای پرسنل)
+   */
+  async getPersonnelComprehensiveDossier(identifier: string, userContext?: UserContext): Promise<AIToolResult> {
+    const rawClean = String(identifier || '').trim();
+    const cleanId = normalizePersianText(rawClean);
+
+    if (!cleanId) {
+      return {
+        toolName: 'personnel_dossier',
+        titleFa: 'پرونده جامع ۳۶۰ درجه پرسنل',
+        summary: 'لطفاً کد پرسنلی، کد ملی یا نام پرسنل مورد نظر را مشخص فرمایید.',
+        data: {},
+        timestamp: new Date().toISOString(),
+      };
+    }
+
+    const isGlobalAdmin = userContext ? isGlobalAdminUser(userContext) : false;
+    const canViewPersonnel = isGlobalAdmin || (userContext ? checkUserHasPermission(userContext, 'personnel:read') : false);
+    const canViewMedical = isGlobalAdmin || (userContext ? checkUserHasPermission(userContext, 'health:read') : false);
+
+    if (userContext && !canViewPersonnel) {
+      return {
+        toolName: 'personnel_dossier',
+        titleFa: 'پرونده جامع ۳۶۰ درجه پرسنل',
+        summary: '⛔ دسترسی غیرمجاز: شما مجوز مشاهده پرونده‌های پرسنلی (personnel:read) را ندارید.',
+        data: { accessDenied: true },
+        timestamp: new Date().toISOString(),
+      };
+    }
+
+    try {
+      const allPersonnel = await db.select().from(schema.personnel).catch(() => []);
+      const matched = allPersonnel.filter((p: any) => {
+        const pCode = normalizePersianText(p.personnelCode || '');
+        const nCode = normalizePersianText(p.nationalCode || '');
+        const fullName = normalizePersianText(`${p.firstName || ''} ${p.lastName || ''}`);
+        return (
+          pCode === cleanId ||
+          nCode === cleanId ||
+          (cleanId.length >= 2 && (fullName.includes(cleanId) || pCode.includes(cleanId) || nCode.includes(cleanId)))
+        );
+      });
+
+      if (matched.length === 0) {
+        return {
+          toolName: 'personnel_dossier',
+          titleFa: 'پرونده جامع ۳۶۰ درجه پرسنل',
+          summary: `❌ هیچ پرونده پرسنلی با شناسه یا مشخصات «${identifier}» در سامانه یافت نشد. لطفاً کد پرسنلی را مجدداً بررسی فرمایید.`,
+          data: { notFound: true, query: identifier },
+          timestamp: new Date().toISOString(),
+        };
+      }
+
+      const person = matched[0];
+      const personId = person.id;
+      const fullName = `${person.firstName || ''} ${person.lastName || ''}`.trim() || 'بدون نام';
+
+      // 1. Fetch Related Records in Parallel
+      const [
+        companies,
+        sites,
+        departments,
+        units,
+        positions,
+        exams,
+        trainings,
+        courses,
+        warnings,
+        ppes,
+        incidents,
+        permits,
+      ] = await Promise.all([
+        db.select().from(schema.orgCompanies).catch(() => []),
+        db.select().from(schema.orgSites).catch(() => []),
+        db.select().from(schema.orgDepartments).catch(() => []),
+        db.select().from(schema.orgUnits).catch(() => []),
+        db.select().from(schema.orgPositions).catch(() => []),
+        canViewMedical ? db.select().from(schema.periodicMedicalExams).where(eq(schema.periodicMedicalExams.personnelId, personId)).catch(() => []) : Promise.resolve([]),
+        db.select().from(schema.trainingAttendances).where(eq(schema.trainingAttendances.personnelId, personId)).catch(() => []),
+        db.select().from(schema.hseTrainings).catch(() => []),
+        db.select().from(schema.safetyWarnings).where(or(
+          eq(schema.safetyWarnings.personnelId, personId),
+          eq(schema.safetyWarnings.personnelCode, person.personnelCode)
+        )).catch(() => []),
+        db.select().from(schema.ppeIssuances).where(eq(schema.ppeIssuances.personnelId, personId)).catch(() => []),
+        incidentRepository.findAll().catch(() => []),
+        ptwRepository.findAll().catch(() => []),
+      ]);
+
+      const company = companies.find((c: any) => c.id === person.companyId)?.name || '-';
+      const site = sites.find((s: any) => s.id === person.siteId)?.name || '-';
+      const department = departments.find((d: any) => d.id === person.departmentId)?.name || '-';
+      const unit = units.find((u: any) => u.id === person.unitId)?.name || '-';
+      const position = positions.find((p: any) => p.id === person.positionId)?.title || person.jobTitle || '-';
+
+      const lines: string[] = [];
+      lines.push(`📋 **پرونده جامع ۳۶۰ درجه پرسنل:** ${fullName} (کد: ${person.personnelCode})`);
+      lines.push(`───────────────────────────────────────`);
+
+      // 1. Identity & Org Placement
+      lines.push(`👤 **۱. مشخصات فردی و ساختار سازمانی:**`);
+      lines.push(`  • نام و نام خانوادگی: ${fullName} | نام پدر: ${person.fatherName || '-'}`);
+      lines.push(`  • کد ملی: ${person.nationalCode || '-'} | جنسیت: ${person.gender === 'FEMALE' ? 'خانم' : 'آقا'} | گروه خونی: ${person.bloodGroup || '-'}`);
+      lines.push(`  • شرکت: ${company} | سایت: ${site} | اداره: ${department} | واحد: ${unit}`);
+      lines.push(`  • شغل/سمت: ${position} | نوع استخدام: ${person.employmentType || '-'} | شیفت: ${person.shiftType || '-'}`);
+      lines.push(`  • وضعیت اشتغال: ${person.status === 'ACTIVE' ? '🟢 فعال' : '🔴 غیرفعال/معلق'} | تاریخ استخدام: ${person.hireDate || '-'}`);
+
+      // 2. Health & Medical Exams
+      lines.push(`\n🩺 **۲. سوابق معاینات سلامت شغلی و طب کار:**`);
+      if (!canViewMedical) {
+        lines.push(`  🔒 *اطلاعات پزشکی به دلیل محرمانگی طبق مجوزهای امنیتی RBAC برای نقش شما ماسک شده است.*`);
+      } else if (exams.length === 0) {
+        lines.push(`  • هیچ پرونده معاینه ادواری برای این پرسنل ثبت نشده است.`);
+      } else {
+        const latestExam = exams.sort((a: any, b: any) => (b.examYear || 0) - (a.examYear || 0))[0];
+        const verdictFa: Record<string, string> = {
+          FIT: '🟢 بلامانع و متناسب (Fit)',
+          CONDITIONAL_FIT: '🟡 مشروط (Conditional Fit)',
+          UNFIT: '🔴 عدم صلاحیت / نامناسب (Unfit)',
+          PENDING: '⚪ در انتظار بررسی',
+        };
+        lines.push(`  • تعداد دوره‌های معاینات ثبت‌شده: ${exams.length} دوره (آخرین دوره: سال ${latestExam.examYear || '-'})`);
+        lines.push(`  • نظر نهایی پزشک طب کار: ${verdictFa[latestExam.doctorVerdict || ''] || latestExam.doctorVerdict || '-'}`);
+        if (latestExam.restrictions) lines.push(`  • محدودیت‌های شغلی تجویزی: ${latestExam.restrictions}`);
+        if (latestExam.bmi) lines.push(`  • قد: ${latestExam.height ?? '-'} cm | وزن: ${latestExam.weight ?? '-'} kg | شاخص توده بدنی (BMI): ${latestExam.bmi}`);
+        if (latestExam.systolicBp || latestExam.diastolicBp) lines.push(`  • فشار خون: ${latestExam.systolicBp ?? '-'}/${latestExam.diastolicBp ?? '-'} mmHg | ضربان قلب: ${latestExam.pulseRate ?? '-'} bpm`);
+        if (latestExam.clinicalNotes) lines.push(`  • ملاحظات بالینی: ${latestExam.clinicalNotes}`);
+      }
+
+      // 3. HSE Training & Competency
+      lines.push(`\n🎓 **۳. سوابق آموزش و گواهینامه‌های HSE:**`);
+      if (trainings.length === 0) {
+        lines.push(`  • هیچ رکورد آموزشی برای این پرسنل ثبت نشده است.`);
+      } else {
+        lines.push(`  • مجموع دوره‌های گذرانده‌شده: ${trainings.length} دوره`);
+        for (const tr of trainings.slice(0, 5)) {
+          const course = courses.find((c: any) => c.id === tr.trainingId);
+          lines.push(`    - ${course?.courseTitle || 'دوره ایمنی'}: ${tr.passed ? '✓ قبولی' : '✗ مردود'} (تاریخ: ${tr.sessionDate || '-'}, گواهینامه: ${tr.certificateNumber || '-'})`);
+        }
+      }
+
+      // 4. PTW Involvement
+      const involvedPermits = permits.filter((p: any) =>
+        p.issuerId === personId ||
+        p.acceptorId === personId ||
+        (p.contractorName && p.contractorName.includes(fullName))
+      );
+      lines.push(`\n📜 **۴. پروانه‌های کار ایمن (PTW) مرتبط:**`);
+      if (involvedPermits.length === 0) {
+        lines.push(`  • پروانه کار فعالی به عنوان صادرکننده یا تحویل‌گیرنده برای ایشان ثبت نشده است.`);
+      } else {
+        lines.push(`  • تعداد پروانه‌های کار مرتبط: ${involvedPermits.length} فقره`);
+        for (const pt of involvedPermits.slice(0, 4)) {
+          lines.push(`    - پروانه ${pt.permitNumber || pt.id}: ${pt.title || pt.permitType} (محل: ${pt.location || '-'}, وضعیت: ${pt.status || '-'})`);
+        }
+      }
+
+      // 5. Safety Incidents & Near Misses
+      const personIncidents = incidents.filter((inc: any) =>
+        inc.involvedPersonnelId === personId ||
+        (inc.personnelName && normalizePersianText(inc.personnelName).includes(normalizePersianText(fullName)))
+      );
+      lines.push(`\n⚠️ **۵. سوابق حوادث و شبه‌حوادث شغلی:**`);
+      if (personIncidents.length === 0) {
+        lines.push(`  • ✅ سابقه حادثه یا شبه‌حادثه ثبت‌شده‌ای ندارد (حادثه صفر).`);
+      } else {
+        lines.push(`  • تعداد رویدادهای ثبت‌شده: ${personIncidents.length} مورد`);
+        for (const inc of personIncidents.slice(0, 4)) {
+          lines.push(`    - رویداد ${inc.incidentNumber || inc.id}: ${inc.incidentType || 'حادثه'} در ${inc.location || '-'} (تاریخ: ${inc.incidentDate || '-'}, وضعیت: ${inc.status || '-'})`);
+        }
+      }
+
+      // 6. Safety Warnings & Compliance
+      lines.push(`\n🛑 **۶. اخطارها و انضباط ایمنی:**`);
+      if (warnings.length === 0) {
+        lines.push(`  • ✅ هیچ اخطار کتبی یا تخلف ایمنی برای ایشان ثبت نشده است.`);
+      } else {
+        lines.push(`  • تعداد اخطارهای ثبت‌شده: ${warnings.length} مورد`);
+        for (const w of warnings.slice(0, 4)) {
+          lines.push(`    - اخطار سطح ${w.warningLevel || '-'}: ${w.reason || w.category} (تاریخ: ${w.warningDate || '-'}, صادرکننده: ${w.issuedBy || '-'})`);
+        }
+      }
+
+      // 7. PPE Delivery History
+      lines.push(`\n🦺 **۷. سوابق تحویل تجهیزات حفاظت فردی (PPE):**`);
+      if (ppes.length === 0) {
+        lines.push(`  • رکوردی از تحویل تجهیزات حفاظت فردی در سیستم ثبت نشده است.`);
+      } else {
+        lines.push(`  • تعداد اقلام تحویلی: ${ppes.length} قلم`);
+        for (const item of ppes.slice(0, 5)) {
+          lines.push(`    - ${item.itemName} (${item.itemCategory}) - تعداد: ${item.quantity || 1} عدد (تاریخ تحویل: ${item.issueDate || '-'})`);
+        }
+      }
+
+      return {
+        toolName: 'personnel_dossier',
+        titleFa: `پرونده جامع ۳۶۰ درجه پرسنل (${fullName})`,
+        summary: lines.join('\n'),
+        data: {
+          personnelId: person.id,
+          personnelCode: person.personnelCode,
+          nationalCode: person.nationalCode,
+          fullName,
+          company,
+          department,
+          unit,
+          position,
+          totalExams: exams.length,
+          totalTrainings: trainings.length,
+          totalPermits: involvedPermits.length,
+          totalIncidents: personIncidents.length,
+          totalWarnings: warnings.length,
+          totalPPEs: ppes.length,
+        },
+        timestamp: new Date().toISOString(),
+      };
+    } catch (err: any) {
+      logger.error('[AITools] getPersonnelComprehensiveDossier failed', err);
+      return {
+        toolName: 'personnel_dossier',
+        titleFa: 'پرونده جامع ۳۶۰ درجه پرسنل',
+        summary: `خطا در دریافت پرونده پرسنلی: ${err?.message || 'خطای ناشناخته سرور'}`,
+        data: { error: String(err?.message || err) },
+        timestamp: new Date().toISOString(),
+      };
+    }
+  }
+
+  /**
+   * Tool 24: Comprehensive Multi-Module Cross Analysis (تحلیل یکپارچه و مقطعی تمام ماژول‌های سامانه برای دستور /ALL)
+   */
+  async getAllModulesCrossAnalysis(userContext?: UserContext): Promise<AIToolResult> {
+    const isGlobalAdmin = userContext ? isGlobalAdminUser(userContext) : false;
+    const canHealth = isGlobalAdmin || (userContext ? checkUserHasPermission(userContext, 'health:read') : false);
+    const canPermit = isGlobalAdmin || (userContext ? checkUserHasPermission(userContext, 'ptw:read') : false);
+    const canIncident = isGlobalAdmin || (userContext ? checkUserHasPermission(userContext, 'incidents:read') : false);
+    const canSafety = isGlobalAdmin || (userContext ? checkUserHasPermission(userContext, 'safety:read') : false);
+    const canFire = isGlobalAdmin || (userContext ? checkUserHasPermission(userContext, 'fire:read') : false);
+    const canTraining = isGlobalAdmin || (userContext ? checkUserHasPermission(userContext, 'training:read') : false);
+    const canPPE = isGlobalAdmin || (userContext ? checkUserHasPermission(userContext, 'ppe:read') : false);
+    const canEnv = isGlobalAdmin || (userContext ? checkUserHasPermission(userContext, 'environment:read') : false);
+    const canPersonnel = isGlobalAdmin || (userContext ? checkUserHasPermission(userContext, 'personnel:read') : false);
+    const canWorkflow = isGlobalAdmin || (userContext ? checkUserHasPermission(userContext, 'workflows:read') : false);
+    const canReport = isGlobalAdmin || (userContext ? checkUserHasPermission(userContext, 'reports:read') : false);
+
+    const tasks: Array<Promise<{ name: string; res: AIToolResult | null }>> = [
+      this.getHeatStressAndWeatherSummary().then(r => ({ name: 'استرس گرمایی و هواشناسی (WBGT)', res: r })),
+      canPermit ? this.getPTWSummary().then(r => ({ name: 'پروانه‌های کار (PTW)', res: r })) : Promise.resolve({ name: 'پروانه‌های کار (PTW)', res: null }),
+      canIncident ? this.getIncidentSummary().then(r => ({ name: 'حوادث و شبه‌حوادث (Incidents)', res: r })) : Promise.resolve({ name: 'حوادث و شبه‌حوادث (Incidents)', res: null }),
+      canHealth ? this.getHealthAndExamsSummary().then(r => ({ name: 'معاینات بهداشت حرفه‌ای و طب کار', res: r })) : Promise.resolve({ name: 'معاینات بهداشت حرفه‌ای و طب کار', res: null }),
+      canHealth ? this.getNutritionHighRiskSummary().then(r => ({ name: 'پایش تغذیه و بیماران پرخطر', res: r })) : Promise.resolve({ name: 'پایش تغذیه و بیماران پرخطر', res: null }),
+      canSafety ? this.getRiskAssessmentsSummary().then(r => ({ name: 'ارزیابی ریسک و مخاطرات (JSA)', res: r })) : Promise.resolve({ name: 'ارزیابی ریسک و مخاطرات (JSA)', res: null }),
+      canSafety ? this.get5SAndInspectionsSummary().then(r => ({ name: 'نظام آراستگی ۵S و بازرسی‌ها', res: r })) : Promise.resolve({ name: 'نظام آراستگی ۵S و بازرسی‌ها', res: null }),
+      canFire ? this.getFireSafetySummary().then(r => ({ name: 'آتش‌نشانی و تجهیزات اطفاء حریق', res: r })) : Promise.resolve({ name: 'آتش‌نشانی و تجهیزات اطفاء حریق', res: null }),
+      canSafety ? this.getWarningsAndAnomaliesSummary().then(r => ({ name: 'اخطارهای ایمنی و عدم انطباق‌ها', res: r })) : Promise.resolve({ name: 'اخطارهای ایمنی و عدم انطباق‌ها', res: null }),
+      canTraining ? this.getTrainingSummary().then(r => ({ name: 'آموزش‌های ایمنی و شایستگی', res: r })) : Promise.resolve({ name: 'آموزش‌های ایمنی و شایستگی', res: null }),
+      canPPE ? this.getPPESummary().then(r => ({ name: 'تجهیزات حفاظت فردی (PPE)', res: r })) : Promise.resolve({ name: 'تجهیزات حفاظت فردی (PPE)', res: null }),
+      canEnv ? this.getEnvironmentSummary().then(r => ({ name: 'پایش محیط زیست و پسماند', res: r })) : Promise.resolve({ name: 'پایش محیط زیست و پسماند', res: null }),
+      canPersonnel ? this.getPersonnelAndOrgSummary().then(r => ({ name: 'پرسنل و ساختار سازمانی', res: r })) : Promise.resolve({ name: 'پرسنل و ساختار سازمانی', res: null }),
+      canWorkflow ? this.getWorkflowAndReferralsSummary().then(r => ({ name: 'کارتابل اسناد و فرآیندهای BPMN', res: r })) : Promise.resolve({ name: 'کارتابل اسناد و فرآیندهای BPMN', res: null }),
+      canReport ? this.getManagementKPISummary().then(r => ({ name: 'شاخص‌های کلیدی عملکرد و TRIR', res: r })) : Promise.resolve({ name: 'شاخص‌های کلیدی عملکرد و TRIR', res: null }),
+      canSafety ? this.getNonConformancesSummary().then(r => ({ name: 'عدم انطباق‌های ISO 45001 / 14001', res: r })) : Promise.resolve({ name: 'عدم انطباق‌های ISO 45001 / 14001', res: null }),
+      this.getNotificationsAndAlertsSummary().then(r => ({ name: 'اعلان‌ها و هشدارهای بلادرنگ', res: r })),
+    ];
+
+    const results = await Promise.all(tasks);
+    const summarySections: string[] = [];
+
+    summarySections.push(`🌐 **گزارش جامع و تحلیل یکپارچه مقطعی کلیه ماژول‌های سامانه HSECORE (/ALL)**`);
+    summarySections.push(`🕒 زمان تحلیل داده‌ها: ${new Date().toLocaleTimeString('fa-IR')} - تاریخ: ${new Date().toLocaleDateString('fa-IR')}\n`);
+
+    let activeCount = 0;
+    let restrictedCount = 0;
+
+    for (const item of results) {
+      if (item.res) {
+        activeCount++;
+        summarySections.push(`📌 **${item.name}:**\n${item.res.summary}\n`);
+      } else {
+        restrictedCount++;
+        summarySections.push(`🔒 **${item.name}:** *به دلیل محدودیت مجوزهای RBAC برای نقش شما در دسترس نیست.*\n`);
+      }
+    }
+
+    summarySections.push(`───────────────────────────────────────`);
+    summarySections.push(`📊 **نتیجه پوشش تحلیلی:** ${activeCount} ماژول فعال و پردازش‌شده ${restrictedCount > 0 ? `| ${restrictedCount} ماژول تحت محافظت RBAC` : ''}`);
+
+    return {
+      toolName: 'all_modules_cross_analysis',
+      titleFa: 'تحلیل مقطعی و یکپارچه تمامی ماژول‌های سامانه (/ALL)',
+      summary: summarySections.join('\n'),
+      data: {
+        totalModulesQueried: results.length,
+        activeModulesCount: activeCount,
+        restrictedCount,
+      },
+      timestamp: new Date().toISOString(),
+    };
   }
 }
 

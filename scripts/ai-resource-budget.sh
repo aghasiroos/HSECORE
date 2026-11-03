@@ -41,8 +41,16 @@ apply_ai_resource_budget() {
     ai_env_set AI_MEMORY_LIMIT_AUTO "$auto" "$file"
   fi
 
+  local host_ram_mb host_swap_mb host_cpus
+  host_ram_mb="$(free -m 2>/dev/null | awk '/^Mem:/ {print $2}' || true)"
+  host_swap_mb="$(free -m 2>/dev/null | awk '/^Swap:/ {print $2}' || true)"
+  host_cpus="$(nproc 2>/dev/null || grep -c '^processor' /proc/cpuinfo 2>/dev/null || echo 1)"
+  [[ "$host_ram_mb" =~ ^[0-9]+$ ]] && ai_env_set HOST_TOTAL_RAM_MB "${host_ram_mb}" "$file"
+  [[ "$host_swap_mb" =~ ^[0-9]+$ ]] && ai_env_set HOST_TOTAL_SWAP_MB "${host_swap_mb}" "$file"
+  [[ "$host_cpus" =~ ^[0-9]+$ ]] && ai_env_set HOST_CPU_CORES "${host_cpus}" "$file"
+
   if [[ "${auto,,}" == "true" || "$auto" == "1" || "${auto,,}" == "yes" ]]; then
-    total_mb="$(free -m | awk '/^Mem:/ {print $2}')"
+    total_mb="${host_ram_mb}"
     [[ "$total_mb" =~ ^[0-9]+$ ]] || { echo "[AI] Could not determine host RAM; preserving AI_MEMORY_LIMIT."; return 0; }
     reserve_mb=3072
     budget_mb=$(( total_mb * 70 / 100 ))

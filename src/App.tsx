@@ -1161,9 +1161,9 @@ export default function App() {
  {/* Main Content Area (Header + Main Stage + Corporate Footer) */}
  <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden relative" id="app-main-area">
 
-  {/* Top Professional Header Bar - Floating Card (Exclusively rendered on main Dashboard) */}
+  {/* Top Professional Header Bar - Floating Card */}
   {showTopNavbar && (
-  <div className="shrink-0 relative z-20 px-3 pt-3 sm:px-4 sm:pt-3.5 lg:px-6 lg:pt-4">
+  <div className={`shrink-0 relative z-20 px-3 pt-3 sm:px-4 sm:pt-3.5 lg:px-6 lg:pt-4 ${activeTab === 'ai-assistant' ? 'hidden lg:block' : ''}`}>
     <header className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border border-slate-200/80 dark:border-slate-800/80 rounded-2xl py-2.5 px-3 sm:px-5 flex flex-wrap items-center justify-between gap-2 sm:gap-4 shadow-xs transition-all relative z-20" id="app-header">
   <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1">
     <button onClick={() => setIsSidebarOpen(true)} className="p-2 -mx-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl lg:hidden transition-colors cursor-pointer text-slate-600 dark:text-slate-400 shrink-0" aria-label={isFa ? 'باز کردن منو' : 'Open menu'}>
@@ -1204,7 +1204,7 @@ export default function App() {
   )}
 
   {/* Floating Mobile Navigation Button (Exclusively displayed on non-dashboard modules when Top Navbar is hidden) */}
-  {!showTopNavbar && (
+  {!showTopNavbar && activeTab !== 'ai-assistant' && (
     <button 
       type="button"
       onClick={() => setIsSidebarOpen(true)} 
@@ -1217,11 +1217,11 @@ export default function App() {
   )}
 
   {/* Core Sub-Module View Render */}
-  <main className={`flex-1 min-w-0 overflow-y-auto px-3 sm:px-4 lg:px-6 custom-scrollbar ${showTopNavbar ? 'py-2.5 sm:py-3 lg:py-3.5' : 'py-3.5 sm:py-4 lg:py-5'}`} id="app-main-stage">
-      <div className="w-full max-w-[1920px] mx-auto space-y-6">
+  <main className={`flex-1 min-w-0 overflow-y-auto custom-scrollbar ${activeTab === 'ai-assistant' ? 'p-0 sm:px-4 sm:py-3 lg:px-6' : `px-3 sm:px-4 lg:px-6 ${showTopNavbar ? 'py-2.5 sm:py-3 lg:py-3.5' : 'py-3.5 sm:py-4 lg:py-5'}`}`} id="app-main-stage">
+      <div className={`w-full max-w-[1920px] mx-auto ${activeTab === 'ai-assistant' ? 'h-full' : 'space-y-6'}`}>
        <ModuleErrorBoundary isFa={isFa} key={activeTab}>
          <React.Suspense fallback={<ModuleLoadingFallback isFa={isFa} />}>
-           <div>
+           <div className={activeTab === 'ai-assistant' ? 'h-full' : ''}>
          {activeTab === 'dashboard' && (
  <Dashboard 
  heatRecord={activeHeatRecord}
@@ -1407,6 +1407,20 @@ export default function App() {
               <AiAssistantApp 
                 currentUser={currentUser}
                 language={language}
+                onOpenGlobalMenu={() => setIsSidebarOpen(true)}
+                onNavigate={(tab, subItem) => {
+                  if (subItem) {
+                    try {
+                      sessionStorage.setItem('hse_system_settings_active_subtab', subItem);
+                    } catch {}
+                  }
+                  setActiveTab(tab as MainTabKey);
+                  if (subItem) {
+                    setTimeout(() => {
+                      window.dispatchEvent(new CustomEvent('hse-navigate-subtab', { detail: { tab, subItem } }));
+                    }, 60);
+                  }
+                }}
               />
             )}
  </div>
@@ -1415,8 +1429,8 @@ export default function App() {
  </div>
  </main>
 
-  {/* Corporate footer info - Floating Card */}
-  <div className="shrink-0 z-10 px-3 pb-3 sm:px-4 sm:pb-3.5 lg:px-6 lg:pb-4">
+  {/* Corporate footer info - Floating Card (hidden on mobile during AI chat to maximize conversation height) */}
+  <div className={`shrink-0 z-10 px-3 pb-3 sm:px-4 sm:pb-3.5 lg:px-6 lg:pb-4 ${activeTab === 'ai-assistant' ? 'hidden sm:block' : ''}`}>
     <footer className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-md py-2.5 px-4 text-center border border-slate-200/80 dark:border-slate-800/80 rounded-2xl text-[11px] text-slate-500 dark:text-slate-400 font-bold shadow-xs transition-all" id="app-footer">
       {isFa 
         ? 'کلیه حقوق مادی و معنوی سامانه متعلق به آقا مصطفی سیروس، کارشناس ارشد بهداشت، ایمنی و محیط زیست (HSE) میباشد.' 

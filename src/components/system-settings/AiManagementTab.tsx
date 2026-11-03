@@ -391,11 +391,15 @@ export default function AiManagementTab({ language = 'fa', currentUser }: AiMana
           <div className="text-sm font-black text-slate-800 dark:text-slate-100">
             {memoryMetrics?.system?.containerLimitMB
               ? `${(memoryMetrics.system.containerLimitMB / 1024).toFixed(1)} گیگابایت RAM`
-              : '۹.۰ گیگابایت RAM'}
+              : 'در حال دریافت از سرور...'}
           </div>
           <div className="text-[11px] text-slate-500 flex items-center justify-between">
-            <span>حفظ تعادل هاست:</span>
-            <span className="text-emerald-600 font-bold">۲.۵GB رزرو سیستمی</span>
+            <span>رزرو سیستم و دیتابیس:</span>
+            <span className="text-emerald-600 font-bold" dir="ltr">
+              {memoryMetrics?.system?.reservedHostRamMB
+                ? `${(memoryMetrics.system.reservedHostRamMB / 1024).toFixed(1)} GB`
+                : '---'}
+            </span>
           </div>
         </div>
 
@@ -450,7 +454,11 @@ export default function AiManagementTab({ language = 'fa', currentUser }: AiMana
                 </span>
               </div>
               <p className="text-xs text-indigo-200/80 mt-0.5">
-                تخصیص پویا بر اساس رم واقعی هاست (۱۱ گیگابایت)، تخلیه مدل قبل از سوئیچ و محاسبه اندازه کانتکست جهت پایداری بدون کرش
+                تخصیص پویا بر اساس رم واقعی سرور میزبان (
+                {memoryMetrics?.system?.totalHostRamMB
+                  ? `${(memoryMetrics.system.totalHostRamMB / 1024).toFixed(1)} گیگابایت — ${memoryMetrics.system.totalHostRamMB} MB`
+                  : 'در حال خواندن از سرور...'}
+                )، تخلیه مدل قبل از سوئیچ و محاسبه اندازه کانتکست جهت پایداری بدون کرش
               </p>
             </div>
           </div>
@@ -471,36 +479,48 @@ export default function AiManagementTab({ language = 'fa', currentUser }: AiMana
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
           <div className="p-3 rounded-2xl bg-white/5 border border-white/10 space-y-1">
             <div className="text-indigo-200 text-[11px] font-bold">کل RAM سرور (میزبان)</div>
-            <div className="text-base font-black font-mono text-white">
+            <div className="text-base font-black font-mono text-white" dir="ltr">
               {memoryMetrics?.system?.totalHostRamMB
-                ? `${(memoryMetrics.system.totalHostRamMB / 1024).toFixed(1)} GB`
-                : '11.7 GB'}
+                ? `${(memoryMetrics.system.totalHostRamMB / 1024).toFixed(1)} GB (${memoryMetrics.system.totalHostRamMB} MB)`
+                : '---'}
             </div>
             <div className="text-[10px] text-slate-300">
-              در دسترس: {memoryMetrics?.system?.availableHostRamMB ? `${(memoryMetrics.system.availableHostRamMB / 1024).toFixed(1)} GB` : '---'}
+              در دسترس:{' '}
+              <span className="font-mono" dir="ltr">
+                {memoryMetrics?.system?.availableHostRamMB != null
+                  ? `${(memoryMetrics.system.availableHostRamMB / 1024).toFixed(1)} GB`
+                  : '---'}
+              </span>
+              {memoryMetrics?.system?.hostCpuCores ? ` · ${memoryMetrics.system.hostCpuCores} هسته CPU` : ''}
             </div>
           </div>
 
           <div className="p-3 rounded-2xl bg-white/5 border border-white/10 space-y-1">
             <div className="text-indigo-200 text-[11px] font-bold">سقف کانتینر AI</div>
-            <div className="text-base font-black font-mono text-amber-300">
+            <div className="text-base font-black font-mono text-amber-300" dir="ltr">
               {memoryMetrics?.system?.containerLimitMB
-                ? `${(memoryMetrics.system.containerLimitMB / 1024).toFixed(1)} GB`
-                : '9.0 GB'}
+                ? `${(memoryMetrics.system.containerLimitMB / 1024).toFixed(1)} GB (${memoryMetrics.system.containerLimitMB} MB)`
+                : '---'}
             </div>
             <div className="text-[10px] text-slate-300">
-              بر اساس رم واقعی سرور
+              {memoryMetrics?.system?.reservedHostRamMB
+                ? `رزرو هاست و دیتابیس: ${(memoryMetrics.system.reservedHostRamMB / 1024).toFixed(1)} GB`
+                : 'بر اساس رم واقعی سرور'}
             </div>
           </div>
 
           <div className="p-3 rounded-2xl bg-white/5 border border-white/10 space-y-1">
             <div className="text-indigo-200 text-[11px] font-bold">فضای Swap میزبان</div>
             <div className="text-base font-black font-mono text-white flex items-center gap-1.5">
-              <span>{memoryMetrics?.system?.totalSwapMB ? `${(memoryMetrics.system.totalSwapMB / 1024).toFixed(1)} GB` : '۰ GB'}</span>
+              <span dir="ltr">
+                {memoryMetrics?.system?.totalSwapMB
+                  ? `${(memoryMetrics.system.totalSwapMB / 1024).toFixed(1)} GB`
+                  : '0 GB'}
+              </span>
               {(memoryMetrics?.system?.totalSwapMB ?? 0) >= 1024 ? (
-                <span className="text-[10px] text-emerald-300 bg-emerald-500/20 px-1.5 py-0.5 rounded font-normal">فعال</span>
+                <span className="text-[10px] text-emerald-300 bg-emerald-500/20 px-1.5 py-0.5 rounded font-sans font-normal">فعال</span>
               ) : (
-                <span className="text-[10px] text-amber-300 bg-amber-500/20 px-1.5 py-0.5 rounded font-normal">نیاز به فعال‌سازی</span>
+                <span className="text-[10px] text-amber-300 bg-amber-500/20 px-1.5 py-0.5 rounded font-sans font-normal">نیاز به فعال‌سازی</span>
               )}
             </div>
             <div className="text-[10px] text-slate-300">

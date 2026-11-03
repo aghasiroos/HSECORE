@@ -1,4 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import {
   Search,
   MapPin,
@@ -248,6 +250,299 @@ export function SmallWeatherIcon(props: {
   variant?: 'hero' | 'card' | 'badge' | 'sm' | 'inline';
 }) {
   return <WeatherIcon variant={props.variant || 'inline'} {...props} />;
+}
+
+/**
+ * Interactive Resilient Leaflet Mini-Map for Weather Tab
+ * Replaces external iframe embeds (which fail under CSP / network restrictions)
+ * with an embedded Leaflet GIS canvas + multi-provider tile fallback + tactical radar overlay.
+ */
+function WeatherStationMiniMap({
+  activeRecord,
+  weatherInfo,
+  isFa,
+  industrialSites,
+  onSelectSite,
+  onSwitchToGisMapTab
+}: {
+  activeRecord: HeatRecord | null;
+  weatherInfo: WeatherInfo | null;
+  isFa: boolean;
+  industrialSites: IndustrialSiteOption[];
+  onSelectSite: (lat: number, lon: number, label: string) => void;
+  onSwitchToGisMapTab: () => void;
+}) {
+  const mapContainerRef = useRef<HTMLDivElement>(null);
+  const mapInstanceRef = useRef<L.Map | null>(null);
+  const tileLayerRef = useRef<L.TileLayer | null>(null);
+  const markersGroupRef = useRef<L.LayerGroup | null>(null);
+  const [miniLayer, setMiniLayer] = useState<'roadmap' | 'hybrid'>('hybrid');
+
+  const lat = activeRecord?.lat ?? 30.471003;
+  const lon = activeRecord?.lon ?? 49.090324;
+  const tempDisplay = weatherInfo?.tempC !== undefined
+    ? `${weatherInfo.tempC.toFixed(1)}°C`
+    : activeRecord?.tempC !== undefined
+    ? `${Number(activeRecord.tempC).toFixed(1)}°C`
+    : '';
+
+  const createMiniTileLayer = (mode: 'roadmap' | 'hybrid', map: L.Map) => {
+    const primaryUrl =
+      mode === 'hybrid'
+        ? 'https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}'
+        : 'https://{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}';
+    const fallbackUrl =
+      mode === 'hybrid'
+        ? 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+        : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+
+    let fallbackUsed = false;
+    let errCount = 0;
+
+    const layer = L.tileLayer(primaryUrl, {
+      subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
+      maxZoom: 19,
+      keepBuffer: 2,
+      updateWhenIdle: false,
+      crossOrigin: true
+    });
+
+    layer.on('tileerror', () => {
+      errCount += 1;
+      if (!fallbackUsed && errCount >= 3 && mapInstanceRef.current === map) {
+        fallbackUsed = true;
+        const backup = L.tileLayer(fallbackUrl, {
+          maxZoom: 19,
+          keepBuffer: 2,
+          updateWhenIdle: false
+        });
+        if (tileLayerRef.current === layer) {
+          map.removeLayer(layer);
+          backup.addTo(map);
+          tileLayerRef.current = backup;
+        }
+      }
+    });
+
+    return layer;
+  };
+
+  useEffect(() => {
+    const container = mapContainerRef.current;
+    if (!container) return;
+
+    if (!mapInstanceRef.current) {
+      const map = L.map(container, {
+        center: [lat, lon],
+        zoom: 12,
+        zoomControl: false,
+        attributionControl: false,
+        preferCanvas: true
+      });
+
+      const tLayer = createMiniTileLayer(miniLayer, map).addTo(map);
+      tileLayerRef.current = tLayer;
+
+      const mGroup = L.layerGroup().addTo(map);
+      markersGroupRef.current = mGroup;
+
+      map.on('click', (e: L.LeafletMouseEvent) => {
+        const clickedLat = e.latlng.lat;
+        const clickedLon = e.latlng.lng;
+        onSelectSite(
+          clickedLat,
+          clickedLon,
+          isFa
+            ? `ایستگاه انتخابی (${clickedLat.toFixed(3)}, ${clickedLon.toFixed(3)})`
+            : `Selected (${clickedLat.toFixed(3)}, ${clickedLon.toFixed(3)})`
+        );
+      });
+
+      mapInstanceRef.current = map;
+    }
+
+    const syncSize = () => {
+      const map = mapInstanceRef.current;
+      const el = mapContainerRef.current;
+      if (!map || !el) return;
+      const rect = el.getBoundingClientRect();
+      if (rect.width > 40 && rect.height > 40) {
+        map.invalidateSize({ animate: false, pan: false });
+      }
+    };
+
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(() => requestAnimationFrame(syncSize));
+      ro.observe(container);
+    }
+    const timer = window.setTimeout(syncSize, 150);
+
+    return () => {
+      clearTimeout(timer);
+      if (ro) ro.disconnect();
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.remove();
+        mapInstanceRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    if (tileLayerRef.current) {
+      map.removeLayer(tileLayerRef.current);
+    }
+    const nextLayer = createMiniTileLayer(miniLayer, map).addTo(map);
+    tileLayerRef.current = nextLayer;
+  }, [miniLayer]);
+
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    const group = markersGroupRef.current;
+    if (!map || !group) return;
+
+    group.clearLayers();
+    map.invalidateSize({ animate: false, pan: false });
+    map.setView([lat, lon], map.getZoom() || 12, { animate: true });
+
+    // Radar perimeter circle
+    L.circle([lat, lon], {
+      color: '#0ea5e9',
+      fillColor: '#38bdf8',
+      fillOpacity: 0.14,
+      radius: 1600,
+      weight: 1.5,
+      dashArray: '5, 5'
+    }).addTo(group);
+
+    // Reference industrial sites
+    industrialSites.forEach((site) => {
+      if (Math.abs(site.lat - lat) < 0.001 && Math.abs(site.lon - lon) < 0.001) return;
+      const siteIcon = L.divIcon({
+        className: 'weather-mini-site-pin',
+        iconSize: [24, 24],
+        iconAnchor: [12, 12],
+        html: `<div title="${isFa ? site.nameFa : site.name}" style="width:12px;height:12px;border-radius:9999px;background:#f59e0b;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.45);cursor:pointer;"></div>`
+      });
+      const m = L.marker([site.lat, site.lon], { icon: siteIcon });
+      m.on('click', (ev) => {
+        L.DomEvent.stopPropagation(ev);
+        onSelectSite(site.lat, site.lon, isFa ? site.nameFa : site.name);
+      });
+      m.addTo(group);
+    });
+
+    // Active station pulsing marker with live temperature badge
+    const activeIcon = L.divIcon({
+      className: 'weather-mini-active-pin',
+      iconSize: [96, 48],
+      iconAnchor: [48, 24],
+      html: `
+        <div style="display:flex;flex-direction:column;align-items:center;pointer-events:none;">
+          ${
+            tempDisplay
+              ? `<div style="background:rgba(15,23,42,0.92);color:#38bdf8;border:1px solid rgba(56,189,248,0.45);padding:1px 7px;border-radius:9999px;font-size:11px;font-weight:900;font-family:monospace;white-space:nowrap;box-shadow:0 4px 10px rgba(0,0,0,0.35);margin-bottom:3px;">${tempDisplay}</div>`
+              : ''
+          }
+          <div style="position:relative;display:flex;align-items:center;justify-content:center;width:28px;height:28px;">
+            <span style="position:absolute;width:32px;height:32px;border-radius:9999px;background:rgba(245,158,11,0.45);animation:ping 1.8s cubic-bezier(0,0,0.2,1) infinite;"></span>
+            <div style="position:relative;width:24px;height:24px;border-radius:9999px;background:#f59e0b;border:2.5px solid #ffffff;box-shadow:0 3px 10px rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:center;font-size:12px;">
+              📍
+            </div>
+          </div>
+        </div>
+      `
+    });
+
+    L.marker([lat, lon], { icon: activeIcon }).addTo(group);
+  }, [lat, lon, tempDisplay, industrialSites, isFa]);
+
+  return (
+    <div className="relative rounded-3xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-900 h-52 sm:h-56 shadow-xs group select-none">
+      {/* Tactical GIS Coordinate Grid Backdrop (visible while tiles load or if offline) */}
+      <div
+        className="absolute inset-0 pointer-events-none opacity-35"
+        style={{
+          backgroundImage:
+            'radial-gradient(circle at 50% 50%, rgba(56, 189, 248, 0.22) 0%, transparent 65%), linear-gradient(to right, rgba(148, 163, 184, 0.14) 1px, transparent 1px), linear-gradient(to bottom, rgba(148, 163, 184, 0.14) 1px, transparent 1px)',
+          backgroundSize: '100% 100%, 28px 28px, 28px 28px'
+        }}
+      />
+
+      {/* Interactive Leaflet Container */}
+      <div ref={mapContainerRef} className="w-full h-full relative z-10" />
+
+      {/* Top Map Controls: Layer Toggle & Zoom */}
+      <div className="absolute top-3 left-3 right-3 z-20 flex items-center justify-between pointer-events-none">
+        <div className="flex items-center gap-1 bg-slate-900/80 backdrop-blur-md border border-white/15 rounded-xl p-1 pointer-events-auto shadow-md">
+          <button
+            type="button"
+            onClick={() => setMiniLayer('hybrid')}
+            className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition cursor-pointer ${
+              miniLayer === 'hybrid'
+                ? 'bg-sky-500 text-white shadow-2xs'
+                : 'text-slate-200 hover:bg-white/10'
+            }`}
+          >
+            {isFa ? 'ماهواره' : 'Satellite'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setMiniLayer('roadmap')}
+            className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition cursor-pointer ${
+              miniLayer === 'roadmap'
+                ? 'bg-sky-500 text-white shadow-2xs'
+                : 'text-slate-200 hover:bg-white/10'
+            }`}
+          >
+            {isFa ? 'نقشه' : 'Map'}
+          </button>
+        </div>
+
+        <div className="flex items-center gap-1 bg-slate-900/80 backdrop-blur-md border border-white/15 rounded-xl p-1 pointer-events-auto shadow-md">
+          <button
+            type="button"
+            onClick={() => mapInstanceRef.current?.zoomIn()}
+            className="w-6 h-6 rounded-lg text-white hover:bg-white/15 flex items-center justify-center text-xs font-black transition cursor-pointer"
+            title={isFa ? 'بزرگ‌نمایی' : 'Zoom In'}
+          >
+            +
+          </button>
+          <button
+            type="button"
+            onClick={() => mapInstanceRef.current?.zoomOut()}
+            className="w-6 h-6 rounded-lg text-white hover:bg-white/15 flex items-center justify-center text-xs font-black transition cursor-pointer"
+            title={isFa ? 'کوچک‌نمایی' : 'Zoom Out'}
+          >
+            −
+          </button>
+        </div>
+      </div>
+
+      {/* Bottom Station Info & Full GIS Button Overlay */}
+      <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-slate-950/95 via-slate-900/70 to-transparent p-3.5 flex items-center justify-between pointer-events-none">
+        <div className="flex items-center gap-2 text-xs pointer-events-auto">
+          <MapPin className="w-4 h-4 text-amber-400 shrink-0" />
+          <span className="font-bold text-white truncate max-w-[180px] sm:max-w-[240px]">
+            {activeRecord?.loc || '—'}
+          </span>
+          <span className="text-[10px] text-slate-200 font-mono tabular-nums hidden sm:inline">
+            ({lat.toFixed(2)}, {lon.toFixed(2)})
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={onSwitchToGisMapTab}
+          className="pointer-events-auto px-3 py-1.5 bg-white/95 hover:bg-amber-500 text-slate-900 hover:text-white rounded-xl text-[11px] font-bold transition flex items-center gap-1 cursor-pointer whitespace-nowrap shrink-0 shadow-sm"
+        >
+          <span>{isFa ? 'نقشه کامل GIS' : 'Full GIS Map'}</span>
+          <ArrowUpLeft className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export default function WeatherDashboardView({
@@ -797,41 +1092,14 @@ export default function WeatherDashboardView({
         {/* 2. Center Interactive Station Map & Sunrise/Sunset Card (5 cols) */}
         <div className="lg:col-span-5 flex flex-col gap-5">
           {/* Interactive Station Map Preview */}
-          <div className="relative rounded-3xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-900 h-52 sm:h-56 shadow-xs group">
-            {activeRecord ? (
-              <iframe
-                title={isFa ? 'نقشه موقعیت ایستگاه هواشناسی' : 'Weather Station Map'}
-                src={`https://www.openstreetmap.org/export/embed.html?bbox=${activeRecord.lon - 0.18}%2C${activeRecord.lat - 0.1}%2C${activeRecord.lon + 0.18}%2C${activeRecord.lat + 0.1}&layer=mapnik&marker=${activeRecord.lat}%2C${activeRecord.lon}`}
-                className="w-full h-full border-0 opacity-95 group-hover:opacity-100 transition-opacity"
-                loading="lazy"
-              />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center text-xs text-slate-400">
-                {isFa ? 'نقشه موقعیت مکانی' : 'Station Map'}
-              </div>
-            )}
-            <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-slate-900/90 via-slate-900/55 to-transparent p-3.5 flex items-center justify-between">
-              <div className="flex items-center gap-2 text-xs">
-                <MapPin className="w-4 h-4 text-amber-400 shrink-0" />
-                <span className="font-bold text-white truncate max-w-[200px] sm:max-w-[260px]">
-                  {activeRecord?.loc || '—'}
-                </span>
-                {activeRecord && (
-                  <span className="text-[10px] text-slate-200 font-mono tabular-nums hidden sm:inline">
-                    ({activeRecord.lat.toFixed(2)}, {activeRecord.lon.toFixed(2)})
-                  </span>
-                )}
-              </div>
-              <button
-                type="button"
-                onClick={onSwitchToGisMapTab}
-                className="px-3 py-1.5 bg-white/95 hover:bg-amber-500 text-slate-900 hover:text-white rounded-xl text-[11px] font-bold transition flex items-center gap-1 cursor-pointer whitespace-nowrap shrink-0 shadow-sm"
-              >
-                <span>{isFa ? 'نقشه کامل GIS' : 'Full GIS Map'}</span>
-                <ArrowUpLeft className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          </div>
+          <WeatherStationMiniMap
+            activeRecord={activeRecord}
+            weatherInfo={weatherInfo}
+            isFa={isFa}
+            industrialSites={industrialSites}
+            onSelectSite={onSelectSite}
+            onSwitchToGisMapTab={onSwitchToGisMapTab}
+          />
 
           {/* Sunrise & Sunset + Day Length Card */}
           <div className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-4 sm:p-5 flex flex-col justify-between shadow-xs">

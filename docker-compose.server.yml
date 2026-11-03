@@ -46,8 +46,13 @@ services:
       - "AI_CONTEXT_TOKENS=${AI_CONTEXT_TOKENS:-2048}"
       - "AI_MAX_QUEUE_LENGTH=${AI_MAX_QUEUE_LENGTH:-10}"
       - "AI_CLOUD_FALLBACK_ENABLED=${AI_CLOUD_FALLBACK_ENABLED:-false}"
+      - "AI_MEMORY_LIMIT=${AI_MEMORY_LIMIT:-}"
+      - "HOST_TOTAL_RAM_MB=${HOST_TOTAL_RAM_MB:-}"
+      - "HOST_TOTAL_SWAP_MB=${HOST_TOTAL_SWAP_MB:-}"
+      - "HOST_CPU_CORES=${HOST_CPU_CORES:-}"
     volumes:
       - ./data/uploads:/app/uploads
+      - /proc/meminfo:/host/proc/meminfo:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
