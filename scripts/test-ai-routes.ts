@@ -55,6 +55,10 @@ async function run() {
       'user-mgmt','system','profile',
     ];
     for (const id of requiredMainModules) assert.equal(coverageIds.has(id), true, 'missing main module: ' + id);
+    assert.equal(actualCoverage.length >= 139, true, 'catalog must include all static nodes plus dynamic persisted entries');
+    for (const id of ['ptw','health','risks','five_s','fire','environment','personnel','workflows']) {
+      assert.equal(actualCoverage.find(item => item.moduleId === id)?.internal, true, 'tool alias must be marked internal: ' + id);
+    }
     for (const id of [
       'periodic-exams-dashboard','periodic-exams-personnel','periodic-exams-exams','periodic-exams-lab',
       'periodic-exams-bmi','periodic-exams-reports','periodic-exams-compare','periodic-exams-personcompare',
