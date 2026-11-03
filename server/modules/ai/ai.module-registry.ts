@@ -198,7 +198,9 @@ function toCatalogItem(definition: ModuleDefinition, user: UserContext, parentId
     ? 'برای مشاهده و تحلیل این بخش، مجوز دسترسی لازم را ندارید.'
     : connected
       ? (definition.rag ? 'بازیابی مستندات از مسیر RAG انجام می‌شود.' : 'خلاصه‌ساز داده متصل است؛ این اتصال لزوماً همه تب‌ها، فرم‌ها و فیلدهای این ماژول را پوشش نمی‌دهد.')
-      : 'در حال حاضر Adapter خواندن داده برای این بخش متصل نیست؛ مدل نباید درباره داده‌های آن حدس بزند.';
+      : configuredTools.length > 0
+        ? 'Adapter داده برای این بخش وجود دارد، اما مجوزهای لازم برای کاربر جاری فراهم نیست.'
+        : 'در حال حاضر Adapter خواندن داده برای این بخش متصل نیست؛ مدل نباید درباره داده‌های آن حدس بزند.';
   return {
     moduleId: parentId ? `${parentId}:${definition.id}` : definition.id,
     moduleNameFa: definition.titleFa,
