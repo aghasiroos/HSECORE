@@ -175,7 +175,7 @@ fetch(base + "/api/tags", { signal: AbortSignal.timeout(8000) })
 # Verify real inference from inside the HSECORE app container, not only from
 # inside the Ollama container. This catches wrong model tags and app-network issues.
 docker exec "${APP_CONTAINER_NAME}" node -e '
-const base = (process.env.AI_ENGINE_URL || "").replace(/\\/$/, "");
+const base = (process.env.AI_ENGINE_URL || "").replace(/\/$/, "");
 const model = (process.env.AI_DEFAULT_CHAT_MODEL || "").trim();
 if (!base || !model) throw new Error("AI_ENGINE_URL or AI_DEFAULT_CHAT_MODEL is empty");
 fetch(base + "/api/chat", {
