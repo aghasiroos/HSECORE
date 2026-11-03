@@ -346,7 +346,8 @@ export default function AiAssistantApp({
       void refreshInstalledModels();
     }, 30000);
     return () => {
-      activeRequestRef.current?.abort();
+      // Keep an in-flight request alive while navigating between application modules.
+      // The server persists its answer using the sessionId before completing the response.
       window.clearInterval(refreshTimer);
       window.removeEventListener('hse_ui_config_updated', onModuleConfigUpdated);
       window.removeEventListener('health_env_config_updated', onModuleConfigUpdated);
@@ -561,6 +562,7 @@ export default function AiAssistantApp({
         headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
         body: JSON.stringify({
           message: text,
+          sessionId,
           assistantId: 'GENERAL_HSE',
           history: historyPayload,
           model: selectedModel,
@@ -634,6 +636,9 @@ export default function AiAssistantApp({
         }
         if (Array.isArray(payload.toolsUsed)) responseToolsUsed = payload.toolsUsed;
         if (Array.isArray(payload.citations)) responseCitations = payload.citations;
+        if (payload.historySaved === false) {
+          setSessionsError('پاسخ تولید شد اما ذخیره سمت سرور ناموفق بود؛ لطفاً پایگاه داده را بررسی کنید.');
+        }
         if (payload.error) streamError = payload.error;
       };
       while (true) {
