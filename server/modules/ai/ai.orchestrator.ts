@@ -82,7 +82,14 @@ export class AIOrchestrator {
     if (!allowTools || !userContext) return [];
 
     const selected = new Set(selectedModules.map(id => String(id).trim().toLowerCase()).filter(Boolean));
-    const selectAll = selected.has('all');
+    const norm = normalizePersianText(message);
+    const allScopeTerms = [
+      'گزارش کلی سامانه', 'گزارش جامع سامانه', 'تحلیل کلی سامانه',
+      'تحلیل جامع سامانه', 'عملکرد کل سامانه', 'تمام ماژول های سامانه',
+      'همه ماژول های سامانه', 'گزارش همه ماژول ها', 'overall system report',
+      'system-wide analysis', 'all modules',
+    ];
+    const selectAll = selected.has('all') || allScopeTerms.some(term => norm.includes(normalizePersianText(term)));
     const moduleAliases: Record<string, string[]> = {
       'dashboard': ['reports', 'non_conformances'],
       'reports': ['non_conformances'],
@@ -133,7 +140,6 @@ export class AIOrchestrator {
     };
     const isSelected = (moduleId: string) => selectAll || selected.has(moduleId.toLowerCase()) ||
       Object.entries(moduleAliases).some(([alias, targets]) => selected.has(alias) && targets.includes(moduleId.toLowerCase()));
-    const norm = normalizePersianText(message);
     const results: AIToolResult[] = [];
     const executedToolNames = new Set<string>();
 
@@ -409,6 +415,13 @@ export class AIOrchestrator {
     const selectedModules = Array.isArray(request.selectedModules)
       ? request.selectedModules.map(id => String(id).trim().toLowerCase()).filter(id => /^[a-z0-9_-]{1,80}$/.test(id)).slice(0, 40)
       : [];
+    const normalizedRequest = normalizePersianText(sanitized);
+    const requestAllScope = selectedModules.includes('all') || [
+      'گزارش کلی سامانه', 'گزارش جامع سامانه', 'تحلیل کلی سامانه',
+      'تحلیل جامع سامانه', 'عملکرد کل سامانه', 'تمام ماژول های سامانه',
+      'همه ماژول های سامانه', 'گزارش همه ماژول ها', 'overall system report',
+      'system-wide analysis', 'all modules',
+    ].some(term => normalizedRequest.includes(normalizePersianText(term)));
     const toolResults = await this.resolveToolsToExecute(sanitized, request.allowTools ?? true, userContext, selectedModules);
     const toolsUsed = toolResults.map(t => t.titleFa);
     const citations: string[] = [
@@ -446,7 +459,7 @@ export class AIOrchestrator {
 
       // Respect explicit module selection when retrieving RAG documents.
       // General and standards documents remain available as shared reference material.
-      if (selectedModules.length > 0 && !selectedModules.includes('all')) {
+      if (selectedModules.length > 0 && !requestAllScope) {
         const selected = new Set(selectedModules);
         const wants = (...ids: string[]) => ids.some(id => selected.has(id));
         const selectedCategories = new Set(['GENERAL', 'STANDARDS']);
@@ -498,10 +511,10 @@ export class AIOrchestrator {
     }
 
     if (selectedModules.length > 0) {
-      retrievedReferenceContext += `\n[محدوده انتخاب‌شده توسط کاربر: ${selectedModules.join('، ')}]\n`;
+      retrievedReferenceContext += `\n[محدوده انتخاب‌شده توسط کاربر: ${requestAllScope ? 'همه ماژول‌های دارای ابزار تحلیلی' : selectedModules.join('، ')}]\n`;
       retrievedReferenceContext += '[قید دقت تحلیلی: بعضی زیرماژول‌ها در حال حاضر از ابزار تحلیلی ماژول والد استفاده می‌کنند. فقط در صورتی نتیجه را مختص زیرماژول اعلام کنید که داده استخراج‌شده واقعاً آن تفکیک را داشته باشد؛ در غیر این صورت سطح تجمیع داده را صریح اعلام کنید.]\n';
     }
-    if (selectedModules.includes('all') && toolResults.length > 0) {
+    if (requestAllScope && toolResults.length > 0) {
       retrievedReferenceContext += '\n[دامنه درخواست: تحلیل چندماژولی /ALL؛ فقط منابعی که در بالا واقعاً استخراج شده‌اند پوشش داده شده‌اند. برای ماژول فاقد ابزار یا داده، نتیجه‌گیری نکنید.]\n';
     }
 
