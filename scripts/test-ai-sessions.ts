@@ -30,8 +30,9 @@ const insertTrigger = `hsecore_reject_ai_message_trigger_${suffix}`;
 const deleteFunction = `hsecore_reject_ai_session_delete_${suffix}`;
 const deleteTrigger = `hsecore_reject_ai_session_delete_trigger_${suffix}`;
 const sharedLegacyUsername = `same-login-${suffix}`;
-const userA: UserContext = { uid: `ai-session-user-a-${suffix}`, username: sharedLegacyUsername, role: 'SAFETY_OFFICER', permissions: [] };
-const userB: UserContext = { uid: `ai-session-user-b-${suffix}`, username: sharedLegacyUsername, role: 'SAFETY_OFFICER', permissions: [] };
+const sharedNumericId = 900000 + Math.floor(Math.random() * 99999);
+const userA: UserContext = { id: sharedNumericId, uid: `ai-session-user-a-${suffix}`, username: sharedLegacyUsername, role: 'SAFETY_OFFICER', permissions: [] };
+const userB: UserContext = { id: sharedNumericId, uid: `ai-session-user-b-${suffix}`, username: sharedLegacyUsername, role: 'SAFETY_OFFICER', permissions: [] };
 
 async function cleanup() {
   await db.execute(sql.raw(`DROP TRIGGER IF EXISTS ${insertTrigger} ON ai_chat_messages`)).catch(() => undefined);
