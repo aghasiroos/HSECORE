@@ -84,7 +84,8 @@ export class AIOrchestrator {
     const selected = new Set(selectedModules.map(id => String(id).trim().toLowerCase()).filter(Boolean));
     const selectAll = selected.has('all');
     const moduleAliases: Record<string, string[]> = {
-      'dashboard': ['reports'],
+      'dashboard': ['reports', 'non_conformances'],
+      'reports': ['non_conformances'],
       'hse-ms': ['reports'],
       'safety-unit': ['five_s'],
       'safety-checklists': ['five_s'],
