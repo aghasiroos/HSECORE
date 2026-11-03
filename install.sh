@@ -2245,17 +2245,11 @@ EOF
   set_env_param "JWT_SECRET" "${jwt_sec}"
   set_env_param "JWT_EXPIRY" "7d"
 
-  # Local AI Resource Configuration (Host-aware dynamic memory ceiling)
-  local host_total_ram_mb ai_mem_calc
-  host_total_ram_mb="$(free -m | awk '/^Mem:/{print $2}' || echo 4096)"
-  if (( host_total_ram_mb >= 10000 )); then
-    ai_mem_calc="$((host_total_ram_mb - 2560))M"
-  elif (( host_total_ram_mb >= 6000 )); then
-    ai_mem_calc="$((host_total_ram_mb - 2048))M"
-  else
-    ai_mem_calc="3584M"
-  fi
-  set_env_param "AI_MEMORY_LIMIT" "${ai_mem_calc}"
+  # Local AI Resource Configuration
+  # Use the shared host-aware budget helper so installer and AI manager apply
+  # exactly the same limits. Existing explicit/manual limits remain untouched.
+  source "${PROJECT_DIR}/scripts/ai-resource-budget.sh"
+  apply_ai_resource_budget "${ENV_FILE}"
   set_env_param "AI_KEEP_ALIVE" "5m"
   set_env_param "AI_MAX_LOADED_MODELS" "1"
   set_env_param "AI_NUM_PARALLEL" "1"
