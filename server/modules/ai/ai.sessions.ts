@@ -478,6 +478,7 @@ export class AISessionService {
       citations?: string[];
       durationMs?: number;
       model?: string;
+      createdAt?: string;
     }
   ): Promise<SessionMessage> {
     const status = await this.checkSessionOwnership(sessionId, user);
@@ -490,6 +491,8 @@ export class AISessionService {
 
     const id = message.id && message.id.trim() ? message.id.trim() : randomUUID();
     const now = new Date();
+    const requestedCreatedAt = message.createdAt ? new Date(message.createdAt) : now;
+    const createdAt = Number.isNaN(requestedCreatedAt.getTime()) ? now : requestedCreatedAt;
     const safeDurationMs =
       message.durationMs != null && Number.isFinite(Number(message.durationMs))
         ? Math.round(Number(message.durationMs))
@@ -504,7 +507,7 @@ export class AISessionService {
       citations: Array.isArray(message.citations) && message.citations.length > 0 ? message.citations : undefined,
       durationMs: safeDurationMs,
       model: message.model,
-      createdAt: now.toISOString(),
+      createdAt: createdAt.toISOString(),
     };
 
     const mem = this.inMemorySessions.get(sessionId);
@@ -561,7 +564,7 @@ export class AISessionService {
           citations: newMsg.citations || null,
           durationMs: safeDurationMs ?? null,
           model: message.model ?? null,
-          createdAt: now,
+          createdAt,
         })
         .onConflictDoUpdate({
           target: schema.aiChatMessages.id,
@@ -669,6 +672,7 @@ export class AISessionService {
           citations: m.citations,
           durationMs: m.durationMs,
           model: m.model,
+          createdAt: m.timestamp,
         });
       }
       imported += 1;
