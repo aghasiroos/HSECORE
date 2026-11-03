@@ -680,6 +680,8 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
                 <div
                   key={session.id}
                   onClick={() => {
+                    if (activeSessionId !== session.id) setSelectedModuleIds([]);
+                    setModulePickerOpen(false);
                     setActiveSessionId(session.id);
                     setSidebarOpen(false);
                   }}
