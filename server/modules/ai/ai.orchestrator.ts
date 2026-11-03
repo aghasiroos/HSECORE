@@ -541,8 +541,10 @@ export class AIOrchestrator {
             max_tokens: 1500,
             timeoutMs: remainingMs,
           };
-          if (request.onToken) {
-            return await localAIProvider.chatStream(messages, chatOptions, request.onToken, request.signal);
+          if (request.signal) {
+            // Stream internally to preserve client cancellation, but only the fully
+            // sanitized final response is sent to the browser.
+            return await localAIProvider.chatStream(messages, chatOptions, () => undefined, request.signal);
           }
           return await localAIProvider.chat(messages, chatOptions);
         },
