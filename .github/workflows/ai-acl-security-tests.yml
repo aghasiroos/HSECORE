@@ -21,6 +21,8 @@ on:
       - 'scripts/manage-ai.sh'
       - 'scripts/setup-local-ai.sh'
       - 'scripts/start-ai-if-enabled.sh'
+      - 'scripts/ai-resource-budget.sh'
+      - 'scripts/test-ai-resource-budget.sh'
       - 'scripts/build-windows-icon.js'
       - 'Dockerfile.prod'
       - 'docker-compose*.yml'
@@ -47,6 +49,8 @@ on:
       - 'scripts/manage-ai.sh'
       - 'scripts/setup-local-ai.sh'
       - 'scripts/start-ai-if-enabled.sh'
+      - 'scripts/ai-resource-budget.sh'
+      - 'scripts/test-ai-resource-budget.sh'
       - 'scripts/build-windows-icon.js'
       - 'Dockerfile.prod'
       - 'docker-compose*.yml'
@@ -149,11 +153,13 @@ jobs:
           fi
       - name: Validate installer shell syntax and prohibit remote shell execution
         run: |
-          bash -n install.sh scripts/ai-resource-budget.sh scripts/manage-ai.sh scripts/setup-local-ai.sh scripts/start-ai-if-enabled.sh
+          bash -n install.sh scripts/ai-resource-budget.sh scripts/manage-ai.sh scripts/setup-local-ai.sh scripts/start-ai-if-enabled.sh scripts/test-ai-resource-budget.sh
           if grep -EnE '(curl|wget)[^#]*[|][[:space:]]*(sudo[[:space:]]+)?(ba)?sh' install.sh; then
             echo "Remote downloaded scripts must not be piped directly into a shell."
             exit 1
           fi
+      - name: Test host-aware AI resource budget
+        run: bash scripts/test-ai-resource-budget.sh
       - name: Verify safe AI runtime management
         run: |
           grep -Fq 'COMPOSE_FILE="docker-compose.server.yml"' scripts/manage-ai.sh
