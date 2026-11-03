@@ -149,6 +149,12 @@ export class AIOrchestrator {
     if (selectedModuleIds && selectedModuleIds.length > 0) {
       const catalog = moduleCatalog || await getAIModuleCatalog(userContext);
       const selectedTools = getAIModuleToolNames(selectedModuleIds, catalog);
+      const selectedRiskMethods = selectedModuleIds.includes('risk')
+        ? undefined
+        : selectedModuleIds
+          .filter(id => id.startsWith('risk:'))
+          .map(id => id.slice('risk:'.length).toUpperCase())
+          .filter(method => ['JSA', 'FMEA', 'FTA', 'HHA'].includes(method));
       const executors: Record<string, () => Promise<AIToolResult>> = {
         heat_weather_summary: () => aiToolsRegistry.getHeatStressAndWeatherSummary(),
         ptw_summary: () => aiToolsRegistry.getPTWSummary(),
@@ -156,7 +162,7 @@ export class AIOrchestrator {
         incidents_summary: () => aiToolsRegistry.getIncidentSummary(),
         health_medical_summary: () => aiToolsRegistry.getHealthAndExamsSummary(),
         nutrition_high_risk_summary: () => aiToolsRegistry.getNutritionHighRiskSummary(),
-        risk_assessment_summary: () => aiToolsRegistry.getRiskAssessmentsSummary(),
+        risk_assessment_summary: () => aiToolsRegistry.getRiskAssessmentsSummary(selectedRiskMethods),
         five_s_inspections_summary: () => aiToolsRegistry.get5SAndInspectionsSummary(),
         fire_safety_summary: () => aiToolsRegistry.getFireSafetySummary(),
         warnings_anomalies_summary: () => aiToolsRegistry.getWarningsAndAnomaliesSummary(),
