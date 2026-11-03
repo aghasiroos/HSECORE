@@ -13,7 +13,7 @@ ai_env_get() {
 ai_env_set() {
   local key="$1" value="$2" file="$3" tmp
   tmp="$(mktemp "${file}.XXXXXX")"
-  if grep -qE "^\${key}=" "$file"; then
+  if grep -qE "^${key}=" "$file"; then
     awk -v key="$key" -v value="$value" '
       BEGIN { replaced=0 }
       index($0, key "=") == 1 {
