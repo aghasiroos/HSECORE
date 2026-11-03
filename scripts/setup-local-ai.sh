@@ -48,7 +48,7 @@ ensure_env_key "AI_DEFAULT_EMBED_MODEL" "bge-m3"
 ensure_env_key "OLLAMA_IMAGE" "ollama/ollama:0.40.13"
 ensure_env_key "AI_BIND_IP" "127.0.0.1"
 ensure_env_key "AI_HOST_PORT" "11434"
-ensure_env_key "AI_CONTEXT_TOKENS" "2048"
+# The shared resource-budget helper initializes automatic context defaults safely.
 ensure_env_key "AI_NUM_PARALLEL" "1"
 ensure_env_key "AI_MAX_LOADED_MODELS" "1"
 ensure_env_key "AI_KEEP_ALIVE" "5m"
