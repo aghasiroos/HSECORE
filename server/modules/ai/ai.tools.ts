@@ -883,13 +883,18 @@ export class AIToolsRegistry {
         connectedAccessibleSections: connected.length,
         unavailableAccessibleSections: unavailable.length,
         restrictedSections: restricted.length,
-        modules: modules.map(item => ({
-          moduleId: item.moduleId,
-          moduleNameFa: item.moduleNameFa,
-          connected: item.connected,
-          allowed: item.allowed,
-          tools: item.tools,
-        })),
+        modules: modules.map(item => {
+          const serializeTree = (node: any): any => ({
+            moduleId: node.moduleId,
+            moduleNameFa: node.moduleNameFa,
+            connected: node.connected,
+            allowed: node.allowed,
+            tools: node.tools,
+            notes: node.notes,
+            children: (node.children || []).map(serializeTree),
+          });
+          return serializeTree(item);
+        }),
       },
       timestamp: new Date().toISOString(),
     };
