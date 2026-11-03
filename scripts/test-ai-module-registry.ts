@@ -119,7 +119,7 @@ assert.deepEqual(descriptions.connected, [
   'آزمایشگاه',
 ]);
 assert.equal(descriptions.unavailable.length, 2);
-assert.ok(descriptions.unavailable.some(item => item.includes('Adapter اختصاصی ممیزی')));
-assert.ok(descriptions.unavailable.some(item => item.includes('بدون مجوز')));
+assert.ok(descriptions.unavailable.includes('ممیزی پروانه کار'));
+assert.ok(descriptions.unavailable.includes('مدیریت کاربران'));
 
 console.log('PASS AI module registry: recursive selection, adapter deduplication, and access-aware coverage.');
