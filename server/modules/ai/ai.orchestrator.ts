@@ -39,7 +39,6 @@ const ALL_MODULE_TOOLS = [
   'notifications_summary',
   'users_roles_summary',
   'settings_backup_summary',
-  'system_architecture_summary',
   'universal_search',
 ];
 
@@ -102,7 +101,7 @@ export class AIOrchestrator {
       'process-management': ['workflows'],
       'notifications': ['notifications'],
       'user-mgmt': ['users'],
-      'system': ['settings', 'system_architecture'],
+      'system': ['settings'],
       'clinic': ['health'],
       'periodic-exams': ['health'],
       'non-periodic-exams': ['health'],
@@ -159,7 +158,6 @@ export class AIOrchestrator {
       notifications_summary: 'notifications:read',
       users_roles_summary: '',
       settings_backup_summary: '',
-      system_architecture_summary: '',
     };
 
     const sensitiveToolsRequiringGlobalScope = new Set([
@@ -168,7 +166,6 @@ export class AIOrchestrator {
       'personnel_org_summary',
       'users_roles_summary',
       'settings_backup_summary',
-      'system_architecture_summary',
     ]);
 
     const checkAndExecute = async (toolName: string, execFn: () => Promise<AIToolResult>) => {
@@ -639,7 +636,7 @@ export class AIOrchestrator {
       non_conformances: ['non_conformances_summary'],
       notifications: ['notifications_summary'],
       users: ['users_roles_summary'],
-      settings: ['settings_backup_summary', 'system_architecture_summary'],
+      settings: ['settings_backup_summary'],
       search: ['universal_search'],
     };
 
