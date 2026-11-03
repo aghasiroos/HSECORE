@@ -55,7 +55,8 @@ export async function runMigrations() {
         if (msg.includes('CREATE SCHEMA') || msg.includes('permission denied') || msg.includes('already exists')) {
           console.log('[Migration] Database schema is actively managed by Cloud SQL schema provider.');
         } else {
-          console.warn('[Migration] Schema migration notice:', msg);
+          console.error('[Migration] Required Drizzle schema migration failed:', msg);
+          throw migrationErr;
         }
       }
     } else {
@@ -80,20 +81,33 @@ export async function runMigrations() {
     // 6. Seed default administrator account if پایگاه داده has no active administrator
     await seedDefaultAdminIfMissing();
   } catch (err: any) {
-    console.log('[Migration] Schema execution notice:', err?.message || err);
+    console.error('[Migration] Schema execution failed:', err?.message || err);
+    const strictSchemaStartup =
+      process.env.STRICT_DB_STARTUP === 'true' ||
+      (process.env.NODE_ENV === 'production' && process.env.STRICT_DB_STARTUP !== 'false');
+    if (strictSchemaStartup) {
+      throw err;
+    }
   }
 }
 
 async function executeBatchWithFallback(statements: string[], label: string) {
   try {
     await db.execute(sql.raw(statements.join('\n')));
+    return;
   } catch {
+    const failures: string[] = [];
     for (const stmt of statements) {
       try {
         await db.execute(sql.raw(stmt));
       } catch (err: any) {
-        console.warn(`[Migration] ${label} statement notice:`, err?.message || err);
+        const message = String(err?.message || err);
+        failures.push(message);
+        console.warn(`[Migration] ${label} statement failed:`, message);
       }
+    }
+    if (failures.length > 0) {
+      throw new Error(`[Migration] ${label} incomplete: ${failures.length} statement(s) failed. First error: ${failures[0]}`);
     }
   }
 }
