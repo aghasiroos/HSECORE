@@ -110,7 +110,8 @@ export class AIController {
     if (typeof message !== 'string' || !message.trim() || message.length > 12000) {
       return res.status(400).json({ success: false, message: 'متن پیام الزامی است و نباید بیش از ۱۲۰۰۰ نویسه باشد.' });
     }
-    if (!req.user) {
+    const user = req.user;
+    if (!user) {
       return res.status(401).json({ success: false, message: 'احراز هویت برای تحلیل داده‌های سامانه الزامی است.' });
     }
 
@@ -152,7 +153,7 @@ export class AIController {
           ? body.contextTokens : undefined,
         signal: streaming ? abortController.signal : undefined,
         allowTools: true,
-      }, req.user);
+      }, user);
 
       if (streaming) {
         if (!res.destroyed && !res.writableEnded) {
@@ -185,10 +186,10 @@ export class AIController {
     } catch (err: any) {
       const messageText = String(err?.message || 'خطا در اجرای تحلیل هوشمند.');
       aiAuditService.log({
-        userId: req.user.id,
-        userUid: req.user.uid,
-        userName: req.user.name || req.user.username,
-        role: req.user.role,
+        userId: user.id,
+        userUid: user.uid,
+        userName: user.name || user.username,
+        role: user.role,
         assistantId: 'GENERAL_HSE',
         promptLength: message.length,
         responseLength: 0,
