@@ -198,6 +198,204 @@ export class AIToolsRegistry {
   }
 
   /**
+   * Dedicated read-only PTW Audit analytics. Only aggregate data is returned;
+   * signer names, personnel identifiers, signatures and attachment payloads are excluded.
+   */
+  async getPTWAuditSummary(): Promise<AIToolResult> {
+    try {
+      const settingsMap = await this.loadSettingsMap();
+      const rawAudits = settingsMap.get('hse_ptw_audit_records_v2');
+      const legacySeedIds = new Set([
+        'ptw-aud-1405-001', 'ptw-aud-1405-002', 'ptw-aud-1405-003',
+        'ptw-aud-1405-004', 'ptw-aud-1405-005', 'ptw-aud-1405-006',
+        'ptw-aud-1404-001', 'ptw-aud-1404-002', 'ptw-aud-1404-003',
+        'ptw-aud-1403-001', 'ptw-aud-1403-002',
+      ]);
+      const audits: any[] = Array.isArray(rawAudits)
+        ? rawAudits.filter((audit: any) => audit && typeof audit.id === 'string' && !legacySeedIds.has(audit.id))
+        : [];
+
+      const metrics = audits.map((audit: any) => {
+        const items = Array.isArray(audit.inspectionItems) ? audit.inspectionItems : [];
+        const hazards = Array.isArray(audit.environmentalHazards) ? audit.environmentalHazards : [];
+        const ppe = Array.isArray(audit.requiredPpe) ? audit.requiredPpe : [];
+        const precautions = Array.isArray(audit.precautionsTaken) ? audit.precautionsTaken : [];
+        const passed = items.filter((item: any) => ['P', 'PASS'].includes(String(item.status || '').toUpperCase())).length;
+        const questionDefects = items.filter((item: any) => ['O', 'DEFECT'].includes(String(item.status || '').toUpperCase())).length;
+        const na = items.filter((item: any) => ['-', 'NA'].includes(String(item.status || '').toUpperCase())).length;
+        const missedHazards = hazards.filter((item: any) => item?.missed === true).length;
+        const missedPpe = ppe.filter((item: any) => item?.missed === true).length;
+        const missedPrecautions = precautions.filter((item: any) => item?.missed === true).length;
+        const computedDefects = questionDefects + missedHazards + missedPpe + missedPrecautions;
+        const explicitDefects = Number(audit.defectsCount);
+        const defects = Number.isFinite(explicitDefects) && audit.defectsCount !== null && audit.defectsCount !== undefined
+          ? Math.max(0, explicitDefects)
+          : computedDefects;
+        const explicitPassed = Number(audit.passedCount);
+        const passedCount = Number.isFinite(explicitPassed) && audit.passedCount !== null && audit.passedCount !== undefined
+          ? Math.max(0, explicitPassed)
+          : passed;
+        const explicitScore = Number(audit.complianceScore);
+        const evaluated = passedCount + defects;
+        const score = Number.isFinite(explicitScore) && audit.complianceScore !== null &&
+          audit.complianceScore !== undefined && explicitScore >= 0 && explicitScore <= 100
+          ? explicitScore
+          : evaluated > 0 ? Number(((passedCount / evaluated) * 100).toFixed(1)) : null;
+        return {
+          audit,
+          defects,
+          passedCount,
+          na,
+          missedHazards,
+          missedPpe,
+          missedPrecautions,
+          score,
+          defective: defects > 0 || String(audit.status || '').toUpperCase() === 'CRITICAL_NC',
+        };
+      });
+
+      const totalAudits = metrics.length;
+      const finalizedCount = metrics.filter(x => String(x.audit.status || '').toUpperCase() === 'FINALIZED').length;
+      const draftCount = metrics.filter(x => String(x.audit.status || '').toUpperCase() === 'DRAFT').length;
+      const criticalNcCount = metrics.filter(x => String(x.audit.status || '').toUpperCase() === 'CRITICAL_NC').length;
+      const defectiveAuditsCount = metrics.filter(x => x.defective).length;
+      const totalDefectsIdentified = metrics.reduce((sum, x) => sum + x.defects, 0);
+      const scoreValues = metrics.map(x => x.score).filter((x): x is number => typeof x === 'number' && Number.isFinite(x));
+      const avgComplianceScore = scoreValues.length
+        ? Number((scoreValues.reduce((sum, x) => sum + x, 0) / scoreValues.length).toFixed(1))
+        : null;
+      const hotPermitCount = metrics.filter(x => String(x.audit.permitType || '').toUpperCase() === 'HOT').length;
+      const coldPermitCount = metrics.filter(x => String(x.audit.permitType || '').toUpperCase() === 'COLD').length;
+      const confinedSpacePermitCount = metrics.filter(x =>
+        String(x.audit.permitType || '').toUpperCase() === 'CONFINED_SPACE' ||
+        String(x.audit.attachedPermitType || '').toLowerCase() === 'confinedspace'
+      ).length;
+      const attachedPermitCount = metrics.filter(x =>
+        x.audit.hasAttachedPermit === true ||
+        (x.audit.attachedPermitType && String(x.audit.attachedPermitType).toUpperCase() !== 'NONE')
+      ).length;
+      const totalMissedHazards = metrics.reduce((sum, x) => sum + x.missedHazards, 0);
+      const totalMissedPpe = metrics.reduce((sum, x) => sum + x.missedPpe, 0);
+      const totalMissedPrecautions = metrics.reduce((sum, x) => sum + x.missedPrecautions, 0);
+
+      const categoryMap = new Map<string, number>();
+      const unitMap = new Map<string, { total: number; defective: number; defects: number; scores: number[] }>();
+      const monthMap = new Map<string, { total: number; defective: number; defects: number; scores: number[] }>();
+      const addCategory = (label: unknown) => {
+        const name = String(label || '').trim();
+        if (name) categoryMap.set(name, (categoryMap.get(name) || 0) + 1);
+      };
+
+      for (const item of metrics) {
+        const audit = item.audit;
+        const unitName = String(audit.unitName || 'واحد نامشخص').trim() || 'واحد نامشخص';
+        const unit = unitMap.get(unitName) || { total: 0, defective: 0, defects: 0, scores: [] };
+        unit.total += 1;
+        unit.defective += item.defective ? 1 : 0;
+        unit.defects += item.defects;
+        if (item.score !== null) unit.scores.push(item.score);
+        unitMap.set(unitName, unit);
+
+        const date = String(audit.auditDate || '');
+        const dateParts = date.split('/');
+        if (dateParts.length >= 2 && /^\\d{4}$/.test(dateParts[0]) && /^\\d{1,2}$/.test(dateParts[1])) {
+          const monthKey = `${dateParts[0]}/${String(Number(dateParts[1])).padStart(2, '0')}`;
+          const month = monthMap.get(monthKey) || { total: 0, defective: 0, defects: 0, scores: [] };
+          month.total += 1;
+          month.defective += item.defective ? 1 : 0;
+          month.defects += item.defects;
+          if (item.score !== null) month.scores.push(item.score);
+          monthMap.set(monthKey, month);
+        }
+
+        const inspectionItems = Array.isArray(audit.inspectionItems) ? audit.inspectionItems : [];
+        inspectionItems.filter((question: any) =>
+          ['O', 'DEFECT'].includes(String(question.status || '').toUpperCase())
+        ).forEach((question: any) => addCategory(question.category || question.questionFa));
+        (Array.isArray(audit.environmentalHazards) ? audit.environmentalHazards : [])
+          .filter((entry: any) => entry?.missed === true).forEach((entry: any) => addCategory(entry.labelFa || 'خطر محیطی انتخاب‌نشده'));
+        (Array.isArray(audit.requiredPpe) ? audit.requiredPpe : [])
+          .filter((entry: any) => entry?.missed === true).forEach((entry: any) => addCategory(entry.labelFa || 'PPE الزامی تأمین‌نشده'));
+        (Array.isArray(audit.precautionsTaken) ? audit.precautionsTaken : [])
+          .filter((entry: any) => entry?.missed === true).forEach((entry: any) => addCategory(entry.labelFa || 'تمهید ایمنی انجام‌نشده'));
+      }
+
+      const topDefectCategories = Array.from(categoryMap.entries())
+        .map(([category, count]) => ({ category, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 10);
+      const byUnit = Array.from(unitMap.entries())
+        .map(([unitName, value]) => ({
+          unitName,
+          totalAudits: value.total,
+          defectiveAudits: value.defective,
+          totalDefects: value.defects,
+          defectRate: value.total ? Number(((value.defective / value.total) * 100).toFixed(1)) : 0,
+          avgComplianceScore: value.scores.length
+            ? Number((value.scores.reduce((sum, score) => sum + score, 0) / value.scores.length).toFixed(1))
+            : null,
+        }))
+        .sort((a, b) => b.totalDefects - a.totalDefects)
+        .slice(0, 10);
+      const monthlyTrend = Array.from(monthMap.entries())
+        .map(([month, value]) => ({
+          month,
+          totalAudits: value.total,
+          defectiveAudits: value.defective,
+          totalDefects: value.defects,
+          defectRate: value.total ? Number(((value.defective / value.total) * 100).toFixed(1)) : 0,
+          avgComplianceScore: value.scores.length
+            ? Number((value.scores.reduce((sum, score) => sum + score, 0) / value.scores.length).toFixed(1))
+            : null,
+        }))
+        .sort((a, b) => a.month.localeCompare(b.month));
+
+      return {
+        toolName: 'ptw_audit_summary',
+        titleFa: 'ماژول ممیزی پروانه‌های کار (PTW Audit)',
+        summary: [
+          `• تعداد ممیزی‌های معتبر: ${totalAudits} مورد؛ نهایی: ${finalizedCount}، پیش‌نویس: ${draftCount}، عدم انطباق بحرانی: ${criticalNcCount}`,
+          `• ممیزی‌های دارای نقص: ${defectiveAuditsCount} مورد؛ مجموع عدم انطباق‌ها: ${totalDefectsIdentified}`,
+          `• میانگین امتیاز انطباق: ${avgComplianceScore === null ? 'داده کافی موجود نیست' : `${avgComplianceScore}٪`}`,
+          `• نوع پروانه ممیزی‌شده: ${hotPermitCount} گرم، ${coldPermitCount} سرد، ${confinedSpacePermitCount} فضای بسته؛ پروانه الحاقی: ${attachedPermitCount}`,
+          `• عدم انطباق‌های اقلام جانبی: خطرات ${totalMissedHazards}، PPE ${totalMissedPpe}، تمهیدات ${totalMissedPrecautions}`,
+        ].join('\\n'),
+        data: {
+          totalAudits,
+          finalizedCount,
+          draftCount,
+          criticalNcCount,
+          defectiveAuditsCount,
+          cleanAuditsCount: Math.max(0, totalAudits - defectiveAuditsCount),
+          totalDefectsIdentified,
+          avgComplianceScore,
+          hotPermitCount,
+          coldPermitCount,
+          confinedSpacePermitCount,
+          attachedPermitCount,
+          totalMissedHazards,
+          totalMissedPpe,
+          totalMissedPrecautions,
+          topDefectCategories,
+          byUnit,
+          monthlyTrend,
+          privacy: 'Aggregate-only output. Signer names, personnel identifiers, signatures, and attachment contents are excluded.',
+        },
+        timestamp: new Date().toISOString(),
+      };
+    } catch (err: any) {
+      logger.warn('[AITools] PTW audit analytics unavailable', { error: err?.message });
+      return {
+        toolName: 'ptw_audit_summary',
+        titleFa: 'ماژول ممیزی پروانه‌های کار (PTW Audit)',
+        summary: 'داده‌های ممیزی پروانه کار در این لحظه از پایگاه داده قابل دریافت نیست؛ هیچ آماری حدس زده نشده است.',
+        data: {},
+        timestamp: new Date().toISOString(),
+      };
+    }
+  }
+
+  /**
    * Tool 3: Incidents, Near Misses & CAPA Real-Time Summary (حوادث و شبه‌حوادث)
    */
   async getIncidentSummary(): Promise<AIToolResult> {
