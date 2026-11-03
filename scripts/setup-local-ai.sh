@@ -83,11 +83,39 @@ PRIMARY_EMBED_MODEL="${PRIMARY_EMBED_MODEL:-bge-m3}"
 TOTAL_RAM_MB="$(free -m | awk '/^Mem:/ {print $2}')"
 CPU_CORES="$(nproc)"
 FREE_DISK_GB="$(df -BG "${PROJECT_DIR}" | awk 'NR==2 {gsub(/G/,"",$4); print $4}')"
+SWAP_MB="$(free -m | awk '/^Swap:/ {print $2}' || echo 0)"
 echo "Host vCPUs : ${CPU_CORES}"
 echo "Host RAM   : ${TOTAL_RAM_MB} MB"
+echo "Host Swap  : ${SWAP_MB} MB"
 echo "Free disk  : ${FREE_DISK_GB} GB"
 [[ "${FREE_DISK_GB}" =~ ^[0-9]+$ ]] || fail "Could not determine available disk space."
 (( FREE_DISK_GB >= 3 )) || fail "At least 3GB free disk space is required for the runtime image."
+
+# Dynamic Memory Sizing: Calculate safe AI container memory limit based on real host RAM
+# Reserving 2560MB for host OS, PostgreSQL, and Node.js
+if (( TOTAL_RAM_MB >= 10000 )); then
+  CALC_AI_MEM="$((TOTAL_RAM_MB - 2560))M"
+elif (( TOTAL_RAM_MB >= 6000 )); then
+  CALC_AI_MEM="$((TOTAL_RAM_MB - 2048))M"
+else
+  CALC_AI_MEM="3584M"
+fi
+
+CURRENT_MEM_LIMIT="$(get_env_value AI_MEMORY_LIMIT)"
+if [[ -z "${CURRENT_MEM_LIMIT}" || "${CURRENT_MEM_LIMIT}" == "4608M" ]]; then
+  if grep -q "^AI_MEMORY_LIMIT=" "${ENV_FILE}"; then
+    sed -i "s|^AI_MEMORY_LIMIT=.*|AI_MEMORY_LIMIT=${CALC_AI_MEM}|" "${ENV_FILE}"
+  else
+    echo "AI_MEMORY_LIMIT=${CALC_AI_MEM}" >> "${ENV_FILE}"
+  fi
+  echo -e "${GREEN}[✓] Dynamically optimized AI_MEMORY_LIMIT to ${CALC_AI_MEM} based on host RAM (${TOTAL_RAM_MB} MB).${NC}"
+else
+  echo "AI_MEMORY_LIMIT: ${CURRENT_MEM_LIMIT} (existing setting preserved)"
+fi
+
+if (( SWAP_MB < 2048 )); then
+  echo -e "${YELLOW}[NOTE] Host swap is low or zero (${SWAP_MB} MB). To prevent sudden kernel OOM kills on big models, consider running: sudo ./scripts/manage-ai.sh swap${NC}"
+fi
 
 docker compose -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" config --quiet
 

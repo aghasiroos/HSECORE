@@ -19,6 +19,16 @@ router.get('/models', requireAuth, (req, res, next) => {
   aiController.listModels(req, res).catch(next);
 });
 
+// RAM and OOM safety metrics inspection
+router.get('/memory-metrics', requireAuth, (req, res, next) => {
+  aiController.getMemoryMetrics(req, res).catch(next);
+});
+
+// Unload resident models from RAM on-demand
+router.post('/models/unload', requireAuth, (req, res, next) => {
+  aiController.unloadModel(req, res).catch(next);
+});
+
 
 // Provider registry (Phase 3a — currently Ollama only)
 router.get('/providers', requireAuth, (req, res, next) => {

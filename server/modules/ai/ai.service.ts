@@ -1,6 +1,7 @@
 import { config } from '../../core/config.ts';
 import { localAIProvider, OllamaHealthStatus, OllamaModelInfo } from './ai.local-provider.ts';
 import { bootstrapAIProviders, aiProviderRegistry } from './provider/index.ts';
+import { AIMemoryEstimator } from './ai.memory-estimator.ts';
 
 // Register default Ollama provider once (idempotent)
 bootstrapAIProviders();
@@ -22,10 +23,24 @@ export class AIService {
   }
 
   /**
-   * List installed models in the local engine
+   * List installed models in the local engine enriched with RAM footprints and OOM safety profiles
    */
-  async listInstalledModels(): Promise<OllamaModelInfo[]> {
-    return localAIProvider.listInstalledModels();
+  async listInstalledModels(): Promise<any[]> {
+    const [models, loaded] = await Promise.all([
+      localAIProvider.listInstalledModels(),
+      localAIProvider.getLoadedModels(),
+    ]);
+    const loadedSet = new Set(loaded.map(l => (l.name || '').toLowerCase()));
+    return models.map(m => {
+      const name = m.name || m.model || '';
+      const isLoadedInRam = loadedSet.has(name.toLowerCase()) || loadedSet.has((name.split(':')[0] || '').toLowerCase());
+      const memoryProfile = AIMemoryEstimator.estimateModelMemory(name, m.size, 2048, m.details?.quantization_level);
+      return {
+        ...m,
+        isLoadedInRam,
+        memoryProfile,
+      };
+    });
   }
 
   /**

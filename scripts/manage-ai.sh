@@ -289,19 +289,116 @@ cmd_embed() {
   docker exec "${CONTAINER_NAME}" ollama run "${model}" "test embedding"
 }
 
+cmd_unload() {
+  print_header
+  check_docker
+  if ! is_container_running; then
+    echo -e "${YELLOW}[!] Container is not running.${NC}"
+    return 0
+  fi
+  echo -e "${BLUE}[*] Querying resident models in RAM via Ollama API...${NC}"
+  local loaded
+  loaded="$(docker exec "${CONTAINER_NAME}" curl -s http://127.0.0.1:11434/api/ps 2>/dev/null || true)"
+  echo -e "${BLUE}[*] Unloading resident models from memory (keep_alive: 0)...${NC}"
+  local names
+  names="$(echo "${loaded}" | grep -o '"name":"[^"]*"' | cut -d'"' -f4 || true)"
+  if [[ -n "${names}" ]]; then
+    for m in ${names}; do
+      docker exec "${CONTAINER_NAME}" curl -s -X POST http://127.0.0.1:11434/api/generate -d "{\"model\":\"${m}\",\"keep_alive\":0}" >/dev/null 2>&1 || true
+      echo -e "  ${GREEN}✓ Evicted model '${m}' from RAM.${NC}"
+    done
+  else
+    docker exec "${CONTAINER_NAME}" curl -s -X POST http://127.0.0.1:11434/api/generate -d '{"model":"all","keep_alive":0}' >/dev/null 2>&1 || true
+  fi
+  echo -e "${GREEN}[✓] Memory evacuation complete. RAM freed.${NC}"
+}
+
+cmd_memory_tune() {
+  print_header
+  ensure_env_file
+  local ram_mb cores free_disk calc_mem
+  ram_mb="$(free -m 2>/dev/null | awk '/^Mem:/ {print $2}' || echo '0')"
+  cores="$(nproc 2>/dev/null || echo '2')"
+  free_disk="$(disk_free_gb)"
+  echo -e "Host RAM   : ${CYAN}${ram_mb} MB${NC}"
+  echo -e "vCPU Cores : ${CYAN}${cores}${NC}"
+  echo -e "Free Disk  : ${CYAN}${free_disk} GB${NC}"
+
+  if (( ram_mb >= 10000 )); then
+    calc_mem="$((ram_mb - 2560))M"
+  elif (( ram_mb >= 6000 )); then
+    calc_mem="$((ram_mb - 2048))M"
+  else
+    calc_mem="3584M"
+  fi
+
+  echo -e "${BLUE}[*] Calculated optimal AI Container Memory Limit: ${GREEN}${calc_mem}${NC} (leaving reserve for OS & DB)"
+  if grep -q "^AI_MEMORY_LIMIT=" "${ENV_FILE}"; then
+    sed -i "s|^AI_MEMORY_LIMIT=.*|AI_MEMORY_LIMIT=${calc_mem}|" "${ENV_FILE}"
+  else
+    echo "AI_MEMORY_LIMIT=${calc_mem}" >> "${ENV_FILE}"
+  fi
+  echo -e "${GREEN}[✓] Updated AI_MEMORY_LIMIT to ${calc_mem} in ${ENV_FILE}.${NC}"
+  if is_container_running; then
+    echo -e "${BLUE}[*] Recreating container with new memory limit...${NC}"
+    docker compose -f "${PROJECT_DIR}/${COMPOSE_FILE}" --env-file "${ENV_FILE}" up -d --no-deps hse-ai-engine
+    echo -e "${GREEN}[✓] Container reloaded with ${calc_mem} memory limit.${NC}"
+  fi
+}
+
+cmd_swap() {
+  print_header
+  local swap_mb free_disk
+  swap_mb="$(free -m | awk '/^Swap:/ {print $2}' || echo 0)"
+  free_disk="$(disk_free_gb)"
+  echo -e "Current Host Swap: ${CYAN}${swap_mb} MB${NC}"
+  echo -e "Free Disk Space  : ${CYAN}${free_disk} GB${NC}"
+  if (( swap_mb >= 2048 )); then
+    echo -e "${GREEN}[✓] Host has adequate swap configured (${swap_mb} MB).${NC}"
+    return 0
+  fi
+  if [[ $EUID -ne 0 ]]; then
+    echo -e "${RED}[ERROR] Root privileges required to configure swapfile. Run: sudo ./scripts/manage-ai.sh swap${NC}"
+    return 1
+  fi
+  if (( free_disk < 8 )); then
+    echo -e "${RED}[ERROR] Insufficient disk space for swapfile (at least 8GB required).${NC}"
+    return 1
+  fi
+  echo -e "${BLUE}[*] Creating 4GB swapfile (/swapfile) with low swappiness (15) for OOM spike safety...${NC}"
+  (fallocate -l 4G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=4096)
+  chmod 600 /swapfile
+  mkswap /swapfile
+  swapon /swapfile || true
+  if ! grep -q '/swapfile' /etc/fstab; then
+    echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  fi
+  sysctl vm.swappiness=15 2>/dev/null || true
+  echo -e "${GREEN}[✓] 4GB swapfile activated successfully. Swappiness set to 15.${NC}"
+}
+
 cmd_sysinfo() {
   print_header
-  echo -e "${BOLD}Host Hardware Analysis:${NC}"
-  local cores ram_mb
+  echo -e "${BOLD}Host Hardware & AI Memory Analysis:${NC}"
+  local cores ram_mb swap_mb mem_limit
   cores="$(nproc 2>/dev/null || echo '?')"
   ram_mb="$(free -m 2>/dev/null | awk '/^Mem:/ {print $2}' || echo '0')"
-  echo -e "  vCPU cores : ${CYAN}${cores}${NC}"
-  echo -e "  Total RAM  : ${CYAN}${ram_mb} MB${NC}"
-  echo -e "  Free disk  : ${CYAN}$(disk_free_gb) GB${NC}"
+  swap_mb="$(free -m 2>/dev/null | awk '/^Swap:/ {print $2}' || echo '0')"
+  mem_limit="$(grep -E '^AI_MEMORY_LIMIT=' "${ENV_FILE}" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '[:space:]\"' || echo 'Not configured in .env')"
+  echo -e "  vCPU cores     : ${CYAN}${cores}${NC}"
+  echo -e "  Total RAM      : ${CYAN}${ram_mb} MB${NC}"
+  echo -e "  Host Swap      : ${CYAN}${swap_mb} MB${NC}"
+  echo -e "  AI Mem Ceiling : ${CYAN}${mem_limit}${NC}"
+  echo -e "  Free disk      : ${CYAN}$(disk_free_gb) GB${NC}"
   echo ""
-  echo -e "${BOLD}Recommended models for this host:${NC}"
-  if [[ "${ram_mb}" =~ ^[0-9]+$ ]] && [ "${ram_mb}" -ge 7000 ]; then
-    echo -e "  ${GREEN}• Qwen 2.5 1.5B / 3B quantized${NC} — suitable for 8GB RAM class"
+  echo -e "${BOLD}Model Memory & OOM Safety Guidelines:${NC}"
+  if [[ "${ram_mb}" =~ ^[0-9]+$ ]] && [ "${ram_mb}" -ge 10000 ]; then
+    echo -e "  ${GREEN}• 1.5B - 3B Models${NC} : Ultra safe, Context up to 8192"
+    echo -e "  ${GREEN}• 7B - 9B Models${NC}  : Safe, Context recommended 2048 - 4096"
+    echo -e "  ${YELLOW}• 12B - 14B Models${NC} : Workable with Context 2048 (Requires AI_MEMORY_LIMIT >= 9200M)"
+  elif [[ "${ram_mb}" =~ ^[0-9]+$ ]] && [ "${ram_mb}" -ge 7000 ]; then
+    echo -e "  ${GREEN}• Qwen 2.5 1.5B / 3B quantized${NC} — suitable for 8GB RAM class (Context 2048-4096)"
+    echo -e "  ${YELLOW}• 7B - 8B Models Q4_K_M${NC} — tight; keep Context 2048"
   elif [[ "${ram_mb}" =~ ^[0-9]+$ ]] && [ "${ram_mb}" -ge 3500 ]; then
     echo -e "  ${GREEN}• Qwen 2.5 0.5B / 1.5B Q4_K_M${NC} — tight but workable"
   else
@@ -475,6 +572,15 @@ case "${1:-}" in
   uninstall)
     cmd_uninstall
     ;;
+  unload|evict)
+    cmd_unload
+    ;;
+  tune|tune-memory|memory-tune)
+    cmd_memory_tune
+    ;;
+  swap)
+    cmd_swap
+    ;;
   *)
     print_header
     echo -e "Usage: ${BOLD}./scripts/manage-ai.sh <command> [args]${NC}"
@@ -484,6 +590,9 @@ case "${1:-}" in
     echo "  start                Start the local AI engine container"
     echo "  stop                 Stop the local AI engine container"
     echo "  restart              Restart the local AI engine container"
+    echo "  unload               Unload all resident models from memory (free RAM)"
+    echo "  tune                 Auto-tune AI container memory limit based on host RAM"
+    echo "  swap                 Configure a 4GB safe swapfile on host for OOM spike safety"
     echo "  pull <model>         Pull any valid Ollama model reference into persistent storage"
     echo "  list                 List all installed models in persistent volume"
     echo "  rm <model>           Remove a model from persistent storage"

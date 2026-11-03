@@ -14,6 +14,7 @@ import {
   Download,
   Search,
   Square,
+  Sliders,
 } from 'lucide-react';
 import { UserProfile } from '../../types';
 import { authFetch } from '../../services/apiDatabaseClient';
@@ -70,6 +71,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [installedModels, setInstalledModels] = useState<Array<{ name: string; details?: { family?: string } }>>([]);
   const [selectedModel, setSelectedModel] = useState<string>('');
+  const [selectedContext, setSelectedContext] = useState<string>('auto');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(false);
   const [sessionsLoading, setSessionsLoading] = useState<boolean>(true);
@@ -411,6 +413,8 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
           history: historyPayload,
           model: selectedModel,
           stream: true,
+          num_ctx: selectedContext === 'auto' ? undefined : Number(selectedContext),
+          contextTokens: selectedContext === 'auto' ? undefined : Number(selectedContext),
         }),
         signal: requestController.signal,
       });
@@ -752,51 +756,95 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
         </div>
 
         <div className="p-4 border-t border-slate-200 dark:border-slate-800 bg-white/90 dark:bg-slate-900/90 backdrop-blur">
-          <div className="max-w-3xl mx-auto flex flex-col gap-2">
-            <div className="flex items-center justify-between gap-2">
-              <label className="text-[11px] text-slate-500">مدل محلی</label>
-              <select
-                value={selectedModel}
-                onChange={e => setSelectedModel(e.target.value)}
-                disabled={isLoading || installedModels.length === 0}
-                className="max-w-[70%] rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-xs text-slate-700 dark:text-slate-200"
-              >
-                {installedModels.length === 0 ? <option value="">مدل گفت‌وگو نصب نیست</option> : installedModels.map(model => <option key={model.name} value={model.name}>{model.name}</option>)}
-              </select>
-            </div>
+          <div className="max-w-3xl mx-auto space-y-2">
             {installedModels.length === 0 && (
               <div className="rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/20 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
                 هیچ مدل زبانیِ قابل گفت‌وگویی نصب نیست. برای شروع، یک مدل مولد را از مدیریت هوش مصنوعی نصب کنید؛ مدل‌های embedding برای چت قابل استفاده نیستند.
               </div>
             )}
-            <div className="flex items-end gap-2">
-            <textarea
-              value={inputMessage}
-              onChange={e => setInputMessage(e.target.value)}
-              onKeyDown={handleKeyDown}
-              rows={1}
-              placeholder="پیام خود را بنویسید...‎"
-              className="flex-1 resize-none bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-violet-500/30 text-slate-800 dark:text-slate-100 max-h-32"
-              disabled={isLoading || sessionsLoading}
-            />
-            {isLoading ? (
-              <button
-                onClick={handleStopGeneration}
-                className="p-3 bg-slate-700 hover:bg-slate-600 text-white rounded-2xl shadow-sm transition"
-                title="توقف تولید پاسخ"
-              >
-                <Square className="w-5 h-5" />
-              </button>
-            ) : (
-              <button
-                onClick={() => handleSendMessage()}
-                disabled={!inputMessage.trim() || sessionsLoading || !selectedModel}
-                className="p-3 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-2xl shadow-sm transition"
-                title="ارسال پیام"
-              >
-                <Send className="w-5 h-5" />
-              </button>
-            )}
+            <div className="relative rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/90 shadow-sm focus-within:border-violet-500 focus-within:ring-2 focus-within:ring-violet-500/20 transition-all p-2.5">
+              <textarea
+                value={inputMessage}
+                onChange={e => setInputMessage(e.target.value)}
+                onKeyDown={handleKeyDown}
+                rows={2}
+                placeholder="پیام خود را بنویسید...‎"
+                className="w-full resize-none bg-transparent border-0 px-2 py-1 text-sm outline-none text-slate-800 dark:text-slate-100 placeholder:text-slate-400 max-h-40"
+                disabled={isLoading || sessionsLoading}
+              />
+              <div className="flex items-center justify-between pt-2 border-t border-slate-200/60 dark:border-slate-700/60 mt-1 gap-2">
+                {/* Right side in RTL (start): Professional Model & Provider Selector and Context Tuning */}
+                <div className="flex items-center gap-2 flex-1 min-w-0 flex-wrap">
+                  <div className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-xs text-slate-700 dark:text-slate-200 text-xs">
+                    <Bot className="w-3.5 h-3.5 text-violet-600 dark:text-violet-400 shrink-0" />
+                    <select
+                      value={selectedModel}
+                      onChange={e => setSelectedModel(e.target.value)}
+                      disabled={isLoading || installedModels.length === 0}
+                      className="bg-transparent border-0 text-xs font-medium text-slate-700 dark:text-slate-200 outline-none cursor-pointer max-w-[170px] sm:max-w-[240px] truncate"
+                      title="انتخاب مدل هوش مصنوعی"
+                    >
+                      {installedModels.length === 0 ? (
+                        <option value="">مدل گفت‌وگو نصب نیست</option>
+                      ) : (
+                        installedModels.map(model => (
+                          <option key={model.name} value={model.name} className="bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100">
+                            {model.name}
+                          </option>
+                        ))
+                      )}
+                    </select>
+                  </div>
+
+                  {/* Context Length Selector (OOM protection) */}
+                  <div className="inline-flex items-center gap-1.5 px-2 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-xs text-slate-700 dark:text-slate-200 text-xs">
+                    <Sliders className="w-3 h-3 text-indigo-500 shrink-0" />
+                    <select
+                      value={selectedContext}
+                      onChange={e => setSelectedContext(e.target.value)}
+                      disabled={isLoading}
+                      className="bg-transparent border-0 text-[11px] font-medium text-slate-600 dark:text-slate-300 outline-none cursor-pointer"
+                      title="تنظیم طول پنجره کانتکست (Context Length) جهت کنترل مصرف RAM و پیشگیری از OOM"
+                    >
+                      <option value="auto">کانتکست: خودکار (ضد OOM)</option>
+                      <option value="2048">کانتکست: ۲۰۴۸ (ایمن)</option>
+                      <option value="4096">کانتکست: ۴۰۹۶ (استاندارد)</option>
+                      <option value="8192">کانتکست: ۸۱۹۲ (بلند)</option>
+                    </select>
+                  </div>
+
+                  {installedModels.length > 0 && (
+                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium px-1.5 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200/60 dark:border-emerald-800/40 hidden lg:inline-flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                      موتور هوشمند سامانه (آماده)
+                    </span>
+                  )}
+                </div>
+
+                {/* Left side in RTL (end): Stop / Send button */}
+                <div className="flex items-center gap-2 shrink-0">
+                  {isLoading ? (
+                    <button
+                      onClick={handleStopGeneration}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded-xl shadow-xs transition text-xs font-medium"
+                      title="توقف تولید پاسخ"
+                    >
+                      <Square className="w-3.5 h-3.5 fill-current" />
+                      <span>توقف</span>
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => handleSendMessage()}
+                      disabled={!inputMessage.trim() || sessionsLoading || !selectedModel}
+                      className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl shadow-xs transition text-xs font-semibold"
+                      title="ارسال پیام"
+                    >
+                      <span>ارسال</span>
+                      <Send className="w-3.5 h-3.5 rotate-180" />
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         </div>

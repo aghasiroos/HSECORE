@@ -14,7 +14,10 @@ import {
   Sliders,
   ShieldCheck,
   Activity,
-  HardDrive
+  HardDrive,
+  Zap,
+  Gauge,
+  AlertTriangle
 } from 'lucide-react';
 import { UserProfile } from '../../types';
 import { authFetch } from '../../services/apiDatabaseClient';
@@ -31,6 +34,8 @@ export default function AiManagementTab({ language = 'fa', currentUser }: AiMana
   const [engineStatus, setEngineStatus] = useState<any>(null);
   const [installedModels, setInstalledModels] = useState<any[]>([]);
   const [auditData, setAuditData] = useState<any>(null);
+  const [memoryMetrics, setMemoryMetrics] = useState<any>(null);
+  const [isUnloadingModel, setIsUnloadingModel] = useState<boolean>(false);
   const [pullModelName, setPullModelName] = useState<string>('');
   const [isPulling, setIsPulling] = useState<boolean>(false);
   const [modelJob, setModelJob] = useState<any>(null);
@@ -59,12 +64,14 @@ export default function AiManagementTab({ language = 'fa', currentUser }: AiMana
   const [searchResults, setSearchResults] = useState<any[]>([]);
 
   const fetchRuntimeData = async () => {
-    const [statusRes, modelsRes] = await Promise.all([
+    const [statusRes, modelsRes, memRes] = await Promise.all([
       authFetch('/api/v1/ai/status').then(r => r.json()).catch(() => null),
       authFetch('/api/v1/ai/models').then(r => r.json()).catch(() => null),
+      authFetch('/api/v1/ai/memory-metrics').then(r => r.json()).catch(() => null),
     ]);
     if (statusRes?.success) setEngineStatus(statusRes.data);
     if (modelsRes?.success) setInstalledModels(modelsRes.data || []);
+    if (memRes?.success) setMemoryMetrics(memRes.data);
   };
 
   const fetchData = async () => {
@@ -270,6 +277,29 @@ export default function AiManagementTab({ language = 'fa', currentUser }: AiMana
     }
   };
 
+  const handleUnloadModel = async (modelName?: string) => {
+    setIsUnloadingModel(true);
+    setActionMessage(null);
+    try {
+      const res = await authFetch('/api/v1/ai/models/unload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ modelName }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setActionMessage({ text: 'مدل از حافظه RAM تخلیه شد و منابع سرور به‌طور کامل آزاد گردید.', type: 'success' });
+        await fetchRuntimeData();
+      } else {
+        setActionMessage({ text: data.message || 'خطا در آزادسازی حافظه مدل.', type: 'error' });
+      }
+    } catch (err: any) {
+      setActionMessage({ text: err.message || 'خطا در برقراری ارتباط جهت آزادسازی رم.', type: 'error' });
+    } finally {
+      setIsUnloadingModel(false);
+    }
+  };
+
   const isOnline = engineStatus?.isAvailable === true;
 
   return (
@@ -352,18 +382,20 @@ export default function AiManagementTab({ language = 'fa', currentUser }: AiMana
           </div>
         </div>
 
-        {/* Card 2: Resource Limits */}
+        {/* Card 2: Dynamic Resource Limits */}
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 space-y-2">
           <div className="flex items-center justify-between text-xs font-bold text-slate-400">
-            <span>سقف تخصیص سخت‌افزاری</span>
+            <span>سقف تخصیص کانتینر AI</span>
             <Cpu className="w-4 h-4 text-amber-500" />
           </div>
           <div className="text-sm font-black text-slate-800 dark:text-slate-100">
-            ۴ هسته CPU / ۴ گیگابایت RAM
+            {memoryMetrics?.system?.containerLimitMB
+              ? `${(memoryMetrics.system.containerLimitMB / 1024).toFixed(1)} گیگابایت RAM`
+              : '۹.۰ گیگابایت RAM'}
           </div>
           <div className="text-[11px] text-slate-500 flex items-center justify-between">
             <span>حفظ تعادل هاست:</span>
-            <span className="text-emerald-600 font-bold">حفاظت ضد OOM فعال</span>
+            <span className="text-emerald-600 font-bold">۲.۵GB رزرو سیستمی</span>
           </div>
         </div>
 
@@ -379,8 +411,10 @@ export default function AiManagementTab({ language = 'fa', currentUser }: AiMana
             <span className="text-indigo-600">در انتظار: {engineStatus?.queue?.queuedRequests ?? 0}</span>
           </div>
           <div className="text-[11px] text-slate-500 flex items-center justify-between">
-            <span>مجموع پردازش‌شده:</span>
-            <span className="font-mono font-bold text-slate-700 dark:text-slate-300">{engineStatus?.queue?.totalProcessed ?? 0}</span>
+            <span>مدل مقیم در RAM:</span>
+            <span className="font-mono font-bold text-indigo-600 truncate max-w-[140px]">
+              {memoryMetrics?.loadedModels?.[0]?.name || engineStatus?.loadedModels?.[0]?.name || 'تخلیه‌شده (آزاد)'}
+            </span>
           </div>
         </div>
 
@@ -400,6 +434,94 @@ export default function AiManagementTab({ language = 'fa', currentUser }: AiMana
         </div>
       </div>
 
+      {/* RAM & OOM Safety Guard Dashboard */}
+      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white rounded-3xl p-6 shadow-md border border-indigo-900/40 space-y-4">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-indigo-800/40 pb-4">
+          <div className="flex items-center gap-3">
+            <div className="p-3 bg-indigo-500/20 text-indigo-300 rounded-2xl border border-indigo-500/30">
+              <Gauge className="w-6 h-6 text-indigo-400" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h4 className="text-sm font-black text-white">پایش وضعیت سخت‌افزار سرور و سامانه ضد OOM (حافظه امن هوش مصنوعی)</h4>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                  <ShieldCheck className="w-3 h-3" />
+                  حفاظت OOM فعال
+                </span>
+              </div>
+              <p className="text-xs text-indigo-200/80 mt-0.5">
+                تخصیص پویا بر اساس رم واقعی هاست (۱۱ گیگابایت)، تخلیه مدل قبل از سوئیچ و محاسبه اندازه کانتکست جهت پایداری بدون کرش
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 self-start md:self-auto">
+            <button
+              onClick={() => handleUnloadModel()}
+              disabled={isUnloadingModel}
+              className="px-3.5 py-2 bg-rose-600/90 hover:bg-rose-600 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm cursor-pointer border border-rose-500/30"
+              title="تخلیه مدل‌های لودشده در RAM جهت آزادسازی حافظه سرور"
+            >
+              <Zap className={`w-3.5 h-3.5 ${isUnloadingModel ? 'animate-spin' : ''}`} />
+              <span>{isUnloadingModel ? 'در حال تخلیه RAM...' : 'آزادسازی فوری RAM (تخلیه مدل)'}</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+          <div className="p-3 rounded-2xl bg-white/5 border border-white/10 space-y-1">
+            <div className="text-indigo-200 text-[11px] font-bold">کل RAM سرور (میزبان)</div>
+            <div className="text-base font-black font-mono text-white">
+              {memoryMetrics?.system?.totalHostRamMB
+                ? `${(memoryMetrics.system.totalHostRamMB / 1024).toFixed(1)} GB`
+                : '11.7 GB'}
+            </div>
+            <div className="text-[10px] text-slate-300">
+              در دسترس: {memoryMetrics?.system?.availableHostRamMB ? `${(memoryMetrics.system.availableHostRamMB / 1024).toFixed(1)} GB` : '---'}
+            </div>
+          </div>
+
+          <div className="p-3 rounded-2xl bg-white/5 border border-white/10 space-y-1">
+            <div className="text-indigo-200 text-[11px] font-bold">سقف کانتینر AI</div>
+            <div className="text-base font-black font-mono text-amber-300">
+              {memoryMetrics?.system?.containerLimitMB
+                ? `${(memoryMetrics.system.containerLimitMB / 1024).toFixed(1)} GB`
+                : '9.0 GB'}
+            </div>
+            <div className="text-[10px] text-slate-300">
+              بر اساس رم واقعی سرور
+            </div>
+          </div>
+
+          <div className="p-3 rounded-2xl bg-white/5 border border-white/10 space-y-1">
+            <div className="text-indigo-200 text-[11px] font-bold">فضای Swap میزبان</div>
+            <div className="text-base font-black font-mono text-white flex items-center gap-1.5">
+              <span>{memoryMetrics?.system?.totalSwapMB ? `${(memoryMetrics.system.totalSwapMB / 1024).toFixed(1)} GB` : '۰ GB'}</span>
+              {(memoryMetrics?.system?.totalSwapMB ?? 0) >= 1024 ? (
+                <span className="text-[10px] text-emerald-300 bg-emerald-500/20 px-1.5 py-0.5 rounded font-normal">فعال</span>
+              ) : (
+                <span className="text-[10px] text-amber-300 bg-amber-500/20 px-1.5 py-0.5 rounded font-normal">نیاز به فعال‌سازی</span>
+              )}
+            </div>
+            <div className="text-[10px] text-slate-300">
+              سپر محافظتی جهش حافظه
+            </div>
+          </div>
+
+          <div className="p-3 rounded-2xl bg-white/5 border border-white/10 space-y-1">
+            <div className="text-indigo-200 text-[11px] font-bold">مدل بارگذاری‌شده در RAM</div>
+            <div className="text-sm font-black font-mono text-indigo-300 truncate">
+              {memoryMetrics?.loadedModels?.[0]?.name || engineStatus?.loadedModels?.[0]?.name || 'هیچ مدلی در RAM نیست'}
+            </div>
+            <div className="text-[10px] text-slate-300">
+              {memoryMetrics?.loadedModels?.[0]?.size
+                ? `اشغال شده: ${(memoryMetrics.loadedModels[0].size / (1024 * 1024 * 1024)).toFixed(2)} GB`
+                : 'حافظه کانتینر کاملاً آزاد'}
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Models Inventory & Pull Section */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-xs space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
@@ -409,7 +531,7 @@ export default function AiManagementTab({ language = 'fa', currentUser }: AiMana
               <span>فهرست مدل‌های زبانی مستقر در حافظه پایدار</span>
             </h4>
             <p className="text-xs text-slate-400 mt-0.5">
-              هر شناسه معتبر Ollama قابل دانلود است؛ هیچ مدلی از پیش انتخاب یا خودکار نصب نمی‌شود. پیش از اجرای مدل، تناسب آن با منابع سخت‌افزاری سرور را بررسی کنید.
+              هر شناسه معتبر Ollama قابل دانلود است؛ هیچ مدلی از پیش انتخاب یا خودکار نصب نمی‌شود. وضعیت سازگاری سخت‌افزاری و تخمین مصرف RAM در جدول زیر مشخص شده است.
             </p>
           </div>
 
@@ -454,64 +576,119 @@ export default function AiManagementTab({ language = 'fa', currentUser }: AiMana
             <thead>
               <tr className="border-b border-slate-100 dark:border-slate-800 text-slate-400 font-bold">
                 <th className="py-2.5 px-3">نام مدل و تگ</th>
-                <th className="py-2.5 px-3">حجم دیسک</th>
+                <th className="py-2.5 px-3">حجم فایل</th>
                 <th className="py-2.5 px-3">کوانتایزیشن</th>
-                <th className="py-2.5 px-3">وضعیت</th>
+                <th className="py-2.5 px-3">تخمین مصرف RAM</th>
+                <th className="py-2.5 px-3">کانتکست ایمن</th>
+                <th className="py-2.5 px-3">وضعیت سازگاری و OOM</th>
                 <th className="py-2.5 px-3 text-left">عملیات</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
               {installedModels.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="py-6 text-center text-slate-400">
+                  <td colSpan={7} className="py-6 text-center text-slate-400">
                     مدلی در حافظه پایدار کانتینر شناسایی نشد یا سرویس در حال راه‌اندازی است.
                   </td>
                 </tr>
               ) : (
-                installedModels.map((m, idx) => (
-                  <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition">
-                    <td className="py-3 px-3 font-mono font-bold text-slate-800 dark:text-slate-100">
-                      {m.name || m.model}
-                    </td>
-                    <td className="py-3 px-3 font-mono text-slate-500">
-                      {m.size ? `${(m.size / (1024 * 1024 * 1024)).toFixed(2)} GB` : '---'}
-                    </td>
-                    <td className="py-3 px-3 font-mono text-slate-500">
-                      {m.details?.quantization_level || 'Q4_K_M'}
-                    </td>
-                    <td className="py-3 px-3">
-                      <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300">
-                        مستقر در سرور
-                      </span>
-                    </td>
-                    <td className="py-3 px-3 text-left">
-                      {confirmDeleteModelName === (m.name || m.model) ? (
-                        <div className="flex items-center gap-1.5 justify-end">
-                          <button
-                            onClick={() => handleDeleteModel(m.name || m.model)}
-                            className="px-2 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-[10px] font-bold transition cursor-pointer"
-                          >
-                            تایید
-                          </button>
-                          <button
-                            onClick={() => setConfirmDeleteModelName(null)}
-                            className="px-2 py-1 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded text-[10px] font-bold transition cursor-pointer"
-                          >
-                            انصراف
-                          </button>
+                installedModels.map((m, idx) => {
+                  const modelName = m.name || m.model;
+                  const profile = m.memoryProfile;
+                  const isLoaded = m.isLoadedInRam === true;
+                  const oomRisk = profile?.oomRisk || 'safe';
+
+                  return (
+                    <tr key={idx} className={`hover:bg-slate-50 dark:hover:bg-slate-800/40 transition ${isLoaded ? 'bg-indigo-50/40 dark:bg-indigo-950/20' : ''}`}>
+                      <td className="py-3 px-3">
+                        <div className="font-mono font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+                          <span>{modelName}</span>
+                          {isLoaded && (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-indigo-600 text-white animate-pulse">
+                              مقیم در RAM
+                            </span>
+                          )}
                         </div>
-                      ) : (
-                        <button
-                          onClick={() => setConfirmDeleteModelName(m.name || m.model)}
-                          className="text-slate-400 hover:text-red-500 p-1 rounded-md transition cursor-pointer"
-                          title="حذف مدل"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))
+                      </td>
+                      <td className="py-3 px-3 font-mono text-slate-500">
+                        {m.size ? `${(m.size / (1024 * 1024 * 1024)).toFixed(2)} GB` : '---'}
+                      </td>
+                      <td className="py-3 px-3 font-mono text-slate-500">
+                        {m.details?.quantization_level || 'Q4_K_M'}
+                      </td>
+                      <td className="py-3 px-3 font-mono">
+                        {profile?.totalEstimatedMB ? (
+                          <span className="text-slate-700 dark:text-slate-200 font-bold">
+                            ~{(profile.totalEstimatedMB / 1024).toFixed(1)} GB
+                          </span>
+                        ) : (
+                          m.size ? `~${((m.size * 1.15) / (1024 * 1024 * 1024)).toFixed(1)} GB` : '---'
+                        )}
+                      </td>
+                      <td className="py-3 px-3 font-mono text-slate-600 dark:text-slate-300">
+                        {profile?.safeContextTokens ? `${profile.safeContextTokens} توکن` : '۲۰۴۸ توکن'}
+                      </td>
+                      <td className="py-3 px-3">
+                        {oomRisk === 'safe' && (
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 inline-flex items-center gap-1">
+                            <CheckCircle className="w-3 h-3" />
+                            کاملاً ایمن (بدون OOM)
+                          </span>
+                        )}
+                        {oomRisk === 'warning' && (
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 inline-flex items-center gap-1">
+                            <AlertTriangle className="w-3 h-3" />
+                            مرزی (کانتکست کنترل‌شده)
+                          </span>
+                        )}
+                        {oomRisk === 'critical' && (
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 inline-flex items-center gap-1">
+                            <AlertCircle className="w-3 h-3" />
+                            خطر OOM (نیازمند Swap)
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-3 px-3 text-left">
+                        <div className="flex items-center gap-1.5 justify-end">
+                          {isLoaded && (
+                            <button
+                              onClick={() => handleUnloadModel(modelName)}
+                              disabled={isUnloadingModel}
+                              className="px-2 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded text-[10px] font-bold transition cursor-pointer"
+                              title="تخلیه مدل از رم"
+                            >
+                              تخلیه رم
+                            </button>
+                          )}
+                          {confirmDeleteModelName === modelName ? (
+                            <div className="flex items-center gap-1 justify-end">
+                              <button
+                                onClick={() => handleDeleteModel(modelName)}
+                                className="px-2 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-[10px] font-bold transition cursor-pointer"
+                              >
+                                تایید
+                              </button>
+                              <button
+                                onClick={() => setConfirmDeleteModelName(null)}
+                                className="px-2 py-1 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded text-[10px] font-bold transition cursor-pointer"
+                              >
+                                انصراف
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => setConfirmDeleteModelName(modelName)}
+                              className="text-slate-400 hover:text-red-500 p-1 rounded-md transition cursor-pointer"
+                              title="حذف مدل از دیسک"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>

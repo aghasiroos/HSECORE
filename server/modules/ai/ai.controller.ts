@@ -11,6 +11,7 @@ import { checkUserHasPermission, type UserContext } from '../../core/middleware/
 import { config } from '../../core/config.ts';
 import { localAIProvider } from './ai.local-provider.ts';
 import { buildAIConversationMessages } from './ai.prompt-security.ts';
+import { AIMemoryEstimator } from './ai.memory-estimator.ts';
 
 export class AIController {
   async getStatus(_req: Request, res: Response) {
@@ -161,6 +162,7 @@ export class AIController {
               temperature: 0.4,
               max_tokens: 1024,
               timeoutMs: config.aiEngine.timeoutMs,
+              num_ctx: req.body?.num_ctx || req.body?.contextTokens,
             },
             (token) => {
               if (!res.destroyed && !res.writableEnded) {
@@ -207,6 +209,7 @@ export class AIController {
         temperature: 0.4,
         max_tokens: 1024,
         timeoutMs: config.aiEngine.timeoutMs,
+        num_ctx: req.body?.num_ctx || req.body?.contextTokens,
       });
 
       aiAuditService.log({
@@ -689,6 +692,40 @@ export class AIController {
       return res.status(202).json({ success: true, data: job });
     } catch (err: any) {
       return res.status(400).json({ success: false, message: err.message || 'خطا در صف‌گذاری حذف مدل' });
+    }
+  }
+
+  async getMemoryMetrics(_req: Request, res: Response) {
+    try {
+      const system = AIMemoryEstimator.getSystemMemoryMetrics();
+      const loadedModels = await localAIProvider.getLoadedModels();
+      const diagnostics = AIMemoryEstimator.getOomDiagnostics();
+      return res.json({
+        success: true,
+        data: {
+          system,
+          loadedModels,
+          diagnostics,
+          queue: aiRequestQueue.telemetry,
+        },
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, message: err.message || 'خطا در دریافت وضعیت حافظه' });
+    }
+  }
+
+  async unloadModel(req: Request, res: Response) {
+    try {
+      const modelName = typeof req.body?.modelName === 'string' ? req.body.modelName.trim() : undefined;
+      const success = await localAIProvider.unloadModel(modelName);
+      return res.json({
+        success,
+        message: success
+          ? (modelName ? `مدل ${modelName} با موفقیت از حافظه RAM تخلیه شد.` : 'تمامی مدل‌های بارگذاری‌شده در RAM با موفقیت تخلیه شدند.')
+          : 'عملیات آزادسازی حافظه مدل ناموفق بود.',
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, message: err.message || 'خطا در آزادسازی مدل از RAM' });
     }
   }
 

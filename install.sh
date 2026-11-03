@@ -1349,22 +1349,30 @@ step2_install_dependencies() {
       bash -c "systemctl stop apache2 2>/dev/null || true; systemctl disable apache2 2>/dev/null || true"
   fi
 
-  # Configure Swap Space if RAM < 2GB to avoid OOM killer during container builds
-  local ram_mb swap_mb
+  # Configure Swap Space for container compilation and AI engine memory safety
+  local ram_mb swap_mb free_disk_mb
   ram_mb="$(free -m | awk '/^Mem:/{print $2}' || echo 2048)"
   swap_mb="$(free -m | awk '/^Swap:/{print $2}' || echo 0)"
-  if [[ "${ram_mb}" -lt 2000 && "${swap_mb}" -lt 1024 && ! -f /swapfile ]]; then
+  free_disk_mb="$(df -BM / 2>/dev/null | awk 'NR==2 {gsub(/M/,"",$4); print $4}' || echo 0)"
+  if [[ "${swap_mb}" -lt 2048 && ! -f /swapfile && "${free_disk_mb}" -ge 8000 ]]; then
+    local swap_size="4G"
+    local swap_count=4096
+    if [[ "${free_disk_mb}" -lt 12000 ]]; then
+      swap_size="2G"
+      swap_count=2048
+    fi
     tui_run_task \
-      "Configuring 2GB swap space (/swapfile) for compilation safety" \
+      "Configuring ${swap_size} swap space (/swapfile) for compilation & AI memory safety" \
       "Check available disk space on root partition (df -h /) or container swap permissions." \
       bash -c "
-        (fallocate -l 2G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=2048) &&
+        (fallocate -l ${swap_size} /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=${swap_count}) &&
         chmod 600 /swapfile &&
         mkswap /swapfile &&
         swapon /swapfile &&
         if ! grep -q '/swapfile' /etc/fstab; then
           echo '/swapfile none swap sw 0 0' >> /etc/fstab
-        fi
+        fi &&
+        sysctl vm.swappiness=15 2>/dev/null || true
       " || log_warn "Swapfile creation skipped (environment may restrict swapon)."
   fi
 
@@ -2236,6 +2244,22 @@ EOF
   # Security & Authentication
   set_env_param "JWT_SECRET" "${jwt_sec}"
   set_env_param "JWT_EXPIRY" "7d"
+
+  # Local AI Resource Configuration (Host-aware dynamic memory ceiling)
+  local host_total_ram_mb ai_mem_calc
+  host_total_ram_mb="$(free -m | awk '/^Mem:/{print $2}' || echo 4096)"
+  if (( host_total_ram_mb >= 10000 )); then
+    ai_mem_calc="$((host_total_ram_mb - 2560))M"
+  elif (( host_total_ram_mb >= 6000 )); then
+    ai_mem_calc="$((host_total_ram_mb - 2048))M"
+  else
+    ai_mem_calc="3584M"
+  fi
+  set_env_param "AI_MEMORY_LIMIT" "${ai_mem_calc}"
+  set_env_param "AI_KEEP_ALIVE" "5m"
+  set_env_param "AI_MAX_LOADED_MODELS" "1"
+  set_env_param "AI_NUM_PARALLEL" "1"
+
   tui_print_completed_task "Synchronized production runtime & database keys in .env" "$(( $(date +%s) - t0 ))" "75%"
 
   chmod 600 "${ENV_FILE}"
@@ -4114,9 +4138,12 @@ manage_ai_infrastructure() {
         echo "10) پایش لاگ‌ها و وضعیت زنده کانتینر (Container Logs & Status)"
         echo "11) حذف مدل از حافظه پایدار (Remove Specific Model)"
         echo "12) حذف کامل کانتینر و زیرساخت هوش مصنوعی (Uninstall AI Infrastructure)"
-        echo "13) بازگشت به منوی اصلی (Return to Main Menu)"
+        echo "13) تخلیه فوری حافظه RAM و آزادسازی مدل‌های مقیم (Unload Models from RAM)"
+        echo "14) بهینه‌سازی پویا سقف حافظه کانتینر (Auto-Tune Container Memory Ceiling)"
+        echo "15) پیکربندی حافظه مجازی Swap برای سرور (Configure 4GB Swap Space)"
+        echo "16) بازگشت به منوی اصلی (Return to Main Menu)"
         echo ""
-        read -r -p "Select AI option [1-13]: " ai_choice
+        read -r -p "Select AI option [1-16]: " ai_choice
         ai_choice="$(echo "${ai_choice:-1}" | tr -d '[:space:]')"
 
         case "${ai_choice}" in
@@ -4152,11 +4179,14 @@ manage_ai_infrastructure() {
             fi
             ;;
           12) bash "${manage_script}" uninstall ;;
-          13) break ;;
-          *) echo -e "${RED}Invalid selection. Please choose a number between 1 and 13.${NC}" ;;
+          13) bash "${manage_script}" unload ;;
+          14) bash "${manage_script}" tune ;;
+          15) bash "${manage_script}" swap ;;
+          16) break ;;
+          *) echo -e "${RED}Invalid selection. Please choose a number between 1 and 16.${NC}" ;;
         esac
 
-        if [[ "${ai_choice}" != "13" ]]; then
+        if [[ "${ai_choice}" != "16" ]]; then
           echo ""
           read -r -p "Press [Enter] to return to AI menu..." _
         fi

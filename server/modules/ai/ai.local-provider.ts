@@ -11,6 +11,7 @@
 
 import { config } from '../../core/config.ts';
 import { logger } from '../../core/logger.ts';
+import { AIMemoryEstimator, type SystemMemoryMetrics } from './ai.memory-estimator.ts';
 
 export interface OllamaModelInfo {
   name: string;
@@ -31,6 +32,8 @@ export interface OllamaHealthStatus {
   engineUrl: string;
   version?: string;
   installedModels: OllamaModelInfo[];
+  loadedModels?: Array<{ name: string; size: number; size_vram?: number }>;
+  memoryMetrics?: SystemMemoryMetrics;
   defaultChatModel: string;
   defaultEmbedModel: string;
   activeRequests: number;
@@ -51,6 +54,8 @@ export interface LocalChatOptions {
   system?: string;
   stream?: boolean;
   timeoutMs?: number;
+  num_ctx?: number;
+  contextTokens?: number;
 }
 
 type QueueTask<T> = (remainingMs: number) => Promise<T>;
@@ -277,6 +282,19 @@ export class LocalAIProvider {
             }
           } catch {}
 
+          // Query resident loaded models in RAM
+          try {
+            const psResp = await fetch(`${targetUrl}/api/ps`, {
+              method: 'GET',
+              signal: AbortSignal.timeout(2000),
+            });
+            if (psResp.ok) {
+              const psData = (await psResp.json()) as { models?: any[] };
+              status.loadedModels = psData?.models || [];
+            }
+          } catch {}
+
+          status.memoryMetrics = AIMemoryEstimator.getSystemMemoryMetrics();
           return status;
         } else {
           lastError = new Error(`پاسخ ناموفق موتور هوش مصنوعی: HTTP ${resp.status}`);
@@ -333,6 +351,80 @@ export class LocalAIProvider {
       logger.debug('[LocalAIProvider] Failed to list models from all candidate URLs');
     }
     return [];
+  }
+
+  /**
+   * List currently resident models loaded in RAM
+   */
+  async getLoadedModels(): Promise<Array<{ name: string; size: number; size_vram?: number }>> {
+    try {
+      const resp = await fetch(`${this.baseUrl}/api/ps`, {
+        method: 'GET',
+        signal: AbortSignal.timeout(3000),
+      });
+      if (!resp.ok) return [];
+      const data = await resp.json() as { models?: Array<{ name: string; size: number; size_vram?: number }> };
+      return data?.models || [];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Unload resident models from RAM (keep_alive: 0) to free memory instantly
+   */
+  async unloadModel(modelName?: string): Promise<boolean> {
+    try {
+      if (modelName) {
+        const normalized = this.normalizeModelName(modelName);
+        if (!normalized) return false;
+        await fetch(`${this.baseUrl}/api/generate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: normalized, keep_alive: 0 }),
+          signal: AbortSignal.timeout(5000),
+        });
+        return true;
+      }
+
+      // Unload all active resident models
+      const loaded = await this.getLoadedModels();
+      for (const m of loaded) {
+        if (m.name) {
+          await fetch(`${this.baseUrl}/api/generate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: m.name, keep_alive: 0 }),
+            signal: AbortSignal.timeout(5000),
+          }).catch(() => null);
+        }
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Evict any other loaded model from RAM before loading a new one to prevent OOM
+   */
+  async evictOtherLoadedModels(targetModel: string): Promise<void> {
+    try {
+      const loaded = await this.getLoadedModels();
+      for (const m of loaded) {
+        if (m.name && !this.sameModelName(m.name, targetModel)) {
+          logger.info(`[LocalAIProvider] Evicting model ${m.name} from RAM to prevent concurrent model OOM before loading ${targetModel}`);
+          await fetch(`${this.baseUrl}/api/generate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: m.name, keep_alive: 0 }),
+            signal: AbortSignal.timeout(5000),
+          }).catch(() => null);
+        }
+      }
+    } catch {
+      // best-effort eviction
+    }
   }
 
   /**
@@ -503,6 +595,13 @@ export class LocalAIProvider {
       const model = options?.model || config.aiEngine.defaultChatModel;
       const timeoutMs = Math.min(options?.timeoutMs || config.aiEngine.timeoutMs || 180000, remainingMs);
 
+      // Evict any other loaded models from RAM to prevent concurrent model residency OOM
+      await this.evictOtherLoadedModels(model);
+
+      // Auto-tune num_ctx for safety
+      const requestedCtx = options?.num_ctx || options?.contextTokens || config.aiEngine.contextTokens;
+      const safeCtx = AIMemoryEstimator.getSafeContextTokens(model, requestedCtx);
+
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -515,7 +614,7 @@ export class LocalAIProvider {
             temperature: options?.temperature ?? 0.3,
             top_p: options?.top_p ?? 0.85,
             num_predict: options?.max_tokens ?? 1024,
-            num_ctx: config.aiEngine.contextTokens,
+            num_ctx: safeCtx,
           },
         };
 
@@ -528,6 +627,9 @@ export class LocalAIProvider {
 
         if (!resp.ok) {
           const errText = await resp.text().catch(() => '');
+          if (resp.status === 502 || resp.status === 503) {
+            AIMemoryEstimator.recordOomEvent();
+          }
           throw new Error(`Ollama chat error: HTTP ${resp.status} - ${errText}`);
         }
 
@@ -543,6 +645,9 @@ export class LocalAIProvider {
         };
       } catch (err: any) {
         clearTimeout(timeout);
+        if (err?.message?.includes('ECONNRESET') || err?.code === 'ECONNRESET') {
+          AIMemoryEstimator.recordOomEvent();
+        }
         const isNet = this.markOfflineIfNetworkError(err);
         if (!isNet) {
           logger.debug('[LocalAIProvider] Chat completion non-network error', { error: err.message });
@@ -568,6 +673,14 @@ export class LocalAIProvider {
     return this.enqueue(async (remainingMs) => {
       const startedAt = Date.now();
       const model = options.model || config.aiEngine.defaultChatModel;
+
+      // Evict any other loaded models from RAM to prevent concurrent model residency OOM
+      await this.evictOtherLoadedModels(model);
+
+      // Auto-tune num_ctx for safety
+      const requestedCtx = options.num_ctx || options.contextTokens || config.aiEngine.contextTokens;
+      const safeCtx = AIMemoryEstimator.getSafeContextTokens(model, requestedCtx);
+
       const controller = new AbortController();
       const abortFromCaller = () => controller.abort();
       if (signal?.aborted) controller.abort();
@@ -586,7 +699,7 @@ export class LocalAIProvider {
               temperature: options.temperature ?? 0.4,
               top_p: options.top_p ?? 0.85,
               num_predict: options.max_tokens ?? 1024,
-              num_ctx: config.aiEngine.contextTokens,
+              num_ctx: safeCtx,
             },
           }),
           signal: controller.signal,
