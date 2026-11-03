@@ -155,11 +155,29 @@ export class AIController {
         allowTools: typeof body.allowTools === 'boolean' ? body.allowTools : true,
       }, user);
 
+      let historySaved = true;
+      const sessionId = typeof body.sessionId === 'string' ? body.sessionId.trim() : '';
+      if (sessionId) {
+        try {
+          await aiSessionService.appendMessage(sessionId, user, {
+            role: 'assistant',
+            content: result.reply,
+            toolsUsed: result.toolsUsed,
+            citations: result.citations,
+            durationMs: result.durationMs,
+            model: result.model,
+          });
+        } catch {
+          historySaved = false;
+        }
+      }
+
       if (streaming) {
         if (!res.destroyed && !res.writableEnded) {
           res.write(`data: ${JSON.stringify({ token: result.reply })}\n\n`);
           res.write(`data: ${JSON.stringify({
             done: true,
+            historySaved,
             model: result.model,
             durationMs: result.durationMs,
             toolsUsed: result.toolsUsed,
@@ -182,6 +200,7 @@ export class AIController {
         durationMs: result.durationMs,
         model: result.model,
         queueWaitMs: result.queueWaitMs,
+        historySaved,
       });
     } catch (err: any) {
       const messageText = String(err?.message || 'خطا در اجرای تحلیل هوشمند.');

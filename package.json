@@ -19,7 +19,8 @@
     "test:ai-routes": "tsx scripts/test-ai-routes.ts",
     "test:ai-queue": "tsx scripts/test-ai-queue.ts",
     "test:ai-model-pull": "tsx scripts/test-ai-model-pull.ts",
-    "test:ai-coverage": "tsx scripts/test-ai-module-coverage.ts"
+    "test:ai-coverage": "tsx scripts/test-ai-module-coverage.ts",
+    "test:ai-sessions": "tsx scripts/test-ai-sessions.ts"
   },
   "dependencies": {
     "@bpmn-io/properties-panel": "^3.48.0",

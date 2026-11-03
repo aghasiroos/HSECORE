@@ -105,7 +105,11 @@ export class AISessionService {
               ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW() NOT NULL;
           `);
         } catch (err: any) {
-          logger.warn('[AISessionService] Schema verification notice', { error: err?.message || err });
+          // Do not mark the schema as ready when DDL failed. A rejected promise is
+          // retried on the next request instead of silently switching to volatile memory.
+          this.schemaReadyPromise = null;
+          logger.error('[AISessionService] Schema initialization failed', { error: err?.message || err });
+          throw err;
         }
       })();
     }
@@ -203,7 +207,8 @@ export class AISessionService {
         }
       }
     } catch (err: any) {
-      logger.warn('[AISessionService] Database error listing sessions, using in-memory store fallback', { error: err?.message || err });
+      logger.error('[AISessionService] Database error listing sessions', { error: err?.message || err });
+      throw new Error('ذخیره‌ساز گفتگوها در دسترس نیست؛ تاریخچه از پایگاه داده قابل دریافت نیست.');
     }
 
     // Merge any in-memory sessions not yet reflected in DB query
@@ -276,7 +281,9 @@ export class AISessionService {
           set: { updatedAt: now },
         });
     } catch (err: any) {
-      logger.warn('[AISessionService] Database error creating session, session cached in memory', { error: err?.message || err });
+      this.inMemorySessions.delete(id);
+      logger.error('[AISessionService] Database error creating session', { error: err?.message || err });
+      throw new Error('ایجاد گفت‌وگو در پایگاه داده انجام نشد؛ لطفاً اتصال پایگاه داده را بررسی کنید.');
     }
 
     return summary;
@@ -332,7 +339,8 @@ export class AISessionService {
         return 'forbidden';
       }
     } catch (err: any) {
-      logger.warn('[AISessionService] Database error checking ownership, checking in-memory cache', { error: err?.message || err });
+      logger.error('[AISessionService] Database error checking session ownership', { error: err?.message || err });
+      throw new Error('بررسی مالکیت گفتگو در پایگاه داده ناموفق بود.');
     }
 
     return 'not_found';
@@ -373,7 +381,8 @@ export class AISessionService {
         });
       }
     } catch (err: any) {
-      logger.warn('[AISessionService] Database error fetching messages, using in-memory store fallback', { error: err?.message || err });
+      logger.error('[AISessionService] Database error fetching messages', { error: err?.message || err });
+      throw new Error('خواندن پیام‌های گفتگو از پایگاه داده ناموفق بود.');
     }
 
     // Merge any in-memory messages that might not have been flushed to DB yet
@@ -561,7 +570,9 @@ export class AISessionService {
         }
       }
     } catch (err: any) {
-      logger.warn('[AISessionService] Database error appending message, stored in-memory', { error: err?.message || err });
+      if (mem) mem.messages = mem.messages.filter(item => item.id !== id);
+      logger.error('[AISessionService] Database error appending message', { error: err?.message || err });
+      throw new Error('ذخیره پیام در پایگاه داده ناموفق بود؛ پیام به‌عنوان ذخیره‌شده تأیید نمی‌شود.');
     }
 
     return newMsg;
@@ -575,11 +586,12 @@ export class AISessionService {
     if (status !== 'owned') {
       throw new Error('دسترسی به این گفتگو مجاز نیست یا گفتگو یافت نشد.');
     }
-    this.inMemorySessions.delete(sessionId);
     try {
       await db.delete(schema.aiChatSessions).where(eq(schema.aiChatSessions.id, sessionId));
+      this.inMemorySessions.delete(sessionId);
     } catch (err: any) {
-      logger.warn('[AISessionService] Database error deleting session', { error: err?.message || err });
+      logger.error('[AISessionService] Database error deleting session', { error: err?.message || err });
+      throw new Error('حذف گفتگو در پایگاه داده ناموفق بود؛ سابقه موجود حفظ شد.');
     }
   }
 

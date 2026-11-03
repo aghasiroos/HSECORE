@@ -141,7 +141,7 @@ if printf '%s\n' "${MODEL_LIST}" | awk 'NR > 1 {print $1}' | grep -Fxq "${PRIMAR
   TEST_OUTPUT="$(docker exec "${CONTAINER_NAME}" ollama run "${PRIMARY_CHAT_MODEL}" "${TEST_PROMPT}" 2>&1)" || fail "Inference test failed for ${PRIMARY_CHAT_MODEL}: ${TEST_OUTPUT}"
   echo -e "Inference response: ${TEST_OUTPUT:0:200}"
 else
-  echo -e "${YELLOW}[NOTE] Chat model is not installed: ${PRIMARY_CHAT_MODEL}. Use the AI model-management menu to pull any valid Ollama model reference.${NC}"
+  fail "Configured chat model is not installed: ${PRIMARY_CHAT_MODEL}. Install any supported chat model from HSECORE AI Model Management, set AI_DEFAULT_CHAT_MODEL to its exact Ollama tag, then rerun this verification. No model was downloaded or changed."
 fi
 
 if printf '%s\n' "${MODEL_LIST}" | awk 'NR > 1 {print $1}' | grep -Fxq "${PRIMARY_EMBED_MODEL}"; then
@@ -171,6 +171,33 @@ fetch(base + "/api/tags", { signal: AbortSignal.timeout(8000) })
   })
   .catch(error => { console.error("HSECORE-to-Ollama connection failed: " + error.message); process.exit(1); });
 ' || fail "The HSECORE application cannot reach Ollama. Check AI_ENGINE_URL and the shared Docker network."
+
+# Verify real inference from inside the HSECORE app container, not only from
+# inside the Ollama container. This catches wrong model tags and app-network issues.
+docker exec "${APP_CONTAINER_NAME}" node -e '
+const base = (process.env.AI_ENGINE_URL || "").replace(/\/$/, "");
+const model = (process.env.AI_DEFAULT_CHAT_MODEL || "").trim();
+if (!base || !model) throw new Error("AI_ENGINE_URL or AI_DEFAULT_CHAT_MODEL is empty");
+fetch(base + "/api/chat", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    model,
+    messages: [{ role: "user", content: "Reply with the single word OK." }],
+    stream: false,
+    options: { num_predict: 8, num_ctx: 1024, temperature: 0 }
+  }),
+  signal: AbortSignal.timeout(120000)
+}).then(async response => {
+  if (!response.ok) throw new Error("Ollama chat returned HTTP " + response.status + ": " + (await response.text()));
+  const payload = await response.json();
+  const answer = payload?.message?.content?.trim();
+  if (!answer) throw new Error("Ollama returned an empty chat response");
+  console.log("HSECORE app-to-Ollama inference: OK");
+  console.log("Model: " + (payload.model || model));
+  console.log("Test response: " + answer.slice(0, 120));
+}).catch(error => { console.error("HSECORE app-to-Ollama inference failed: " + error.message); process.exit(1); });
+' || fail "Ollama is reachable but real inference from HSECORE failed. Check model availability, RAM/swap, and Ollama logs."
 
 echo -e "\n${BOLD}${GREEN}Local AI runtime verification completed.${NC}"
 echo "Container : ${CONTAINER_NAME}"

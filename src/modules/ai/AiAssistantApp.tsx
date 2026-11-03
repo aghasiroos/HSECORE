@@ -261,7 +261,8 @@ export default function AiAssistantApp({
       setActiveSessionId(prev => (prev && list.some(s => s.id === prev) ? prev : list[0]?.id || ''));
     } catch (err: any) {
       setSessionsError(err?.message || 'خطا در بارگذاری گفتگوها');
-      setSessions([]);
+      // Preserve the last successfully loaded sessions during transient failures.
+
     } finally {
       setSessionsLoading(false);
     }
@@ -271,24 +272,26 @@ export default function AiAssistantApp({
     if (!sessionId) return;
     try {
       const res = await authFetch(`/api/v1/ai/sessions/${sessionId}/messages`);
-      const data = await res.json();
-      if (data.success && Array.isArray(data.data)) {
-        const msgs: ChatMessage[] = data.data.map((m: any) => ({
-          id: m.id,
-          role: m.role === 'assistant' ? 'assistant' : 'user',
-          content: m.content,
-          timestamp: m.createdAt
-            ? new Date(m.createdAt).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })
-            : '',
-          toolsUsed: m.toolsUsed,
-          citations: m.citations,
-          durationMs: m.durationMs,
-          model: m.model,
-        }));
-        setSessions(prev => prev.map(s => (s.id === sessionId ? { ...s, messages: msgs } : s)));
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success || !Array.isArray(data.data)) {
+        throw new Error(data.message || `دریافت پیام‌های گفتگو ناموفق بود (HTTP ${res.status})`);
       }
-    } catch {
-      // keep existing
+      const msgs: ChatMessage[] = data.data.map((m: any) => ({
+        id: m.id,
+        role: m.role === 'assistant' ? 'assistant' : 'user',
+        content: m.content,
+        timestamp: m.createdAt
+          ? new Date(m.createdAt).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })
+          : '',
+        toolsUsed: m.toolsUsed,
+        citations: m.citations,
+        durationMs: m.durationMs,
+        model: m.model,
+      }));
+      setSessions(prev => prev.map(s => (s.id === sessionId ? { ...s, messages: msgs } : s)));
+    } catch (err: any) {
+      // Do not replace an existing transcript with an empty one when a fetch fails.
+      setSessionsError(err?.message || 'خواندن سابقه گفتگو از پایگاه داده ناموفق بود.');
     }
   };
 
@@ -345,7 +348,8 @@ export default function AiAssistantApp({
       void refreshInstalledModels();
     }, 30000);
     return () => {
-      activeRequestRef.current?.abort();
+      // Keep an in-flight request alive while navigating between application modules.
+      // The server persists its answer using the sessionId before completing the response.
       window.clearInterval(refreshTimer);
       window.removeEventListener('hse_ui_config_updated', onModuleConfigUpdated);
       window.removeEventListener('health_env_config_updated', onModuleConfigUpdated);
@@ -517,13 +521,22 @@ export default function AiAssistantApp({
     );
 
     try {
-      await authFetch(`/api/v1/ai/sessions/${sessionId}/messages`, {
+      const saveResponse = await authFetch(`/api/v1/ai/sessions/${sessionId}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ role: 'user', content: text }),
       });
-    } catch {
-      // non-blocking
+      const saveResult = await saveResponse.json().catch(() => ({}));
+      if (!saveResponse.ok || saveResult.success === false) {
+        throw new Error(saveResult.message || `ذخیره پیام ناموفق بود (HTTP ${saveResponse.status})`);
+      }
+    } catch (saveError: any) {
+      setSessions(prev => prev.map(s => s.id === sessionId
+        ? { ...s, messages: (session.messages || []) }
+        : s));
+      setInputMessage(text);
+      setSessionsError(saveError?.message || 'پیام در پایگاه داده ذخیره نشد؛ ارسال به هوش مصنوعی متوقف شد تا سابقه ناقص نشود.');
+      return;
     }
 
     setIsLoading(true);
@@ -551,6 +564,7 @@ export default function AiAssistantApp({
         headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
         body: JSON.stringify({
           message: text,
+          sessionId,
           assistantId: 'GENERAL_HSE',
           history: historyPayload,
           model: selectedModel,
@@ -590,6 +604,7 @@ export default function AiAssistantApp({
       const decoder = new TextDecoder();
       let pending = '';
       let streamError = '';
+      let serverHistorySaved = false;
       const applyEvent = (line: string) => {
         if (!line.startsWith('data:')) return;
         let payload: any;
@@ -624,6 +639,10 @@ export default function AiAssistantApp({
         }
         if (Array.isArray(payload.toolsUsed)) responseToolsUsed = payload.toolsUsed;
         if (Array.isArray(payload.citations)) responseCitations = payload.citations;
+        if (payload.historySaved === true) serverHistorySaved = true;
+        if (payload.historySaved === false) {
+          setSessionsError('پاسخ تولید شد اما ذخیره سمت سرور ناموفق بود؛ لطفاً پایگاه داده را بررسی کنید.');
+        }
         if (payload.error) streamError = payload.error;
       };
       while (true) {
@@ -654,21 +673,27 @@ export default function AiAssistantApp({
         )
       );
 
-      try {
-        await authFetch(`/api/v1/ai/sessions/${sessionId}/messages`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            role: 'assistant',
-            content: assistantText,
-            toolsUsed: responseToolsUsed,
-            citations: responseCitations,
-            durationMs,
-            model: responseModel,
-          }),
-        });
-      } catch {
-        // non-blocking
+      if (!serverHistorySaved) {
+        try {
+          const saveResponse = await authFetch(`/api/v1/ai/sessions/${sessionId}/messages`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              role: 'assistant',
+              content: assistantText,
+              toolsUsed: responseToolsUsed,
+              citations: responseCitations,
+              durationMs,
+              model: responseModel,
+            }),
+          });
+          const saveResult = await saveResponse.json().catch(() => ({}));
+          if (!saveResponse.ok || saveResult.success === false) {
+            throw new Error(saveResult.message || 'ذخیره پاسخ هوش مصنوعی ناموفق بود.');
+          }
+        } catch (saveError: any) {
+          setSessionsError(saveError?.message || 'پاسخ تولید شد اما ذخیره آن در تاریخچه ناموفق بود؛ لطفاً وضعیت پایگاه داده را بررسی کنید.');
+        }
       }
     } catch (requestError: any) {
       const nowTime = new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
