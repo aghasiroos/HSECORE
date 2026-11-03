@@ -4,6 +4,7 @@
  * Strictly read-only; no raw SQL mutation.
  */
 
+import { HighRiskNutritionService } from '../../../src/modules/health-env/services/highRiskNutritionService.ts';
 import { db, schema } from '../../core/db.ts';
 import { desc } from 'drizzle-orm';
 import { ptwRepository } from '../ptw/ptw.repository.ts';
@@ -516,56 +517,196 @@ export class AIToolsRegistry {
    */
   async getNutritionHighRiskSummary(): Promise<AIToolResult> {
     try {
-      const exams = await db.select().from(schema.periodicMedicalExams).catch(() => []);
-      let normalBmi = 0;
-      let overweight = 0;
-      let obeseGrade1 = 0;
-      let obeseGrade2 = 0;
-      let obeseGrade3 = 0;
-      let highBloodPressure = 0;
-      let highBloodSugar = 0;
+      const [nutritionRecords, dbExams, settingsMap] = await Promise.all([
+        db.select().from(schema.nutritionRecords).catch(() => []),
+        db.select().from(schema.periodicMedicalExams).catch(() => []),
+        this.loadSettingsMap(),
+      ]);
+      const settingsArray = (key: string): any[] => {
+        const value = settingsMap.get(key);
+        return Array.isArray(value) ? value : [];
+      };
+      const occData = settingsMap.get('OCC_HEALTH_EXAMS_DATA_V2');
+      const occExams: any[] = Array.isArray(occData)
+        ? occData
+        : Array.isArray(occData?.examinations) ? occData.examinations : [];
+      const settingsExams = settingsArray('hse_medical_exams_v4');
+      const periodicRecords = settingsArray('hse_medical_records_v4');
+      const structuredLabs = settingsArray('hse_structured_lab_results_v1');
 
-      for (const exam of exams) {
-        const raw = ((exam as any).rawData || (exam as any).extraData || {}) as Record<string, any>;
-        const bmi = Number((exam as any).bmi || raw.bmi || 0);
-        if (bmi > 0 && bmi < 25) normalBmi++;
-        else if (bmi >= 25 && bmi < 30) overweight++;
-        else if (bmi >= 30 && bmi < 35) obeseGrade1++;
-        else if (bmi >= 35 && bmi < 40) obeseGrade2++;
-        else if (bmi >= 40) obeseGrade3++;
+      const parseObject = (value: any): Record<string, any> => {
+        if (value && typeof value === 'object' && !Array.isArray(value)) return value;
+        if (typeof value === 'string') {
+          try {
+            const parsed = JSON.parse(value);
+            return parsed && typeof parsed === 'object' ? parsed : {};
+          } catch { return {}; }
+        }
+        return {};
+      };
+      const normalizeExam = (record: any) => {
+        const raw = parseObject(record.rawData || record.extraData);
+        const merged = { ...raw, ...record };
+        const rawFindings = parseObject(raw.findings);
+        const recordFindings = parseObject(record.findings);
+        const findings = { ...rawFindings, ...recordFindings };
+        const employeeCode = merged.employeeCode || merged.employee_code || merged.personnelCode || merged.personnel_code || merged.pcode;
+        const nationalCode = merged.nationalCode || merged.national_code || merged.nid;
+        const systolic = merged.systolicBp ?? merged.bp_sys ?? merged.systolic ?? raw.bp_sys;
+        const diastolic = merged.diastolicBp ?? merged.bp_dia ?? merged.diastolic ?? raw.bp_dia;
+        const bloodPressure = findings.bloodPressure || merged.bloodPressure ||
+          (systolic || diastolic ? `${systolic || ''}/${diastolic || ''}` : undefined);
+        return {
+          ...merged,
+          id: merged.id || merged.examId || merged.exam_id,
+          employeeCode,
+          nationalCode,
+          examYear: Number(merged.examYear ?? merged.exam_year ?? merged.year ?? 0) || undefined,
+          examDate: merged.examDate || merged.exam_date || merged.date || undefined,
+          height: merged.height ?? merged.heightCm ?? findings.heightCm,
+          weight: merged.weight ?? merged.weightKg ?? findings.weightKg,
+          bmi: merged.bmi ?? findings.bmi,
+          bp_sys: systolic,
+          bp_dia: diastolic,
+          fbs: merged.fbs ?? raw.fbs,
+          randomBs: merged.randomBs ?? merged.random_bs ?? raw.randomBs,
+          hba1c: merged.hba1c ?? raw.hba1c,
+          cholesterol: merged.cholesterol ?? raw.cholesterol,
+          triglycerides: merged.triglycerides ?? raw.triglycerides,
+          findings: {
+            ...findings,
+            heightCm: findings.heightCm ?? merged.heightCm ?? merged.height,
+            weightKg: findings.weightKg ?? merged.weightKg ?? merged.weight,
+            bmi: findings.bmi ?? merged.bmi,
+            bloodPressure,
+            bloodTests: findings.bloodTests || merged.bloodTests || merged.blood_tests,
+            generalConclusion: findings.generalConclusion || merged.generalConclusion || merged.final_opinion,
+          },
+          recommendations: merged.recommendations || merged.final_advice,
+          description: merged.description || merged.clinicalNotes,
+        };
+      };
 
-        const sys = Number((exam as any).systolicBp || raw.bloodPressureSystolic || 0);
-        const dia = Number((exam as any).diastolicBp || raw.bloodPressureDiastolic || 0);
-        if (sys >= 140 || dia >= 90) highBloodPressure++;
+      const examMap = new Map<string, any>();
+      [...settingsExams, ...occExams, ...(dbExams as any[])].forEach((record, index) => {
+        const normalized = normalizeExam(record);
+        const identity = String(normalized.employeeCode || normalized.nationalCode || normalized.id || 'unknown').trim().toLowerCase();
+        const period = String(normalized.examYear || normalized.examDate || index);
+        const key = `${identity}:${period}`;
+        examMap.set(key, { ...(examMap.get(key) || {}), ...normalized });
+      });
+      const unifiedExams = Array.from(examMap.values());
 
-        const fbs = Number(raw.fbs || 0);
-        if (fbs >= 126) highBloodSugar++;
+      const dateParts = new Intl.DateTimeFormat('en-US-u-ca-persian', {
+        year: 'numeric', month: '2-digit', day: '2-digit',
+      }).formatToParts(new Date());
+      const datePart = (type: string) => dateParts.find(part => part.type === type)?.value || '01';
+      const todayJalali = `${datePart('year')}/${datePart('month')}/${datePart('day')}`;
+
+      // Reuse the same domain rules as the Nutrition > High-Risk & Follow-up tab.
+      // Only aggregated counts are returned; personnel names and identifiers never leave this method.
+      const highRiskService = new HighRiskNutritionService();
+      const profiles = highRiskService.buildHighRiskProfiles(
+        nutritionRecords as any[],
+        unifiedExams as any[],
+        periodicRecords as any[],
+        [],
+        todayJalali,
+        structuredLabs as any[],
+      );
+
+      const categoryMap = new Map<string, Set<string>>();
+      const priorityMap = new Map<string, number>();
+      const bmiMap = new Map<string, number>();
+      const unitMap = new Map<string, { total: number; urgent: number; overdue: number }>();
+      for (const profile of profiles as any[]) {
+        const profileKey = String(profile.id || profile.personnelCode || profile.nationalCode || 'anonymous');
+        const seenCategories = new Set<string>();
+        for (const match of Array.isArray(profile.riskCategories) ? profile.riskCategories : []) {
+          const category = String(match.category || '');
+          if (!category || seenCategories.has(category)) continue;
+          seenCategories.add(category);
+          const people = categoryMap.get(category) || new Set<string>();
+          people.add(profileKey);
+          categoryMap.set(category, people);
+        }
+        const priority = String(profile.overallPriority || 'routine');
+        priorityMap.set(priority, (priorityMap.get(priority) || 0) + 1);
+        const bmiCategory = String(profile.bmiCategory || 'unknown');
+        if (Number(profile.bmi) > 0) bmiMap.set(bmiCategory, (bmiMap.get(bmiCategory) || 0) + 1);
+        const unitName = String(profile.unit || 'واحد نامشخص');
+        const unit = unitMap.get(unitName) || { total: 0, urgent: 0, overdue: 0 };
+        unit.total += 1;
+        unit.urgent += priority === 'urgent' ? 1 : 0;
+        unit.overdue += profile.isFollowUpOverdue || profile.followUpStatus === 'missed' ? 1 : 0;
+        unitMap.set(unitName, unit);
       }
 
+      const categoryCounts = Array.from(categoryMap.entries())
+        .map(([category, people]) => ({ category, personnelCount: people.size }))
+        .sort((a, b) => b.personnelCount - a.personnelCount);
+      const bmiDistribution = Array.from(bmiMap.entries()).map(([category, personnelCount]) => ({ category, personnelCount }));
+      const byUnit = Array.from(unitMap.entries())
+        .map(([unit, value]) => ({ unit, ...value }))
+        .sort((a, b) => b.total - a.total)
+        .slice(0, 10);
+      const overdueFollowUps = profiles.filter((profile: any) =>
+        profile.isFollowUpOverdue || profile.followUpStatus === 'missed'
+      ).length;
+      const dueFollowUps = categoryMap.get('followup_due')?.size || 0;
+      const needsReview = categoryMap.get('needs_review')?.size || 0;
+      const countFor = (category: string) => categoryMap.get(category)?.size || 0;
+      const dataAvailable = nutritionRecords.length + unifiedExams.length + structuredLabs.length;
+
       return {
         toolName: 'nutrition_high_risk_summary',
-        titleFa: 'ماژول تغذیه، شاخص توده بدنی (BMI) و بیماران پرخطر',
+        titleFa: 'ماژول تغذیه، BMI و شناسایی افراد پرخطر و پیگیری',
         summary: [
-          `• وضعیت وزن و BMI در پرونده‌های سلامت: ${normalBmi} نفر وزن نرمال، ${overweight} نفر اضافه‌وزن (BMI 25-29.9)، ${obeseGrade1} نفر چاقی درجه ۱، ${obeseGrade2} نفر چاقی درجه ۲ و ${obeseGrade3} نفر چاقی مفرط (BMI ≥ 40)`,
-          `• شاخص‌های متابولیک پرخطر: ${highBloodPressure} نفر دارای فشار خون بالا (≥140/90) و ${highBloodSugar} نفر دارای قند خون ناشتای بالا (FBS ≥ 126)`,
+          dataAvailable === 0
+            ? '• در منابع متصل، داده‌ای برای تحلیل تغذیه و معاینات ادواری یافت نشد.'
+            : `• بر اساس قواعد همان تب «بیماری‌های پرخطر و پیگیری»، ${profiles.length} پروفایل پرخطر یکتا شناسایی شد.`,
+          `• اولویت بالینی: فوری ${priorityMap.get('urgent') || 0}، پرخطر ${priorityMap.get('high_risk') || 0}، پیگیری معمول ${priorityMap.get('routine') || 0}`,
+          `• BMI: اضافه‌وزن ${countFor('bmi_overweight')}، چاقی درجه ۱ ${countFor('bmi_obese_1')}، درجه ۲ ${countFor('bmi_obese_2')}، درجه ۳ ${countFor('bmi_obese_3')}`,
+          `• شاخص‌های بالینی: فشار خون ${countFor('hypertension')}، قند خون ${countFor('hyperglycemia')}، کبد چرب گرید ۲/۳ ${countFor('fatty_liver')}`,
+          `• پیگیری: ${dueFollowUps} مورد نیازمند پیگیری، ${overdueFollowUps} مورد معوق؛ نتایج نیازمند بررسی: ${needsReview}`,
+          `• پوشش داده: ${nutritionRecords.length} پرونده تغذیه، ${unifiedExams.length} سابقه معاینه یکتا، ${structuredLabs.length} نتیجه آزمایش ساختاریافته`,
         ].join('\n'),
-        data: { normalBmi, overweight, obeseGrade1, obeseGrade2, obeseGrade3, highBloodPressure, highBloodSugar },
+        data: {
+          highRiskPersonnelCount: profiles.length,
+          priorityDistribution: Array.from(priorityMap.entries()).map(([priority, count]) => ({ priority, count })),
+          categoryCounts,
+          bmiDistribution,
+          hypertensionCount: countFor('hypertension'),
+          hyperglycemiaCount: countFor('hyperglycemia'),
+          fattyLiverCount: countFor('fatty_liver'),
+          urgentClinicalCount: countFor('clinical_urgent'),
+          followUpDueCount: dueFollowUps,
+          overdueFollowUpCount: overdueFollowUps,
+          needsReviewCount: needsReview,
+          byUnit,
+          sourceCounts: {
+            nutritionRecords: nutritionRecords.length,
+            periodicExams: unifiedExams.length,
+            structuredLabResults: structuredLabs.length,
+            medicalRecords: periodicRecords.length,
+          },
+          methodology: 'Same HighRiskNutritionService rules used by the Nutrition > High-Risk & Follow-up UI; category counts are unique people and may overlap.',
+          privacy: 'Aggregate-only output. Personnel names, personnel codes, national IDs, phones and individual medical records are excluded.',
+        },
         timestamp: new Date().toISOString(),
       };
-    } catch {
+    } catch (err: any) {
+      logger.warn('[AITools] nutrition high-risk summary unavailable', { error: err?.message });
       return {
         toolName: 'nutrition_high_risk_summary',
-        titleFa: 'ماژول تغذیه و بیماران پرخطر',
-        summary: 'اطلاعات پایش تغذیه در دسترس نیست.',
+        titleFa: 'ماژول تغذیه و افراد پرخطر',
+        summary: 'اطلاعات تغذیه و معاینات ادواری در این لحظه قابل دریافت یا تحلیل نیست؛ هیچ آماری حدس زده نشده است.',
         data: {},
         timestamp: new Date().toISOString(),
       };
     }
   }
 
-  /**
-   * Tool 6: Risk Assessment & Hazard Identification (ارزیابی ریسک و مخاطرات)
-   */
   async getRiskAssessmentsSummary(selectedMethodologies?: string[]): Promise<AIToolResult> {
     try {
       const allRisks = await db.select().from(schema.riskAssessments);
