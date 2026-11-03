@@ -976,10 +976,19 @@ export class AIOrchestrator {
     ]);
     return ordered.map(item => {
       const permittedTools = item.tools.filter(toolName => canUserAccessAITool(toolName, _userContext));
-      const permittedKnowledge = documentOnlyModules.has(item.moduleId) &&
+      let ancestor: import('./ai.types.ts').AIModuleCoverage | undefined = item;
+      let isDocumentScope = false;
+      for (let depth = 0; ancestor && depth < 9; depth++) {
+        if (documentOnlyModules.has(ancestor.moduleId)) {
+          isDocumentScope = true;
+          break;
+        }
+        ancestor = ancestor.parentModuleId ? byId.get(ancestor.parentModuleId) : undefined;
+      }
+      const permittedKnowledge = isDocumentScope &&
         Boolean(_userContext && (globalAdmin || checkUserHasPermission(_userContext, 'documents:read')));
       const permitted = item.connected &&
-        (permittedTools.length > 0 || permittedKnowledge || (item.tools.length === 0 && !documentOnlyModules.has(item.moduleId)));
+        (permittedTools.length > 0 || permittedKnowledge || (item.tools.length === 0 && !isDocumentScope));
       if (permitted) return item;
       return {
         ...item,
