@@ -522,7 +522,7 @@ export class AIController {
 
   async getModuleCoverage(req: Request, res: Response) {
     try {
-      const coverage = aiOrchestrator.getModuleCoverage(req.user);
+      const coverage = await aiOrchestrator.getModuleCoverage(req.user);
       return res.json({ success: true, data: coverage });
     } catch (err: any) {
       return res.status(500).json({ success: false, message: err.message || 'خطا در دریافت گزارش پوشش' });
