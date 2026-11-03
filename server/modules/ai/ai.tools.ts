@@ -11,6 +11,8 @@ import { incidentRepository } from '../incidents/incident.repository.ts';
 import { weatherService } from '../../weather/service.ts';
 import { AIToolResult } from './ai.types.ts';
 import { logger } from '../../core/logger.ts';
+import type { UserContext } from '../../core/middleware/auth.ts';
+import { getAIModuleCatalog } from './ai.module-registry.ts';
 
 /**
  * Normalize Persian/Arabic characters, digits, and spacing for colloquial & cross-script matching
@@ -841,45 +843,53 @@ export class AIToolsRegistry {
   /**
    * Tool 20: Complete HSECORE System Architecture & Blueprint (معماری جامع، ماژول‌ها، تب‌ها، فرم‌ها و قابلیت‌ها)
    */
-  async getSystemArchitectureAndCapabilitiesSummary(): Promise<AIToolResult> {
+  async getSystemArchitectureAndCapabilitiesSummary(userContext?: UserContext): Promise<AIToolResult> {
+    if (!userContext) {
+      return {
+        toolName: 'system_architecture_summary',
+        titleFa: 'رجیستری ساختار و پوشش ماژول‌های HSECORE',
+        summary: 'برای مشاهده ساختار و سطح اتصال ماژول‌ها، احراز هویت لازم است.',
+        data: {},
+        timestamp: new Date().toISOString(),
+      };
+    }
+
+    const modules = await getAIModuleCatalog(userContext);
+    const allItems: Array<{ moduleId: string; moduleNameFa: string; connected: boolean; allowed: boolean }> = [];
+    const visit = (item: any) => {
+      allItems.push(item);
+      (item.children || []).forEach(visit);
+    };
+    modules.forEach(visit);
+    const connected = allItems.filter(item => item.allowed && item.connected);
+    const unavailable = allItems.filter(item => item.allowed && !item.connected);
+    const restricted = allItems.filter(item => !item.allowed);
+
     return {
       toolName: 'system_architecture_summary',
-      titleFa: 'نقشه معماری جامع، ساختار ماژول‌ها، تب‌ها، فرم‌ها و قابلیت‌های HSECORE',
+      titleFa: 'رجیستری زنده ساختار و پوشش ماژول‌های HSECORE',
       summary: [
-        `🏛️ **معماری جامع سامانه یکپارچه HSECORE:**`,
-        `۱. **ماژول‌ها و تب‌های عملیاتی سامانه (۲۴ ماژول یکپارچه):**`,
-        `   • داشبورد مدیریتی (Dashboard): تب‌های شاخص‌های کلیدی، نمودارهای TRIR/LTIFR، تقویم HSE، خلاصه وضعیت ایستگاه‌های کاری`,
-        `   • استرس گرمایی (Heat Stress): تب هواشناسی آنلاین، محاسبه دمای تر گوی‌سان (WBGT آفتاب و سایه طبق ISO 7243)، رژیم کار-استراحت، آلارم صوتی`,
-        `   • پروانه کار ایمن (PTW): تب‌های کار گرم، سرد، فضای بسته، ارتفاع، حفاری، ایزولاسیون LOTO، تست گاز و ارجاعات الکترونیکی`,
-        `   • واحد ایمنی (Safety Unit): تب بازرسی‌های کارگاهی، چک‌لیست‌های دوره‌ای، کمیته‌های حفاظت فنی و ایمنی ماشین‌آلات`,
-        `   • آتش‌نشانی و امداد (Fire Dept): تب بازرسی کپسول‌ها، فایرباکس، سناریوهای واکنش در شرایط اضطراری (ERP) و مانورها`,
-        `   • بهداشت و محیط زیست (Health & Env): تب‌های طب کار (معاینات ادواری و بدو استخدام)، ارگونومی، پایش عوامل زیان‌آور فیزیکی/شیمیایی، پسماند و پساب`,
-        `   • ارزیابی ریسک (Risk Assessment): تب متدولوژی‌های JSA, FMEA, HAZOP، ماتریس ۵×۵ و سلسله‌مراتب اقدامات کنترلی`,
-        `   • حوادث و شبه‌حوادث (Incidents): تب ثبت رخداد، ماتریس علل ریشه‌ای (RCA / Fishbone)، اقدامات اصلاحی (CAPA) و آمار خسارات`,
-        `   • اخطارها و ناهنجاری‌ها (Warnings): تب ثبت شرایط و اعمال ناایمن، تعیین مهلت رفع و پیگیری بازرسی‌ها`,
-        `   • عدم انطباق‌ها (Non-Conformances): تب ممیزی داخلی و خارجی، استانداردهای ISO 45001 / ISO 14001 و تاییدیه رفع`,
-        `   • آموزش و صلاحیت (Training): تب تقویم آموزشی سالیانه، ماتریس شایستگی، سوابق دوره‌ها و صدور گواهینامه`,
-        `   • تجهیزات حفاظت فردی (PPE): تب جدول استحقاق، انبارداری اقلام، تاریخ انقضا و فرم‌های تحویل به پرسنل`,
-        `   • پرونده پرسنلی (Personnel): تب مشخصات، سوابق سلامت، حوادث گذشته، جایگاه در چارت سازمانی و مدارک پیوست`,
-        `   • فرآیندها و گردش کار (BPMN): تب دیاگرام‌های فرآیندی استاندارد، کارتابل اسناد، امضاهای دیجیتال چندمرحله‌ای`,
-        `   • کتابخانه مستندات (Documents & RAG): تب خط‌مشی‌ها، آیین‌نامه‌ها، دستورالعمل‌های کاری و جستجوی معنایی هوش مصنوعی`,
-        `   • کاربران و نقش‌ها (User Management & RBAC): تب تعریف کاربران، نقش‌ها (مدیر، کارشناس، پزشک، ناظر) و حدود دسترسی`,
-        `   • تنظیمات سامانه و پشتیبان‌گیری (System Settings): تب پارامترهای سرور، پیکربندی هوش مصنوعی، پایگاه داده و بکاپ خودکار`,
-        `   • هشدارها و اعلان‌ها (Notifications): تب هشدارهای بلادرنگ کارتابل، رویدادهای بحرانی و اعلان‌های درون‌برنامه‌ای`,
-        `۲. **فرم‌های ثبت اطلاعات:**`,
-        `   • فرم صدور PTW، فرم گازسنجی، فرم ایزولاسیون مکانیکی/الکتریکی، فرم گزارش حادثه، فرم JSA، فرم معاینات طب کار، فرم تحویل PPE، فرم بازرسی آتش‌نشانی و فرم‌های ممیزی ۵S`,
-        `۳. **پایگاه داده و جداول:**`,
-        `   • بیش از ۲۵ جدول رابطه‌ای PostgreSQL شامل users, personnel, work_permits, incidents, risk_assessments, notifications, non_conformances, system_settings و audit_logs`,
-        `۴. **قابلیت‌های فعلی و آینده:**`,
-        `   • قابلیت‌های فعلی: همگام‌سازی آفلاین، موتور هوش مصنوعی محلی Ollama، جستجوی عمیق RAG، امضای دیجیتال و محاسبات فیزیک هواشناسی`,
-        `   • قابلیت‌های نقشه راه آینده: اتصال سنسورهای اینترنت اشیاء (IoT) برای گازسنجی آنلاین، هوش مصنوعی بینایی ماشین برای تشخیص PPE و پیش‌بینی ریسک حوادث`,
-      ].join('\n'),
+        `• تعداد ماژول‌های اصلی ثبت‌شده: ${modules.length}`,
+        `• تعداد زیرماژول‌ها و تب‌های ثبت‌شده: ${allItems.length - modules.length}`,
+        `• بخش‌های دارای منبع داده متصل و مجاز: ${connected.length}`,
+        `• بخش‌های مجاز بدون Adapter داده: ${unavailable.length}`,
+        `• بخش‌های خارج از سطح دسترسی کاربر: ${restricted.length}`,
+        `• فهرست ماژول‌ها: ${modules.map(item => item.moduleNameFa).join('، ')}`,
+        'این گزارش از رجیستری واقعی و وضعیت Adapterهای خواندن ساخته شده است؛ قابلیت‌های آینده یا داده‌های فاقد اتصال در آن به‌عنوان قابلیت موجود معرفی نمی‌شوند.',
+      ].join('\\n'),
       data: {
-        totalModules: 24,
-        hasBPMN: true,
-        hasIoTSupport: true,
-        databaseType: 'PostgreSQL with Drizzle ORM',
-        offlineSupport: true,
+        totalModules: modules.length,
+        totalSubmodulesAndTabs: allItems.length - modules.length,
+        connectedAccessibleSections: connected.length,
+        unavailableAccessibleSections: unavailable.length,
+        restrictedSections: restricted.length,
+        modules: modules.map(item => ({
+          moduleId: item.moduleId,
+          moduleNameFa: item.moduleNameFa,
+          connected: item.connected,
+          allowed: item.allowed,
+          tools: item.tools,
+        })),
       },
       timestamp: new Date().toISOString(),
     };
