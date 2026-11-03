@@ -642,14 +642,19 @@ export class AISessionService {
     }>
   ): Promise<{ imported: number }> {
     if (!Array.isArray(payload) || payload.length === 0) return { imported: 0 };
+    const batch = payload.slice(0, 30);
+    if (batch.some(item => !item?.id || !String(item.id).trim())) {
+      throw new Error('انتقال تاریخچه به شناسه پایدار برای هر گفتگو نیاز دارد؛ نسخه محلی حفظ شد.');
+    }
     let imported = 0;
-    for (const item of payload.slice(0, 30)) {
+    for (const item of batch) {
       const session = await this.createSession(user, item.title, item.assistantId || 'GENERAL_HSE', item.id);
       const msgs = Array.isArray(item.messages) ? item.messages.slice(0, 100) : [];
-      for (const m of msgs) {
+      for (let messageIndex = 0; messageIndex < msgs.length; messageIndex++) {
+        const m = msgs[messageIndex];
         if (!m.content || (m.role !== 'user' && m.role !== 'assistant')) continue;
         await this.appendMessage(session.id, user, {
-          id: m.id,
+          id: m.id || `legacy-${session.id}-${messageIndex}`.slice(0, 200),
           role: m.role,
           content: String(m.content).slice(0, 50000),
           toolsUsed: m.toolsUsed,
