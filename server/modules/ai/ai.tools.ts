@@ -876,7 +876,7 @@ export class AIToolsRegistry {
         `• بخش‌های خارج از سطح دسترسی کاربر: ${restricted.length}`,
         `• فهرست ماژول‌ها: ${modules.map(item => item.moduleNameFa).join('، ')}`,
         'این گزارش از رجیستری واقعی و وضعیت Adapterهای خواندن ساخته شده است؛ قابلیت‌های آینده یا داده‌های فاقد اتصال در آن به‌عنوان قابلیت موجود معرفی نمی‌شوند.',
-      ].join('\\n'),
+      ].join('\n'),
       data: {
         totalModules: modules.length,
         totalSubmodulesAndTabs: allItems.length - modules.length,
