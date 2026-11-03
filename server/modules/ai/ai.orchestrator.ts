@@ -454,7 +454,7 @@ export class AIOrchestrator {
           selectedCategories.add('HEALTH');
           selectedCategories.add('OCCUPATIONAL_HEALTH');
         }
-        if (wants('incidents', 'warnings', 'five_s', 'five-s', 'safety-unit', 'safety-checklists')) {
+        if (wants('incidents', 'warnings', 'five_s', 'five-s', 'safety-unit', 'safety-checklists', 'fire', 'fire-dept', 'ppe', 'risks', 'risk')) {
           selectedCategories.add('SAFETY');
           selectedCategories.add('INCIDENT');
           selectedCategories.add('5S');
