@@ -361,7 +361,7 @@ cmd_swap() {
     return 1
   fi
   # Never truncate or reformat an existing /swapfile or another administrator's file.
-  if [[ -e "${swap_file}" ]]; then
+  if [[ -e "${swap_file}" || -L "${swap_file}" ]]; then
     if swapon --show=NAME --noheadings 2>/dev/null | grep -Fxq "${swap_file}"; then
       echo -e "${YELLOW}[!] HSECORE swapfile already exists and is active; refusing to modify it.${NC}"
       return 0
