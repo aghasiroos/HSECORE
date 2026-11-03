@@ -80,6 +80,9 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string>('');
   const [searchSessionQuery, setSearchSessionQuery] = useState<string>('');
+  const [moduleCatalog, setModuleCatalog] = useState<Array<{ moduleId: string; moduleNameFa: string; connected: boolean; notes?: string }>>([]);
+  const [selectedModules, setSelectedModules] = useState<string[]>([]);
+  const [showModulePicker, setShowModulePicker] = useState(false);
 
   const activeSession = sessions.find(s => s.id === activeSessionId) || sessions[0];
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -216,6 +219,9 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
   useEffect(() => {
     loadSessionsFromServer();
     void refreshInstalledModels();
+    void authFetch('/api/v1/ai/coverage').then(response => response.json()).then(data => {
+      if (data?.success && Array.isArray(data.data)) setModuleCatalog(data.data);
+    }).catch(() => setModuleCatalog([]));
     // Runtime can be enabled or models can be installed while this module is open.
     // Refresh from the live backend inventory without requiring a page reload.
     const refreshTimer = window.setInterval(() => { void refreshInstalledModels(); }, 30000);
@@ -361,6 +367,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
     }
 
     setInputMessage('');
+    setShowModulePicker(false);
 
     const userMsg: ChatMessage = {
       id: `msg-${Date.now()}`,
@@ -395,6 +402,8 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
     let partialAssistantId = '';
     let partialResponseModel = selectedModel;
     let partialDurationMs: number | undefined;
+    let responseToolsUsed: string[] = [];
+    let responseCitations: string[] = [];
 
     try {
       const historyPayload = updatedMessages.slice(0, -1).slice(-6).map(m => ({
@@ -412,6 +421,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
           assistantId: 'GENERAL_HSE',
           history: historyPayload,
           model: selectedModel,
+          selectedModules,
           stream: true,
           num_ctx: selectedContext === 'auto' ? undefined : Number(selectedContext),
           contextTokens: selectedContext === 'auto' ? undefined : Number(selectedContext),
@@ -452,6 +462,8 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
         }
         if (payload.model) { responseModel = payload.model; partialResponseModel = responseModel; }
         if (payload.durationMs) { durationMs = payload.durationMs; partialDurationMs = durationMs; }
+        if (Array.isArray(payload.toolsUsed)) responseToolsUsed = payload.toolsUsed;
+        if (Array.isArray(payload.citations)) responseCitations = payload.citations;
         if (payload.error) streamError = payload.error;
       };
       while (true) {
@@ -467,12 +479,16 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
       if (streamError) throw new Error(streamError);
       if (!assistantText.trim()) throw new Error('پاسخی از موتور هوش مصنوعی دریافت نشد.');
 
+      setSessions(prev => prev.map(s => s.id === sessionId ? {
+        ...s, messages: s.messages.map(m => m.id === assistantId ? { ...m, toolsUsed: responseToolsUsed, citations: responseCitations } : m),
+      } : s));
+
       try {
         await authFetch(`/api/v1/ai/sessions/${sessionId}/messages`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            role: 'assistant', content: assistantText, toolsUsed: [], citations: [],
+            role: 'assistant', content: assistantText, toolsUsed: responseToolsUsed, citations: responseCitations,
             durationMs, model: responseModel,
           }),
         });
@@ -763,9 +779,53 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
               </div>
             )}
             <div className="relative rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/90 shadow-sm focus-within:border-violet-500 focus-within:ring-2 focus-within:ring-violet-500/20 transition-all p-2.5">
+              {showModulePicker && (
+                <div className="mb-2 rounded-xl border border-violet-200 dark:border-violet-900/60 bg-white dark:bg-slate-900 p-3 shadow-sm max-h-64 overflow-y-auto">
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <p className="text-xs font-bold text-slate-700 dark:text-slate-200">انتخاب محدوده تحلیل</p>
+                    <span className="text-[10px] text-slate-400">انتخاب چندگانه با /</span>
+                  </div>
+                  <button type="button" onClick={() => { setSelectedModules(['all']); setInputMessage(''); setShowModulePicker(false); }}
+                    className="w-full text-right px-3 py-2 mb-1 rounded-lg text-xs font-bold bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-900/50">
+                    /ALL — تحلیل همه ماژول‌های دارای اتصال تحلیلی
+                  </button>
+                  {moduleCatalog.map(item => (
+                    <button key={item.moduleId} type="button"
+                      onClick={() => {
+                        setSelectedModules(current => {
+                          const next = current.includes(item.moduleId)
+                            ? current.filter(id => id !== item.moduleId)
+                            : [...current.filter(id => id !== 'all'), item.moduleId];
+                          return next;
+                        });
+                        setInputMessage('');
+                        setShowModulePicker(false);
+                      }}
+                      className="w-full flex items-center justify-between gap-2 text-right px-3 py-2 rounded-lg text-xs hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200">
+                      <span>{item.moduleNameFa}</span>
+                      <span className="text-[10px] text-slate-400">{item.connected ? 'اتصال تحلیلی' : 'پوشش محدود / بدون ابزار'}</span>
+                    </button>
+                  ))}
+                  {moduleCatalog.length === 0 && <p className="text-xs text-slate-400 py-2">فهرست ماژول‌ها در دسترس نیست.</p>}
+                </div>
+              )}
+              {selectedModules.length > 0 && (
+                <div className="mb-2 flex flex-wrap gap-1.5">
+                  {selectedModules.map(id => (
+                    <button key={id} type="button" onClick={() => setSelectedModules(current => current.filter(item => item !== id))}
+                      className="text-[10px] rounded-full px-2 py-1 bg-violet-100 dark:bg-violet-950/50 text-violet-700 dark:text-violet-300">
+                      {id === 'all' ? 'همه ماژول‌ها' : (moduleCatalog.find(item => item.moduleId === id)?.moduleNameFa || id)} ×
+                    </button>
+                  ))}
+                </div>
+              )}
               <textarea
                 value={inputMessage}
-                onChange={e => setInputMessage(e.target.value)}
+                onChange={e => {
+                  const value = e.target.value;
+                  setInputMessage(value);
+                  setShowModulePicker(value.trimStart().startsWith('/'));
+                }}
                 onKeyDown={handleKeyDown}
                 rows={2}
                 placeholder="پیام خود را بنویسید...‎"
