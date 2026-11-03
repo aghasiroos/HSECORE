@@ -361,10 +361,12 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  const flatModuleCatalog = moduleCatalog.flatMap(module => [
-    module,
-    ...(module.children || []),
-  ]);
+  const flatModuleCatalog: AIModulePickerItem[] = [];
+  const appendCatalogTree = (item: AIModulePickerItem) => {
+    flatModuleCatalog.push(item);
+    (item.children || []).forEach(appendCatalogTree);
+  };
+  moduleCatalog.forEach(appendCatalogTree);
 
   const handleComposerChange = (value: string) => {
     const slashMatch = value.match(/(?:^|\\s)\\/([^\\s]*)$/);
