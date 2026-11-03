@@ -375,6 +375,12 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
     if (slashMatch) {
       const query = slashMatch[1] || '';
       if (/^all$/i.test(query)) {
+        if (moduleCatalogLoading || moduleCatalog.length === 0) {
+          setInputMessage(value);
+          setModuleSearch('');
+          setModulePickerOpen(true);
+          return;
+        }
         setSelectedModuleIds(flatModuleCatalog.filter(item => item.allowed).map(item => item.moduleId));
         setInputMessage(value.replace(/(?:^|\s)\/all\s*$/i, '').trimStart());
         setModulePickerOpen(false);
