@@ -106,11 +106,18 @@ export class AIOrchestrator {
       if (executedToolNames.has(toolName)) return;
       const requiredPerm = toolPermissions[toolName];
       const isGlobalAdmin = isGlobalAdminUser(userContext);
+      const isMedicalTool = toolName === 'health_medical_summary' || toolName === 'nutrition_high_risk_summary';
 
+      // Medical data always requires an explicit health permission, including for global admins.
+      // Until every medical adapter enforces per-person scope, keep aggregate medical access
+      // restricted to global-scope users rather than risk leaking assigned-scope records.
+      if (isMedicalTool && (!requiredPerm || !checkUserHasPermission(userContext, requiredPerm))) {
+        return;
+      }
       if (sensitiveToolsRequiringGlobalScope.has(toolName) && !isGlobalAdmin) {
         return;
       }
-      if (requiredPerm && !isGlobalAdmin && !checkUserHasPermission(userContext, requiredPerm)) {
+      if (requiredPerm && !isMedicalTool && !isGlobalAdmin && !checkUserHasPermission(userContext, requiredPerm)) {
         return;
       }
 
@@ -487,7 +494,7 @@ export class AIOrchestrator {
       { moduleId: 'environment', moduleNameFa: 'محیط زیست و پسماند', connected: true, tools: toolMap.environment, assistantIds: ['GENERAL_HSE', 'ENVIRONMENT_WASTE'] },
       { moduleId: 'personnel', moduleNameFa: 'پرونده جامع پرسنل / ساختار سازمانی', connected: true, tools: toolMap.personnel, assistantIds: ['GENERAL_HSE'] },
       { moduleId: 'workflows', moduleNameFa: 'کارتابل اسناد و فرآیندها', connected: true, tools: toolMap.workflows, assistantIds: ['GENERAL_HSE'] },
-      { moduleId: 'documents', moduleNameFa: 'دستورالعمل‌ها و مستندات (RAG)', connected: true, tools: [], assistantIds: ['GENERAL_HSE'], notes: 'از طریق پایگاه دانش RAG' },
+      { moduleId: 'documents', moduleNameFa: 'دستورالعمل‌ها و مستندات (RAG)', connected: false, tools: [], assistantIds: ['GENERAL_HSE'], notes: 'بازیابی دانش RAG در مسیر جداگانه انجام می‌شود؛ ابزار خواندن مستقیم این ماژول در رجیستری ابزارها متصل نیست.' },
     ];
 
     return modules;
