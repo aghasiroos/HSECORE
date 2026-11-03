@@ -272,7 +272,7 @@ export class AIOrchestrator {
 
     // 16. Universal Deep Search across records when specific terms/names/codes are queried or no specific summary matched
     if (isGlobalAdminUser(userContext)) {
-      const deepSearchResult = await aiToolsRegistry.searchAcrossAllModules(message, true);
+      const deepSearchResult = await aiToolsRegistry.searchAcrossAllModules(message);
       if (deepSearchResult) {
         results.push(deepSearchResult);
       }
