@@ -50,6 +50,8 @@ export interface AIChatRequest {
   assistantId?: AIAssistantId;
   history?: Array<{ role: 'user' | 'assistant'; content: string }>;
   contextModule?: string;
+  /** Explicit module IDs selected from the server-provided AI coverage catalog. */
+  selectedModules?: string[];
   allowTools?: boolean;
   model?: string;
 }
