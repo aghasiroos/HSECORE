@@ -167,13 +167,15 @@ async function run() {
     const selectedModuleChat = await request('/chat', {
       method: 'POST',
       role: 'ADMIN',
-      body: { message: 'گزارش مدیریتی', selectedModules: ['ptw', 'incidents'], stream: false },
+      body: { message: 'گزارش مدیریتی', selectedModules: ['ptw', 'incidents'], model: 'test-model', contextTokens: 4096, stream: false },
     });
     const selectedModulePayload = await selectedModuleChat.json() as any;
     assert.equal(selectedModuleChat.status, 200);
     assert.equal(selectedModulePayload.success, true);
     assert.equal(chatCalls, 1);
     assert.deepEqual(capturedChatRequest.selectedModules, ['ptw', 'incidents']);
+    assert.equal(capturedChatRequest.model, 'test-model');
+    assert.equal(capturedChatRequest.contextTokens, 4096);
     assert.deepEqual(selectedModulePayload.toolsUsed, ['ماژول پروانه کار']);
     console.log('PASS selected modules are forwarded to the secure orchestrator and source metadata is returned');
 
