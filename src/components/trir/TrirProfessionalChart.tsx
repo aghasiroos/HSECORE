@@ -606,7 +606,7 @@ export default function TrirProfessionalChart({
         id="trir-analytical-chart"
       >
         {filteredData.length > 0 ? (
-          <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={300} debounce={50}>
+          <ResponsiveContainer width="100%" height={isExpanded ? 500 : 340} minWidth={0} minHeight={300} debounce={50}>
             <ComposedChart data={filteredData} margin={{ top: 20, right: 20, left: 10, bottom: 25 }}>
               <defs>
                 {/* Modern subtle gradient for bars */}

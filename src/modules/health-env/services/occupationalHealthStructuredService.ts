@@ -211,10 +211,7 @@ class OccupationalHealthStructuredService {
   };
 
   public reloadFromStorage = () => {
-    this.catalog = this.loadFromStorage(STORAGE_KEYS.CATALOG, INITIAL_MEDICAL_ITEMS_CATALOG);
-    this.referenceRules = this.loadFromStorage(STORAGE_KEYS.REFERENCES, INITIAL_REFERENCE_RULES);
-    this.examSessions = this.loadFromStorage(STORAGE_KEYS.EXAM_SESSIONS, []);
-    this.testResults = this.loadFromStorage(STORAGE_KEYS.TEST_RESULTS, []);
+    void this.reloadFromServer();
   };
 
   public async reloadFromServer() {
@@ -230,25 +227,28 @@ class OccupationalHealthStructuredService {
 
       if (Array.isArray(catalogs) && catalogs.length > 0) {
         this.catalog = catalogs;
-        try { localStorage.setItem(STORAGE_KEYS.CATALOG, JSON.stringify(catalogs)); } catch {}
+      } else if (this.catalog.length === 0) {
+        this.catalog = [...INITIAL_MEDICAL_ITEMS_CATALOG];
       }
 
       if (Array.isArray(rules) && rules.length > 0) {
         this.referenceRules = rules;
-        try { localStorage.setItem(STORAGE_KEYS.REFERENCES, JSON.stringify(rules)); } catch {}
+      } else if (this.referenceRules.length === 0) {
+        this.referenceRules = [...INITIAL_REFERENCE_RULES];
       }
 
       if (Array.isArray(sessions)) {
         this.examSessions = sessions;
-        try { localStorage.setItem(STORAGE_KEYS.EXAM_SESSIONS, JSON.stringify(sessions)); } catch {}
       }
 
       if (Array.isArray(results)) {
         this.testResults = results;
-        try { localStorage.setItem(STORAGE_KEYS.TEST_RESULTS, JSON.stringify(results)); } catch {}
       }
 
       if (typeof window !== 'undefined') {
+        try {
+          Object.values(STORAGE_KEYS).forEach(k => localStorage.removeItem(k));
+        } catch {}
         window.dispatchEvent(new Event('hse_occ_health_updated'));
       }
     } catch (e) {
@@ -259,49 +259,20 @@ class OccupationalHealthStructuredService {
   }
 
   private initData() {
-    this.catalog = this.loadFromStorage(STORAGE_KEYS.CATALOG, INITIAL_MEDICAL_ITEMS_CATALOG);
-    this.referenceRules = this.loadFromStorage(STORAGE_KEYS.REFERENCES, INITIAL_REFERENCE_RULES);
-    this.examSessions = this.loadFromStorage(STORAGE_KEYS.EXAM_SESSIONS, []);
-    this.testResults = this.loadFromStorage(STORAGE_KEYS.TEST_RESULTS, []);
-
-    // Purge year 1402 from structured records if existing
-    const has1402 = this.examSessions.some(s => Number(s.examYear) === 1402) || this.testResults.some(r => Number(r.examYear) === 1402);
-    if (has1402) {
-      this.examSessions = this.examSessions.filter(s => Number(s.examYear) !== 1402);
-      this.testResults = this.testResults.filter(r => Number(r.examYear) !== 1402);
-    }
-
-    // Purge any legacy default/mock seeded sessions and test results
-    const mockSessions = this.examSessions.filter(s => 
-      s.id.startsWith('sess_') || 
-      s.doctor?.includes('احمدرضا سهرابی') || 
-      s.medicalCenter?.includes('مرکز سلامت شغلی و طب کار صنعت نفت')
-    );
-    if (mockSessions.length > 0) {
-      const mockIds = new Set(mockSessions.map(s => s.id));
-      this.examSessions = this.examSessions.filter(s => !mockIds.has(s.id));
-      this.testResults = this.testResults.filter(r => !mockIds.has(r.examId || '') && !r.id.startsWith('res_EMP-') && !r.id.startsWith('res_'));
-    }
-
-    this.saveData();
-    this.reloadFromServer(); // Fetch from PG
+    this.catalog = [...INITIAL_MEDICAL_ITEMS_CATALOG];
+    this.referenceRules = [...INITIAL_REFERENCE_RULES];
+    this.examSessions = [];
+    this.testResults = [];
+    void this.reloadFromServer();
   }
 
   public saveData() {
-    if (typeof window === 'undefined') return;
     try {
-      localStorage.setItem(STORAGE_KEYS.CATALOG, JSON.stringify(this.catalog));
-      localStorage.setItem(STORAGE_KEYS.REFERENCES, JSON.stringify(this.referenceRules));
-      localStorage.setItem(STORAGE_KEYS.EXAM_SESSIONS, JSON.stringify(this.examSessions));
-      localStorage.setItem(STORAGE_KEYS.TEST_RESULTS, JSON.stringify(this.testResults));
-
-      // Sync to پایگاه داده in background
-      import('../../../services/apiDatabaseClient').then(({ apiDb }) => {
-        apiDb.saveSystemSetting(STORAGE_KEYS.CATALOG, this.catalog).catch(console.error);
-        apiDb.saveSystemSetting(STORAGE_KEYS.REFERENCES, this.referenceRules).catch(console.error);
-        apiDb.saveSystemSetting(STORAGE_KEYS.EXAM_SESSIONS, this.examSessions).catch(console.error);
-        apiDb.saveSystemSetting(STORAGE_KEYS.TEST_RESULTS, this.testResults).catch(console.error);
-      });
+      // Authoritatively persist to PostgreSQL central database
+      apiDb.saveSystemSetting(STORAGE_KEYS.CATALOG, this.catalog).catch(console.error);
+      apiDb.saveSystemSetting(STORAGE_KEYS.REFERENCES, this.referenceRules).catch(console.error);
+      apiDb.saveSystemSetting(STORAGE_KEYS.EXAM_SESSIONS, this.examSessions).catch(console.error);
+      apiDb.saveSystemSetting(STORAGE_KEYS.TEST_RESULTS, this.testResults).catch(console.error);
     } catch (_) {}
   }
 

@@ -2123,7 +2123,7 @@ export default function WarningsManager({
                   </div>
 
                   <div className="h-64 w-full min-w-0">
-                    <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={230} debounce={50}>
+                    <ResponsiveContainer width="100%" height={250} minWidth={0} minHeight={230} debounce={50}>
                       <BarChart data={aggByUnit} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#cbd5e1" opacity={0.3} />
                         <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#64748b' }} interval={0} angle={-30} textAnchor="end" />
@@ -2149,7 +2149,7 @@ export default function WarningsManager({
                   </div>
 
                   <div className="h-64 w-full min-w-0">
-                    <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={230} debounce={50}>
+                    <ResponsiveContainer width="100%" height={250} minWidth={0} minHeight={230} debounce={50}>
                       <BarChart data={aggByMonth} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#cbd5e1" opacity={0.3} />
                         <XAxis dataKey="month" tick={{ fontSize: 10, fill: '#64748b' }} interval={0} angle={-30} textAnchor="end" />

@@ -11,6 +11,7 @@ import { checkUserHasPermission, type UserContext } from '../../core/middleware/
 import { config } from '../../core/config.ts';
 import { localAIProvider } from './ai.local-provider.ts';
 import { AIMemoryEstimator } from './ai.memory-estimator.ts';
+import { aiModuleRegistry } from './ai.module-registry.ts';
 
 export class AIController {
   async getStatus(_req: Request, res: Response) {
@@ -46,6 +47,29 @@ export class AIController {
     }
   }
 
+  private logModelLifecycleAudit(
+    req: Request,
+    actionModelTag: string,
+    targetModelName: string,
+    startedAt: number,
+    success: boolean,
+  ) {
+    aiAuditService.log({
+      userId: req.user?.id,
+      userUid: req.user?.uid,
+      userName: req.user?.name || req.user?.username,
+      role: req.user?.role,
+      assistantId: 'GENERAL_HSE',
+      promptLength: targetModelName.length,
+      responseLength: 0,
+      toolsUsed: [],
+      durationMs: Date.now() - startedAt,
+      model: actionModelTag,
+      success,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
   async pullModel(req: Request, res: Response) {
     const { modelName } = req.body;
     if (!modelName || typeof modelName !== 'string') {
@@ -55,22 +79,10 @@ export class AIController {
     const startedAt = Date.now();
     try {
       const result = await aiService.pullModel(modelName);
-      aiAuditService.log({
-        userId: req.user?.id, userUid: req.user?.uid,
-        userName: req.user?.name || req.user?.username, role: req.user?.role,
-        assistantId: 'GENERAL_HSE', promptLength: modelName.length, responseLength: 0,
-        toolsUsed: [], durationMs: Date.now() - startedAt,
-        model: 'ollama-model-pull', success: result.success, timestamp: new Date().toISOString(),
-      });
+      this.logModelLifecycleAudit(req, 'ollama-model-pull', modelName, startedAt, result.success);
       return res.status(result.success ? 200 : 400).json(result);
     } catch (err: any) {
-      aiAuditService.log({
-        userId: req.user?.id, userUid: req.user?.uid,
-        userName: req.user?.name || req.user?.username, role: req.user?.role,
-        assistantId: 'GENERAL_HSE', promptLength: modelName.length, responseLength: 0,
-        toolsUsed: [], durationMs: Date.now() - startedAt,
-        model: 'ollama-model-pull', success: false, timestamp: new Date().toISOString(),
-      });
+      this.logModelLifecycleAudit(req, 'ollama-model-pull', modelName, startedAt, false);
       return res.status(500).json({ success: false, message: err.message || 'خطا در شروع بارگیری مدل' });
     }
   }
@@ -84,22 +96,10 @@ export class AIController {
     const startedAt = Date.now();
     try {
       const result = await aiService.deleteModel(modelName);
-      aiAuditService.log({
-        userId: req.user?.id, userUid: req.user?.uid,
-        userName: req.user?.name || req.user?.username, role: req.user?.role,
-        assistantId: 'GENERAL_HSE', promptLength: modelName.length, responseLength: 0,
-        toolsUsed: [], durationMs: Date.now() - startedAt,
-        model: 'ollama-model-delete', success: result.success, timestamp: new Date().toISOString(),
-      });
+      this.logModelLifecycleAudit(req, 'ollama-model-delete', modelName, startedAt, result.success);
       return res.status(result.success ? 200 : 400).json(result);
     } catch (err: any) {
-      aiAuditService.log({
-        userId: req.user?.id, userUid: req.user?.uid,
-        userName: req.user?.name || req.user?.username, role: req.user?.role,
-        assistantId: 'GENERAL_HSE', promptLength: modelName.length, responseLength: 0,
-        toolsUsed: [], durationMs: Date.now() - startedAt,
-        model: 'ollama-model-delete', success: false, timestamp: new Date().toISOString(),
-      });
+      this.logModelLifecycleAudit(req, 'ollama-model-delete', modelName, startedAt, false);
       return res.status(500).json({ success: false, message: err.message || 'خطا در حذف مدل' });
     }
   }
@@ -152,7 +152,7 @@ export class AIController {
         contextTokens: Number.isInteger(body.contextTokens) && body.contextTokens >= 1024 && body.contextTokens <= 32768
           ? body.contextTokens : undefined,
         signal: streaming ? abortController.signal : undefined,
-        allowTools: true,
+        allowTools: typeof body.allowTools === 'boolean' ? body.allowTools : true,
       }, user);
 
       if (streaming) {
@@ -526,6 +526,23 @@ export class AIController {
       return res.json({ success: true, data: coverage });
     } catch (err: any) {
       return res.status(500).json({ success: false, message: err.message || 'خطا در دریافت گزارش پوشش' });
+    }
+  }
+
+  async getModuleRegistry(req: Request, res: Response) {
+    try {
+      const grouped = aiModuleRegistry.getGroupedModules(req.user);
+      const modules = aiModuleRegistry.getAllModules();
+      return res.json({
+        success: true,
+        data: {
+          totalModules: modules.length,
+          groups: grouped,
+          modules,
+        },
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, message: err.message || 'خطا در دریافت رجیستری ماژول‌ها' });
     }
   }
 

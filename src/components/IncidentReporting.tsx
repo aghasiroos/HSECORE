@@ -1362,7 +1362,7 @@ export default function IncidentReporting({ isFa, currentUser }: IncidentReporti
           </h2>
 
           <div className="h-80 w-full min-w-0">
-            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={280} debounce={50}>
+            <ResponsiveContainer width="100%" height={310} minWidth={0} minHeight={280} debounce={50}>
               <PieChart>
                 <Pie data={categoryChartData} cx="50%" cy="50%" outerRadius={110} dataKey="value" label>
                   {categoryChartData.map((entry, index) => (

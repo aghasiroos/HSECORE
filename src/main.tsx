@@ -36,8 +36,14 @@ axios.interceptors.response.use(
 // Global Unhandled Rejection safety handler for seamless user experience
 if (typeof window !== 'undefined') {
   window.addEventListener('unhandledrejection', (event) => {
-    if (event.reason?.response?.status === 401 || event.reason?.message?.includes('401')) {
-      event.preventDefault(); // Prevent noisy uncaught error overlay for 401 auth rejections
+    const msg = String(event.reason?.message || event.reason || '');
+    if (
+      event.reason?.response?.status === 401 ||
+      msg.includes('401') ||
+      msg.includes('WebSocket closed without opened') ||
+      msg.includes('failed to connect to websocket')
+    ) {
+      event.preventDefault(); // Prevent noisy uncaught error overlay for 401 and sandbox HMR socket closures
     }
   });
 }

@@ -56,6 +56,35 @@ export function isExplicitAllModulesCommand(message: string): boolean {
   return /(?:^|\s)\/\s*all(?:\s|$)/i.test(String(message || '').trim());
 }
 
+const ALL_SCOPE_PHRASES = [
+  'گزارش کلی سامانه',
+  'گزارش جامع سامانه',
+  'تحلیل کلی سامانه',
+  'تحلیل جامع سامانه',
+  'عملکرد کل سامانه',
+  'تمام ماژول های سامانه',
+  'همه ماژول های سامانه',
+  'گزارش همه ماژول ها',
+  'overall system report',
+  'system-wide analysis',
+  'all modules',
+  'همه ماژول ها',
+  'تمام ماژول ها',
+  'کل سامانه',
+  'گزارش کل سامانه',
+  'تحلیل کل سامانه',
+  'گزارش کلی',
+  'تحلیل کلی',
+  'گزارش جامع',
+  'تحلیل جامع',
+].map(normalizePersianText);
+
+function isAllModulesScopeRequest(rawMessage: string, normalizedMessage: string, selectedModules: Set<string>): boolean {
+  if (selectedModules.has('all') || isExplicitAllModulesCommand(rawMessage)) return true;
+  if (selectedModules.size > 0) return false;
+  return ALL_SCOPE_PHRASES.some(term => normalizedMessage.includes(term));
+}
+
 const ALL_MODULE_TOOLS = [
   'heat_weather_summary',
   'ptw_summary',
@@ -120,16 +149,7 @@ export class AIOrchestrator {
 
     const selected = new Set(selectedModules.map(id => String(id).trim().toLowerCase()).filter(Boolean));
     const norm = normalizePersianText(message);
-    const allScopeTerms = [
-      'گزارش کلی سامانه', 'گزارش جامع سامانه', 'تحلیل کلی سامانه',
-      'تحلیل جامع سامانه', 'عملکرد کل سامانه', 'تمام ماژول های سامانه',
-      'همه ماژول های سامانه', 'گزارش همه ماژول ها', 'overall system report',
-      'system-wide analysis', 'all modules', 'همه ماژول ها', 'تمام ماژول ها',
-      'کل سامانه', 'گزارش کل سامانه', 'تحلیل کل سامانه', 'گزارش کلی', 'تحلیل کلی', 'گزارش جامع', 'تحلیل جامع', 'همه ماژول ها', 'تمام ماژول ها',
-      'کل سامانه', 'گزارش کل سامانه', 'تحلیل کل سامانه', 'گزارش کلی', 'تحلیل کلی', 'گزارش جامع', 'تحلیل جامع',
-    ];
-    const hasExplicitAllCommand = isExplicitAllModulesCommand(message);
-    const selectAll = selected.has('all') || hasExplicitAllCommand || (selected.size === 0 && allScopeTerms.some(term => norm.includes(normalizePersianText(term))));
+    const selectAll = isAllModulesScopeRequest(message, norm, selected);
     const moduleAliases: Record<string, string[]> = {
       'dashboard': ['reports', 'non_conformances'],
       'reports': ['non_conformances'],
@@ -438,6 +458,59 @@ export class AIOrchestrator {
   }
 
   /**
+   * Plan and execute read-only domain tools and slash commands (`/` and `/ALL`)
+   */
+  async planAndExecuteTools(
+    message: string,
+    request: Partial<AIChatRequest> = {},
+    userContext?: UserContext,
+  ): Promise<{
+    isSlashCommand: boolean;
+    directResponse?: string;
+    toolResults: AIToolResult[];
+    toolsUsed: string[];
+    citations: string[];
+  }> {
+    const trimmed = String(message || '').trim();
+    if (trimmed === '/') {
+      const tree = await aiToolsRegistry.getModuleHierarchyTree(userContext);
+      return {
+        isSlashCommand: true,
+        directResponse: tree.summary,
+        toolResults: [tree],
+        toolsUsed: [tree.titleFa],
+        citations: [tree.titleFa],
+      };
+    }
+
+    const selectedModules = Array.isArray(request.selectedModules) ? request.selectedModules : [];
+    const allowTools = request.allowTools ?? true;
+    const toolResults: AIToolResult[] = [];
+
+    if (isExplicitAllModulesCommand(trimmed) && allowTools) {
+      const crossAnalysis = await aiToolsRegistry.getAllModulesCrossAnalysis(userContext);
+      toolResults.push(crossAnalysis);
+    }
+
+    const resolved = await this.resolveToolsToExecute(trimmed, allowTools, userContext, selectedModules);
+    for (const r of resolved) {
+      if (!toolResults.some(existing => existing.toolName === r.toolName)) {
+        toolResults.push(r);
+      }
+    }
+
+    const toolsUsed = toolResults.map(t => t.titleFa);
+    const citations = Array.from(new Set(toolsUsed));
+
+    return {
+      isSlashCommand: false,
+      toolResults,
+      toolsUsed,
+      citations,
+    };
+  }
+
+  /**
    * Main Processing Entry Point
    * Always operates as the Unified Comprehensive HSE & Legal References Consultant (GENERAL_HSE)
    */
@@ -474,13 +547,7 @@ export class AIOrchestrator {
     }
 
     const normalizedRequest = normalizePersianText(sanitized);
-    const hasExplicitAllCommand = isExplicitAllModulesCommand(sanitized);
-    const requestAllScope = selectedModules.includes('all') || hasExplicitAllCommand || (selectedModules.length === 0 && [
-      'گزارش کلی سامانه', 'گزارش جامع سامانه', 'تحلیل کلی سامانه',
-      'تحلیل جامع سامانه', 'عملکرد کل سامانه', 'تمام ماژول های سامانه',
-      'همه ماژول های سامانه', 'گزارش همه ماژول ها', 'overall system report',
-      'system-wide analysis', 'all modules',
-    ].some(term => normalizedRequest.includes(normalizePersianText(term))));
+    const requestAllScope = isAllModulesScopeRequest(sanitized, normalizedRequest, new Set(selectedModules));
     const toolResults = await this.resolveToolsToExecute(sanitized, request.allowTools ?? true, userContext, selectedModules);
     const toolsUsed = toolResults.map(t => t.titleFa);
     const citations: string[] = [

@@ -429,7 +429,7 @@ export const ReportCustomizableChart: React.FC<ReportCustomizableChartProps> = (
       {/* Chart Canvas */}
       <div className="w-full min-w-0" style={{ height: `${height}px` }}>
         {processedData.length > 0 ? (
-          <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={height - 20} debounce={50}>
+          <ResponsiveContainer width="100%" height={height} minWidth={0} minHeight={height - 20} debounce={50}>
             {chartType === 'bar' ? (
               <BarChart data={processedData} margin={{ top: 25, right: 15, left: -15, bottom: processedData.length > 5 ? 55 : 25 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" opacity={0.6} />

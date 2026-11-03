@@ -610,7 +610,7 @@ export const CustomizableChart: React.FC<CustomizableChartProps> = ({
         {/* 3. LINE CHART */}
         {chartType === 'line' && (
           <div className="w-full min-w-0 pt-4 pb-2" style={{ height: `${height}px` }}>
-            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={height || 200} debounce={50}>
+            <ResponsiveContainer width="100%" height={height || 220} minWidth={0} minHeight={height || 200} debounce={50}>
               <LineChart data={processedData} margin={{ top: 15, right: 15, left: -20, bottom: 25 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148, 163, 184, 0.2)" />
                 <XAxis
@@ -670,7 +670,7 @@ export const CustomizableChart: React.FC<CustomizableChartProps> = ({
         {/* 4. AREA / SURFACE GRADIENT CHART */}
         {chartType === 'area' && (
           <div className="w-full min-w-0 pt-4 pb-2" style={{ height: `${height}px` }}>
-            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={height || 200} debounce={50}>
+            <ResponsiveContainer width="100%" height={height || 220} minWidth={0} minHeight={height || 200} debounce={50}>
               <AreaChart data={processedData} margin={{ top: 15, right: 15, left: -20, bottom: 25 }}>
                 <defs>
                   <linearGradient id={`area-grad-${id || 'chart'}`} x1="0" y1="0" x2="0" y2="1">

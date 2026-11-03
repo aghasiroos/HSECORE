@@ -204,7 +204,7 @@ export default function PtwAuditYearlyTrends({
         
         {/* Yearly Multi-Bar / Line / Area / Radar Chart (2 Cols) */}
         <div className="lg:col-span-2 h-76 w-full min-w-0">
-          <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={280} debounce={50}>
+          <ResponsiveContainer width="100%" height={295} minWidth={0} minHeight={280} debounce={50}>
             {yearlyView === 'bar' ? (
               <BarChart data={yearlyTrends} margin={{ top: 20, right: 10, left: 0, bottom: 0 }}>
                 {chartSettings.showGrid && <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" opacity={0.5} />}
@@ -477,7 +477,7 @@ export default function PtwAuditYearlyTrends({
           </div>
 
           <div className="h-56 w-full min-w-0">
-            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={210} debounce={50}>
+            <ResponsiveContainer width="100%" height={220} minWidth={0} minHeight={210} debounce={50}>
               {monthlyView === 'area' ? (
                 <AreaChart data={monthlyTrends}>
                   <defs>

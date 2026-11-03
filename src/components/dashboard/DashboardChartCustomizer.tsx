@@ -491,7 +491,7 @@ export const DashboardChartCustomizer: React.FC<DashboardChartCustomizerProps> =
       {/* Main Chart Canvas */}
       <div className="h-44 sm:h-52 w-full min-w-0 flex-1" id="dashboard-trend-chart-compact">
         {chartData.length > 0 ? (
-          <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={160} debounce={50}>
+          <ResponsiveContainer width="100%" height={192} minWidth={0} minHeight={160} debounce={50}>
             {config.chartType === 'area' && config.metric !== 'dual' ? (
               <AreaChart data={chartData} margin={{ top: 15, right: 10, left: -20, bottom: 0 }}>
                 <defs>

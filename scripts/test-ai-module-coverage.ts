@@ -111,7 +111,7 @@ async function runTests() {
   console.log('PASS Personnel 360° dossier enforces strict RBAC and handles missing cases');
 
   // Test 9: Orchestrator module coverage output
-  const coverage = aiOrchestrator.getModuleCoverage(adminUser);
+  const coverage = await aiOrchestrator.getModuleCoverage(adminUser);
   assert.ok(coverage.length >= 20, 'Coverage report must reflect all registered modules');
   console.log(`PASS AI Orchestrator getModuleCoverage reports 100% dynamic coverage (${coverage.length} modules)`);
 

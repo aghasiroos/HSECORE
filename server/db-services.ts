@@ -1578,40 +1578,416 @@ export async function clearAllSafetyWarnings(): Promise<number> {
 // ============================================================================
 // 8. FIRE EQUIPMENT & 5S AUDITS
 // ============================================================================
+function normalizeEquipCodeValue(val: any): string {
+  return String(val ?? '').trim();
+}
+
+function extractCanonicalEquipmentCode(data: any): string {
+  const candidates = [
+    data?.code,
+    data?.assetCode,
+    data?.specializedCode,
+    data?.fireBoxNo,
+    data?.foamStationNo,
+    data?.tag,
+    data?.id,
+  ];
+  for (const c of candidates) {
+    const clean = normalizeEquipCodeValue(c);
+    if (clean) return clean;
+  }
+  return '';
+}
+
+function buildComposedLocationString(data: any): string {
+  const details = data?.locationDetails && typeof data.locationDetails === 'object' ? data.locationDetails : {};
+  const complex = normalizeEquipCodeValue(details.complex ?? data?.complex);
+  const unit = normalizeEquipCodeValue(details.unit ?? data?.unit);
+  const direction = normalizeEquipCodeValue(details.direction ?? data?.direction);
+  const floor = normalizeEquipCodeValue(details.floor ?? data?.floor);
+  const exactLocation = normalizeEquipCodeValue(details.exactLocation ?? data?.exactLocation);
+
+  const parts = [
+    complex,
+    unit,
+    direction,
+    floor ? (floor === 'همکف' || floor === 'فاقد طبقه' || floor.startsWith('طبقه') ? floor : `طبقه ${floor}`) : '',
+    exactLocation,
+  ].filter(Boolean);
+
+  if (parts.length > 0) {
+    return parts.join(' - ');
+  }
+  return normalizeEquipCodeValue(data?.location) || 'نامشخص';
+}
+
+function mapFireEquipmentRowToDto(row: any): any {
+  let extra: Record<string, any> = {};
+  if (row.extraData && typeof row.extraData === 'object') {
+    extra = { ...(row.extraData as Record<string, any>) };
+  } else if (typeof row.notes === 'string' && row.notes.trim().startsWith('{')) {
+    try {
+      extra = JSON.parse(row.notes);
+    } catch {
+      extra = {};
+    }
+  }
+
+  const canonicalCode = normalizeEquipCodeValue(extra.code || row.code || extra.id || row.id);
+  const frontendId = normalizeEquipCodeValue(extra.id || row.code || String(row.id));
+  const category = normalizeEquipCodeValue(extra.category || row.equipmentType || 'Fire Extinguisher Capsol');
+
+  const locationDetails = {
+    complex: normalizeEquipCodeValue(extra.locationDetails?.complex ?? extra.complex ?? ''),
+    unit: normalizeEquipCodeValue(extra.locationDetails?.unit ?? extra.unit ?? ''),
+    direction: normalizeEquipCodeValue(extra.locationDetails?.direction ?? extra.direction ?? ''),
+    floor: normalizeEquipCodeValue(extra.locationDetails?.floor ?? extra.floor ?? ''),
+    exactLocation: normalizeEquipCodeValue(extra.locationDetails?.exactLocation ?? extra.exactLocation ?? ''),
+  };
+
+  const composedLocation =
+    normalizeEquipCodeValue(extra.location) ||
+    normalizeEquipCodeValue(row.location) ||
+    buildComposedLocationString({ ...extra, locationDetails });
+
+  const operationalStatus =
+    normalizeEquipCodeValue(extra.operationalStatus) ||
+    (row.status === 'OUT_OF_SERVICE'
+      ? 'غیرفعال'
+      : row.status === 'NEEDS_RECHARGE'
+      ? 'انتقال جهت شارژ'
+      : row.status === 'IN_TEST'
+      ? 'انتقال جهت تست'
+      : 'فعال');
+
+  const isTemporaryOut =
+    operationalStatus === 'انتقال جهت شارژ' || operationalStatus === 'انتقال جهت تست';
+
+  return {
+    ...extra,
+    dbId: row.id,
+    id: frontendId,
+    code: canonicalCode,
+    category,
+    equipmentType: row.equipmentType || category,
+    location: composedLocation,
+    complex: locationDetails.complex,
+    unit: locationDetails.unit,
+    direction: locationDetails.direction,
+    floor: locationDetails.floor,
+    exactLocation: locationDetails.exactLocation,
+    locationDetails,
+    primaryLocation: extra.primaryLocation || composedLocation,
+    primaryLocationDetails: extra.primaryLocationDetails || locationDetails,
+    operationalStatus,
+    isTemporaryOut,
+    currentDestination: extra.currentDestination || '',
+    statusHistory: Array.isArray(extra.statusHistory) ? extra.statusHistory : [],
+    inspections: Array.isArray(extra.inspections) ? extra.inspections : [],
+    defects: Array.isArray(extra.defects) ? extra.defects : [],
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
 export async function getAllFireEquipment() {
   try {
-    return await withDbRetry(() =>
-      db.select().from(schema.fireEquipment).orderBy(schema.fireEquipment.code)
+    const rows = await withDbRetry(() =>
+      db.select().from(schema.fireEquipment).orderBy(desc(schema.fireEquipment.updatedAt))
     );
+    return rows.map(mapFireEquipmentRowToDto);
   } catch (error) {
     console.error('Failed to fetch fire equipment:', error);
     throw new Error('Failed to fetch fire equipment', { cause: error });
   }
 }
 
-export async function upsertFireEquipment(data: any) {
+export async function upsertFireEquipment(data: any, actorUsername: string = 'system') {
   try {
-    const res = await db
-      .insert(schema.fireEquipment)
-      .values(data)
-      .onConflictDoUpdate({
-        target: schema.fireEquipment.code,
-        set: { ...data, updatedAt: new Date() },
-      })
-      .returning();
-    return res[0];
-  } catch (error) {
+    const isCreateMode = Boolean(data?.__isCreate);
+    const canonicalCode = extractCanonicalEquipmentCode(data);
+    if (!canonicalCode) {
+      const err: any = new Error('کد یکتای تجهیز الزامی است.');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    // Load all existing records to check for cross-form or case-insensitive code collisions
+    const allRows = await withDbRetry(() => db.select().from(schema.fireEquipment));
+    const allDtos = allRows.map(mapFireEquipmentRowToDto);
+
+    const normalizedTargetCode = canonicalCode.toLowerCase();
+    const targetFrontendId = normalizeEquipCodeValue(data?.id || canonicalCode).toLowerCase();
+
+    const matchedExistingDto = allDtos.find((item) => {
+      const itemCodes = [
+        item.code,
+        item.id,
+        item.assetCode,
+        item.specializedCode,
+        item.fireBoxNo,
+        item.foamStationNo,
+        item.tag,
+      ]
+        .map((v) => normalizeEquipCodeValue(v).toLowerCase())
+        .filter(Boolean);
+
+      return itemCodes.includes(normalizedTargetCode) || (targetFrontendId && itemCodes.includes(targetFrontendId));
+    });
+
+    if (isCreateMode && matchedExistingDto) {
+      const conflictErr: any = new Error(
+        `تجهیز با کد/شناسه «${canonicalCode}» قبلاً در فرم «${matchedExistingDto.category}» (${matchedExistingDto.location || 'بدون موقعیت'}) ثبت شده است.`
+      );
+      conflictErr.statusCode = 409;
+      conflictErr.code = 'DUPLICATE_EQUIPMENT_CODE';
+      conflictErr.existingRecord = matchedExistingDto;
+      throw conflictErr;
+    }
+
+    // Even in update mode, ensure user didn't change the secondary code (assetCode/tag/etc.) to collide with a DIFFERENT existing equipment
+    if (!isCreateMode && matchedExistingDto) {
+      const editingId = normalizeEquipCodeValue(data?.__editingId || data?.id).toLowerCase();
+      if (
+        editingId &&
+        normalizeEquipCodeValue(matchedExistingDto.id).toLowerCase() !== editingId &&
+        normalizeEquipCodeValue(matchedExistingDto.code).toLowerCase() !== editingId
+      ) {
+        const conflictErr: any = new Error(
+          `کد واردشده «${canonicalCode}» متعلق به تجهیز دیگری با شناسه «${matchedExistingDto.id}» در فرم «${matchedExistingDto.category}» است.`
+        );
+        conflictErr.statusCode = 409;
+        conflictErr.code = 'DUPLICATE_EQUIPMENT_CODE';
+        conflictErr.existingRecord = matchedExistingDto;
+        throw conflictErr;
+      }
+    }
+
+    const existingRow = matchedExistingDto
+      ? allRows.find((r) => r.id === matchedExistingDto.dbId)
+      : undefined;
+    const existingDto = matchedExistingDto || null;
+
+    const locationDetails = {
+      complex: normalizeEquipCodeValue(data?.locationDetails?.complex ?? data?.complex ?? existingDto?.locationDetails?.complex ?? ''),
+      unit: normalizeEquipCodeValue(data?.locationDetails?.unit ?? data?.unit ?? existingDto?.locationDetails?.unit ?? ''),
+      direction: normalizeEquipCodeValue(data?.locationDetails?.direction ?? data?.direction ?? existingDto?.locationDetails?.direction ?? ''),
+      floor: normalizeEquipCodeValue(data?.locationDetails?.floor ?? data?.floor ?? existingDto?.locationDetails?.floor ?? ''),
+      exactLocation: normalizeEquipCodeValue(data?.locationDetails?.exactLocation ?? data?.exactLocation ?? existingDto?.locationDetails?.exactLocation ?? ''),
+    };
+
+    const composedLocation = buildComposedLocationString({
+      ...existingDto,
+      ...data,
+      locationDetails,
+    });
+
+    const operationalStatus =
+      normalizeEquipCodeValue(data?.operationalStatus) ||
+      existingDto?.operationalStatus ||
+      'فعال';
+
+    const isTemporaryOut =
+      operationalStatus === 'انتقال جهت شارژ' || operationalStatus === 'انتقال جهت تست';
+
+    // Preserve primary location when equipment is temporarily transferred out
+    const primaryLocation =
+      !isTemporaryOut
+        ? composedLocation
+        : normalizeEquipCodeValue(data?.primaryLocation || existingDto?.primaryLocation || composedLocation);
+
+    const primaryLocationDetails =
+      !isTemporaryOut
+        ? locationDetails
+        : data?.primaryLocationDetails || existingDto?.primaryLocationDetails || locationDetails;
+
+    // Merge and preserve statusHistory without losing prior entries
+    const prevStatusHistory = Array.isArray(existingDto?.statusHistory) ? existingDto.statusHistory : [];
+    let nextStatusHistory = Array.isArray(data?.statusHistory) ? data.statusHistory : [...prevStatusHistory];
+    if (prevStatusHistory.length > 0 && nextStatusHistory.length < prevStatusHistory.length) {
+      const existingIds = new Set(nextStatusHistory.map((h: any) => h.id));
+      const merged = [...prevStatusHistory];
+      for (const entry of nextStatusHistory) {
+        if (!existingIds.has(entry.id)) merged.push(entry);
+      }
+      nextStatusHistory = merged;
+    }
+
+    // If operational status changed or this is a new registration with no status history, ensure an entry is recorded
+    const statusChanged = existingDto && existingDto.operationalStatus !== operationalStatus;
+    if ((isCreateMode && nextStatusHistory.length === 0) || (statusChanged && nextStatusHistory.length === prevStatusHistory.length)) {
+      nextStatusHistory = [
+        {
+          id: `st-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          status: operationalStatus,
+          previousStatus: existingDto?.operationalStatus || null,
+          changeDate: data?.statusChangeMeta?.changeDate || new Date().toLocaleDateString('fa-IR'),
+          reason:
+            data?.statusChangeMeta?.reason ||
+            (isCreateMode ? 'ثبت اولیه تجهیز در سامانه' : `تغییر وضعیت به ${operationalStatus}`),
+          notes: data?.statusChangeMeta?.notes || '',
+          previousLocation: data?.statusChangeMeta?.previousLocation || existingDto?.location || composedLocation,
+          destinationLocation:
+            data?.statusChangeMeta?.destinationLocation ||
+            (isTemporaryOut ? data?.currentDestination || '' : composedLocation),
+          recordedBy: data?.statusChangeMeta?.recordedBy || actorUsername || 'کارشناس آتش‌نشانی',
+          isReturnToService: Boolean(data?.statusChangeMeta?.isReturnToService),
+          timestamp: new Date().toISOString(),
+        },
+        ...nextStatusHistory,
+      ];
+    }
+
+    // Preserve inspections and defects unless explicitly updated
+    const inspections = Array.isArray(data?.inspections)
+      ? data.inspections
+      : Array.isArray(existingDto?.inspections)
+      ? existingDto.inspections
+      : [];
+
+    const defects = Array.isArray(data?.defects)
+      ? data.defects
+      : Array.isArray(existingDto?.defects)
+      ? existingDto.defects
+      : [];
+
+    const frontendId = normalizeEquipCodeValue(data?.id || existingDto?.id || canonicalCode);
+    const category = normalizeEquipCodeValue(data?.category || existingDto?.category || data?.equipmentType || 'Fire Extinguisher Capsol');
+
+    const cleanExtra: Record<string, any> = {
+      ...(existingDto || {}),
+      ...data,
+      id: frontendId,
+      code: canonicalCode,
+      category,
+      location: composedLocation,
+      complex: locationDetails.complex,
+      unit: locationDetails.unit,
+      direction: locationDetails.direction,
+      floor: locationDetails.floor,
+      exactLocation: locationDetails.exactLocation,
+      locationDetails,
+      primaryLocation,
+      primaryLocationDetails,
+      operationalStatus,
+      isTemporaryOut,
+      statusHistory: nextStatusHistory,
+      inspections,
+      defects,
+    };
+    delete cleanExtra.__isCreate;
+    delete cleanExtra.__editingId;
+    delete cleanExtra.statusChangeMeta;
+    delete cleanExtra.dbId;
+
+    const dbStatus =
+      operationalStatus === 'غیرفعال'
+        ? 'OUT_OF_SERVICE'
+        : operationalStatus === 'انتقال جهت شارژ'
+        ? 'NEEDS_RECHARGE'
+        : operationalStatus === 'انتقال جهت تست'
+        ? 'IN_TEST'
+        : 'SERVICEABLE';
+
+    const dbValues: any = {
+      code: existingRow ? existingRow.code : canonicalCode,
+      equipmentType: category,
+      location: composedLocation,
+      capacity: data?.weight ? `${data.weight} kg` : data?.size ? String(data.size) : existingRow?.capacity || null,
+      manufacturingYear:
+        data?.buildYear && !isNaN(Number(data.buildYear))
+          ? Number(data.buildYear)
+          : existingRow?.manufacturingYear || null,
+      status: dbStatus,
+      pressureStatus: normalizeEquipCodeValue(data?.gaugeStatus || data?.standbyStatus || existingRow?.pressureStatus || 'NORMAL'),
+      notes: normalizeEquipCodeValue(data?.description || data?.notes || ''),
+      extraData: cleanExtra,
+      updatedAt: new Date(),
+    };
+
+    let savedRow: any;
+    if (existingRow) {
+      // Allow updating code if it changed and didn't conflict
+      dbValues.code = canonicalCode;
+      const res = await withDbRetry(() =>
+        db
+          .update(schema.fireEquipment)
+          .set(dbValues)
+          .where(eq(schema.fireEquipment.id, existingRow.id))
+          .returning()
+      );
+      savedRow = res[0];
+    } else {
+      const res = await withDbRetry(() =>
+        db
+          .insert(schema.fireEquipment)
+          .values(dbValues)
+          .onConflictDoUpdate({
+            target: schema.fireEquipment.code,
+            set: dbValues,
+          })
+          .returning()
+      );
+      savedRow = res[0];
+    }
+
+    const dto = mapFireEquipmentRowToDto(savedRow);
+
+    await logAudit({
+      action: existingRow ? (statusChanged ? 'STATUS_CHANGE_FIRE_EQUIPMENT' : 'UPDATE_FIRE_EQUIPMENT') : 'CREATE_FIRE_EQUIPMENT',
+      entityType: 'FIRE_EQUIPMENT',
+      entityId: dto.code || dto.id,
+      details: {
+        id: dto.id,
+        code: dto.code,
+        category: dto.category,
+        location: dto.location,
+        operationalStatus: dto.operationalStatus,
+        actor: actorUsername,
+      },
+    }).catch(() => {});
+
+    return dto;
+  } catch (error: any) {
     console.error('Failed to upsert fire equipment:', error);
-    throw new Error('Failed to upsert fire equipment', { cause: error });
+    if (error?.statusCode) {
+      throw error;
+    }
+    throw new Error(error?.message || 'Failed to upsert fire equipment', { cause: error });
   }
 }
 
-export async function deleteFireEquipment(idOrCode: string | number) {
+export async function deleteFireEquipment(idOrCode: string | number, actorUsername: string = 'system') {
   try {
+    const cleanTarget = String(idOrCode).trim();
+    const allRows = await withDbRetry(() => db.select().from(schema.fireEquipment));
+    const matchedRow = allRows.find((r) => {
+      const dto = mapFireEquipmentRowToDto(r);
+      return (
+        String(r.id) === cleanTarget ||
+        r.code === cleanTarget ||
+        dto.id === cleanTarget ||
+        dto.code === cleanTarget
+      );
+    });
+
+    if (matchedRow) {
+      await withDbRetry(() =>
+        db.delete(schema.fireEquipment).where(eq(schema.fireEquipment.id, matchedRow.id))
+      );
+      await logAudit({
+        action: 'DELETE_FIRE_EQUIPMENT',
+        entityType: 'FIRE_EQUIPMENT',
+        entityId: matchedRow.code,
+        details: { idOrCode: cleanTarget, actor: actorUsername },
+      }).catch(() => {});
+      return true;
+    }
+
     const isNum = !isNaN(Number(idOrCode));
     const conditions = [];
     if (isNum) conditions.push(eq(schema.fireEquipment.id, Number(idOrCode)));
-    conditions.push(eq(schema.fireEquipment.code, String(idOrCode)));
+    conditions.push(eq(schema.fireEquipment.code, cleanTarget));
     await db.delete(schema.fireEquipment).where(or(...conditions));
     return true;
   } catch (error) {

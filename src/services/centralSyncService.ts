@@ -8,6 +8,8 @@ import { apiDb, getAuthToken } from './apiDatabaseClient';
 import { UserProfile, NotificationEntry, AuditLogEntry } from '../types';
 import { setSystemUsers } from '../utils/authHelper';
 import { dispatchGlobalDataMutation } from '../providers/WebSocketProvider';
+import { setInMemoryPersonnelList, purgeLegacyBrowserCache } from '../utils/personnelHelper';
+import { hydrateOrgConfigFromSettingsObject } from '../utils/orgHelper';
 
 export type SyncStatus = 'connected' | 'syncing' | 'offline' | 'error';
 
@@ -201,10 +203,10 @@ class CentralSyncService {
         if (d.personnel) {
           this.notifyDataUpdate('personnel', d.personnel);
           if (typeof window !== 'undefined' && Array.isArray(d.personnel)) {
-            import('../utils/personnelHelper').then(({ setInMemoryPersonnelList, purgeLegacyBrowserCache }) => {
+            try {
               purgeLegacyBrowserCache();
               setInMemoryPersonnelList(d.personnel);
-            }).catch(() => {});
+            } catch (_) {}
           }
         }
         if (d.medicalExams) this.notifyDataUpdate('medicalExams', d.medicalExams);
@@ -219,12 +221,12 @@ class CentralSyncService {
         if (d.settings) {
           this.notifyDataUpdate('settings', d.settings);
           if (typeof window !== 'undefined') {
-            import('../utils/orgHelper').then(({ hydrateOrgConfigFromSettingsObject }) => {
+            try {
               const settingsObj = Array.isArray(d.settings)
                 ? Object.fromEntries(d.settings.map((s: any) => [s.key, s.value]))
                 : d.settings;
               hydrateOrgConfigFromSettingsObject(settingsObj || {});
-            }).catch(() => {});
+            } catch (_) {}
           }
         }
 

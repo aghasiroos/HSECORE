@@ -40,6 +40,8 @@ async function startServer() {
     if (typeof runMigrations === 'function') {
       await runMigrations();
     }
+    const { preloadSettingsCache } = await import('./server/routes/settings.router.ts');
+    await preloadSettingsCache();
   } catch (err) {
     logger.error('Error running migrations:', err);
     throw err;

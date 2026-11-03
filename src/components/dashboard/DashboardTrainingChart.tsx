@@ -106,7 +106,7 @@ export const DashboardTrainingChart: React.FC<DashboardTrainingChartProps> = Rea
 
       {/* Bar Chart */}
       <div className="flex-1 min-h-[170px] w-full min-w-0">
-        <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={170} debounce={50}>
+        <ResponsiveContainer width="100%" height={170} minWidth={0} minHeight={170} debounce={50}>
           <BarChart data={chartData} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
             <XAxis dataKey="name" tick={{ fontSize: 9, fontWeight: 'bold' }} />
             <YAxis tick={{ fontSize: 9, fontWeight: 'bold' }} allowDecimals={false} />

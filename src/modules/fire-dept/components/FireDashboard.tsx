@@ -332,7 +332,7 @@ export default function FireDashboard({ language, equipment, onSelectCategory, o
         </div>
 
         <div className="h-64 w-full pt-2 min-w-0">
-          <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={240} debounce={50}>
+          <ResponsiveContainer width="100%" height={250} minWidth={0} minHeight={240} debounce={50}>
             {chartType === 'bar' ? (
               <BarChart data={categoryData} margin={{ top: 20, right: 10, left: -10, bottom: 25 }}>
                 <CartesianGrid strokeDasharray="3 3" opacity={0.15} />

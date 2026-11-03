@@ -300,9 +300,11 @@ export default function FireDeptModule({ language }: Props) {
             language={language}
             category={activeSection}
             data={equipment.filter(e => e.category === activeSection)}
+            allEquipment={equipment}
             onAdd={addEquipment}
             onUpdate={updateEquipment}
             onDelete={deleteEquipment}
+            onNavigateCategory={(targetCat) => setActiveSection(targetCat)}
           />
         )}
       </main>

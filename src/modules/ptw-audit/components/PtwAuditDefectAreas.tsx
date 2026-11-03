@@ -177,7 +177,7 @@ const DefectCardItem: React.FC<DefectCardItemProps> = ({
         </div>
       ) : viewMode === 'barHorizontal' ? (
         <div className="h-56 w-full flex-1 pt-1 min-h-[220px]">
-          <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={200} debounce={50}>
+          <ResponsiveContainer width="100%" height={220} minWidth={0} minHeight={200} debounce={50}>
             <BarChart 
               data={chartData} 
               layout="vertical"
@@ -206,7 +206,7 @@ const DefectCardItem: React.FC<DefectCardItemProps> = ({
         </div>
       ) : (
         <div className="h-56 w-full flex-1 pt-1 min-h-[220px]">
-          <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={200} debounce={50}>
+          <ResponsiveContainer width="100%" height={220} minWidth={0} minHeight={200} debounce={50}>
             <BarChart 
               data={chartData} 
               margin={{ top: 15, right: 10, left: 0, bottom: 20 }}

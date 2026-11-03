@@ -563,6 +563,39 @@ async function ensureSchemaColumnsAndTables() {
     console.warn('[Migration] AI tables creation notice:', err?.message || err);
   }
 
+  // Ensure fire_equipment table and extra_data JSONB column exist for structured Fire Dept equipment records
+  try {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS fire_equipment (
+        id SERIAL PRIMARY KEY,
+        code TEXT NOT NULL UNIQUE,
+        equipment_type TEXT NOT NULL,
+        location TEXT NOT NULL,
+        unit_id INTEGER,
+        capacity TEXT,
+        manufacturing_year INTEGER,
+        last_inspection_date TEXT,
+        next_inspection_due TEXT,
+        hydrostatic_test_due TEXT,
+        status TEXT DEFAULT 'SERVICEABLE' NOT NULL,
+        pressure_status TEXT DEFAULT 'NORMAL',
+        notes TEXT,
+        extra_data JSONB DEFAULT '{}'::jsonb,
+        created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+        updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+      );
+    `);
+    await db.execute(sql`
+      ALTER TABLE fire_equipment
+        ADD COLUMN IF NOT EXISTS extra_data JSONB DEFAULT '{}'::jsonb;
+    `);
+    await db.execute(sql`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_fire_equipment_code_unique ON fire_equipment (code);
+    `);
+  } catch (err: any) {
+    console.warn('[Migration] fire_equipment column alter notice:', err?.message || err);
+  }
+
   console.log('[Migration] All database tables and missing columns verified successfully.');
 }
 

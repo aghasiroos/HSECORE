@@ -1,0 +1,321 @@
+14:22:56.091
+System
+Build
+ Render Start 
+14:22:56.555
+Backend
+Log
+ Starting build...
+  $ NODE_OPTIONS='--max-old-space-size=2048' vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs && esbuild server/migrate.ts --bundle --platform=node --format=cjs --packages=external --outfile=dist/migrate.cjs && esbuild scripts/test-db-connection.ts --bundle --platform=node --format=cjs --packages=external --outfile=dist/diagnose-db.cjs
+  vite v6.4.5 building for production...
+  transforming...
+  ✓ 3679 modules transformed.
+  rendering chunks...
+  [plugin vite:reporter] 
+  (!) /app/applet/src/services/apiDatabaseClient.ts is dynamically imported by /app/applet/src/context/NotificationContext.tsx, /app/applet/src/modules/health-env/services/occupationalHealthStructuredService.ts but also statically imported by /app/applet/src/App.tsx, /app/applet/src/components/GlobalAuditLogSystem.tsx, /app/applet/src/components/HeatStressMonitor.tsx, /app/applet/src/components/HseMsManager.tsx, /app/applet/src/components/IncidentReporting.tsx, /app/applet/src/components/InstructionsDocumentsModule.tsx, /app/applet/src/components/LoginScreen.tsx, /app/applet/src/components/OrgBackupRestorePanel.tsx, /app/applet/src/components/OrgStructureManager.tsx, /app/applet/src/components/PersonnelManagement.tsx, /app/applet/src/components/PpeManagement.tsx, /app/applet/src/components/ReportsModule.tsx, /app/applet/src/components/TrainingMgmt.tsx, /app/applet/src/components/UserManagement.tsx, /app/applet/src/components/UserProfilePage.tsx, /app/applet/src/components/WarningsManager.tsx, /app/applet/src/components/WorkPermit.tsx, /app/applet/src/components/non-conformance/ComprehensiveNonConformanceModule.tsx, /app/applet/src/components/non-conformance/nonConformanceService.ts, /app/applet/src/components/notifications/AdvancedSoundSettingsPanel.tsx, /app/applet/src/components/permit/services/permitFieldConfigService.ts, /app/applet/src/components/referral/CartablePdfViewerModal.tsx, /app/applet/src/components/system-settings/AiManagementTab.tsx, /app/applet/src/components/system-settings/ApiManagementTab.tsx, /app/applet/src/components/system-settings/BackupRestoreTab.tsx, /app/applet/src/components/system-settings/SystemNotificationsTab.tsx, /app/applet/src/components/users/UserPersonnelAssignmentSection.tsx, /app/applet/src/components/warnings/CustomizableWarningCharts.tsx, /app/applet/src/config/modulesConfig.ts, /app/applet/src/hooks/useDashboardMetrics.ts, /app/applet/src/main.tsx, /app/applet/src/modules/ai/AiAssistantApp.tsx, /app/applet/src/modules/fire-dept/daily-report/services/dailyReportService.ts, /app/applet/src/modules/fire-dept/hooks/useFireDeptData.ts, /app/applet/src/modules/fire-dept/vehicles/hooks/useVehicleData.ts, /app/applet/src/modules/health-env/components/FiveS/FiveSModuleView.tsx, /app/applet/src/modules/health-env/components/PdfDocumentViewer.tsx, /app/applet/src/modules/health-env/components/periodic-exams/PeriodicMedicalExamsApp.tsx, /app/applet/src/modules/health-env/components/periodic-exams/dossierAttachmentStorage.ts, /app/applet/src/modules/health-env/services/clinicService.ts, /app/applet/src/modules/health-env/services/fiveSService.ts, /app/applet/src/modules/health-env/services/healthEnvChecklistService.ts, /app/applet/src/modules/health-env/services/healthEnvService.ts, /app/applet/src/modules/health-env/services/medicalExamService.ts, /app/applet/src/modules/health-env/services/nutritionService.ts, /app/applet/src/modules/health-env/services/occupationalHealthStructuredService.ts, /app/applet/src/modules/process-management/MyTasks.tsx, /app/applet/src/modules/process-management/utils/approverHelper.ts, /app/applet/src/modules/ptw-audit/components/PtwAuditDetailModal.tsx, /app/applet/src/modules/ptw-audit/services/ptwAuditService.ts, /app/applet/src/modules/risk-assessment/services/riskAssessmentService.ts, /app/applet/src/modules/safety-dept/components/OperationalChecklistsView.tsx, /app/applet/src/modules/safety-dept/services/safetyDeptService.ts, /app/applet/src/providers/WebSocketProvider.tsx, /app/applet/src/services/centralSyncService.ts, /app/applet/src/services/notificationService.ts, /app/applet/src/services/personnelDossierService.ts, /app/applet/src/services/personnelImportService.ts, /app/applet/src/utils/authHelper.ts, /app/applet/src/utils/incidentSupplementaryHelper.ts, /app/applet/src/utils/inspectionScheduleHelper.ts, /app/applet/src/utils/orgHelper.ts, /app/applet/src/utils/personnelHelper.ts, /app/applet/src/utils/referralHelper.ts, /app/applet/src/utils/systemBrandingHelper.ts, dynamic import will not move module into another chunk.
+  
+  [plugin vite:reporter] 
+  (!) /app/applet/src/utils/orgHelper.ts is dynamically imported by /app/applet/src/services/centralSyncService.ts but also statically imported by /app/applet/src/components/InstructionsDocumentsModule.tsx, /app/applet/src/components/OrgChartPickerModal.tsx, /app/applet/src/components/OrgStructureManager.tsx, /app/applet/src/components/OrganizationMgmt.tsx, /app/applet/src/components/PersonnelManagement.tsx, /app/applet/src/components/PpeManagement.tsx, /app/applet/src/components/TrainingMgmt.tsx, /app/applet/src/components/UserManagement.tsx, /app/applet/src/components/non-conformance/ComprehensiveNonConformanceModule.tsx, /app/applet/src/components/warnings/warningsExcelService.ts, /app/applet/src/modules/fire-dept/components/DefectModal.tsx, /app/applet/src/modules/fire-dept/components/EquipmentModal.tsx, /app/applet/src/modules/fire-dept/daily-report/components/DailyReportFormModal.tsx, /app/applet/src/modules/health-env/components/FiveS/FiveSModuleView.tsx, /app/applet/src/modules/health-env/components/NonPeriodicExams.tsx, /app/applet/src/modules/health-env/components/checklists/HealthEnvChecklistFormModal.tsx, /app/applet/src/modules/process-management/ProcessCatalog.tsx, /app/applet/src/modules/process-management/utils/approverHelper.ts, /app/applet/src/modules/ptw-audit/components/PtwAuditFormModal.tsx, /app/applet/src/modules/risk-assessment/components/FmeaForm.tsx, /app/applet/src/modules/risk-assessment/components/FtaForm.tsx, /app/applet/src/modules/risk-assessment/components/HhaForm.tsx, /app/applet/src/modules/risk-assessment/components/JsaForm.tsx, /app/applet/src/modules/safety-dept/components/OperationalChecklistsView.tsx, /app/applet/src/modules/safety-dept/components/SafetyChecklistFormModal.tsx, /app/applet/src/utils/orgUnitsHelper.ts, /app/applet/src/utils/personnelHelper.ts, dynamic import will not move module into another chunk.
+  
+  [plugin vite:reporter] 
+  (!) /app/applet/src/utils/personnelHelper.ts is dynamically imported by /app/applet/src/services/centralSyncService.ts but also statically imported by /app/applet/src/components/CentralPersonnelSelector.tsx, /app/applet/src/components/IncidentReporting.tsx, /app/applet/src/components/OrgStructureManager.tsx, /app/applet/src/components/OrganizationMgmt.tsx, /app/applet/src/components/PersonnelHistoryModule.tsx, /app/applet/src/components/PersonnelManagement.tsx, /app/applet/src/components/PpeManagement.tsx, /app/applet/src/components/UserManagement.tsx, /app/applet/src/components/UserProfilePage.tsx, /app/applet/src/components/WarningsManager.tsx, /app/applet/src/components/incident/IncidentSupplementaryModal.tsx, /app/applet/src/components/non-conformance/ComprehensiveNonConformanceModule.tsx, /app/applet/src/components/permit/PermitFormMain.tsx, /app/applet/src/components/permit/PermitFormSupplementary.tsx, /app/applet/src/components/permit/PermitPersonnelAutocomplete.tsx, /app/applet/src/components/permit/PermitQualifiedPersonnelField.tsx, /app/applet/src/components/permit/PermitSignatures4TierSection.tsx, /app/applet/src/components/permit/supplementary/index.ts, /app/applet/src/components/personnel-dossier/PersonnelRestrictionModal.tsx, /app/applet/src/components/referral/ActionReferralModal.tsx, /app/applet/src/components/referral/CreateReferralModal.tsx, /app/applet/src/components/referral/DigitalSignaturePad.tsx, /app/applet/src/components/referral/DocumentWorkflowTrackerModal.tsx, /app/applet/src/components/referral/PendingDocuments.tsx, /app/applet/src/components/referral/PrintDocumentSignaturesBox.tsx, /app/applet/src/components/system-settings/SystemNotificationsTab.tsx, /app/applet/src/components/users/SitePersonnelTab.tsx, /app/applet/src/components/users/UserPersonnelAssignmentSection.tsx, /app/applet/src/components/warnings/CustomizableWarningCharts.tsx, /app/applet/src/components/warnings/warningsExcelService.ts, /app/applet/src/modules/fire-dept/components/DefectModal.tsx, /app/applet/src/modules/fire-dept/components/EquipmentModal.tsx, /app/applet/src/modules/fire-dept/daily-report/components/DailyReportFormModal.tsx, /app/applet/src/modules/health-env/components/ComprehensiveExecutiveDashboard.tsx, /app/applet/src/modules/health-env/components/FiveS/FiveSModuleView.tsx, /app/applet/src/modules/health-env/components/NonPeriodicExams.tsx, /app/applet/src/modules/health-env/components/nutrition/NutritionSubmoduleView.tsx, /app/applet/src/modules/health-env/components/periodic-exams/PeriodicMedicalExamsApp.tsx, /app/applet/src/modules/health-env/services/healthEnvService.ts, /app/applet/src/modules/health-env/services/medicalExamService.ts, /app/applet/src/modules/health-env/services/personnelMatchingHelper.ts, /app/applet/src/modules/process-management/utils/approverHelper.ts, /app/applet/src/modules/risk-assessment/components/RiskPersonnelSignatures.tsx, /app/applet/src/providers/WebSocketProvider.tsx, /app/applet/src/services/personnelImportService.ts, /app/applet/src/utils/authHelper.ts, /app/applet/src/utils/orgHelper.ts, /app/applet/src/utils/orgUnitsHelper.ts, /app/applet/src/utils/referralHelper.ts, dynamic import will not move module into another chunk.
+  
+  dist/index.html                                                2.18 kB
+  dist/assets/bpmn-Cyvp-fAH.eot                                 48.80 kB
+  dist/assets/bpmn-0HrGCizt.svg                                136.02 kB
+  dist/assets/pdf.worker.min-Dswkl-cV.mjs                    1,265.41 kB
+  dist/assets/ProcessDesigner-DxRT4R8d.css                       7.22 kB
+  dist/assets/HeatStressMonitor-DvTUgzRd.css                    19.38 kB
+  dist/assets/vendor-bpmn-CDbYuK44.css                         180.38 kB
+  dist/assets/index-DD-R3PCK.css                               628.86 kB
+  dist/assets/minus-BQ--wrA7.js                                  0.38 kB
+  dist/assets/square-iA9dMWP2.js                                 0.42 kB
+  dist/assets/cloud-BUsxrrmj.js                                  0.43 kB
+  dist/assets/arrow-up-right-BV8AHyY3.js                         0.46 kB
+  dist/assets/trending-up-o3SeIK_w.js                            0.46 kB
+  dist/assets/arrow-down-right-CtJgF344.js                       0.46 kB
+  dist/assets/circle-minus-CdhLHNdj.js                           0.46 kB
+  dist/assets/chart-line-ByTy2CBn.js                             0.47 kB
+  dist/assets/trending-down-k8FrrWjm.js                          0.47 kB
+  dist/assets/rotate-cw-2zCUGBpB.js                              0.48 kB
+  dist/assets/play-DxR-jBXc.js                                   0.48 kB
+  dist/assets/circle-check-big-aWDgHmzB.js                       0.49 kB
+  dist/assets/chart-no-axes-column-C7IAsE9s.js                   0.51 kB
+  dist/assets/copy-FX2i3vOL.js                                   0.52 kB
+  dist/assets/wind-B1DnpPPO.js                                   0.53 kB
+  dist/assets/globe-CQTIx5SY.js                                  0.53 kB
+  dist/assets/link-2-DqeUeMwz.js                                 0.53 kB
+  dist/assets/paperclip-BBQPFqGg.js                              0.53 kB
+  dist/assets/message-square-CtZyGm3h.js                         0.54 kB
+  dist/assets/cloud-upload-DvuJ8jiq.js                           0.55 kB
+  dist/assets/archive-xTR_BjI7.js                                0.55 kB
+  dist/assets/arrow-up-down-BtauXA17.js                          0.55 kB
+  dist/assets/funnel-DauM_Df2.js                                 0.55 kB
+  dist/assets/heart-Bn-9l_23.js                                  0.55 kB
+  dist/assets/table-D--qlrKr.js                                  0.56 kB
+  dist/assets/circle-question-mark-1m5jLSNg.js                   0.56 kB
+  dist/assets/compass-FRWcMbaS.js                                0.56 kB
+  dist/assets/calendar-BFGXwKz9.js                               0.56 kB
+  dist/assets/zap-Dx7sEgLz.js                                    0.56 kB
+  dist/assets/image-CGpz4f9F.js                                  0.57 kB
+  dist/assets/award-ClrDJAy-.js                                  0.58 kB
+  dist/assets/chart-pie-DFqEatDU.js                              0.58 kB
+  dist/assets/pen-line-B_MtjAzk.js                               0.58 kB
+  dist/assets/send-Dw8v4jhf.js                                   0.59 kB
+  dist/assets/git-compare-yBUrdHmx.js                            0.60 kB
+  dist/assets/folder-open-BB76ofcg.js                            0.60 kB
+  dist/assets/hash-BBkJtV89.js                                   0.61 kB
+  dist/assets/list-ngCxItwt.js                                   0.61 kB
+  dist/assets/phone-Boz0o7ya.js                                  0.62 kB
+  dist/assets/box-15W-H5GI.js                                    0.62 kB
+  dist/assets/user-plus-DRYQB31s.js                              0.62 kB
+  dist/assets/scale-Dlhmd97S.js                                  0.63 kB
+  dist/assets/save-Ccf6MoZt.js                                   0.64 kB
+  dist/assets/file-check-BP4qsSu9.js                             0.64 kB
+  dist/assets/camera-CLPFHKzs.js                                 0.64 kB
+  dist/assets/file-exclamation-point-Dlm-_jkW.js                 0.65 kB
+  dist/assets/stethoscope-DLik5iqR.js                            0.66 kB
+  dist/assets/layout-grid-COpNAV1v.js                            0.68 kB
+  dist/assets/droplets-BsfqkSIb.js                               0.71 kB
+  dist/assets/network-BteZBm7w.js                                0.71 kB
+  dist/assets/grip-vertical-CgJ0E15M.js                          0.72 kB
+  dist/assets/truck-DeALng2n.js                                  0.74 kB
+  dist/assets/clipboard-list-D_JyFNTk.js                         0.78 kB
+  dist/assets/file-spreadsheet-CJ2LlYAI.js                       0.79 kB
+  dist/assets/shovel-B-EcRj9S.js                                 0.79 kB
+  dist/assets/settings-QWNmgx83.js                               0.80 kB
+  dist/assets/arrow-up-C66H9E_K.js                               0.82 kB
+  dist/assets/palette-DcBOzApt.js                                0.87 kB
+  dist/assets/calculator-CrCi3YFz.js                             0.91 kB
+  dist/assets/toggle-right-6TTfkbvp.js                           0.93 kB
+  dist/assets/recycle-LQPJC23L.js                                0.98 kB
+  dist/assets/snowflake-BAUrsydm.js                              1.00 kB
+  dist/assets/minimize-2-D1YKaYbX.js                             1.01 kB
+  dist/assets/timer-CFOQ6_uR.js                                  1.02 kB
+  dist/assets/user-x-CUOas53a.js                                 1.05 kB
+  dist/assets/zoom-out-BJra-7uk.js                               1.10 kB
+  dist/assets/list-filter-CZjvDOHu.js                            1.12 kB
+  dist/assets/DualDateBadge-DiQlNcbG.js                          3.22 kB
+  dist/assets/fileHelpers-D2PlfGbR.js                            3.57 kB
+  dist/assets/SearchableSelect-IC65UWUr.js                       5.65 kB
+  dist/assets/riskAssessmentService-DmQ5YnbT.js                  6.18 kB
+  dist/assets/categoryIcons-BbHyBGj3.js                          6.47 kB
+  dist/assets/FormalReportHeader-CmIz5xdo.js                     7.08 kB
+  dist/assets/orgUnitsHelper-CgaLMW_m.js                         7.49 kB
+  dist/assets/jalaliDate-DBqQ6LR5.js                             9.59 kB
+  dist/assets/ConfirmDeleteModal-ZAnMSIYl.js                    11.11 kB
+  dist/assets/Checklist3TierSignatures-BhZK6s3M.js              12.55 kB
+  dist/assets/DigitalSignaturePad-yvzb3OMW.js                   13.45 kB
+  dist/assets/inspectionScheduleHelper-B59PJ888.js              16.85 kB
+  dist/assets/PermitPersonnelAutocomplete-Bk5Jq4l6.js           17.23 kB
+  dist/assets/weatherPhysics-Bak2mHY8.js                        18.13 kB
+  dist/assets/nutritionService-CgzONmIc.js                      20.98 kB
+  dist/assets/DocumentWorkflowTrackerModal-B0gd9jgN.js          23.40 kB
+  dist/assets/workerManager-DtQpZc2d.js                         32.27 kB
+  dist/assets/UserProfilePage-DE0owYl5.js                       34.97 kB
+  dist/assets/fiveSService-DF429ave.js                          36.83 kB
+  dist/assets/CreateReferralModal-adNiVjuJ.js                   39.14 kB
+  dist/assets/ptwAuditService-DYG5WxJP.js                       40.29 kB
+  dist/assets/PersianDatePicker-BpnFpQOd.js                     43.98 kB
+  dist/assets/PersianTimePicker-BqDMD0F2.js                     47.13 kB
+  dist/assets/CartablePdfViewerModal-BueIwKTY.js                52.82 kB
+  dist/assets/safetyDeptService-MTny60GD.js                     59.77 kB
+  dist/assets/WorkflowAutomationRules-C3jErNY6.js               62.68 kB
+  dist/assets/PendingDocuments-BVjyrfPR.js                      78.64 kB
+  dist/assets/PpeManagement-Bcmibn7m.js                         84.09 kB
+  dist/assets/AiAssistantApp-BOSfdGIK.js                        87.52 kB
+  dist/assets/InstructionsDocumentsModule-EZk8-p-6.js           96.71 kB
+  dist/assets/VirtualizedDataTable-w-NzHDwK.js                 100.59 kB
+  dist/assets/ProcessManagementModule-CxzhgqRH.js              107.52 kB
+  dist/assets/medicalExamService-C2UWxCr0.js                   144.76 kB
+  dist/assets/TrainingMgmt-3mReKtUj.js                         159.08 kB
+  dist/assets/SystemNotificationsTab-BNVldBGM.js               178.74 kB
+  dist/assets/HseMsManager-CDJBJdus.js                         201.50 kB
+  dist/assets/ComprehensiveNonConformanceModule-xORF-3xE.js    207.31 kB
+  dist/assets/ReportsModule-B8gKXrss.js                        220.88 kB
+  dist/assets/RiskAssessment-BUb8ZoAH.js                       220.93 kB
+  dist/assets/ProcessDesigner-BkVG6EOf.js                      263.10 kB
+  dist/assets/WarningsManager-BeHHUTou.js                      272.29 kB
+  dist/assets/Dashboard-_-u9pk-A.js                            276.21 kB
+  dist/assets/UserManagement-5GIxhxbe.js                       345.06 kB
+  dist/assets/IncidentReporting-DS6cLpJJ.js                    375.23 kB
+  dist/assets/PersonnelHistoryModule-ClodUVF1.js               389.63 kB
+  dist/assets/SafetyUnitModule-Cb0OD_PV.js                     428.68 kB
+  dist/assets/PtwAuditModule-CBVPaIBf.js                       614.71 kB
+  dist/assets/SystemSettings-CndHCAvo.js                       786.02 kB
+  dist/assets/HeatStressMonitor-BF7aBkcZ.js                    787.88 kB
+  dist/assets/PdfDocumentViewer-CwXRRord.js                    883.41 kB
+  dist/assets/WorkPermit-BRX0Y8od.js                           904.69 kB
+  dist/assets/FireDeptModule-OPWYKt7H.js                       979.30 kB
+  dist/assets/vendor-docs-9S72Tkh2.js                          986.61 kB
+  dist/assets/vendor-charts-2xk_Ykh0.js                      1,268.55 kB
+  dist/assets/HealthEnvModule-Bew0LJN7.js                    1,756.71 kB
+  dist/assets/index-Ca7w_0qn.js                              2,597.67 kB
+  dist/assets/vendor-bpmn-VrV3ujIA.js                        3,573.26 kB
+  ✓ built in 29.96s
+  
+    dist/server.cjs      1.6mb ⚠️
+    dist/server.cjs.map  2.7mb
+  
+  ⚡ Done in 221ms
+  
+    dist/migrate.cjs  109.3kb
+  
+  ⚡ Done in 45ms
+  
+    dist/diagnose-db.cjs  12.1kb
+  
+  ⚡ Done in 8ms 
+14:22:56.555
+Backend
+Log
+ Build successful. 
+14:22:56.664
+Backend
+Log
+ CONNECTED 
+14:22:58.585
+System
+Build
+ Render End 
+14:22:58.597
+App
+Debug
+ [vite] connecting... 
+14:23:04.414
+App
+Warning
+ The width(0) and height(0) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(240) or use aspect(undefined) to control the
+       height and width. 
+14:23:04.416
+App
+Warning
+ The width(0) and height(0) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(240) or use aspect(undefined) to control the
+       height and width. 
+14:23:04.453
+App
+Warning
+ The width(0) and height(0) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(240) or use aspect(undefined) to control the
+       height and width. 
+14:23:04.454
+App
+Warning
+ The width(0) and height(0) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(240) or use aspect(undefined) to control the
+       height and width. 
+14:23:04.861
+App
+Warning
+ The width(0) and height(0) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(240) or use aspect(undefined) to control the
+       height and width. 
+14:23:04.863
+App
+Warning
+ The width(0) and height(0) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(240) or use aspect(undefined) to control the
+       height and width. 
+14:23:05.187
+App
+Warning
+ The width(0) and height(0) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(240) or use aspect(undefined) to control the
+       height and width. 
+14:23:05.189
+App
+Warning
+ The width(0) and height(0) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(240) or use aspect(undefined) to control the
+       height and width. 
+14:23:05.217
+App
+Warning
+ The width(0) and height(0) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(240) or use aspect(undefined) to control the
+       height and width. 
+14:23:05.217
+App
+Warning
+ The width(0) and height(0) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(240) or use aspect(undefined) to control the
+       height and width. 
+14:23:06.379
+App
+Warning
+ The width(0) and height(0) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(240) or use aspect(undefined) to control the
+       height and width. 
+14:23:06.381
+App
+Warning
+ The width(0) and height(0) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(240) or use aspect(undefined) to control the
+       height and width. 
+14:23:06.412
+App
+Warning
+ The width(0) and height(0) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(240) or use aspect(undefined) to control the
+       height and width. 
+14:23:06.413
+App
+Warning
+ The width(0) and height(0) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(240) or use aspect(undefined) to control the
+       height and width. 
+14:23:06.439
+App
+Warning
+ The width(0) and height(0) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(240) or use aspect(undefined) to control the
+       height and width. 
+14:23:06.440
+App
+Warning
+ The width(0) and height(0) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(240) or use aspect(undefined) to control the
+       height and width. 
+14:23:13.001
+Backend
+Log
+ [2026-11-03T10:53:12.750Z] [WARN] [System] Slow HTTP Request Detected {"method":"GET","path":"/api/v1/settings/trir_target","statusCode":304,"durationMs":5825,"correlationId":"f8e9bdcb-a71c-4353-a820-4e43aab63040","ip":"169.254.169.126"} 
+14:23:13.001
+Backend
+Log
+ [2026-11-03T10:53:12.751Z] [INFO] [System] Domain event successfully staged in Transactional Outbox {"outboxId":44,"eventId":"evt_9bd4fedc-3810-425a-ab8c-aec3a72622ff","eventType":"heat_stress.level_change","correlationKey":"WBGT-27.147,56.126"} 
+14:23:13.001
+Backend
+Log
+ [2026-11-03T10:53:12.816Z] [INFO] [System] Outbox event processed successfully {"outboxId":44,"eventId":"evt_9bd4fedc-3810-425a-ab8c-aec3a72622ff","eventType":"heat_stress.level_change","rulesMatched":0,"durationMs":48} 
+14:23:13.311
+Backend
+Log
+ [2026-11-03T10:53:13.038Z] [WARN] [System] Slow HTTP Request Detected {"method":"POST","path":"/api/v1/settings/hse_heat_log","statusCode":200,"durationMs":6893,"correlationId":"08c29308-f97f-4087-9260-688c80b46602","ip":"169.254.169.126"} 
+14:23:27.232
+App
+Error
+ [vite] failed to connect to websocket (Error: WebSocket closed without opened.).  
+14:23:27.235
+App
+Unhandled Rejection
+ Error: WebSocket closed without opened.
+    at WebSocket.<anonymous> (https://ais-dev-gue2jtlzld3mhfbeglgdgd-988041806506.europe-west2.run.app/@vite/client:454:22) 

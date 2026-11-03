@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Bot,
   Send,
@@ -15,6 +15,16 @@ import {
   Search,
   Square,
   Sliders,
+  Layers,
+  Wifi,
+  WifiOff,
+  Menu,
+  ArrowLeft,
+  X,
+  ChevronDown,
+  Settings,
+  AlertCircle,
+  CheckCircle2,
 } from 'lucide-react';
 import { UserProfile } from '../../types';
 import { authFetch } from '../../services/apiDatabaseClient';
@@ -50,46 +60,149 @@ export function getAiAllowToolsSetting(): boolean {
 
 const GENERAL_AI_ASSISTANT = {
   id: 'GENERAL_HSE',
-  nameFa: 'دستیار هوش مصنوعی',
-  title: 'گفت‌وگوی عمومی با مدل‌های زبانی محلی نصب‌شده',
-  description: 'هر پرسشی دارید مطرح کنید؛ پاسخ‌ها مستقیماً توسط مدل انتخاب‌شده در موتور محلی Ollama تولید می‌شوند.',
-  promptSuggestions: [
-    'مفهوم هوش مصنوعی مولد را ساده و با مثال توضیح بده.',
-    'برای یادگیری یک مهارت جدید، برنامه ۳۰ روزه طراحی کن.',
-    'این متن را خلاصه کن و نکات کلیدی آن را استخراج کن.',
-    'برای حل یک مسئله پیچیده، مرحله‌به‌مرحله راهنمایی‌ام کن.',
-  ],
+  nameFa: 'هوش مصنوعی HSECORE',
+  title: 'موتور یکپارچه تحلیل برخط ماژول‌های بهداشت، ایمنی و محیط زیست',
+  description:
+    'تمامی داده‌های ماژول‌های سامانه، پرونده ۳۶۰ درجه پرسنل، حوادث، مجوزهای کار (PTW) و استانداردها را تحلیل و به پرسش‌های تخصصی و عمومی پاسخ می‌دهد.',
 };
 
-interface AiAssistantAppProps {
+const CONTEXT_OPTIONS = [
+  {
+    value: 'auto',
+    label: 'خودکار (ضد OOM)',
+    shortLabel: 'خودکار',
+    desc: 'تنظیم هوشمند طول کانتکست بر اساس RAM آزاد سرور و اندازه مدل جهت پیشگیری کامل از خطای OOM',
+  },
+  {
+    value: '2048',
+    label: '۲۰۴۸ توکن (سبک و ایمن)',
+    shortLabel: '2K ایمن',
+    desc: 'کمترین مصرف حافظه RAM؛ مناسب برای پرسش‌های سریع و سرورهای با منابع محدود',
+  },
+  {
+    value: '4096',
+    label: '۴۰۹۶ توکن (استاندارد)',
+    shortLabel: '4K استاندارد',
+    desc: 'تعادل بهینه بین دقت تحلیل چندماژولی و مصرف حافظه کانتینر هوش مصنوعی',
+  },
+  {
+    value: '8192',
+    label: '۸۱۹۲ توکن (تحلیل عمیق)',
+    shortLabel: '8K بلند',
+    desc: 'مناسب برای تحلیل گزارش‌های طولانی و چند ماژول هم‌زمان (نیازمند RAM کافی)',
+  },
+];
+
+export interface AiAssistantAppProps {
   currentUser?: UserProfile | null;
   language?: 'fa' | 'en';
+  onOpenGlobalMenu?: () => void;
+  onNavigate?: (tab: string, subItem?: string) => void;
 }
 
-export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps) {
+type ActiveSheetType = 'none' | 'model' | 'context' | 'modules';
+
+let messageSequence = 0;
+function createMessageId(prefix = 'msg'): string {
+  messageSequence = (messageSequence + 1) % 100000;
+  return `${prefix}-${Date.now()}-${messageSequence}`;
+}
+
+function toEmptyChatSession(raw: { id: string; title: string; createdAt: string }): ChatSession {
+  return {
+    id: raw.id,
+    title: raw.title,
+    createdAt: raw.createdAt,
+    messages: [],
+  };
+}
+
+export default function AiAssistantApp({
+  onOpenGlobalMenu,
+  onNavigate,
+}: AiAssistantAppProps) {
   const [inputMessage, setInputMessage] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [installedModels, setInstalledModels] = useState<Array<{ name: string; details?: { family?: string } }>>([]);
+  const [installedModels, setInstalledModels] = useState<Array<{ name: string; details?: { family?: string; parameter_size?: string; quantization_level?: string } }>>([]);
   const [selectedModel, setSelectedModel] = useState<string>('');
   const [selectedContext, setSelectedContext] = useState<string>('auto');
+  const [allowTools, setAllowTools] = useState<boolean>(() => getAiAllowToolsSetting());
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(false);
+  const [activeSheet, setActiveSheet] = useState<ActiveSheetType>('none');
   const [sessionsLoading, setSessionsLoading] = useState<boolean>(true);
   const [sessionsError, setSessionsError] = useState<string | null>(null);
+  const [isOnline, setIsOnline] = useState<boolean>(() => (typeof navigator !== 'undefined' ? navigator.onLine : true));
 
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string>('');
   const [searchSessionQuery, setSearchSessionQuery] = useState<string>('');
-  const [moduleCatalog, setModuleCatalog] = useState<Array<{ moduleId: string; moduleNameFa: string; connected: boolean; tools?: string[]; notes?: string; parentModuleId?: string; level?: number; internal?: boolean }>>([]);
+  const [moduleSearchQuery, setModuleSearchQuery] = useState<string>('');
+  const [moduleCatalog, setModuleCatalog] = useState<
+    Array<{
+      moduleId: string;
+      moduleNameFa: string;
+      connected: boolean;
+      tools?: string[];
+      notes?: string;
+      parentModuleId?: string;
+      level?: number;
+      internal?: boolean;
+    }>
+  >([]);
   const [selectedModules, setSelectedModules] = useState<string[]>([]);
-  const [showModulePicker, setShowModulePicker] = useState(false);
+  const [showSlashModulePicker, setShowSlashModulePicker] = useState(false);
 
   const activeSession = sessions.find(s => s.id === activeSessionId) || sessions[0];
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const migratedRef = useRef(false);
   const autoCreateOnceRef = useRef(false);
   const deletingRef = useRef(false);
   const activeRequestRef = useRef<AbortController | null>(null);
+
+  // Monitor online/offline state
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  // Auto-resize textarea height cleanly
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    const nextHeight = Math.min(Math.max(el.scrollHeight, 44), 144);
+    el.style.height = `${nextHeight}px`;
+  }, [inputMessage]);
+
+  // Keep bottom input visible when mobile virtual keyboard resizes viewport
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const handleResize = () => {
+      if (document.activeElement === textareaRef.current) {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      }
+    };
+    vv.addEventListener('resize', handleResize);
+    return () => vv.removeEventListener('resize', handleResize);
+  }, []);
+
+  const handleToggleAllowTools = (nextVal: boolean) => {
+    setAllowTools(nextVal);
+    try {
+      localStorage.setItem(AI_ALLOW_TOOLS_STORAGE_KEY, String(nextVal));
+    } catch {
+      // ignore storage errors
+    }
+  };
 
   const loadSessionsFromServer = async () => {
     setSessionsLoading(true);
@@ -99,12 +212,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
       const data = await res.json();
       if (!data.success) throw new Error(data.message || 'خطا در دریافت گفتگوها');
 
-      let list: ChatSession[] = (data.data || []).map((s: any) => ({
-        id: s.id,
-        title: s.title,
-        createdAt: s.createdAt,
-        messages: [],
-      }));
+      let list: ChatSession[] = (data.data || []).map(toEmptyChatSession);
 
       if (!migratedRef.current) {
         migratedRef.current = true;
@@ -122,12 +230,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
               const res2 = await authFetch('/api/v1/ai/sessions');
               const data2 = await res2.json();
               if (data2.success && Array.isArray(data2.data)) {
-                list = data2.data.map((s: any) => ({
-                  id: s.id,
-                  title: s.title,
-                  createdAt: s.createdAt,
-                  messages: [],
-                }));
+                list = data2.data.map(toEmptyChatSession);
               }
             }
           }
@@ -136,7 +239,6 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
         }
       }
 
-      // Auto-create only on first empty load of this mount — never after user deletes all sessions
       if (list.length === 0 && !autoCreateOnceRef.current) {
         autoCreateOnceRef.current = true;
         const createRes = await authFetch('/api/v1/ai/sessions', {
@@ -149,14 +251,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
         });
         const createData = await createRes.json();
         if (createData.success && createData.data) {
-          list = [
-            {
-              id: createData.data.id,
-              title: createData.data.title,
-              createdAt: createData.data.createdAt,
-              messages: [],
-            },
-          ];
+          list = [toEmptyChatSession(createData.data)];
         }
       } else if (list.length > 0) {
         autoCreateOnceRef.current = true;
@@ -202,13 +297,16 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
       const response = await authFetch('/api/v1/ai/models');
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
-      const models = Array.isArray(data?.data) ? data.data.filter((model: any) =>
-        String(model?.details?.family || '').toLowerCase() !== 'bert' &&
-        !/embed|embedding/i.test(String(model?.name || ''))
-      ) : [];
+      const models = Array.isArray(data?.data)
+        ? data.data.filter(
+            (model: any) =>
+              String(model?.details?.family || '').toLowerCase() !== 'bert' &&
+              !/embed|embedding/i.test(String(model?.name || ''))
+          )
+        : [];
       setInstalledModels(models);
       setSelectedModel(current =>
-        models.some((model: any) => model.name === current) ? current : (models[0]?.name || '')
+        models.some((model: any) => model.name === current) ? current : models[0]?.name || ''
       );
     } catch {
       setInstalledModels([]);
@@ -220,13 +318,22 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
     loadSessionsFromServer();
     void refreshInstalledModels();
     const refreshModuleCatalog = () => {
-      void authFetch('/api/v1/ai/coverage').then(response => response.json()).then(data => {
-        if (data?.success && Array.isArray(data.data)) {
-          const visibleModules = data.data.filter((item: any) => !item.internal);
-          setModuleCatalog(visibleModules);
-          setSelectedModules(current => current.filter(id => id === 'all' || visibleModules.some((item: any) => item.moduleId === id && item.connected)));
-        }
-      }).catch(() => setModuleCatalog([]));
+      void authFetch('/api/v1/ai/coverage')
+        .then(response => response.json())
+        .then(data => {
+          if (data?.success && Array.isArray(data.data)) {
+            const visibleModules = data.data.filter((item: any) => !item.internal);
+            setModuleCatalog(visibleModules);
+            setSelectedModules(current =>
+              current.filter(
+                id =>
+                  id === 'all' ||
+                  visibleModules.some((item: any) => item.moduleId === id && item.connected)
+              )
+            );
+          }
+        })
+        .catch(() => setModuleCatalog([]));
     };
     refreshModuleCatalog();
     const onModuleConfigUpdated = () => refreshModuleCatalog();
@@ -234,9 +341,11 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
     window.addEventListener('health_env_config_updated', onModuleConfigUpdated);
     window.addEventListener('fire_dept_config_updated', onModuleConfigUpdated);
     window.addEventListener('safety_dept_config_updated', onModuleConfigUpdated);
-    // Runtime can be enabled or models can be installed while this module is open.
-    const refreshTimer = window.setInterval(() => { void refreshInstalledModels(); }, 30000);
+    const refreshTimer = window.setInterval(() => {
+      void refreshInstalledModels();
+    }, 30000);
     return () => {
+      activeRequestRef.current?.abort();
       window.clearInterval(refreshTimer);
       window.removeEventListener('hse_ui_config_updated', onModuleConfigUpdated);
       window.removeEventListener('health_env_config_updated', onModuleConfigUpdated);
@@ -297,14 +406,10 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
       });
       const data = await res.json();
       if (data.success && data.data) {
-        const newSession: ChatSession = {
-          id: data.data.id,
-          title: data.data.title,
-          createdAt: data.data.createdAt,
-          messages: [],
-        };
+        const newSession = toEmptyChatSession(data.data);
         setSessions(prev => [newSession, ...prev]);
         setActiveSessionId(newSession.id);
+        setSidebarOpen(false);
       }
     } catch {
       // ignore
@@ -320,7 +425,6 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
     const previous = sessions;
     const filtered = previous.filter(s => s.id !== sessionId);
 
-    // Optimistic UI: remove immediately; do NOT auto-create a replacement session
     setSessions(filtered);
     if (activeSessionId === sessionId) {
       setActiveSessionId(filtered[0]?.id || '');
@@ -330,7 +434,6 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
       const res = await authFetch(`/api/v1/ai/sessions/${sessionId}`, { method: 'DELETE' });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.success === false) {
-        // Roll back on failure
         setSessions(previous);
         if (activeSessionId === sessionId || !filtered.length) {
           setActiveSessionId(sessionId);
@@ -370,7 +473,6 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
     const text = (textToSend || inputMessage).trim();
     if (!text || isLoading) return;
 
-    // If user deleted all sessions, create one on first send
     let session = activeSession;
     if (!session) {
       try {
@@ -384,12 +486,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
         });
         const data = await res.json();
         if (!data.success || !data.data) return;
-        session = {
-          id: data.data.id,
-          title: data.data.title,
-          createdAt: data.data.createdAt,
-          messages: [],
-        };
+        session = toEmptyChatSession(data.data);
         setSessions([session]);
         setActiveSessionId(session.id);
       } catch {
@@ -398,10 +495,11 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
     }
 
     setInputMessage('');
-    setShowModulePicker(false);
+    setShowSlashModulePicker(false);
+    setActiveSheet('none');
 
     const userMsg: ChatMessage = {
-      id: `msg-${Date.now()}`,
+      id: createMessageId('msg-u'),
       role: 'user',
       content: text,
       timestamp: new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }),
@@ -437,11 +535,15 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
     let responseCitations: string[] = [];
 
     try {
-      const historyPayload = updatedMessages.slice(0, -1).slice(-6).map(m => ({
-        role: m.role,
-        content: m.content,
-      }));
+      const historyPayload = updatedMessages
+        .slice(0, -1)
+        .slice(-6)
+        .map(m => ({
+          role: m.role,
+          content: m.content,
+        }));
 
+      const parsedContextTokens = selectedContext === 'auto' ? undefined : Number(selectedContext);
       const requestController = new AbortController();
       activeRequestRef.current = requestController;
       const res = await authFetch('/api/v1/ai/chat', {
@@ -453,9 +555,10 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
           history: historyPayload,
           model: selectedModel,
           selectedModules: getSelectedModuleScope(),
+          allowTools: getAiAllowToolsSetting(),
           stream: true,
-          num_ctx: selectedContext === 'auto' ? undefined : Number(selectedContext),
-          contextTokens: selectedContext === 'auto' ? undefined : Number(selectedContext),
+          num_ctx: parsedContextTokens,
+          contextTokens: parsedContextTokens,
         }),
         signal: requestController.signal,
       });
@@ -464,18 +567,24 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
         throw new Error(failure.message || `خطای سرور هوش مصنوعی: HTTP ${res.status}`);
       }
 
-      const assistantId = `msg-${Date.now()}`;
+      const assistantId = createMessageId('msg-a');
       partialAssistantId = assistantId;
       const timestamp = new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
       let assistantText = '';
       let responseModel = selectedModel;
       let durationMs: number | undefined;
       const streamingMessage: ChatMessage = {
-        id: assistantId, role: 'assistant', content: '', timestamp, model: selectedModel,
+        id: assistantId,
+        role: 'assistant',
+        content: '',
+        timestamp,
+        model: selectedModel,
       };
-      setSessions(prev => prev.map(s =>
-        s.id === sessionId ? { ...s, messages: [...updatedMessages, streamingMessage] } : s
-      ));
+      setSessions(prev =>
+        prev.map(s =>
+          s.id === sessionId ? { ...s, messages: [...updatedMessages, streamingMessage] } : s
+        )
+      );
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -483,16 +592,36 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
       let streamError = '';
       const applyEvent = (line: string) => {
         if (!line.startsWith('data:')) return;
-        const payload = JSON.parse(line.slice(5).trim());
+        let payload: any;
+        try {
+          payload = JSON.parse(line.slice(5).trim());
+        } catch {
+          return;
+        }
         if (payload.token) {
           assistantText += payload.token;
           partialAssistantText = assistantText;
-          setSessions(prev => prev.map(s => s.id === sessionId ? {
-            ...s, messages: s.messages.map(m => m.id === assistantId ? { ...m, content: assistantText } : m),
-          } : s));
+          setSessions(prev =>
+            prev.map(s =>
+              s.id === sessionId
+                ? {
+                    ...s,
+                    messages: s.messages.map(m =>
+                      m.id === assistantId ? { ...m, content: assistantText } : m
+                    ),
+                  }
+                : s
+            )
+          );
         }
-        if (payload.model) { responseModel = payload.model; partialResponseModel = responseModel; }
-        if (payload.durationMs) { durationMs = payload.durationMs; partialDurationMs = durationMs; }
+        if (payload.model) {
+          responseModel = payload.model;
+          partialResponseModel = responseModel;
+        }
+        if (payload.durationMs) {
+          durationMs = payload.durationMs;
+          partialDurationMs = durationMs;
+        }
         if (Array.isArray(payload.toolsUsed)) responseToolsUsed = payload.toolsUsed;
         if (Array.isArray(payload.citations)) responseCitations = payload.citations;
         if (payload.error) streamError = payload.error;
@@ -510,55 +639,100 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
       if (streamError) throw new Error(streamError);
       if (!assistantText.trim()) throw new Error('پاسخی از موتور هوش مصنوعی دریافت نشد.');
 
-      setSessions(prev => prev.map(s => s.id === sessionId ? {
-        ...s, messages: s.messages.map(m => m.id === assistantId ? { ...m, toolsUsed: responseToolsUsed, citations: responseCitations } : m),
-      } : s));
+      setSessions(prev =>
+        prev.map(s =>
+          s.id === sessionId
+            ? {
+                ...s,
+                messages: s.messages.map(m =>
+                  m.id === assistantId
+                    ? { ...m, toolsUsed: responseToolsUsed, citations: responseCitations, durationMs, model: responseModel }
+                    : m
+                ),
+              }
+            : s
+        )
+      );
 
       try {
         await authFetch(`/api/v1/ai/sessions/${sessionId}/messages`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            role: 'assistant', content: assistantText, toolsUsed: responseToolsUsed, citations: responseCitations,
-            durationMs, model: responseModel,
+            role: 'assistant',
+            content: assistantText,
+            toolsUsed: responseToolsUsed,
+            citations: responseCitations,
+            durationMs,
+            model: responseModel,
           }),
         });
       } catch {
         // non-blocking
       }
     } catch (requestError: any) {
-      if (partialAssistantText.trim() && partialAssistantId) {
-        const partialMessage: ChatMessage = {
-          id: partialAssistantId, role: 'assistant', content: partialAssistantText,
-          timestamp: new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }),
-          model: partialResponseModel, durationMs: partialDurationMs,
-        };
-        setSessions(prev => prev.map(s => s.id === sessionId ? {
-          ...s, messages: [...s.messages.filter(m => m.id !== partialAssistantId), partialMessage],
-        } : s));
+      const nowTime = new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
+      const hasPartial = Boolean(partialAssistantText.trim() && partialAssistantId);
+      const partialMessage: ChatMessage | null = hasPartial
+        ? {
+            id: partialAssistantId,
+            role: 'assistant',
+            content: partialAssistantText,
+            timestamp: nowTime,
+            model: partialResponseModel,
+            durationMs: partialDurationMs,
+            toolsUsed: responseToolsUsed.length > 0 ? responseToolsUsed : undefined,
+            citations: responseCitations.length > 0 ? responseCitations : undefined,
+          }
+        : null;
+
+      if (partialMessage) {
         try {
           await authFetch(`/api/v1/ai/sessions/${sessionId}/messages`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              role: 'assistant', content: partialAssistantText, toolsUsed: [], citations: [],
-              durationMs: partialDurationMs, model: partialResponseModel,
+              role: 'assistant',
+              content: partialAssistantText,
+              toolsUsed: responseToolsUsed,
+              citations: responseCitations,
+              durationMs: partialDurationMs,
+              model: partialResponseModel,
             }),
           });
-        } catch { /* keep the partial response visible */ }
+        } catch {
+          // keep partial response visible
+        }
       }
-      if (requestError?.name === 'AbortError') return;
-      const networkErrorMsg: ChatMessage = {
-        id: `msg-${Date.now()}`,
-        role: 'assistant',
-        content: requestError?.message || 'خطا در ارتباط با سرور هوش مصنوعی سامانه. لطفاً اتصال شبکه را بررسی فرمایید.',
-        timestamp: new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }),
-      };
-      setSessions(prev => prev.map(s => s.id === sessionId ? {
-        ...s, messages: [...s.messages.filter(m => m.id !== partialAssistantId), ...(partialAssistantText.trim() ? [{
-          id: partialAssistantId, role: 'assistant' as const, content: partialAssistantText,
-          timestamp: networkErrorMsg.timestamp, model: partialResponseModel, durationMs: partialDurationMs,
-        }] : []), networkErrorMsg],
-      } : s));
+
+      const isAborted = requestError?.name === 'AbortError';
+      const networkErrorMsg: ChatMessage | null = isAborted
+        ? null
+        : {
+            id: createMessageId('msg-err'),
+            role: 'assistant',
+            content:
+              requestError?.message ||
+              'خطا در ارتباط با سرور هوش مصنوعی سامانه. لطفاً اتصال شبکه را بررسی فرمایید.',
+            timestamp: nowTime,
+          };
+
+      setSessions(prev =>
+        prev.map(s => {
+          if (s.id !== sessionId) return s;
+          const baseMessages = partialAssistantId
+            ? s.messages.filter(m => m.id !== partialAssistantId)
+            : s.messages;
+          return {
+            ...s,
+            messages: [
+              ...baseMessages,
+              ...(partialMessage ? [partialMessage] : []),
+              ...(networkErrorMsg ? [networkErrorMsg] : []),
+            ],
+          };
+        })
+      );
     } finally {
       activeRequestRef.current = null;
       setIsLoading(false);
@@ -574,49 +748,119 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
     }
   };
 
+  const handleNavigateToAiSettings = () => {
+    setActiveSheet('none');
+    if (onNavigate) {
+      onNavigate('system', 'ai');
+    }
+  };
+
+  const filteredModules = useMemo(() => {
+    const q = moduleSearchQuery.trim().toLowerCase();
+    if (!q) return moduleCatalog;
+    return moduleCatalog.filter(
+      m =>
+        m.moduleNameFa.toLowerCase().includes(q) ||
+        m.moduleId.toLowerCase().includes(q)
+    );
+  }, [moduleCatalog, moduleSearchQuery]);
+
+  const activeContextOption =
+    CONTEXT_OPTIONS.find(c => c.value === selectedContext) || CONTEXT_OPTIONS[0];
+
+  const isWaitingForFirstToken =
+    isLoading &&
+    (!activeSession?.messages.length ||
+      activeSession.messages[activeSession.messages.length - 1]?.role === 'user' ||
+      activeSession.messages[activeSession.messages.length - 1]?.content === '');
+
   return (
-    <div className="flex h-[calc(100vh-140px)] min-h-[550px] bg-slate-50 dark:bg-slate-950 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden" dir="rtl">
-      <aside className={`w-80 flex-shrink-0 bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 flex flex-col transition-all duration-300 z-20 ${sidebarOpen ? 'fixed inset-y-0 start-0 z-50 md:static' : 'hidden md:flex'}`}>
-        <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="p-2 bg-violet-50 dark:bg-violet-950/40 text-violet-600 dark:text-violet-400 rounded-xl">
+    <div
+      className="relative flex h-[100dvh] sm:h-[calc(100vh-124px)] min-h-[540px] w-full bg-[#F8FAFC] dark:bg-slate-950 sm:rounded-3xl sm:border border-slate-200/80 dark:border-slate-800/80 sm:shadow-sm overflow-hidden select-text"
+      dir="rtl"
+    >
+      {/* ── Mobile Slide-Over Backdrop for Chat History Drawer ── */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-slate-950/50 backdrop-blur-xs md:hidden animate-in fade-in duration-200"
+          onClick={() => setSidebarOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
+      {/* ── Chat History Sidebar (Desktop Fixed Column & Mobile Slide-Over Drawer) ── */}
+      <aside
+        className={`w-[82vw] max-w-[310px] md:w-72 lg:w-80 flex-shrink-0 bg-white dark:bg-slate-900 border-l border-slate-200/80 dark:border-slate-800 flex flex-col transition-transform duration-300 z-50 ${
+          sidebarOpen
+            ? 'fixed inset-y-0 start-0 translate-x-0 shadow-2xl md:static md:shadow-none'
+            : 'hidden md:flex'
+        }`}
+      >
+        <div className="px-4 py-3.5 border-b border-slate-100 dark:border-slate-800/80 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-9 h-9 rounded-xl bg-[#5B4BFF]/10 dark:bg-[#5B4BFF]/20 text-[#5B4BFF] flex items-center justify-center shrink-0">
               <Bot className="w-5 h-5" />
             </div>
-            <div>
-              <h2 className="text-sm font-black text-slate-800 dark:text-slate-100">دستیار هوش مصنوعی</h2>
-              <p className="text-[10px] text-slate-400">مدل‌های زبانی محلی · Ollama</p>
+            <div className="min-w-0">
+              <h2 className="text-sm font-black text-slate-900 dark:text-slate-100 truncate">
+                تاریخچه گفتگوها
+              </h2>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                ذخیره‌سازی پایدار در سرور
+              </p>
             </div>
           </div>
-          <button
-            onClick={handleNewSession}
-            className="p-2 bg-violet-600 hover:bg-violet-500 text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow-sm transition cursor-pointer"
-            title="گفتگوی جدید"
-          >
-            <Plus className="w-4 h-4" />
-          </button>
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={handleNewSession}
+              className="min-h-[44px] min-w-[44px] px-3 bg-[#5B4BFF] hover:bg-[#4A3AE8] text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm shadow-[#5B4BFF]/20 transition cursor-pointer active:scale-95"
+              title="گفت‌وگوی جدید"
+            >
+              <Plus className="w-4 h-4" />
+              <span className="hidden lg:inline">جدید</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setSidebarOpen(false)}
+              className="md:hidden min-h-[44px] min-w-[44px] rounded-xl text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center transition"
+              aria-label="بستن فهرست گفتگوها"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
-        <div className="px-3 py-2">
+        {/* Search Sessions */}
+        <div className="p-3 border-b border-slate-100 dark:border-slate-800/60">
           <div className="relative">
-            <Search className="w-3.5 h-3.5 absolute start-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <Search className="w-4 h-4 absolute start-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
             <input
               type="text"
               value={searchSessionQuery}
               onChange={e => setSearchSessionQuery(e.target.value)}
               placeholder="جستجو در گفتگوها..."
-              className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs py-2 pe-3 ps-9 outline-none focus:ring-2 focus:ring-violet-500/30 text-slate-700 dark:text-slate-200"
+              className="w-full min-h-[44px] bg-slate-50 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/80 rounded-xl text-xs py-2.5 pe-3 ps-10 outline-none focus:border-[#5B4BFF] focus:ring-2 focus:ring-[#5B4BFF]/20 text-slate-800 dark:text-slate-200 transition"
             />
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-2 pb-3 space-y-1">
+        {/* Session List */}
+        <div className="flex-1 overflow-y-auto px-2.5 py-2.5 space-y-1 custom-scrollbar">
           {sessionsLoading && (
-            <div className="text-center text-xs text-slate-400 py-6">در حال بارگذاری گفتگوها...</div>
+            <div className="text-center text-xs text-slate-400 py-8">
+              در حال بارگذاری گفتگوها...
+            </div>
           )}
           {sessionsError && (
-            <div className="text-center text-xs text-rose-500 py-4 px-2">
-              {sessionsError}
-              <button onClick={loadSessionsFromServer} className="block mx-auto mt-2 text-violet-500 underline">
+            <div className="text-center text-xs text-rose-500 py-4 px-3 bg-rose-50/60 dark:bg-rose-950/20 rounded-xl">
+              <p>{sessionsError}</p>
+              <button
+                type="button"
+                onClick={loadSessionsFromServer}
+                className="mt-2 min-h-[44px] px-4 text-[#5B4BFF] font-bold underline"
+              >
                 تلاش مجدد
               </button>
             </div>
@@ -625,205 +869,353 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
             !sessionsError &&
             sessions
               .filter(s => !searchSessionQuery || s.title.includes(searchSessionQuery))
-              .map(session => (
-                <div
-                  key={session.id}
-                  onClick={() => {
-                    setActiveSessionId(session.id);
-                    setSidebarOpen(false);
-                  }}
-                  className={`group flex items-center gap-2 px-3 py-2.5 rounded-xl cursor-pointer transition ${
-                    activeSessionId === session.id
-                      ? 'bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300'
-                      : 'hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300'
-                  }`}
-                >
-                  <MessageSquare className="w-4 h-4 flex-shrink-0 opacity-60" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-bold truncate">{session.title}</p>
-                    <p className="text-[10px] opacity-50">
-                      {session.createdAt
-                        ? new Date(session.createdAt).toLocaleDateString('fa-IR')
-                        : ''}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onMouseDown={e => {
-                      e.preventDefault();
-                      e.stopPropagation();
+              .map(session => {
+                const isActive = activeSessionId === session.id;
+                return (
+                  <div
+                    key={session.id}
+                    onClick={() => {
+                      setActiveSessionId(session.id);
+                      setSidebarOpen(false);
                     }}
-                    onClick={e => handleDeleteSession(session.id, e)}
-                    className="opacity-0 group-hover:opacity-100 p-1 hover:bg-rose-100 dark:hover:bg-rose-900/40 rounded-lg text-rose-500 transition"
-                    title="حذف گفتگو"
+                    className={`group min-h-[48px] flex items-center gap-2.5 px-3 py-2.5 rounded-xl cursor-pointer transition-all ${
+                      isActive
+                        ? 'bg-[#5B4BFF]/10 dark:bg-[#5B4BFF]/20 text-[#5B4BFF] dark:text-[#9D93FF] border border-[#5B4BFF]/20'
+                        : 'hover:bg-slate-50 dark:hover:bg-slate-800/60 text-slate-700 dark:text-slate-300 border border-transparent'
+                    }`}
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              ))}
+                    <MessageSquare
+                      className={`w-4 h-4 flex-shrink-0 ${
+                        isActive ? 'text-[#5B4BFF]' : 'text-slate-400'
+                      }`}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-bold truncate">{session.title}</p>
+                      <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">
+                        {session.createdAt
+                          ? new Date(session.createdAt).toLocaleDateString('fa-IR')
+                          : ''}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onMouseDown={e => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                      }}
+                      onClick={e => handleDeleteSession(session.id, e)}
+                      className="min-h-[36px] min-w-[36px] md:opacity-0 md:group-hover:opacity-100 flex items-center justify-center hover:bg-rose-100 dark:hover:bg-rose-900/40 rounded-lg text-slate-400 hover:text-rose-500 transition"
+                      title="حذف گفتگو"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                );
+              })}
+        </div>
+
+        {/* Sidebar Footer Quick Link to AI Settings */}
+        <div className="p-3 border-t border-slate-100 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-900/50">
+          <button
+            type="button"
+            onClick={handleNavigateToAiSettings}
+            className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-800/80 hover:border-[#5B4BFF]/40 text-xs font-bold text-slate-700 dark:text-slate-200 flex items-center justify-between transition cursor-pointer"
+          >
+            <span className="flex items-center gap-2">
+              <Settings className="w-4 h-4 text-[#5B4BFF]" />
+              <span>مدیریت مدل‌ها و منابع AI</span>
+            </span>
+            <ArrowLeft className="w-3.5 h-3.5 text-slate-400" />
+          </button>
         </div>
       </aside>
 
-      <main className="flex-1 flex flex-col min-w-0 bg-slate-50/50 dark:bg-slate-950/50">
-        <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3 min-w-0">
+      {/* ── Main Chat Column (Sticky Header + Scrollable Messages + Sticky Bottom Composer) ── */}
+      <main className="flex-1 flex flex-col min-w-0 h-full bg-[#F8FAFC] dark:bg-slate-950 relative">
+        {/* ۱. هدر ثابت و سبک (Fixed & Lightweight Header) */}
+        <header className="sticky top-0 z-20 shrink-0 h-14 sm:h-16 px-3 sm:px-5 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800/80 flex items-center justify-between gap-2">
+          {/* Right side in RTL: Menu, Brand Logo & Title, Active Model Status */}
+          <div className="flex items-center gap-1.5 sm:gap-2.5 min-w-0">
+            {onOpenGlobalMenu && (
+              <button
+                type="button"
+                onClick={onOpenGlobalMenu}
+                className="lg:hidden min-h-[44px] min-w-[44px] rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center transition cursor-pointer"
+                title="منوی اصلی سامانه"
+                aria-label="منوی اصلی سامانه"
+              >
+                <Menu className="w-5 h-5" />
+              </button>
+            )}
+
             <button
-              className="md:hidden p-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600"
+              type="button"
               onClick={() => setSidebarOpen(true)}
+              className="md:hidden min-h-[44px] min-w-[44px] rounded-xl bg-slate-100/80 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200/70 flex items-center justify-center transition cursor-pointer"
+              title="تاریخچه گفتگوها"
+              aria-label="تاریخچه گفتگوها"
             >
               <MessageSquare className="w-4 h-4" />
             </button>
-            <div className="min-w-0">
-              <h3 className="text-sm font-black text-slate-800 dark:text-slate-100 truncate">
-                {activeSession?.title || GENERAL_AI_ASSISTANT.nameFa}
-              </h3>
-              <p className="text-[10px] text-slate-400 flex items-center gap-1">
-                <Sparkles className="w-3 h-3" />
-                {GENERAL_AI_ASSISTANT.title}
-              </p>
+
+            {/* Small HSECORE Brand Mark + Title «هوش مصنوعی» */}
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#5B4BFF] to-[#4636E8] text-white flex items-center justify-center shadow-sm shadow-[#5B4BFF]/25 shrink-0">
+                <Sparkles className="w-4 h-4" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] font-black tracking-wider uppercase px-1.5 py-0.5 rounded-md bg-[#5B4BFF]/10 text-[#5B4BFF] dark:bg-[#5B4BFF]/20 dark:text-[#ACA2FF]">
+                    HSECORE
+                  </span>
+                  <h1 className="text-sm sm:text-base font-black text-slate-900 dark:text-slate-100 truncate">
+                    هوش مصنوعی
+                  </h1>
+                </div>
+
+                {/* Active Model Status Indicator */}
+                <button
+                  type="button"
+                  onClick={() => setActiveSheet('model')}
+                  className="flex items-center gap-1.5 text-[11px] font-medium text-slate-500 dark:text-slate-400 hover:text-[#5B4BFF] dark:hover:text-[#9D93FF] transition truncate max-w-[180px] sm:max-w-[280px]"
+                >
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                      installedModels.length > 0 && selectedModel
+                        ? 'bg-emerald-500 animate-pulse'
+                        : 'bg-amber-500'
+                    }`}
+                  />
+                  <span className="truncate">
+                    {installedModels.length > 0 && selectedModel
+                      ? `مدل فعال: ${selectedModel}`
+                      : 'مدل نصب نشده'}
+                  </span>
+                </button>
+              </div>
             </div>
           </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <button
-              onClick={handleExportSession}
-              className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition"
-              title="دریافت گزارش متنی"
+
+          {/* Left side in RTL: Status Icons (Wi-Fi, Notifications, Actions) & Back/Close Button */}
+          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+            {/* Wi-Fi / Connection Status */}
+            <div
+              className={`hidden xs:flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-[11px] font-bold border ${
+                isOnline
+                  ? 'bg-emerald-50/80 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 border-emerald-200/70 dark:border-emerald-800/50'
+                  : 'bg-rose-50 dark:bg-rose-950/30 text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-800'
+              }`}
+              title={isOnline ? 'اتصال برقرار است' : 'آفلاین'}
             >
-              <Download className="w-4 h-4" />
-            </button>
+              {isOnline ? <Wifi className="w-3.5 h-3.5" /> : <WifiOff className="w-3.5 h-3.5" />}
+              <span className="hidden md:inline">{isOnline ? 'متصل' : 'آفلاین'}</span>
+            </div>
+
+            {/* New Conversation Action */}
             <button
-              onClick={() => activeSessionId && loadMessagesForSession(activeSessionId)}
-              className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition"
-              title="بازخوانی پیام‌ها"
+              type="button"
+              onClick={handleNewSession}
+              className="min-h-[44px] min-w-[44px] rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center transition cursor-pointer"
+              title="گفت‌وگوی جدید"
+              aria-label="گفت‌وگوی جدید"
+            >
+              <Plus className="w-5 h-5" />
+            </button>
+
+            {/* Refresh Messages */}
+            <button
+              type="button"
+              onClick={() => {
+                void refreshInstalledModels();
+                if (activeSessionId) void loadMessagesForSession(activeSessionId);
+              }}
+              className="min-h-[44px] min-w-[44px] rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center transition cursor-pointer"
+              title="بروزرسانی وضعیت مدل و پیام‌ها"
+              aria-label="بروزرسانی"
             >
               <RefreshCw className="w-4 h-4" />
             </button>
+
+            {/* Export Chat */}
+            {activeSession && activeSession.messages.length > 0 && (
+              <button
+                type="button"
+                onClick={handleExportSession}
+                className="min-h-[44px] min-w-[44px] rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center transition cursor-pointer"
+                title="دریافت فایل گزارش گفتگو"
+                aria-label="دریافت گزارش"
+              >
+                <Download className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        </header>
+
+        {/* ۲. ناحیه اصلی چت (Scrollable Chat Canvas) */}
+        <div className="flex-1 overflow-y-auto px-3 sm:px-6 py-4 sm:py-6 space-y-5 custom-scrollbar">
+          <div className="max-w-3xl mx-auto space-y-5">
+            {/* حالت خالی جذاب (Empty State when no messages exist) */}
+            {(!activeSession || activeSession.messages.length === 0) && !isLoading && (
+              <div className="pt-4 sm:pt-8 pb-4 text-center space-y-6 animate-in fade-in duration-300">
+                <div className="space-y-3">
+                  <div className="w-16 h-16 mx-auto rounded-3xl bg-gradient-to-br from-[#5B4BFF] to-[#4332E0] text-white flex items-center justify-center shadow-xl shadow-[#5B4BFF]/25">
+                    <Sparkles className="w-8 h-8" />
+                  </div>
+                  <div className="space-y-1.5 max-w-lg mx-auto px-2">
+                    <h2 className="text-lg sm:text-xl font-black text-slate-900 dark:text-slate-100">
+                      چطور می‌توانم در تحلیل HSE به شما کمک کنم؟
+                    </h2>
+                    <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 leading-relaxed">
+                      {GENERAL_AI_ASSISTANT.description}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* فهرست پیام‌ها (Messages Feed: User on Right with Light Purple Bubble, AI on Left with White Bubble & Soft Shadow) */}
+            {activeSession?.messages.map(msg => {
+              const isUser = msg.role === 'user';
+              if (!isUser && !msg.content && isLoading) {
+                return null;
+              }
+              return (
+                <div
+                  key={msg.id}
+                  className={`flex items-start gap-2.5 sm:gap-3 animate-in fade-in slide-in-from-bottom-1 duration-200 ${
+                    isUser ? 'justify-start' : 'justify-end flex-row-reverse'
+                  }`}
+                >
+                  {/* Avatar */}
+                  <div
+                    className={`flex-shrink-0 w-8 h-8 sm:w-9 sm:h-9 rounded-2xl flex items-center justify-center text-xs font-black shadow-2xs ${
+                      isUser
+                        ? 'bg-[#5B4BFF] text-white'
+                        : 'bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 text-[#5B4BFF]'
+                    }`}
+                  >
+                    {isUser ? <span>شما</span> : <Bot className="w-4 h-4 sm:w-5 sm:h-5" />}
+                  </div>
+
+                  {/* Message Bubble */}
+                  <div
+                    className={`relative max-w-[86%] sm:max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-7 transition-all ${
+                      isUser
+                        ? 'bg-[#ECEAFE] dark:bg-[#5B4BFF]/25 text-slate-900 dark:text-slate-100 border border-[#5B4BFF]/20 rounded-tr-xs shadow-2xs'
+                        : 'bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 text-slate-800 dark:text-slate-100 rounded-tl-xs shadow-sm'
+                    }`}
+                  >
+                    <div className="whitespace-pre-wrap break-words">{msg.content}</div>
+
+                    {/* Data Sources & Citations */}
+                    {(msg.toolsUsed?.length || msg.citations?.length) ? (
+                      <div className="mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-800/80 space-y-1.5">
+                        {msg.toolsUsed && msg.toolsUsed.length > 0 && (
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-start gap-1.5">
+                            <Database className="w-3.5 h-3.5 text-[#5B4BFF] shrink-0 mt-0.5" />
+                            <span>منابع داده: {msg.toolsUsed.join('، ')}</span>
+                          </div>
+                        )}
+                        {msg.citations && msg.citations.length > 0 && (
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-start gap-1.5">
+                            <BookOpen className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
+                            <span>مراجع: {msg.citations.join('، ')}</span>
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
+
+                    {/* Timestamp, Model tag & Copy action */}
+                    <div className="mt-2 flex items-center justify-between gap-3 text-[10px] text-slate-400 dark:text-slate-500">
+                      <div className="flex items-center gap-2">
+                        <span>{msg.timestamp}</span>
+                        {!isUser && msg.model && (
+                          <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 font-mono">
+                            {msg.model}
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleCopy(msg.content, msg.id)}
+                        className="min-h-[32px] min-w-[32px] -my-1 flex items-center justify-center rounded-lg hover:bg-black/5 dark:hover:bg-white/5 text-slate-500 dark:text-slate-400 transition cursor-pointer"
+                        title="کپی متن پیام"
+                      >
+                        {copiedId === msg.id ? (
+                          <Check className="w-3.5 h-3.5 text-emerald-500" />
+                        ) : (
+                          <Copy className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* انیمیشن تایپ هوش مصنوعی (AI Typing Indicator) */}
+            {isWaitingForFirstToken && (
+              <div className="flex items-start gap-2.5 sm:gap-3 justify-end flex-row-reverse animate-in fade-in duration-200">
+                <div className="flex-shrink-0 w-8 h-8 sm:w-9 sm:h-9 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 text-[#5B4BFF] flex items-center justify-center shadow-2xs">
+                  <Bot className="w-4 h-4 sm:w-5 sm:h-5 animate-pulse" />
+                </div>
+                <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl rounded-tl-xs px-4 py-3.5 shadow-sm flex items-center gap-3">
+                  <div className="flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-[#5B4BFF] animate-bounce [animation-delay:-0.3s]" />
+                    <span className="w-2 h-2 rounded-full bg-[#5B4BFF]/80 animate-bounce [animation-delay:-0.15s]" />
+                    <span className="w-2 h-2 rounded-full bg-[#5B4BFF]/60 animate-bounce" />
+                  </div>
+                  <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                    هوش مصنوعی در حال تحلیل و نگارش پاسخ...
+                  </span>
+                </div>
+              </div>
+            )}
+
+            <div ref={messagesEndRef} className="h-2" />
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-4 py-5 space-y-4">
-          {(!activeSession || activeSession.messages.length === 0) && !isLoading && (
-            <div className="max-w-2xl mx-auto text-center space-y-5 pt-8">
-              <div className="inline-flex p-4 rounded-3xl bg-gradient-to-br from-violet-500 to-violet-600 text-white shadow-lg shadow-violet-500/20">
-                <Sparkles className="w-8 h-8" />
-              </div>
-              <div>
-                <h3 className="text-lg font-black text-slate-800 dark:text-slate-100">
-                  {GENERAL_AI_ASSISTANT.nameFa}
-                </h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed max-w-md mx-auto">
-                  {GENERAL_AI_ASSISTANT.description}
-                </p>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-start">
-                {GENERAL_AI_ASSISTANT.promptSuggestions.map((s, i) => (
+        {/* ۳. ناحیه ورودی پیام در پایین (Sticky Bottom Message Composer) */}
+        <div className="sticky bottom-0 z-20 shrink-0 px-3 sm:px-6 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-gradient-to-t from-[#F8FAFC] via-[#F8FAFC]/95 to-transparent dark:from-slate-950 dark:via-slate-950/95">
+          <div className="max-w-3xl mx-auto">
+            {/* Quick Slash Command Inline Picker when typing '/' */}
+            {showSlashModulePicker && (
+              <div className="mb-2 rounded-2xl border border-[#5B4BFF]/30 bg-white dark:bg-slate-900 p-3 shadow-lg max-h-60 overflow-y-auto custom-scrollbar animate-in fade-in slide-in-from-bottom-2 duration-150">
+                <div className="flex items-center justify-between gap-2 mb-2 pb-2 border-b border-slate-100 dark:border-slate-800">
+                  <p className="text-xs font-black text-slate-800 dark:text-slate-100">
+                    انتخاب سریع محدوده تحلیل ماژول‌ها
+                  </p>
                   <button
-                    key={i}
-                    onClick={() => handleSendMessage(s)}
-                    className="text-[11px] leading-relaxed p-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:border-violet-300 dark:hover:border-violet-600 text-slate-600 dark:text-slate-300 transition text-right"
+                    type="button"
+                    onClick={() => setShowSlashModulePicker(false)}
+                    className="p-1 text-slate-400 hover:text-slate-600"
                   >
-                    {s}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {activeSession?.messages.map(msg => (
-            <div
-              key={msg.id}
-              className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
-            >
-              <div
-                className={`flex-shrink-0 w-8 h-8 rounded-xl flex items-center justify-center ${
-                  msg.role === 'user'
-                    ? 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-200'
-                    : 'bg-violet-600 text-white'
-                }`}
-              >
-                {msg.role === 'user' ? (
-                  <span className="text-xs font-bold">شما</span>
-                ) : (
-                  <Bot className="w-4 h-4" />
-                )}
-              </div>
-              <div
-                className={`relative max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-sm ${
-                  msg.role === 'user'
-                    ? 'bg-violet-600 text-white rounded-te-sm'
-                    : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-200 rounded-ts-sm'
-                }`}
-              >
-                <div className="whitespace-pre-wrap">{msg.content}</div>
-                {(msg.toolsUsed?.length || msg.citations?.length) ? (
-                  <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-800 space-y-1">
-                    {msg.toolsUsed && msg.toolsUsed.length > 0 && (
-                      <p className="text-[10px] text-slate-400 flex items-center gap-1">
-                        <Database className="w-3 h-3" />
-                        منابع داده: {msg.toolsUsed.join('، ')}
-                      </p>
-                    )}
-                    {msg.citations && msg.citations.length > 0 && (
-                      <p className="text-[10px] text-slate-400 flex items-center gap-1">
-                        <BookOpen className="w-3 h-3" />
-                        مراجع: {msg.citations.join('، ')}
-                      </p>
-                    )}
-                  </div>
-                ) : null}
-                <div className="mt-1.5 flex items-center gap-2 justify-between">
-                  <span className="text-[10px] opacity-50">{msg.timestamp}</span>
-                  <button
-                    onClick={() => handleCopy(msg.content, msg.id)}
-                    className="opacity-50 hover:opacity-100 transition"
-                    title="کپی"
-                  >
-                    {copiedId === msg.id ? (
-                      <Check className="w-3.5 h-3.5 text-emerald-500" />
-                    ) : (
-                      <Copy className="w-3.5 h-3.5" />
-                    )}
+                    <X className="w-4 h-4" />
                   </button>
                 </div>
-              </div>
-            </div>
-          ))}
-
-          {isLoading && (
-            <div className="flex gap-3">
-              <div className="flex-shrink-0 w-8 h-8 rounded-xl bg-violet-600 text-white flex items-center justify-center">
-                <Bot className="w-4 h-4 animate-pulse" />
-              </div>
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl rounded-ts-sm px-4 py-3 text-sm text-slate-400">
-                در حال تولید پاسخ...
-              </div>
-            </div>
-          )}
-          <div ref={messagesEndRef} />
-        </div>
-
-        <div className="p-4 border-t border-slate-200 dark:border-slate-800 bg-white/90 dark:bg-slate-900/90 backdrop-blur">
-          <div className="max-w-3xl mx-auto space-y-2">
-            {installedModels.length === 0 && (
-              <div className="rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/20 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
-                هیچ مدل زبانیِ قابل گفت‌وگویی نصب نیست. برای شروع، یک مدل مولد را از مدیریت هوش مصنوعی نصب کنید؛ مدل‌های embedding برای چت قابل استفاده نیستند.
-              </div>
-            )}
-            <div className="relative rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/90 shadow-sm focus-within:border-violet-500 focus-within:ring-2 focus-within:ring-violet-500/20 transition-all p-2.5">
-              {showModulePicker && (
-                <div className="mb-2 rounded-xl border border-violet-200 dark:border-violet-900/60 bg-white dark:bg-slate-900 p-3 shadow-sm max-h-64 overflow-y-auto">
-                  <div className="flex items-center justify-between gap-2 mb-2">
-                    <p className="text-xs font-bold text-slate-700 dark:text-slate-200">انتخاب محدوده تحلیل</p>
-                    <span className="text-[10px] text-slate-400">انتخاب چندگانه با /</span>
-                  </div>
-                  <button type="button" onClick={() => { setSelectedModules(['all']); setInputMessage(''); setShowModulePicker(false); }}
-                    className="w-full text-right px-3 py-2 mb-1 rounded-lg text-xs font-bold bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-900/50">
-                    /ALL — تحلیل همه ماژول‌ها (با اعلام بخش‌های فاقد اتصال)
-                  </button>
-                  {moduleCatalog.map(item => {
-                    const hasVisibleParent = Boolean(item.parentModuleId && moduleCatalog.some(parent => parent.moduleId === item.parentModuleId));
-                    return (
-                    <button key={item.moduleId} type="button" disabled={!item.connected}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedModules(['all']);
+                    setInputMessage('');
+                    setShowSlashModulePicker(false);
+                  }}
+                  className="w-full min-h-[44px] text-right px-3 py-2 mb-1 rounded-xl text-xs font-bold bg-[#5B4BFF]/10 text-[#5B4BFF] dark:text-[#9D93FF] hover:bg-[#5B4BFF]/15 transition flex items-center justify-between"
+                >
+                  <span>/ALL — تحلیل یکپارچه همه ماژول‌های سامانه</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded bg-[#5B4BFF] text-white">ALL</span>
+                </button>
+                {moduleCatalog.map(item => {
+                  const hasVisibleParent = Boolean(
+                    item.parentModuleId &&
+                      moduleCatalog.some(parent => parent.moduleId === item.parentModuleId)
+                  );
+                  return (
+                    <button
+                      key={item.moduleId}
+                      type="button"
+                      disabled={!item.connected}
                       onClick={() => {
                         setSelectedModules(current => {
                           const next = current.includes(item.moduleId)
@@ -832,116 +1224,484 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
                           return next;
                         });
                         setInputMessage('');
-                        setShowModulePicker(false);
+                        setShowSlashModulePicker(false);
                       }}
-                      className="w-full flex items-center justify-between gap-2 text-right px-3 py-2 rounded-lg text-xs hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed" title={item.notes || item.moduleNameFa}>
-                      <span style={{ paddingRight: hasVisibleParent ? `${Math.min(item.level || 1, 4) * 12}px` : '0px' }}>{hasVisibleParent ? '↳ ' : ''}{item.moduleNameFa}</span>
-                      <span className="text-[10px] text-slate-400">{item.connected ? (item.tools?.length ? 'ابزار داده‌خوان' : 'پایگاه دانش RAG') : (item.notes?.includes('مجوز') ? 'محدودیت دسترسی' : 'فاقد ابزار داده‌خوان')}</span>
+                      className="w-full min-h-[44px] flex items-center justify-between gap-2 text-right px-3 py-2 rounded-xl text-xs hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                    >
+                      <span
+                        style={{
+                          paddingRight: hasVisibleParent
+                            ? `${Math.min(item.level || 1, 4) * 12}px`
+                            : '0px',
+                        }}
+                      >
+                        {hasVisibleParent ? '↳ ' : ''}
+                        {item.moduleNameFa}
+                      </span>
+                      <span className="text-[10px] text-slate-400">
+                        {item.connected ? 'متصل' : 'غیرفعال'}
+                      </span>
                     </button>
-                    );
-                  })}
-                  {moduleCatalog.length === 0 && <p className="text-xs text-slate-400 py-2">فهرست ماژول‌ها در دسترس نیست.</p>}
-                </div>
-              )}
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Main Rounded Input Card */}
+            <div className="rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-md shadow-slate-900/5 focus-within:border-[#5B4BFF] focus-within:ring-2 focus-within:ring-[#5B4BFF]/20 transition-all p-2 sm:p-3">
+              {/* Selected Module Scope Chips */}
               {selectedModules.length > 0 && (
-                <div className="mb-2 flex flex-wrap gap-1.5">
+                <div className="flex flex-wrap items-center gap-1.5 px-2 pb-2 mb-1 border-b border-slate-100 dark:border-slate-800/80">
+                  <span className="text-[10px] font-bold text-slate-400">محدوده تحلیل:</span>
                   {selectedModules.map(id => (
-                    <button key={id} type="button" onClick={() => setSelectedModules(current => current.filter(item => item !== id))}
-                      className="text-[10px] rounded-full px-2 py-1 bg-violet-100 dark:bg-violet-950/50 text-violet-700 dark:text-violet-300">
-                      {id === 'all' ? 'همه ماژول‌ها' : (moduleCatalog.find(item => item.moduleId === id)?.moduleNameFa || id)} ×
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() =>
+                        setSelectedModules(current => current.filter(item => item !== id))
+                      }
+                      className="min-h-[28px] text-[11px] font-bold rounded-xl px-2.5 py-1 bg-[#5B4BFF]/10 text-[#5B4BFF] dark:bg-[#5B4BFF]/20 dark:text-[#ACA2FF] flex items-center gap-1 hover:bg-[#5B4BFF]/20 transition cursor-pointer"
+                    >
+                      <span>
+                        {id === 'all'
+                          ? 'همه ماژول‌ها (ALL)'
+                          : moduleCatalog.find(item => item.moduleId === id)?.moduleNameFa || id}
+                      </span>
+                      <X className="w-3 h-3" />
                     </button>
                   ))}
                 </div>
               )}
-              <textarea
-                value={inputMessage}
-                onChange={e => {
-                  const value = e.target.value;
-                  setInputMessage(value);
-                  setShowModulePicker(value.trimStart().startsWith('/'));
-                }}
-                onKeyDown={handleKeyDown}
-                rows={2}
-                placeholder="پیام خود را بنویسید...‎"
-                className="w-full resize-none bg-transparent border-0 px-2 py-1 text-sm outline-none text-slate-800 dark:text-slate-100 placeholder:text-slate-400 max-h-40"
-                disabled={isLoading || sessionsLoading}
-              />
-              <div className="flex items-center justify-between pt-2 border-t border-slate-200/60 dark:border-slate-700/60 mt-1 gap-2">
-                {/* Right side in RTL (start): Professional Model & Provider Selector and Context Tuning */}
-                <div className="flex items-center gap-2 flex-1 min-w-0 flex-wrap">
-                  <div className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-xs text-slate-700 dark:text-slate-200 text-xs">
-                    <Bot className="w-3.5 h-3.5 text-violet-600 dark:text-violet-400 shrink-0" />
-                    <select
-                      value={selectedModel}
-                      onChange={e => setSelectedModel(e.target.value)}
-                      disabled={isLoading || installedModels.length === 0}
-                      className="bg-transparent border-0 text-xs font-medium text-slate-700 dark:text-slate-200 outline-none cursor-pointer max-w-[170px] sm:max-w-[240px] truncate"
-                      title="انتخاب مدل هوش مصنوعی"
-                    >
-                      {installedModels.length === 0 ? (
-                        <option value="">مدل گفت‌وگو نصب نیست</option>
-                      ) : (
-                        installedModels.map(model => (
-                          <option key={model.name} value={model.name} className="bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100">
-                            {model.name}
-                          </option>
-                        ))
-                      )}
-                    </select>
-                  </div>
 
-                  {/* Context Length Selector (OOM protection) */}
-                  <div className="inline-flex items-center gap-1.5 px-2 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-xs text-slate-700 dark:text-slate-200 text-xs">
-                    <Sliders className="w-3 h-3 text-indigo-500 shrink-0" />
-                    <select
-                      value={selectedContext}
-                      onChange={e => setSelectedContext(e.target.value)}
-                      disabled={isLoading}
-                      className="bg-transparent border-0 text-[11px] font-medium text-slate-600 dark:text-slate-300 outline-none cursor-pointer"
-                      title="تنظیم طول پنجره کانتکست (Context Length) جهت کنترل مصرف RAM و پیشگیری از OOM"
-                    >
-                      <option value="auto">کانتکست: خودکار (ضد OOM)</option>
-                      <option value="2048">کانتکست: ۲۰۴۸ (ایمن)</option>
-                      <option value="4096">کانتکست: ۴۰۹۶ (استاندارد)</option>
-                      <option value="8192">کانتکست: ۸۱۹۲ (بلند)</option>
-                    </select>
-                  </div>
+              {/* Textarea Row */}
+              <div className="flex items-end gap-2">
+                <textarea
+                  ref={textareaRef}
+                  value={inputMessage}
+                  onChange={e => {
+                    const value = e.target.value;
+                    setInputMessage(value);
+                    setShowSlashModulePicker(value.trimStart().startsWith('/'));
+                  }}
+                  onKeyDown={handleKeyDown}
+                  rows={1}
+                  placeholder="پیام یا دستور خود را بنویسید..."
+                  className="flex-1 min-h-[44px] max-h-36 resize-none bg-transparent border-0 px-2.5 py-2.5 text-sm leading-relaxed outline-none text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500"
+                  disabled={isLoading || sessionsLoading}
+                />
 
-                  {installedModels.length > 0 && (
-                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium px-1.5 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200/60 dark:border-emerald-800/40 hidden lg:inline-flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                      موتور هوشمند سامانه (آماده)
-                    </span>
-                  )}
-                </div>
-
-                {/* Left side in RTL (end): Stop / Send button */}
-                <div className="flex items-center gap-2 shrink-0">
+                {/* Circular Purple Send / Stop Button */}
+                <div className="shrink-0 pb-0.5">
                   {isLoading ? (
                     <button
+                      type="button"
                       onClick={handleStopGeneration}
-                      className="inline-flex items-center gap-1 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded-xl shadow-xs transition text-xs font-medium"
+                      className="w-11 h-11 min-h-[44px] min-w-[44px] rounded-full bg-rose-600 hover:bg-rose-500 text-white flex items-center justify-center shadow-md shadow-rose-600/25 transition-all active:scale-95 cursor-pointer"
                       title="توقف تولید پاسخ"
+                      aria-label="توقف تولید پاسخ"
                     >
-                      <Square className="w-3.5 h-3.5 fill-current" />
-                      <span>توقف</span>
+                      <Square className="w-4 h-4 fill-current" />
                     </button>
                   ) : (
                     <button
+                      type="button"
                       onClick={() => handleSendMessage()}
                       disabled={!inputMessage.trim() || sessionsLoading || !selectedModel}
-                      className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl shadow-xs transition text-xs font-semibold"
+                      className="w-11 h-11 min-h-[44px] min-w-[44px] rounded-full bg-[#5B4BFF] hover:bg-[#4A3AE8] disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:text-slate-400 text-white flex items-center justify-center shadow-md shadow-[#5B4BFF]/25 disabled:shadow-none transition-all active:scale-95 disabled:cursor-not-allowed cursor-pointer"
                       title="ارسال پیام"
+                      aria-label="ارسال پیام"
                     >
-                      <span>ارسال</span>
-                      <Send className="w-3.5 h-3.5 rotate-180" />
+                      <Send className="w-4 h-4 -rotate-90 rtl:rotate-180" />
                     </button>
                   )}
                 </div>
               </div>
+
+              {/* Compact Bottom Action Toolbar (Model Selector, Context/Memory Settings, Module Scope) */}
+              <div className="flex items-center justify-between gap-1.5 pt-2 mt-1 border-t border-slate-100 dark:border-slate-800/80 overflow-x-auto no-scrollbar">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  {/* 1. Model Selector Trigger (Opens Bottom Sheet on Mobile / Modal Sheet) */}
+                  <button
+                    type="button"
+                    onClick={() => setActiveSheet('model')}
+                    disabled={isLoading}
+                    className="min-h-[44px] px-3 py-1.5 rounded-2xl bg-slate-50 hover:bg-slate-100 dark:bg-slate-800/90 dark:hover:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center gap-1.5 shrink-0 transition cursor-pointer"
+                    title="انتخاب مدل هوش مصنوعی"
+                  >
+                    <Bot className="w-4 h-4 text-[#5B4BFF] shrink-0" />
+                    <span className="max-w-[115px] sm:max-w-[180px] truncate">
+                      {selectedModel || 'انتخاب مدل'}
+                    </span>
+                    <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  </button>
+
+                  {/* 2. Context / Memory Anti-OOM Trigger */}
+                  <button
+                    type="button"
+                    onClick={() => setActiveSheet('context')}
+                    disabled={isLoading}
+                    className="min-h-[44px] px-3 py-1.5 rounded-2xl bg-slate-50 hover:bg-slate-100 dark:bg-slate-800/90 dark:hover:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center gap-1.5 shrink-0 transition cursor-pointer"
+                    title="تنظیمات کانتکست و حافظه (ضد OOM)"
+                  >
+                    <Sliders className="w-3.5 h-3.5 text-[#5B4BFF] shrink-0" />
+                    <span className="truncate">کانتکست: {activeContextOption.shortLabel}</span>
+                    <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  </button>
+
+                  {/* 3. Module Scope Selector Trigger */}
+                  <button
+                    type="button"
+                    onClick={() => setActiveSheet('modules')}
+                    disabled={isLoading}
+                    className={`min-h-[44px] px-3 py-1.5 rounded-2xl border text-xs font-bold flex items-center gap-1.5 shrink-0 transition cursor-pointer ${
+                      selectedModules.length > 0
+                        ? 'bg-[#5B4BFF]/10 border-[#5B4BFF]/30 text-[#5B4BFF] dark:text-[#ACA2FF]'
+                        : 'bg-slate-50 hover:bg-slate-100 dark:bg-slate-800/90 dark:hover:bg-slate-800 border-slate-200/80 dark:border-slate-700/80 text-slate-700 dark:text-slate-200'
+                    }`}
+                    title="انتخاب ماژول‌های سامانه جهت تحلیل"
+                  >
+                    <Layers className="w-3.5 h-3.5 text-[#5B4BFF] shrink-0" />
+                    <span>
+                      {selectedModules.includes('all')
+                        ? 'ماژول‌ها: همه (ALL)'
+                        : selectedModules.length > 0
+                        ? `ماژول‌ها (${selectedModules.length})`
+                        : 'ماژول‌ها'}
+                    </span>
+                    <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  </button>
+                </div>
+
+                {/* Quick /ALL Toggle Pill on Desktop/Tablet */}
+                <button
+                  type="button"
+                  onClick={() =>
+                    setSelectedModules(prev => (prev.includes('all') ? [] : ['all']))
+                  }
+                  className={`hidden sm:inline-flex min-h-[44px] px-3 py-1.5 rounded-2xl text-xs font-black items-center gap-1 shrink-0 transition cursor-pointer ${
+                    selectedModules.includes('all')
+                      ? 'bg-[#5B4BFF] text-white shadow-xs'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200/70'
+                  }`}
+                  title="تحلیل جامع تمامی ماژول‌های سامانه"
+                >
+                  <span>/ALL</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
+
+        {/* ── ۴. باتم‌شیت‌های موبایل‌فرست (Bottom Sheets for Model, Context/Memory & Modules) ── */}
+        {activeSheet !== 'none' && (
+          <div
+            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/50 backdrop-blur-xs animate-in fade-in duration-200"
+            onClick={() => setActiveSheet('none')}
+          >
+            <div
+              className="w-full sm:max-w-lg bg-white dark:bg-slate-900 rounded-t-3xl sm:rounded-3xl border-t sm:border border-slate-200 dark:border-slate-800 shadow-2xl max-h-[82dvh] flex flex-col overflow-hidden animate-in slide-in-from-bottom duration-200"
+              onClick={e => e.stopPropagation()}
+            >
+              {/* Drag Handle Bar for Mobile Bottom Sheet */}
+              <div className="w-10 h-1.5 bg-slate-300 dark:bg-slate-700 rounded-full mx-auto mt-3 mb-1 sm:hidden shrink-0" />
+
+              {/* Sheet Header */}
+              <div className="px-5 py-3.5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between gap-3 shrink-0">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-[#5B4BFF]/10 text-[#5B4BFF] flex items-center justify-center">
+                    {activeSheet === 'model' && <Bot className="w-5 h-5" />}
+                    {activeSheet === 'context' && <Sliders className="w-5 h-5" />}
+                    {activeSheet === 'modules' && <Layers className="w-5 h-5" />}
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black text-slate-900 dark:text-slate-100">
+                      {activeSheet === 'model' && 'انتخاب مدل زبانی هوش مصنوعی'}
+                      {activeSheet === 'context' && 'تنظیمات حافظه، کانتکست و ابزارها'}
+                      {activeSheet === 'modules' && 'انتخاب محدوده ماژول‌های سامانه'}
+                    </h3>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      {activeSheet === 'model' && 'مدل‌های محلی آماده پاسخ‌گویی در موتور Ollama'}
+                      {activeSheet === 'context' && 'مدیریت پویا و ایمن RAM سرور جهت جلوگیری از خطای OOM'}
+                      {activeSheet === 'modules' && 'تعیین دامنه دسترسی هوش مصنوعی به داده‌های برخط'}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveSheet('none')}
+                  className="min-h-[44px] min-w-[44px] rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center transition cursor-pointer"
+                  aria-label="بستن"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Sheet Body */}
+              <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+                {/* SHEET 1: MODEL SELECTION */}
+                {activeSheet === 'model' && (
+                  <>
+                    {installedModels.length === 0 ? (
+                      <div className="p-5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-800 text-center space-y-3">
+                        <AlertCircle className="w-10 h-10 text-amber-500 mx-auto" />
+                        <div className="space-y-1">
+                          <p className="text-sm font-black text-slate-900 dark:text-slate-100">
+                            هیچ مدل گفت‌وگویی نصب نشده است
+                          </p>
+                          <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                            برای استفاده از دستیار هوشمند، ابتدا یک مدل مولد را از بخش مدیریت هوش مصنوعی نصب نمایید.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleNavigateToAiSettings}
+                          className="w-full min-h-[48px] px-4 py-2.5 rounded-xl bg-[#5B4BFF] hover:bg-[#4A3AE8] text-white text-xs font-bold flex items-center justify-center gap-2 shadow-md shadow-[#5B4BFF]/20 transition cursor-pointer"
+                        >
+                          <Settings className="w-4 h-4" />
+                          <span>نصب مدل از مدیریت هوش مصنوعی</span>
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {installedModels.map(model => {
+                          const isSelected = selectedModel === model.name;
+                          return (
+                            <button
+                              key={model.name}
+                              type="button"
+                              onClick={() => {
+                                setSelectedModel(model.name);
+                                setActiveSheet('none');
+                              }}
+                              className={`w-full min-h-[56px] p-3.5 rounded-2xl border text-right flex items-center justify-between gap-3 transition cursor-pointer ${
+                                isSelected
+                                  ? 'bg-[#5B4BFF]/10 border-[#5B4BFF] text-slate-900 dark:text-white'
+                                  : 'bg-slate-50/70 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-800 text-slate-700 dark:text-slate-200 hover:border-slate-300'
+                              }`}
+                            >
+                              <div className="flex items-center gap-3 min-w-0">
+                                <div
+                                  className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+                                    isSelected
+                                      ? 'bg-[#5B4BFF] text-white'
+                                      : 'bg-white dark:bg-slate-800 text-slate-500 border border-slate-200 dark:border-slate-700'
+                                  }`}
+                                >
+                                  <Bot className="w-4 h-4" />
+                                </div>
+                                <div className="min-w-0">
+                                  <p className="text-xs sm:text-sm font-black truncate">
+                                    {model.name}
+                                  </p>
+                                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                                    {model.details?.parameter_size
+                                      ? `ظرفیت: ${model.details.parameter_size}`
+                                      : 'مدل زبانی محلی آماده'}
+                                    {model.details?.quantization_level
+                                      ? ` • کوانتیزاسیون: ${model.details.quantization_level}`
+                                      : ''}
+                                  </p>
+                                </div>
+                              </div>
+                              {isSelected && (
+                                <CheckCircle2 className="w-5 h-5 text-[#5B4BFF] shrink-0" />
+                              )}
+                            </button>
+                          );
+                        })}
+
+                        <div className="pt-2">
+                          <button
+                            type="button"
+                            onClick={handleNavigateToAiSettings}
+                            className="w-full min-h-[44px] px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-800 text-xs font-bold text-[#5B4BFF] dark:text-[#9D93FF] hover:bg-[#5B4BFF]/5 flex items-center justify-center gap-2 transition cursor-pointer"
+                          >
+                            <Settings className="w-4 h-4" />
+                            <span>مدیریت و نصب مدل‌های بیشتر</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {/* SHEET 2: CONTEXT & ANTI-OOM MEMORY SETTINGS */}
+                {activeSheet === 'context' && (
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <label className="text-xs font-black text-slate-700 dark:text-slate-300 block">
+                        طول پنجره کانتکست (Context Length)
+                      </label>
+                      {CONTEXT_OPTIONS.map(option => {
+                        const isSelected = selectedContext === option.value;
+                        return (
+                          <button
+                            key={option.value}
+                            type="button"
+                            onClick={() => {
+                              setSelectedContext(option.value);
+                              setActiveSheet('none');
+                            }}
+                            className={`w-full min-h-[60px] p-3.5 rounded-2xl border text-right flex items-start justify-between gap-3 transition cursor-pointer ${
+                              isSelected
+                                ? 'bg-[#5B4BFF]/10 border-[#5B4BFF] text-slate-900 dark:text-white'
+                                : 'bg-slate-50/70 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-800 text-slate-700 dark:text-slate-200 hover:border-slate-300'
+                            }`}
+                          >
+                            <div className="space-y-1">
+                              <p className="text-xs font-black">{option.label}</p>
+                              <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                                {option.desc}
+                              </p>
+                            </div>
+                            {isSelected && (
+                              <CheckCircle2 className="w-5 h-5 text-[#5B4BFF] shrink-0 mt-0.5" />
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Tool Execution Toggle */}
+                    <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-800 flex items-center justify-between gap-3">
+                      <div className="space-y-0.5">
+                        <p className="text-xs font-black text-slate-800 dark:text-slate-100">
+                          واکشی زنده داده‌های ماژول‌ها (Tool Calling)
+                        </p>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                          اجازه دسترسی برخط به دیتابیس و ماژول‌های HSE هنگام پاسخ‌گویی
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleAllowTools(!allowTools)}
+                        className={`min-h-[44px] px-4 rounded-xl text-xs font-black transition cursor-pointer ${
+                          allowTools
+                            ? 'bg-[#5B4BFF] text-white'
+                            : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+                        }`}
+                      >
+                        {allowTools ? 'فعال' : 'غیرفعال'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* SHEET 3: MODULE SCOPE PICKER */}
+                {activeSheet === 'modules' && (
+                  <div className="space-y-3">
+                    <div className="relative">
+                      <Search className="w-4 h-4 absolute start-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                      <input
+                        type="text"
+                        value={moduleSearchQuery}
+                        onChange={e => setModuleSearchQuery(e.target.value)}
+                        placeholder="جستجو در ماژول‌ها و زیرتب‌ها..."
+                        className="w-full min-h-[44px] bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs py-2.5 pe-3 ps-10 outline-none focus:border-[#5B4BFF] text-slate-800 dark:text-slate-100"
+                      />
+                    </div>
+
+                    {/* /ALL Option */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedModules(prev => (prev.includes('all') ? [] : ['all']));
+                        setActiveSheet('none');
+                      }}
+                      className={`w-full min-h-[52px] p-3.5 rounded-2xl border text-right flex items-center justify-between gap-2 transition cursor-pointer ${
+                        selectedModules.includes('all')
+                          ? 'bg-[#5B4BFF]/10 border-[#5B4BFF] text-[#5B4BFF] dark:text-[#ACA2FF]'
+                          : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-100'
+                      }`}
+                    >
+                      <div>
+                        <p className="text-xs font-black">
+                          /ALL — تحلیل جامع تمامی ماژول‌های سامانه
+                        </p>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                          پوشش ۱۰۰٪ ماژول‌های فعال به همراه اعلام وضعیت اتصال هر بخش
+                        </p>
+                      </div>
+                      {selectedModules.includes('all') && (
+                        <CheckCircle2 className="w-5 h-5 text-[#5B4BFF] shrink-0" />
+                      )}
+                    </button>
+
+                    {/* Individual Modules List */}
+                    <div className="space-y-1.5 max-h-64 overflow-y-auto custom-scrollbar">
+                      {filteredModules.map(item => {
+                        const isSelected = selectedModules.includes(item.moduleId);
+                        const hasVisibleParent = Boolean(
+                          item.parentModuleId &&
+                            moduleCatalog.some(parent => parent.moduleId === item.parentModuleId)
+                        );
+                        return (
+                          <button
+                            key={item.moduleId}
+                            type="button"
+                            disabled={!item.connected}
+                            onClick={() => {
+                              setSelectedModules(current => {
+                                const next = current.includes(item.moduleId)
+                                  ? current.filter(id => id !== item.moduleId)
+                                  : [...current.filter(id => id !== 'all'), item.moduleId];
+                                return next;
+                              });
+                            }}
+                            className={`w-full min-h-[46px] px-3.5 py-2.5 rounded-xl border text-right flex items-center justify-between gap-2 text-xs transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+                              isSelected
+                                ? 'bg-[#5B4BFF]/10 border-[#5B4BFF] text-[#5B4BFF] dark:text-[#ACA2FF] font-bold'
+                                : 'bg-white dark:bg-slate-900 border-slate-200/70 dark:border-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50'
+                            }`}
+                          >
+                            <span
+                              style={{
+                                paddingRight: hasVisibleParent
+                                  ? `${Math.min(item.level || 1, 4) * 12}px`
+                                  : '0px',
+                              }}
+                              className="truncate"
+                            >
+                              {hasVisibleParent ? '↳ ' : ''}
+                              {item.moduleNameFa}
+                            </span>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <span className="text-[10px] text-slate-400">
+                                {item.connected
+                                  ? item.tools?.length
+                                    ? 'ابزار داده‌خوان'
+                                    : 'پایگاه دانش'
+                                  : 'غیرفعال'}
+                              </span>
+                              {isSelected && <Check className="w-4 h-4 text-[#5B4BFF]" />}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div className="pt-2 flex items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedModules([])}
+                        className="min-h-[44px] px-4 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300"
+                      >
+                        پاک‌سازی انتخاب
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setActiveSheet('none')}
+                        className="flex-1 min-h-[44px] px-4 rounded-xl bg-[#5B4BFF] text-white text-xs font-bold"
+                      >
+                        تأیید و اعمال ({selectedModules.length || 'پیش‌فرض'})
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );

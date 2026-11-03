@@ -954,8 +954,8 @@ export default function NonPeriodicExams({ language, currentUser }: Props) {
                   </span>
                 </div>
 
-                <div className="h-64 w-full">
-                  <ResponsiveContainer width="100%" height="100%">
+                <div className="h-64 w-full min-h-[256px]">
+                  <ResponsiveContainer width="100%" height={256} minWidth={0} minHeight={240} debounce={50}>
                     <PieChart>
                       <Pie
                         data={stats.statusChartData}
@@ -986,8 +986,8 @@ export default function NonPeriodicExams({ language, currentUser }: Props) {
                   </h3>
                 </div>
 
-                <div className="h-64 w-full">
-                  <ResponsiveContainer width="100%" height="100%">
+                <div className="h-64 w-full min-h-[256px]">
+                  <ResponsiveContainer width="100%" height={256} minWidth={0} minHeight={240} debounce={50}>
                     <BarChart data={stats.reasonChartData} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
                       <CartesianGrid strokeDasharray="3 3" horizontal={false} />
                       <XAxis type="number" />

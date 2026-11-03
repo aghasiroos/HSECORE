@@ -197,12 +197,18 @@ export async function initDossierAttachmentStorage(): Promise<void> {
 
       // Automatically migrate any browser-only IndexedDB attachments to the central database
       if (hasUnmigratedLocal && memoryCache.length > 0) {
-        apiDb.saveSetting(CENTRAL_SETTING_KEY, memoryCache, 'Periodic Medical Exam Dossier Attachments').catch(() => {});
+        await apiDb.saveSetting(CENTRAL_SETTING_KEY, memoryCache, 'Periodic Medical Exam Dossier Attachments').catch(() => {});
       }
 
-      try {
-        localStorage.removeItem('dossier_attachments_cache_meta');
-      } catch {}
+      // Purge legacy browser storage after migration
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.removeItem('dossier_attachments_cache_meta');
+          if (window.indexedDB && localList.length > 0) {
+            window.indexedDB.deleteDatabase(DB_NAME);
+          }
+        } catch {}
+      }
 
       isDbInitialized = true;
     } catch (err) {
@@ -257,22 +263,10 @@ export async function addDossierAttachment(
 
   memoryCache = [newAttachment, ...memoryCache];
 
-  // Persist to authoritative central database
+  // Persist exclusively to authoritative central PostgreSQL database
   await apiDb.saveSetting(CENTRAL_SETTING_KEY, memoryCache, 'Periodic Medical Exam Dossier Attachments').catch(err => {
     console.warn('Could not save attachment to central database:', err);
   });
-
-  // Also keep in local IndexedDB cache
-  try {
-    const db = await openDB();
-    const tx = db.transaction(STORE_NAME, 'readwrite');
-    const store = tx.objectStore(STORE_NAME);
-    await new Promise<void>((resolve, reject) => {
-      const req = store.put(newAttachment);
-      req.onsuccess = () => resolve();
-      req.onerror = () => reject(req.error);
-    });
-  } catch {}
 
   return newAttachment;
 }
@@ -293,21 +287,10 @@ export async function updateDossierAttachment(
 
   memoryCache[index] = updated;
 
-  // Persist to authoritative central database
+  // Persist exclusively to authoritative central PostgreSQL database
   await apiDb.saveSetting(CENTRAL_SETTING_KEY, memoryCache, 'Periodic Medical Exam Dossier Attachments').catch(err => {
     console.warn('Could not update attachment in central database:', err);
   });
-
-  try {
-    const db = await openDB();
-    const tx = db.transaction(STORE_NAME, 'readwrite');
-    const store = tx.objectStore(STORE_NAME);
-    await new Promise<void>((resolve, reject) => {
-      const req = store.put(updated);
-      req.onsuccess = () => resolve();
-      req.onerror = () => reject(req.error);
-    });
-  } catch {}
 
   return updated;
 }
@@ -320,21 +303,10 @@ export async function deleteDossierAttachment(id: string): Promise<boolean> {
 
   memoryCache.splice(index, 1);
 
-  // Persist deletion to authoritative central database
+  // Persist deletion exclusively to authoritative central PostgreSQL database
   await apiDb.saveSetting(CENTRAL_SETTING_KEY, memoryCache, 'Periodic Medical Exam Dossier Attachments').catch(err => {
     console.warn('Could not delete attachment from central database:', err);
   });
-
-  try {
-    const db = await openDB();
-    const tx = db.transaction(STORE_NAME, 'readwrite');
-    const store = tx.objectStore(STORE_NAME);
-    await new Promise<void>((resolve, reject) => {
-      const req = store.delete(id);
-      req.onsuccess = () => resolve();
-      req.onerror = () => reject(req.error);
-    });
-  } catch {}
 
   return true;
 }

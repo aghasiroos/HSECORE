@@ -1,4 +1,5 @@
 import { UserChartItemConfig } from './EditChartModal';
+import { apiDb } from '../../../../services/apiDatabaseClient';
 
 const STORAGE_KEY_PREFIX = 'OCC_HEALTH_DASHBOARD_CHARTS_CONFIG_V2';
 
@@ -104,86 +105,54 @@ function cleanupLegacyStorageKeys() {
 export function loadUserChartConfigs(userId?: string): UserChartItemConfig[] {
   const key = `${STORAGE_KEY_PREFIX}_${userId || 'default'}`;
 
-  // 1. Check in-memory cache first
+  // 1. Return in-memory session cache if already hydrated
   if (memoryCache[key] && Array.isArray(memoryCache[key]) && memoryCache[key].length > 0) {
     return memoryCache[key];
   }
 
-  // 2. Try loading from localStorage
-  try {
-    const raw = localStorage.getItem(key);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        const sanitized = sanitizeConfigs(parsed);
-        memoryCache[key] = sanitized;
-        return sanitized;
+  // 2. One-time zero-loss uplink from legacy localStorage/sessionStorage if present
+  if (typeof window !== 'undefined') {
+    try {
+      const raw = localStorage.getItem(key) || sessionStorage.getItem(key);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const sanitized = sanitizeConfigs(parsed);
+          memoryCache[key] = sanitized;
+          void apiDb.saveSetting(key, sanitized, 'Occupational Health User Chart Configs').catch(() => {});
+        }
+        localStorage.removeItem(key);
+        sessionStorage.removeItem(key);
       }
-    }
-  } catch (_) {
-    // Local storage reading failed or quota restricted
+      cleanupLegacyStorageKeys();
+    } catch (_) {}
   }
 
-  // 3. Try sessionStorage fallback
-  try {
-    const sessionRaw = sessionStorage.getItem(key);
-    if (sessionRaw) {
-      const parsed = JSON.parse(sessionRaw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        const sanitized = sanitizeConfigs(parsed);
-        memoryCache[key] = sanitized;
-        return sanitized;
-      }
+  // 3. Hydrate asynchronously from central database
+  void apiDb.getSetting(key).then((remote) => {
+    if (Array.isArray(remote) && remote.length > 0) {
+      memoryCache[key] = sanitizeConfigs(remote);
     }
-  } catch (_) {
-    // Session storage fallback failed
-  }
+  }).catch(() => {});
 
-  memoryCache[key] = DEFAULT_DASHBOARD_CHARTS;
-  return DEFAULT_DASHBOARD_CHARTS;
+  if (!memoryCache[key]) {
+    memoryCache[key] = DEFAULT_DASHBOARD_CHARTS;
+  }
+  return memoryCache[key];
 }
 
 export function saveUserChartConfigs(configs: UserChartItemConfig[], userId?: string): void {
   const key = `${STORAGE_KEY_PREFIX}_${userId || 'default'}`;
   const sanitized = sanitizeConfigs(configs);
-
-  // Always update in-memory cache so current session retains all changes flawlessly
   memoryCache[key] = sanitized;
 
-  const payload = JSON.stringify(sanitized);
-
-  // Try saving to localStorage
-  try {
-    localStorage.setItem(key, payload);
-    return;
-  } catch (err: any) {
-    // If quota exceeded, clean up legacy items and retry once
-    cleanupLegacyStorageKeys();
-    try {
-      localStorage.setItem(key, payload);
-      return;
-    } catch (_) {
-      // If still exceeding quota, fallback gracefully to sessionStorage
-      try {
-        sessionStorage.setItem(key, payload);
-      } catch (sessionErr) {
-        // In-memory cache is already updated, no further action needed
-      }
-    }
-  }
+  void apiDb.saveSetting(key, sanitized, 'Occupational Health User Chart Configs').catch(() => {});
 }
 
 export function resetUserChartConfigs(userId?: string): UserChartItemConfig[] {
   const key = `${STORAGE_KEY_PREFIX}_${userId || 'default'}`;
   memoryCache[key] = DEFAULT_DASHBOARD_CHARTS;
 
-  try {
-    localStorage.removeItem(key);
-  } catch (_) {}
-
-  try {
-    sessionStorage.removeItem(key);
-  } catch (_) {}
-
+  void apiDb.saveSetting(key, DEFAULT_DASHBOARD_CHARTS, 'Occupational Health User Chart Configs').catch(() => {});
   return DEFAULT_DASHBOARD_CHARTS;
 }

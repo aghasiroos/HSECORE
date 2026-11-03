@@ -1,4 +1,5 @@
-import { get, set, del } from 'idb-keyval';
+import { get, del } from 'idb-keyval';
+import { apiDb } from '../services/apiDatabaseClient';
 import { WarningRecord } from '../types';
 
 export const WARNING_STORAGE_KEY = 'warning_records';
@@ -245,101 +246,92 @@ export function sanitizeWarningRecords(records: any[]): WarningRecord[] {
 }
 
 /**
- * Asynchronously save warning records to persistent IndexedDB (no 5MB quota constraint)
- * and attempt safe mirrored write to localStorage, always ensuring data is deduplicated.
+ * Asynchronously save warning records directly to PostgreSQL central database via apiDb,
+ * ensuring real-time multi-user consistency without relying on browser memory.
  */
 export async function saveWarningsToStorage(warns: WarningRecord[]): Promise<void> {
   const sanitized = sanitizeWarningRecords(warns);
-
-  // 1. Primary Durable Storage: IndexedDB (Virtually unlimited quota)
   try {
-    await set(WARNING_STORAGE_KEY, sanitized);
-  } catch {
-    // Tolerated gracefully
+    await apiDb.saveSafetyWarningsBatch(sanitized);
+  } catch (err) {
+    console.warn('[Storage Migration] Error saving warnings to central database:', err);
   }
 
-  // 2. Secondary Fast Storage: LocalStorage (Quota safe)
+  // Purge any legacy browser storage remnants
   try {
-    safeLocalStorageSet(WARNING_STORAGE_KEY, JSON.stringify(sanitized));
-  } catch {
-    // Data secured in IndexedDB
-  }
+    localStorage.removeItem(WARNING_STORAGE_KEY);
+    await del(WARNING_STORAGE_KEY).catch(() => {});
+  } catch {}
 }
 
 /**
- * Asynchronously load warning records from IndexedDB or LocalStorage with automatic deduplication.
+ * In-memory session cache for instant synchronous retrieval
+ */
+let inMemoryWarningsSnapshot: WarningRecord[] = [];
+
+/**
+ * Asynchronously load warning records from PostgreSQL central database.
+ * Also performs zero-loss uplink migration of any orphaned legacy IndexedDB/LocalStorage drafts.
  */
 export async function loadWarningsFromStorage(): Promise<WarningRecord[]> {
-  // Try IndexedDB first
   try {
-    const idbData = await get<WarningRecord[]>(WARNING_STORAGE_KEY);
-    if (Array.isArray(idbData) && idbData.length > 0) {
-      const { clean, removedCount } = deduplicateWarningRecords(idbData);
-      if (removedCount > 0) {
-        try {
-          await set(WARNING_STORAGE_KEY, clean);
-        } catch {}
-      }
-      // Sync to localStorage if quota allows
-      safeLocalStorageSet(WARNING_STORAGE_KEY, JSON.stringify(clean));
-      return clean;
-    }
-  } catch {
-    // Continue to fallback
-  }
+    // 1. Fetch authoritative records from central PostgreSQL database
+    const dbRows = await apiDb.getSafetyWarnings();
+    let records: WarningRecord[] = Array.isArray(dbRows) ? dbRows : [];
 
-  // Fallback to localStorage
-  const rawLocal = safeLocalStorageGet(WARNING_STORAGE_KEY);
-  if (rawLocal) {
+    // 2. One-time zero-loss uplink check for legacy orphaned client drafts
     try {
-      const parsed = JSON.parse(rawLocal);
-      if (Array.isArray(parsed)) {
-        const { clean, removedCount } = deduplicateWarningRecords(parsed);
-        if (removedCount > 0) {
-          safeLocalStorageSet(WARNING_STORAGE_KEY, JSON.stringify(clean));
-        }
-        // Persist to IndexedDB for future safety
-        try {
-          await set(WARNING_STORAGE_KEY, clean);
-        } catch {}
-        return clean;
-      }
-    } catch {
-      // Corrupt payload handled safely
-    }
-  }
+      const legacyIdb = await get<WarningRecord[]>(WARNING_STORAGE_KEY).catch(() => null);
+      const rawLocal = typeof window !== 'undefined' ? localStorage.getItem(WARNING_STORAGE_KEY) : null;
+      const legacyLocal = rawLocal ? JSON.parse(rawLocal) : null;
+      const candidates = [...(Array.isArray(legacyIdb) ? legacyIdb : []), ...(Array.isArray(legacyLocal) ? legacyLocal : [])];
 
-  return [];
+      if (candidates.length > 0) {
+        const { clean: orphaned } = deduplicateWarningRecords(candidates);
+        const existingNumbers = new Set(records.map(r => String(r.number || '').toLowerCase()));
+        const toUpload = orphaned.filter(o => o.number && !existingNumbers.has(String(o.number).toLowerCase()));
+
+        if (toUpload.length > 0) {
+          console.log(`[Storage Migration] Uplinking ${toUpload.length} legacy client warning drafts to central PostgreSQL...`);
+          await apiDb.saveSafetyWarningsBatch(toUpload).catch(() => {});
+          const refreshed = await apiDb.getSafetyWarnings().catch(() => null);
+          if (Array.isArray(refreshed)) records = refreshed;
+        }
+
+        // Cleanly purge legacy client storage once uplinked
+        localStorage.removeItem(WARNING_STORAGE_KEY);
+        await del(WARNING_STORAGE_KEY).catch(() => {});
+      }
+    } catch {}
+
+    const { clean } = deduplicateWarningRecords(records);
+    inMemoryWarningsSnapshot = clean;
+    return clean;
+  } catch (err) {
+    console.warn('[Storage Migration] Error loading warnings from database, returning in-memory snapshot:', err);
+    return inMemoryWarningsSnapshot;
+  }
 }
 
 /**
- * Synchronous initial retrieval of warnings from LocalStorage for instant render
+ * Synchronous initial retrieval of warnings from memory for zero-flicker render
  */
 export function getWarningsSynchronously(): WarningRecord[] {
-  const raw = safeLocalStorageGet(WARNING_STORAGE_KEY);
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) {
-      return sanitizeWarningRecords(parsed);
-    }
-  } catch {
-    // Handled safely
-  }
-  return [];
+  return inMemoryWarningsSnapshot;
 }
 
 /**
- * Completely clear all stored warnings from both IndexedDB and LocalStorage
+ * Completely clear all stored warnings from the central database
  */
 export async function clearWarningsFromStorage(): Promise<void> {
   try {
-    await del(WARNING_STORAGE_KEY);
-  } catch {
-    // Ignored
+    await apiDb.clearAllSafetyWarnings();
+  } catch (err) {
+    console.error('Error clearing warnings from database:', err);
   }
+  inMemoryWarningsSnapshot = [];
   try {
+    await del(WARNING_STORAGE_KEY).catch(() => {});
     localStorage.removeItem(WARNING_STORAGE_KEY);
   } catch {}
-  safeLocalStorageSet(WARNING_STORAGE_KEY, JSON.stringify([]));
 }

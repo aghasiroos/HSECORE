@@ -1513,7 +1513,7 @@ export default function ComprehensiveExecutiveDashboard({ language, onNavigate }
               emptyText={isFa ? 'هنوز سابقه معاینه طب کار برای فیلتر انتخابی ثبت نشده است' : 'No medical exams recorded yet'}
               onNavigate={onNavigate}
             >
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height={250} minWidth={0} minHeight={240} debounce={50}>
                 <PieChart>
                   <Pie
                     data={fitnessChartData}
@@ -1558,7 +1558,7 @@ export default function ComprehensiveExecutiveDashboard({ language, onNavigate }
               emptyText={isFa ? 'داده‌ای در بخش مشاوره تغذیه یا شاخص BMI معاینات ثبت نشده است' : 'No nutrition or BMI records found'}
               onNavigate={onNavigate}
             >
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height={250} minWidth={0} minHeight={240} debounce={50}>
                 <BarChart data={nutritionHighRiskChartData} margin={{ top: 10, right: 15, left: 0, bottom: 20 }}>
                   <CartesianGrid strokeDasharray="3 3" opacity={0.25} />
                   <XAxis dataKey="category" tick={{ fontSize: 10 }} interval={0} angle={-15} textAnchor="end" />
@@ -1596,7 +1596,7 @@ export default function ComprehensiveExecutiveDashboard({ language, onNavigate }
               emptyText={isFa ? 'هنوز مراجعه‌ای در زیرماژول بهداری ثبت نشده است' : 'No clinic visits recorded yet'}
               onNavigate={onNavigate}
             >
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height={250} minWidth={0} minHeight={240} debounce={50}>
                 <BarChart data={clinicChartData} margin={{ top: 10, right: 15, left: 0, bottom: 20 }}>
                   <CartesianGrid strokeDasharray="3 3" opacity={0.25} />
                   <XAxis dataKey="level" tick={{ fontSize: 10 }} interval={0} angle={-15} textAnchor="end" />
@@ -1634,7 +1634,7 @@ export default function ComprehensiveExecutiveDashboard({ language, onNavigate }
               emptyText={isFa ? 'هنوز رکوردی در بخش پایش‌های محیط‌زیستی، پساب یا هوا ثبت نشده است' : 'No environmental monitoring records yet'}
               onNavigate={onNavigate}
             >
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height={250} minWidth={0} minHeight={240} debounce={50}>
                 <BarChart data={envMonitoringChartData} margin={{ top: 10, right: 15, left: 0, bottom: 20 }}>
                   <CartesianGrid strokeDasharray="3 3" opacity={0.25} />
                   <XAxis dataKey="label" tick={{ fontSize: 10 }} interval={0} angle={-12} textAnchor="end" />
@@ -1681,7 +1681,7 @@ export default function ComprehensiveExecutiveDashboard({ language, onNavigate }
               emptyText={isFa ? 'هنوز سابقه پسماند صنعتی در زیرماژول پسماند ثبت نشده است' : 'No waste records registered yet'}
               onNavigate={onNavigate}
             >
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height={250} minWidth={0} minHeight={240} debounce={50}>
                 <PieChart>
                   <Pie
                     data={wasteCategoryChartData}
@@ -1725,7 +1725,7 @@ export default function ComprehensiveExecutiveDashboard({ language, onNavigate }
             emptyText={isFa ? 'هنوز ممیزی ۵S یا چک‌لیست عملیاتی بهداشت ثبت نشده است' : 'No 5S audits or hygiene checklists recorded yet'}
             onNavigate={onNavigate}
           >
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height={250} minWidth={0} minHeight={240} debounce={50}>
               <RadarChart cx="50%" cy="50%" outerRadius="72%" data={fiveSAndChecklistChartData}>
                 <PolarGrid opacity={0.3} />
                 <PolarAngleAxis dataKey="subject" tick={{ fontSize: 10 }} />

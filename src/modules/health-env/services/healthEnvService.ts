@@ -310,9 +310,7 @@ export class HealthEnvService {
 
       if (typeof window !== 'undefined') {
         try {
-          localStorage.setItem(STORAGE_KEYS.RECORDS, JSON.stringify(this.records));
-          localStorage.setItem(STORAGE_KEYS.EXAMS, JSON.stringify(this.periodicExams));
-          localStorage.setItem(STORAGE_KEYS.NON_PERIODIC_EXAMS, JSON.stringify(this.nonPeriodicExams));
+          Object.values(STORAGE_KEYS).forEach(k => localStorage.removeItem(k));
         } catch (_) {}
         window.dispatchEvent(new Event('hse_health_env_updated'));
       }
@@ -327,87 +325,31 @@ export class HealthEnvService {
     return [...this.rawOccExams];
   }
 
-  private loadKey = <T>(key: string, fallback: T[]): T[] => {
-    try {
-      const saved = localStorage.getItem(key);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed;
-      }
-    } catch (e) {
-      console.warn(`Error loading key ${key}:`, e);
-    }
-    return [...fallback];
-  };
-
   public reloadFromStorage = () => {
-    this.records = this.loadKey(STORAGE_KEYS.RECORDS, []);
-    this.periodicExams = this.loadKey(STORAGE_KEYS.EXAMS, []);
-    this.nonPeriodicExams = this.loadKey(STORAGE_KEYS.NON_PERIODIC_EXAMS, []);
-    this.attachments = this.loadKey(STORAGE_KEYS.ATTACHMENTS, []);
-    this.envMonitoring = this.loadKey(STORAGE_KEYS.ENV_MONITORING, []);
-    this.wasteRecords = this.loadKey(STORAGE_KEYS.WASTE, []);
-    this.wastewaterRecords = this.loadKey(STORAGE_KEYS.WASTEWATER, []);
-    this.airQualityRecords = this.loadKey(STORAGE_KEYS.AIR_QUALITY, []);
-    this.waterSoilRecords = this.loadKey(STORAGE_KEYS.WATER_SOIL, []);
-    this.nonConformances = this.loadKey(STORAGE_KEYS.NON_CONFORMANCES, []);
+    void this.reloadFromServer();
   };
 
   private initData() {
-    // Clean older keys from prior seed versions (v1 - v4)
-    [
-      'hse_medical_records_v1', 'hse_medical_records_v2', 'hse_medical_records_v3',
-      'hse_medical_exams_v1', 'hse_medical_exams_v2', 'hse_medical_exams_v3',
-      'hse_non_periodic_exams_v1', 'hse_non_periodic_exams_v2', 'hse_non_periodic_exams_v3',
-      'hse_medical_attachments_v1', 'hse_medical_attachments_v2', 'hse_medical_attachments_v3',
-      'hse_env_monitoring_v1', 'hse_env_monitoring_v2', 'hse_env_monitoring_v3', 'hse_env_monitoring_v4',
-      'hse_waste_records_v1', 'hse_waste_records_v2', 'hse_waste_records_v3', 'hse_waste_records_v4',
-      'hse_wastewater_records_v1', 'hse_wastewater_records_v2', 'hse_wastewater_records_v3', 'hse_wastewater_records_v4',
-      'hse_air_quality_v1', 'hse_air_quality_v2', 'hse_air_quality_v3', 'hse_air_quality_v4',
-      'hse_water_soil_v1', 'hse_water_soil_v2', 'hse_water_soil_v3', 'hse_water_soil_v4',
-      'hse_env_health_nc_v1', 'hse_env_health_nc_v2', 'hse_env_health_nc_v3', 'hse_env_health_nc_v4'
-    ].forEach(k => {
-      try { localStorage.removeItem(k); } catch (_) {}
-    });
-
-    this.records = this.loadKey(STORAGE_KEYS.RECORDS, []);
-    this.periodicExams = this.loadKey(STORAGE_KEYS.EXAMS, []);
-    this.nonPeriodicExams = this.loadKey(STORAGE_KEYS.NON_PERIODIC_EXAMS, []);
-    this.attachments = this.loadKey(STORAGE_KEYS.ATTACHMENTS, []);
-    this.envMonitoring = this.loadKey(STORAGE_KEYS.ENV_MONITORING, []);
-    this.wasteRecords = this.loadKey(STORAGE_KEYS.WASTE, []);
-    this.wastewaterRecords = this.loadKey(STORAGE_KEYS.WASTEWATER, []);
-    this.airQualityRecords = this.loadKey(STORAGE_KEYS.AIR_QUALITY, []);
-    this.waterSoilRecords = this.loadKey(STORAGE_KEYS.WATER_SOIL, []);
-    this.nonConformances = this.loadKey(STORAGE_KEYS.NON_CONFORMANCES, []);
-
-    // Purge year 1402 data
-    const has1402 = this.periodicExams.some(e => Number(e.examYear) === 1402) || this.attachments.some(a => Number(a.examYear) === 1402);
-    if (has1402) {
-      this.periodicExams = this.periodicExams.filter(e => Number(e.examYear) !== 1402);
-      this.attachments = this.attachments.filter(a => Number(a.examYear) !== 1402);
-      this.records = this.records.filter(r => {
-        const remaining = this.periodicExams.filter(e => e.recordId === r.id || e.employeeCode === r.employeeCode);
-        return remaining.length > 0;
+    // Purge legacy keys from browser storage
+    if (typeof window !== 'undefined') {
+      [
+        ...Object.values(STORAGE_KEYS),
+        'hse_medical_records_v1', 'hse_medical_records_v2', 'hse_medical_records_v3',
+        'hse_medical_exams_v1', 'hse_medical_exams_v2', 'hse_medical_exams_v3',
+        'hse_non_periodic_exams_v1', 'hse_non_periodic_exams_v2', 'hse_non_periodic_exams_v3',
+        'hse_medical_attachments_v1', 'hse_medical_attachments_v2', 'hse_medical_attachments_v3',
+        'hse_env_monitoring_v1', 'hse_env_monitoring_v2', 'hse_env_monitoring_v3', 'hse_env_monitoring_v4',
+        'hse_waste_records_v1', 'hse_waste_records_v2', 'hse_waste_records_v3', 'hse_waste_records_v4',
+        'hse_wastewater_records_v1', 'hse_wastewater_records_v2', 'hse_wastewater_records_v3', 'hse_wastewater_records_v4',
+        'hse_air_quality_v1', 'hse_air_quality_v2', 'hse_air_quality_v3', 'hse_air_quality_v4',
+        'hse_water_soil_v1', 'hse_water_soil_v2', 'hse_water_soil_v3', 'hse_water_soil_v4',
+        'hse_env_health_nc_v1', 'hse_env_health_nc_v2', 'hse_env_health_nc_v3', 'hse_env_health_nc_v4'
+      ].forEach(k => {
+        try { localStorage.removeItem(k); } catch (_) {}
       });
     }
 
-    // Purge any legacy default/mock seeded medical exams or records
-    const mockExams = this.periodicExams.filter(e => 
-      e.id.startsWith('exam_seed_') || 
-      e.id.startsWith('seed_') || 
-      e.doctor?.includes('احمدرضا سهرابی') || 
-      e.medicalCenter?.includes('مرکز سلامت شغلی و طب کار صنعت نفت')
-    );
-    if (mockExams.length > 0) {
-      const mockIds = new Set(mockExams.map(e => e.id));
-      this.periodicExams = this.periodicExams.filter(e => !mockIds.has(e.id));
-      this.attachments = this.attachments.filter(a => !mockIds.has(a.examId));
-      this.records = this.records.filter(r => this.periodicExams.some(e => e.recordId === r.id || e.employeeCode === r.employeeCode));
-    }
-
-    this.saveAll();
-    this.reloadFromServer(); // sync from PG immediately
+    void this.reloadFromServer();
   }
 
   public resetEnvironmentData() {

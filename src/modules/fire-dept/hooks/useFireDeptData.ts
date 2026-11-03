@@ -1,21 +1,59 @@
 import { useState, useEffect, useCallback } from 'react';
 import { FireEquipment } from '../types';
 import { apiDb } from '../../../services/apiDatabaseClient';
+import { composeStructuredLocation, extractEquipmentUniqueCode } from '../config/columns';
 
 export function useFireDeptData() {
   const [equipment, setEquipment] = useState<FireEquipment[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
 
-  const normalizeEquip = (list: FireEquipment[]) => {
-    return list.map(item => {
+  const normalizeEquip = (list: FireEquipment[]): FireEquipment[] => {
+    return list.map((item) => {
       const itemAny = item as any;
-      if (itemAny.type && typeof itemAny.type === 'string') {
-        const updatedType = itemAny.type
+      let updatedType = itemAny.type;
+      if (updatedType && typeof updatedType === 'string') {
+        updatedType = updatedType
           .replace(/خاموشکننده|خاموش‌کننده/g, 'خاموش كننده')
           .replace(/دیاکسید/g, 'دی‌اکسید');
-        return { ...item, type: updatedType } as FireEquipment;
       }
-      return item;
+
+      const locDetails = {
+        complex: String(itemAny.locationDetails?.complex ?? itemAny.complex ?? '').trim(),
+        unit: String(itemAny.locationDetails?.unit ?? itemAny.unit ?? '').trim(),
+        direction: String(itemAny.locationDetails?.direction ?? itemAny.direction ?? '').trim(),
+        floor: String(itemAny.locationDetails?.floor ?? itemAny.floor ?? '').trim(),
+        exactLocation: String(itemAny.locationDetails?.exactLocation ?? itemAny.exactLocation ?? '').trim(),
+      };
+
+      const composedLocation =
+        composeStructuredLocation({
+          ...locDetails,
+          fallbackLocation: itemAny.location,
+        }) || itemAny.location || '';
+
+      const operationalStatus = itemAny.operationalStatus || 'فعال';
+      const isTemporaryOut =
+        operationalStatus === 'انتقال جهت شارژ' || operationalStatus === 'انتقال جهت تست';
+
+      return {
+        ...item,
+        ...(updatedType ? { type: updatedType } : {}),
+        code: extractEquipmentUniqueCode(itemAny),
+        location: composedLocation,
+        complex: locDetails.complex,
+        unit: locDetails.unit,
+        direction: locDetails.direction,
+        floor: locDetails.floor,
+        exactLocation: locDetails.exactLocation,
+        locationDetails: locDetails,
+        primaryLocation: itemAny.primaryLocation || composedLocation,
+        primaryLocationDetails: itemAny.primaryLocationDetails || locDetails,
+        operationalStatus,
+        isTemporaryOut,
+        statusHistory: Array.isArray(itemAny.statusHistory) ? itemAny.statusHistory : [],
+        inspections: Array.isArray(itemAny.inspections) ? itemAny.inspections : [],
+        defects: Array.isArray(itemAny.defects) ? itemAny.defects : [],
+      } as FireEquipment;
     });
   };
 
@@ -50,31 +88,38 @@ export function useFireDeptData() {
     };
   }, [loadData]);
 
-  const addEquipment = async (item: FireEquipment) => {
-    setEquipment(prev => [item, ...prev]);
-    try {
-      await apiDb.saveFireEquipment(item);
-    } catch (e) {
-      console.error('Failed to save fire equipment to پایگاه داده:', e);
-      loadData();
-    }
+  const addEquipment = async (item: FireEquipment): Promise<FireEquipment> => {
+    const saved = await apiDb.saveFireEquipment({ ...item, __isCreate: true });
+    const normalized = normalizeEquip([saved || item])[0];
+    setEquipment((prev) => {
+      const withoutDup = prev.filter(
+        (p) => p.id !== normalized.id && extractEquipmentUniqueCode(p) !== extractEquipmentUniqueCode(normalized)
+      );
+      return [normalized, ...withoutDup];
+    });
+    return normalized;
   };
 
-  const updateEquipment = async (id: string, updates: Partial<FireEquipment>) => {
-    setEquipment(prev => prev.map(item => item.id === id ? { ...item, ...updates } as FireEquipment : item));
-    try {
-      const current = equipment.find(item => item.id === id);
-      if (current) {
-        await apiDb.saveFireEquipment({ ...current, ...updates });
-      }
-    } catch (e) {
-      console.error('Failed to update fire equipment in پایگاه داده:', e);
-      loadData();
-    }
+  const updateEquipment = async (id: string, updates: Partial<FireEquipment>): Promise<FireEquipment | null> => {
+    const current = equipment.find((item) => item.id === id || item.code === id);
+    const mergedPayload = {
+      ...(current || {}),
+      ...updates,
+      id: updates.id || current?.id || id,
+      __isCreate: false,
+      __editingId: id,
+    };
+
+    const saved = await apiDb.saveFireEquipment(mergedPayload);
+    const normalized = normalizeEquip([saved || mergedPayload])[0];
+    setEquipment((prev) =>
+      prev.map((item) => (item.id === id || item.id === normalized.id ? normalized : item))
+    );
+    return normalized;
   };
 
   const deleteEquipment = async (id: string) => {
-    setEquipment(prev => prev.filter(item => item.id !== id));
+    setEquipment((prev) => prev.filter((item) => item.id !== id));
     try {
       await apiDb.deleteFireEquipment(id);
     } catch (e) {
@@ -89,6 +134,6 @@ export function useFireDeptData() {
     addEquipment,
     updateEquipment,
     deleteEquipment,
-    reload: loadData
+    reload: loadData,
   };
 }

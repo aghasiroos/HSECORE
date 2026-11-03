@@ -311,7 +311,7 @@ export default function PtwAuditPersonnelRanking({
         </div>
       ) : personnelView === 'barHorizontal' ? (
         <div className="h-80 w-full min-w-0 pt-2">
-          <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={280} debounce={50}>
+          <ResponsiveContainer width="100%" height={310} minWidth={0} minHeight={280} debounce={50}>
             <BarChart 
               data={chartData} 
               layout="vertical"
@@ -363,7 +363,7 @@ export default function PtwAuditPersonnelRanking({
         </div>
       ) : personnelView === 'bar' ? (
         <div className="h-80 w-full min-w-0 pt-2">
-          <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={280} debounce={50}>
+          <ResponsiveContainer width="100%" height={310} minWidth={0} minHeight={280} debounce={50}>
             <BarChart data={chartData} margin={{ top: 15, right: 10, left: 0, bottom: 25 }}>
               {chartSettings.showGrid && <CartesianGrid strokeDasharray="3 3" opacity={0.4} />}
               <XAxis dataKey="name" tick={{ fontSize: 10 }} interval={0} angle={-25} textAnchor="end" />
@@ -396,7 +396,7 @@ export default function PtwAuditPersonnelRanking({
         </div>
       ) : personnelView === 'line' ? (
         <div className="h-80 w-full min-w-0 pt-2">
-          <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={280} debounce={50}>
+          <ResponsiveContainer width="100%" height={310} minWidth={0} minHeight={280} debounce={50}>
             <LineChart data={chartData} margin={{ top: 15, right: 20, left: 10, bottom: 25 }}>
               {chartSettings.showGrid && <CartesianGrid strokeDasharray="3 3" opacity={0.4} />}
               <XAxis dataKey="name" tick={{ fontSize: 10 }} interval={0} angle={-25} textAnchor="end" />
@@ -437,7 +437,7 @@ export default function PtwAuditPersonnelRanking({
         </div>
       ) : (
         <div className="h-80 w-full min-w-0 pt-2">
-          <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={280} debounce={50}>
+          <ResponsiveContainer width="100%" height={310} minWidth={0} minHeight={280} debounce={50}>
             <PieChart>
               <Tooltip 
                 formatter={(val: any, name: any) => [`${val} نقص ثبت‌شده`, name]}

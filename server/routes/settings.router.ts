@@ -38,6 +38,21 @@ export function syncSettingsMemoryCache(key: string, value: any) {
   }
 }
 
+export async function preloadSettingsCache(): Promise<void> {
+  try {
+    const records = await withDbRetry(() => db.select().from(systemSettings));
+    for (const r of records) {
+      memorySettingsCache[r.key] = r.value;
+      if (r.key === INTEGRATION_CONFIG_KEY) {
+        syncIntegrationConfigCache(r.value);
+      }
+    }
+    logger.info(`[Settings] Preloaded ${records.length} system settings and warmed database pool`);
+  } catch (err: any) {
+    logger.warn('[Settings] Settings cache warmup note', { error: err?.message });
+  }
+}
+
 export const ADMIN_ONLY_SETTING_KEYS = [
   'system_branding',
   'security_policy',
@@ -133,6 +148,15 @@ settingsRouter.get('/:key', optionalAuth, async (req, res) => {
       return res.json({ success: true, data: [], value: [] });
     }
   }
+  // Fast-path: return from memory cache immediately (<1ms)
+  if (memorySettingsCache[key] !== undefined) {
+    const outVal =
+      key === INTEGRATION_CONFIG_KEY
+        ? maskIntegrationConfigForClient(memorySettingsCache[key])
+        : memorySettingsCache[key];
+    return res.json({ success: true, data: outVal });
+  }
+
   try {
     const records = await withDbRetry(() => db.select().from(systemSettings).where(eq(systemSettings.key, key)));
     if (records.length > 0) {
@@ -141,23 +165,9 @@ settingsRouter.get('/:key', optionalAuth, async (req, res) => {
         key === INTEGRATION_CONFIG_KEY ? maskIntegrationConfigForClient(records[0].value) : records[0].value;
       return res.json({ success: true, data: outVal });
     }
-    if (memorySettingsCache[key] !== undefined) {
-      const outVal =
-        key === INTEGRATION_CONFIG_KEY
-          ? maskIntegrationConfigForClient(memorySettingsCache[key])
-          : memorySettingsCache[key];
-      return res.json({ success: true, data: outVal });
-    }
     res.json({ success: true, data: null });
   } catch (err) {
-    logger.warn('Failed to query db for setting, checking memory cache fallback', { key, error: (err as any)?.message });
-    if (memorySettingsCache[key] !== undefined) {
-      const outVal =
-        key === INTEGRATION_CONFIG_KEY
-          ? maskIntegrationConfigForClient(memorySettingsCache[key])
-          : memorySettingsCache[key];
-      return res.json({ success: true, data: outVal });
-    }
+    logger.warn('Failed to query db for setting', { key, error: (err as any)?.message });
     res.json({ success: true, data: null });
   }
 });

@@ -2598,7 +2598,7 @@ export default function ReportsModule({
 
               <div className="h-[460px] w-full min-w-0">
                 {trirProjectionData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={420} debounce={50}>
+                  <ResponsiveContainer width="100%" height={450} minWidth={0} minHeight={420} debounce={50}>
                     <ComposedChart data={trirProjectionData} margin={{ top: 35, right: 25, bottom: 40, left: 10 }}>
                       <defs>
                         <linearGradient id="histBarGradient" x1="0" y1="0" x2="0" y2="1">

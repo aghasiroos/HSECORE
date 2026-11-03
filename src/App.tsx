@@ -11,14 +11,7 @@ import { SystemStatusBadge } from './components/SystemStatusBadge';
 import { PrintNotificationModal } from './components/common/PrintNotificationModal';
 import { centralSync } from './services/centralSyncService';
 import { apiDb, getAuthToken } from './services/apiDatabaseClient';
-import {
-  safeLocalStorageSet,
-  safeLocalStorageGet,
-  saveWarningsToStorage,
-  loadWarningsFromStorage,
-  getWarningsSynchronously,
-  deduplicateWarningRecords
-} from './utils/safeStorage';
+import { deduplicateWarningRecords } from './utils/safeStorage';
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -830,9 +823,6 @@ export default function App() {
         const parsed = parseFloat(detail.settings.trir_target);
         if (!isNaN(parsed) && parsed > 0) {
           setTrirTarget(parsed);
-          try {
-            localStorage.setItem('hse_trir_target', parsed.toString());
-          } catch (_) {}
         }
       }
       if (detail.settings && Array.isArray(detail.settings.hse_heat_log)) {
@@ -889,9 +879,6 @@ export default function App() {
               const parsed = parseFloat(s.trir_target);
               if (!isNaN(parsed) && parsed > 0) {
                 setTrirTarget(parsed);
-                try {
-                  localStorage.setItem('hse_trir_target', parsed.toString());
-                } catch (_) {}
               }
             }
             if (Array.isArray(s?.hse_heat_log)) {
@@ -909,9 +896,6 @@ export default function App() {
       const target = e.detail?.target;
       if (typeof target === 'number' && !isNaN(target) && target > 0) {
         setTrirTarget(target);
-        try {
-          localStorage.setItem('hse_trir_target', target.toString());
-        } catch (_) {}
       }
     };
 
@@ -964,9 +948,6 @@ export default function App() {
   const handleTrirTargetUpdated = React.useCallback((target: number) => {
     if (typeof target !== 'number' || isNaN(target) || target <= 0) return;
     setTrirTarget(target);
-    try {
-      localStorage.setItem('hse_trir_target', target.toString());
-    } catch (_) {}
     centralSync.persistSetting('trir_target', target, 'Target TRIR Rate');
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('hse_trir_target_changed', { detail: { target } }));

@@ -581,6 +581,7 @@ export const fireEquipment = pgTable('fire_equipment', {
   status: text('status').default('SERVICEABLE').notNull(), // SERVICEABLE, NEEDS_RECHARGE, DEFECTIVE, OUT_OF_SERVICE
   pressureStatus: text('pressure_status').default('NORMAL'),
   notes: text('notes'),
+  extraData: jsonb('extra_data'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });

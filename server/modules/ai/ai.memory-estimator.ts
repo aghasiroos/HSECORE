@@ -218,6 +218,10 @@ export class AIMemoryEstimator {
     return 7; // default average
   }
 
+  private static getKvFactorPerTokenMB(paramsB: number): number {
+    return Math.max(0.06, Math.min(0.65, (paramsB / 7) * 0.22));
+  }
+
   /**
    * Calculates KV Cache memory footprint in MB based on context length & model params
    */
@@ -229,8 +233,8 @@ export class AIMemoryEstimator {
     // 7B - 8B ~ 0.22 MB per token
     // 12B - 14B ~ 0.28 MB per token
     // 32B ~ 0.55 MB per token
-    const factorPerToken = Math.max(0.06, Math.min(0.65, (paramsB / 7) * 0.22));
-    const kvMb = Math.round((contextLength * factorPerToken));
+    const factorPerToken = this.getKvFactorPerTokenMB(paramsB);
+    const kvMb = Math.round(contextLength * factorPerToken);
     return Math.max(64, kvMb);
   }
 
@@ -265,7 +269,7 @@ export class AIMemoryEstimator {
     // Multimodal / Vision Projector (mmproj)
     const visionMmprojMB = isVision ? 1150 : 0;
 
-    // Runtime runtime baseline overhead (libc, Ollama core, embeddings buffer)
+    // Runtime baseline overhead (libc, Ollama core, embeddings buffer)
     const baseRuntimeMB = 280;
 
     const totalEstimatedMB = ggufSizeMB + cpuRepackMB + kvCacheMB + visionMmprojMB + baseRuntimeMB;
@@ -275,7 +279,7 @@ export class AIMemoryEstimator {
 
     // Determine safe context window
     const availableForContext = Math.max(0, containerLimit - (ggufSizeMB + cpuRepackMB + visionMmprojMB + baseRuntimeMB + 400));
-    const factorPerToken = Math.max(0.06, Math.min(0.65, (paramsB / 7) * 0.22));
+    const factorPerToken = this.getKvFactorPerTokenMB(paramsB);
     const maxCalculatedTokens = Math.floor(availableForContext / factorPerToken);
 
     let safeContextTokens = 2048;

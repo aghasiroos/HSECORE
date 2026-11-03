@@ -731,18 +731,22 @@ export const apiDb = {
   },
 
   async saveFireEquipment(item: any): Promise<any> {
-    try {
-      invalidateCacheKeys('fire-equipment', 'sync:full');
-      const res = await authFetch('/api/v1/fire-equipment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(item),
-      });
-      const json: ApiResponse = await res.json();
-      return json.data;
-    } catch {
-      return null;
+    invalidateCacheKeys('fire-equipment', 'sync:full');
+    const res = await authFetch('/api/v1/fire-equipment', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(item),
+    });
+    const json: any = await res.json().catch(() => ({}));
+    if (!res.ok || json?.success === false) {
+      const err: any = new Error(json?.error || 'خطا در ذخیره تجهیز در پایگاه داده');
+      err.status = res.status;
+      err.code = json?.code;
+      err.existingRecord = json?.existingRecord || null;
+      throw err;
     }
+    invalidateCacheKeys('fire-equipment', 'sync:full');
+    return json.data;
   },
 
   async deleteFireEquipment(id: string | number): Promise<boolean> {

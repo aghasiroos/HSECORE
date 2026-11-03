@@ -188,7 +188,7 @@ export default function PtwAuditPermitDistribution({
         {permitView === 'donut' || permitView === 'pie' ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center">
             <div className="h-64 w-full min-w-0">
-              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={240} debounce={50}>
+              <ResponsiveContainer width="100%" height={240} minWidth={0} minHeight={240} debounce={50}>
                 <PieChart>
                   <Tooltip 
                     formatter={(val: any, name: any) => [`${val} پروانه ممیزی‌شده`, name]}
@@ -249,7 +249,7 @@ export default function PtwAuditPermitDistribution({
           </div>
         ) : permitView === 'bar' ? (
           <div className="h-64 w-full min-w-0">
-            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={240} debounce={50}>
+            <ResponsiveContainer width="100%" height={240} minWidth={0} minHeight={240} debounce={50}>
               <BarChart data={permitDistribution} margin={{ top: 15, right: 10, left: 0, bottom: 5 }}>
                 {chartSettings.showGrid && <CartesianGrid strokeDasharray="3 3" opacity={0.3} />}
                 <XAxis dataKey="titleFa" tick={{ fontSize: 11 }} />
@@ -290,7 +290,7 @@ export default function PtwAuditPermitDistribution({
           </div>
         ) : permitView === 'barHorizontal' ? (
           <div className="h-64 w-full min-w-0">
-            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={240} debounce={50}>
+            <ResponsiveContainer width="100%" height={240} minWidth={0} minHeight={240} debounce={50}>
               <BarChart 
                 data={permitDistribution} 
                 layout="vertical"
@@ -335,7 +335,7 @@ export default function PtwAuditPermitDistribution({
           </div>
         ) : permitView === 'radar' ? (
           <div className="h-64 w-full min-w-0">
-            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={240} debounce={50}>
+            <ResponsiveContainer width="100%" height={240} minWidth={0} minHeight={240} debounce={50}>
               <RadarChart data={permitDistribution}>
                 <PolarGrid opacity={0.4} />
                 <PolarAngleAxis dataKey="titleFa" tick={{ fontSize: 11, fill: '#64748b' }} />
@@ -527,7 +527,7 @@ export default function PtwAuditPermitDistribution({
           </div>
         ) : unitView === 'barHorizontal' ? (
           <div className="h-64 w-full min-w-0">
-            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={240} debounce={50}>
+            <ResponsiveContainer width="100%" height={240} minWidth={0} minHeight={240} debounce={50}>
               <BarChart 
                 data={unitChartData} 
                 layout="vertical"
@@ -560,7 +560,7 @@ export default function PtwAuditPermitDistribution({
           </div>
         ) : unitView === 'bar' ? (
           <div className="h-64 w-full min-w-0">
-            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={240} debounce={50}>
+            <ResponsiveContainer width="100%" height={240} minWidth={0} minHeight={240} debounce={50}>
               <BarChart data={unitChartData} margin={{ top: 15, right: 10, left: 0, bottom: 5 }}>
                 {chartSettings.showGrid && <CartesianGrid strokeDasharray="3 3" opacity={0.3} />}
                 <XAxis dataKey="name" tick={{ fontSize: 10 }} />
@@ -587,7 +587,7 @@ export default function PtwAuditPermitDistribution({
           </div>
         ) : unitView === 'pie' ? (
           <div className="h-64 w-full min-w-0">
-            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={240} debounce={50}>
+            <ResponsiveContainer width="100%" height={240} minWidth={0} minHeight={240} debounce={50}>
               <PieChart>
                 <Tooltip 
                   formatter={(val: any, name: any) => [`${val} خطا`, name]}
@@ -613,7 +613,7 @@ export default function PtwAuditPermitDistribution({
           </div>
         ) : (
           <div className="h-64 w-full min-w-0">
-            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={240} debounce={50}>
+            <ResponsiveContainer width="100%" height={240} minWidth={0} minHeight={240} debounce={50}>
               <RadarChart data={unitChartData.slice(0, 6)}>
                 <PolarGrid opacity={0.4} />
                 <PolarAngleAxis dataKey="name" tick={{ fontSize: 10, fill: '#64748b' }} />

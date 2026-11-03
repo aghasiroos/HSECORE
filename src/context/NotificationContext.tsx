@@ -9,6 +9,7 @@ import {
 import { useWebSocket } from '../providers/WebSocketProvider';
 import { startSirenLoop, stopSirenLoop } from '../utils/notificationAudio';
 import { UserProfile } from '../types';
+import { apiDb } from '../services/apiDatabaseClient';
 
 interface NotificationContextType {
   currentUser: UserProfile | null;
@@ -647,7 +648,6 @@ export const NotificationProvider: React.FC<{
   const triggerTestAlert = useCallback(
     async (category = 'critical_hse', priority = 'critical') => {
       try {
-        const { apiDb } = await import('../services/apiDatabaseClient');
         await apiDb.triggerTestAlert({ category, priority });
         await refreshNotifications();
         window.dispatchEvent(

@@ -984,7 +984,7 @@ export const CustomizableWarningCharts: React.FC<CustomizableWarningChartsProps>
                     <span>{isFa ? 'هیچ رکوردی منطبق بر فیلترهای انتخابی یافت نشد.' : 'No data matching selected filters.'}</span>
                   </div>
                 ) : (
-                  <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={260} debounce={50}>
+                  <ResponsiveContainer width="100%" height={275} minWidth={0} minHeight={260} debounce={50}>
                     {config.chartType === 'bar' ? (
                       <BarChart 
                         data={chartData} 

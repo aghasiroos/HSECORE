@@ -1,6 +1,45 @@
 export type EquipmentStatus = 'مطلوب' | 'نامطلوب';
 export type CorrectiveActionStatus = 'باز' | 'بسته';
 
+export type OperationalStatus =
+  | 'فعال'
+  | 'غیرفعال'
+  | 'انتقال جهت شارژ'
+  | 'انتقال جهت تست';
+
+export type GeographicalDirection =
+  | 'N – North'
+  | 'NE – North East'
+  | 'E – East'
+  | 'SE – South East'
+  | 'S – South'
+  | 'SW – South West'
+  | 'W – West'
+  | 'NW – North West'
+  | string;
+
+export interface EquipmentLocationDetails {
+  complex: string;       // مجتمع / شرکت
+  unit: string;          // واحد سازمانی
+  direction: string;     // جهت جغرافیایی (N, NE, E, SE, S, SW, W, NW)
+  floor: string;         // طبقه (1..20, همکف, فاقد طبقه)
+  exactLocation: string; // موقعیت دقیق / توضیحات تکمیلی
+}
+
+export interface OperationalStatusChangeLog {
+  id: string;
+  status: OperationalStatus | string;
+  previousStatus?: OperationalStatus | string | null;
+  changeDate: string;          // تاریخ تغییر وضعیت
+  reason: string;              // علت تغییر وضعیت
+  notes?: string;              // توضیحات تکمیلی
+  previousLocation?: string;   // محل استقرار قبلی
+  destinationLocation?: string;// محل یا مقصد جدید (در صورت انتقال)
+  recordedBy: string;          // نام فرد ثبت‌کننده تغییر
+  isReturnToService?: boolean; // بازگشت به محل استقرار اصلی و فعال‌سازی مجدد
+  timestamp?: string;
+}
+
 export interface DefectRecord {
   id: string;
   date: string;
@@ -24,8 +63,21 @@ export interface MonthlyInspection {
 
 export interface BaseEquipment {
   id: string;
+  code?: string;
   category: string;
   location: string;
+  complex?: string;
+  unit?: string;
+  direction?: string;
+  floor?: string;
+  exactLocation?: string;
+  locationDetails?: EquipmentLocationDetails;
+  primaryLocation?: string;
+  primaryLocationDetails?: EquipmentLocationDetails;
+  operationalStatus?: OperationalStatus | string;
+  isTemporaryOut?: boolean;
+  currentDestination?: string;
+  statusHistory?: OperationalStatusChangeLog[];
   shift?: string;
   workOrder?: string;
   inspections: MonthlyInspection[];

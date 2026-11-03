@@ -227,7 +227,7 @@ export default function RiskDashboardOverview({
             </h4>
             <div className="h-52 w-full min-w-0 flex items-center justify-center">
               {riskPieData.length > 0 ? (
-                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={200} debounce={50}>
+                <ResponsiveContainer width="100%" height={205} minWidth={0} minHeight={200} debounce={50}>
                   <PieChart>
                     <Pie
                       data={riskPieData}
@@ -283,7 +283,7 @@ export default function RiskDashboardOverview({
               </span>
             </div>
             <div className="h-52 w-full min-w-0">
-              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={200} debounce={50}>
+              <ResponsiveContainer width="100%" height={205} minWidth={0} minHeight={200} debounce={50}>
                 <BarChart data={dynamicMethodBarData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.15} vertical={false} />
                   <XAxis dataKey="name" tick={{ fontSize: 11, fontWeight: 'bold', fill: '#64748b' }} />

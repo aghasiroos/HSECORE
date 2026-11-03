@@ -17,6 +17,7 @@ import {
   Layers,
   ChevronDown
 } from 'lucide-react';
+import { JALALI_MONTH_NAMES_FA, JALALI_MONTH_NAMES_EN } from '../utils/jalaliDate';
 
 interface CourseData {
   id: string;
@@ -54,19 +55,8 @@ interface TrainingDashboardProps {
   isFa: boolean;
 }
 
-const JALALI_MONTHS_FA = [
-  'فروردین', 'اردیبهشت', 'خرداد',
-  'تیر', 'مرداد', 'شهریور',
-  'مهر', 'آبان', 'آذر',
-  'دی', 'بهمن', 'اسفند'
-];
-
-const JALALI_MONTHS_EN = [
-  'Farvardin', 'Ordibehesht', 'Khordad',
-  'Tir', 'Mordad', 'Shahrivar',
-  'Mehr', 'Aban', 'Azar',
-  'Dey', 'Bahman', 'Esfand'
-];
+const JALALI_MONTHS_FA = JALALI_MONTH_NAMES_FA;
+const JALALI_MONTHS_EN = JALALI_MONTH_NAMES_EN;
 
 export default function TrainingDashboard({
   courses,

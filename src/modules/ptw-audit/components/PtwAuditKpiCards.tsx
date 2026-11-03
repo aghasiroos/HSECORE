@@ -210,7 +210,7 @@ export default function PtwAuditKpiCards({
       ) : (
         <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3">
           <div className="h-60 w-full min-w-0">
-            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={220} debounce={50}>
+            <ResponsiveContainer width="100%" height={235} minWidth={0} minHeight={220} debounce={50}>
               <BarChart data={kpiChartData} margin={{ top: 20, right: 10, left: 10, bottom: 5 }}>
                 {chartSettings.showGrid && <CartesianGrid strokeDasharray="3 3" opacity={0.4} />}
                 <XAxis dataKey="name" tick={{ fontSize: 11 }} />

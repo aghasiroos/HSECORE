@@ -1,4 +1,5 @@
 import { GlobalLabReferenceRange, LabResultStatus } from '../types';
+import { apiDb } from '../../../services/apiDatabaseClient';
 
 const STORAGE_KEY = 'hse_lab_reference_ranges_v1';
 
@@ -233,34 +234,43 @@ export const INITIAL_LAB_REFERENCES: GlobalLabReferenceRange[] = [
 ];
 
 export class LabReferenceRangeService {
-  private ranges: GlobalLabReferenceRange[] = [];
+  private ranges: GlobalLabReferenceRange[] = [...INITIAL_LAB_REFERENCES];
 
   constructor() {
     this.loadRanges();
   }
 
   private loadRanges(): void {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          this.ranges = parsed;
-          return;
+    // One-time zero-loss uplink of any legacy localStorage customizations
+    let legacyRanges: GlobalLabReferenceRange[] | null = null;
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            legacyRanges = parsed;
+          }
+          localStorage.removeItem(STORAGE_KEY);
         }
-      }
-    } catch (_) {}
+      } catch (_) {}
+    }
 
-    this.ranges = [...INITIAL_LAB_REFERENCES];
-    this.saveRanges();
+    // Hydrate from central PostgreSQL database
+    apiDb.getSetting(STORAGE_KEY).then((dbRanges) => {
+      if (Array.isArray(dbRanges) && dbRanges.length > 0) {
+        this.ranges = dbRanges;
+      } else if (legacyRanges) {
+        this.ranges = legacyRanges;
+        this.saveRanges();
+      }
+    }).catch(() => {});
   }
 
   public saveRanges(): void {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.ranges));
-    } catch (e) {
-      console.error('Error saving lab reference ranges', e);
-    }
+    apiDb.saveSetting(STORAGE_KEY, this.ranges, 'Global Lab Reference Ranges').catch((e) => {
+      console.error('Error saving lab reference ranges to database:', e);
+    });
   }
 
   public getAllRanges(): GlobalLabReferenceRange[] {

@@ -148,18 +148,18 @@ export default function DefectModal({ language, initialData, onSave, onClose }: 
           </form>
         </div>
 
-        <div className="p-4 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 flex justify-end gap-3">
+        <div className="p-4 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 flex items-center justify-end gap-2.5">
           <button 
             type="button" 
             onClick={onClose} 
-            className="px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-600"
+            className="flex-1 sm:flex-initial px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-600 cursor-pointer text-center"
           >
             {isFa ? 'انصراف' : 'Cancel'}
           </button>
           <button 
             form="defectForm" 
             type="submit" 
-            className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg shadow-sm"
+            className="flex-1 sm:flex-initial px-5 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg shadow-sm cursor-pointer text-center"
           >
             {isFa ? 'ذخیره نقص' : 'Save Defect'}
           </button>

@@ -289,6 +289,13 @@ export default function HeatStressMonitor({
   const [showHeatStressLayer, setShowHeatStressLayer] = useState(true);
   const [showIncidentLayer, setShowIncidentLayer] = useState(true);
   const [gpsPermissionDenied, setGpsPermissionDenied] = useState(false);
+  const [selectedWeatherProvider, setSelectedWeatherProvider] = useState<string>(() => {
+    try {
+      return localStorage.getItem('hse_weather_selected_provider') || 'auto';
+    } catch {
+      return 'auto';
+    }
+  });
   
   // References for latest state in async/timer callbacks (prevents stale closures)
   const logRef = useRef<HeatRecord[]>(log);
@@ -570,6 +577,7 @@ export default function HeatStressMonitor({
       recordInHistory?: boolean;
       accuracy?: number | null;
       locateMode?: 'gps' | 'internet' | 'manual';
+      providerOverride?: string;
     } = {}
   ) => {
     const {
@@ -578,7 +586,8 @@ export default function HeatStressMonitor({
       forceBypassCache = false,
       recordInHistory = isManual || isAutoScheduled,
       accuracy = gpsAccuracy,
-      locateMode = locateModeRef.current || 'manual'
+      locateMode = locateModeRef.current || 'manual',
+      providerOverride
     } = options;
 
     // Prevent overlapping concurrent network requests
@@ -592,8 +601,10 @@ export default function HeatStressMonitor({
       const clientTs = Date.now();
       const clientTz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Tehran';
       const tzOffsetMin = new Date().getTimezoneOffset();
+      const activeProvider = providerOverride !== undefined ? providerOverride : selectedWeatherProvider;
+      const providerParam = activeProvider && activeProvider !== 'auto' ? `&provider=${encodeURIComponent(activeProvider)}` : '';
       const res = await fetch(
-        `/api/weather?lat=${lat}&lon=${lon}&refresh=true&clientTs=${clientTs}&clientTz=${encodeURIComponent(clientTz)}&tzOffsetMin=${tzOffsetMin}`
+        `/api/weather?lat=${lat}&lon=${lon}&refresh=true&clientTs=${clientTs}&clientTz=${encodeURIComponent(clientTz)}&tzOffsetMin=${tzOffsetMin}${providerParam}`
       );
       const data = await res.json().catch(() => null);
       if (!res.ok || !data || data.error) {
@@ -792,6 +803,22 @@ export default function HeatStressMonitor({
       isFetchingRef.current = false;
       setSearchLoading(false);
     }
+  };
+
+  const handleSelectWeatherProvider = (providerId: string) => {
+    setSelectedWeatherProvider(providerId);
+    try {
+      localStorage.setItem('hse_weather_selected_provider', providerId);
+    } catch {}
+    const target = activeRecord
+      ? { lat: activeRecord.lat, lon: activeRecord.lon, loc: activeRecord.loc }
+      : lastFetchedLocationRef.current;
+    triggerWeatherRefresh(target.lat, target.lon, target.loc, 'Provider Switch', {
+      isManual: true,
+      forceBypassCache: true,
+      recordInHistory: false,
+      providerOverride: providerId,
+    });
   };
 
   // Scheduled Auto-Refresh Runner: refreshes GPS/Internet coordinates if active, fetches live weather, and inserts into History DB
@@ -1346,6 +1373,8 @@ export default function HeatStressMonitor({
             color: activeRecord ? (CAT_COLOR[activeRecord.cat] || '#10b981') : '#10b981',
             recos: activeRecord ? (L.recos[activeRecord.cat] || []) : []
           }}
+          selectedProvider={selectedWeatherProvider}
+          onSelectProvider={handleSelectWeatherProvider}
         />
       )}
 
@@ -2379,7 +2408,7 @@ export default function HeatStressMonitor({
               </div>
             ) : log.length > 0 ? (
               chartTab === 'line' ? (
-                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={240} debounce={50}>
+                <ResponsiveContainer width="100%" height={240} minWidth={0} minHeight={240} debounce={50}>
                   <LineChart data={chartData}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                     <XAxis dataKey="time" tick={{ fill: '#64748b', fontSize: 10 }} />
@@ -2392,7 +2421,7 @@ export default function HeatStressMonitor({
                   </LineChart>
                 </ResponsiveContainer>
               ) : chartTab === 'summary' ? (
-                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={240} debounce={50}>
+                <ResponsiveContainer width="100%" height={240} minWidth={0} minHeight={240} debounce={50}>
                   <ReBarChart data={summaryChartData}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                     <XAxis dataKey="name" tick={{ fill: '#64748b', fontSize: 10 }} />

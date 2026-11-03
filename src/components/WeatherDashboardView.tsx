@@ -52,7 +52,7 @@ import {
   resolveWeatherCondition,
   calculateFullHeatStressMetrics
 } from '../utils/weatherPhysics';
-import { gregorianToJalali } from '../utils/jalaliDate';
+import { gregorianToJalali, JALALI_MONTH_NAMES_FA, PERSIAN_WEEKDAYS_BY_JS_DAY } from '../utils/jalaliDate';
 
 export interface IndustrialSiteOption {
   name: string;
@@ -88,7 +88,61 @@ export interface WeatherDashboardViewProps {
     color: string;
     recos: string[];
   };
+  selectedProvider?: string;
+  onSelectProvider?: (providerId: string) => void;
 }
+
+export interface WeatherProviderOption {
+  id: string;
+  nameFa: string;
+  nameEn: string;
+  badgeFa: string;
+  badgeEn: string;
+  isAvailableWithoutKey: boolean;
+}
+
+export const WEATHER_PROVIDERS: WeatherProviderOption[] = [
+  {
+    id: 'auto',
+    nameFa: 'خودکار هوشمند (سلسله‌مراتبی)',
+    nameEn: 'Automatic (Smart Fallback)',
+    badgeFa: 'پیش‌فرض سامانه',
+    badgeEn: 'System Default',
+    isAvailableWithoutKey: true
+  },
+  {
+    id: 'metno',
+    nameFa: 'MET Norway (Yr.no)',
+    nameEn: 'MET Norway (Yr.no)',
+    badgeFa: 'موسسه هواشناسی نروژ',
+    badgeEn: 'Norwegian Met Inst.',
+    isAvailableWithoutKey: true
+  },
+  {
+    id: 'openmeteo',
+    nameFa: 'Open-Meteo (WMO / ECMWF)',
+    nameEn: 'Open-Meteo (WMO/ECMWF)',
+    badgeFa: 'مدل جهانی WMO/ECMWF',
+    badgeEn: 'WMO & ECMWF Models',
+    isAvailableWithoutKey: true
+  },
+  {
+    id: 'foreca',
+    nameFa: 'Foreca Weather',
+    nameEn: 'Foreca Weather',
+    badgeFa: 'سرویس تجاری Foreca',
+    badgeEn: 'Commercial Foreca',
+    isAvailableWithoutKey: false
+  },
+  {
+    id: 'accuweather',
+    nameFa: 'AccuWeather',
+    nameEn: 'AccuWeather',
+    badgeFa: 'شبکه جهانی AccuWeather',
+    badgeEn: 'AccuWeather Global',
+    isAvailableWithoutKey: false
+  }
+];
 
 interface CityLiveSummary extends IndustrialSiteOption {
   tempC?: number;
@@ -102,8 +156,8 @@ interface CityLiveSummary extends IndustrialSiteOption {
   error: boolean;
 }
 
-export const JALALI_MONTHS = ['فروردین', 'اردیبهشت', 'خرداد', 'تیر', 'مرداد', 'شهریور', 'مهر', 'آبان', 'آذر', 'دی', 'بهمن', 'اسفند'];
-const PERSIAN_WEEKDAYS = ['یکشنبه', 'دوشنبه', 'سه‌شنبه', 'چهارشنبه', 'پنجشنبه', 'جمعه', 'شنبه'];
+export const JALALI_MONTHS = JALALI_MONTH_NAMES_FA;
+const PERSIAN_WEEKDAYS = PERSIAN_WEEKDAYS_BY_JS_DAY;
 const EN_WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 export function toJalali(gy: number, gm: number, gd: number): [number, number, number] {
@@ -566,7 +620,9 @@ export default function WeatherDashboardView({
   onSwitchToHeatStressTab,
   onSwitchToGisMapTab,
   persianDateStr,
-  categoryInfo
+  categoryInfo,
+  selectedProvider = 'auto',
+  onSelectProvider
 }: WeatherDashboardViewProps) {
   const [forecastMode, setForecastMode] = useState<'7days' | 'details'>('7days');
   const [summaryMode, setSummaryMode] = useState<'summary' | 'hourly' | 'details'>('summary');
@@ -754,22 +810,18 @@ export default function WeatherDashboardView({
       id="hse-weather-dashboard"
     >
       {/* Top Action, Location & Auto-Refresh Toolbar */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex flex-col xl:flex-row items-stretch xl:items-center justify-between gap-4">
-        <div className="flex flex-wrap items-center justify-between sm:justify-start gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-sky-500/10 dark:bg-sky-500/15 border border-sky-500/20 flex items-center justify-center text-sky-600 dark:text-sky-400 shrink-0">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex flex-col gap-3.5">
+        {/* Row 1: Location Title, Live Status Badge & Telemetry Metadata */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800/80">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-sky-500/10 dark:bg-sky-500/15 border border-sky-500/20 flex items-center justify-center text-sky-600 dark:text-sky-400 shrink-0 shadow-2xs">
               <MapPin className="w-5 h-5" />
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <h2 className="text-sm sm:text-base font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">
+                <h2 className="text-sm sm:text-base font-extrabold text-slate-800 dark:text-slate-100 tracking-tight truncate max-w-xl">
                   {activeRecord?.loc || (isFa ? 'در حال دریافت موقعیت...' : 'Fetching location...')}
                 </h2>
-                {(weatherInfo?.source || activeRecord?.provider) && (
-                  <span className="text-[11px] text-sky-600 dark:text-sky-400 font-mono bg-sky-500/10 px-2 py-0.5 rounded-md border border-sky-500/20">
-                    {isFa ? 'منبع داده: ' : 'Source: '}{weatherInfo?.source || activeRecord?.provider}
-                  </span>
-                )}
                 {(() => {
                   const recordTs = weatherInfo?.fetchedAt || weatherInfo?.observedAt || activeRecord?.observedAt || activeRecord?.ts;
                   const obsTs = weatherInfo?.observedAt || activeRecord?.observedAt || activeRecord?.ts;
@@ -777,112 +829,138 @@ export default function WeatherDashboardView({
                   const recordAge = getWeatherRecordAgeMinutes(obsTs);
                   if (isStale) {
                     return (
-                      <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                      <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 flex items-center gap-1 shrink-0">
                         <AlertTriangle className="w-3 h-3 text-amber-500" />
                         {isFa ? `هشدار داده قدیمی (${recordAge !== null ? `${recordAge} دقیقه قبل` : 'نیازمند بروزرسانی'})` : `Telemetry Stale (${recordAge !== null ? `${recordAge}m ago` : 'old'})`}
                       </span>
                     );
                   }
                   return (
-                    <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                    <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 flex items-center gap-1 shrink-0">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
                       {isFa ? 'داده معتبر و زنده' : 'Verified Live Telemetry'}
                     </span>
                   );
                 })()}
               </div>
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500 dark:text-slate-400 font-mono tabular-nums mt-0.5">
-                <span
-                  className="flex items-center gap-1 cursor-help"
-                  title={
-                    isFa
-                      ? 'زمان سنجش ایستگاه (Observation Time): ساعت رسمی ثبت و کالیبراسیون پارامترهای جوی در ایستگاه یا مدل سینوپتیک جهانی (سیکل‌های یک‌ساعته UTC)'
-                      : 'Station Observation Time: Official synoptic model/station measurement slot'
-                  }
-                >
-                  <Clock className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                  {isFa
-                    ? `زمان سنجش ایستگاه: ${persianDateStr} — ساعت ${weatherInfo?.updated || '—'}`
-                    : `Observed: ${persianDateStr} at ${weatherInfo?.updated || '—'}`}
-                </span>
-                {weatherInfo?.fetchedAt && (
-                  <>
-                    <span className="text-slate-300 dark:text-slate-700">|</span>
-                    <span>
-                      {isFa
-                        ? `دریافت سرور: ${new Date(weatherInfo.fetchedAt).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
-                        : `Fetched: ${new Date(weatherInfo.fetchedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`}
-                    </span>
-                  </>
-                )}
-                <span className="text-slate-300 dark:text-slate-700">|</span>
-                <span className="text-amber-600 dark:text-amber-400 font-bold">
-                  {isFa ? `بروزرسانی خودکار (${refreshMinutes} دقیقه): ${formattedCountdown}` : `Auto-Sync (${refreshMinutes}m): ${formattedCountdown}`}
-                </span>
-              </div>
             </div>
+          </div>
+
+          {/* Time & Auto-Sync Metadata Pills */}
+          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-[11px] text-slate-500 dark:text-slate-400 font-mono tabular-nums">
+            <span
+              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-slate-50 dark:bg-slate-800/80 border border-slate-200/70 dark:border-slate-700/60 cursor-help"
+              title={
+                isFa
+                  ? 'زمان سنجش ایستگاه (Observation Time): ساعت رسمی ثبت و کالیبراسیون پارامترهای جوی در ایستگاه یا مدل سینوپتیک جهانی (سیکل‌های یک‌ساعته UTC)'
+                  : 'Station Observation Time: Official synoptic model/station measurement slot'
+              }
+            >
+              <Clock className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+              <span>
+                {isFa
+                  ? `زمان سنجش ایستگاه: ${persianDateStr} — ساعت ${weatherInfo?.updated || '—'}`
+                  : `Observed: ${persianDateStr} at ${weatherInfo?.updated || '—'}`}
+              </span>
+            </span>
+
+            {weatherInfo?.fetchedAt && (
+              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-50 dark:bg-slate-800/80 border border-slate-200/70 dark:border-slate-700/60">
+                <span>
+                  {isFa
+                    ? `دریافت سرور: ${new Date(weatherInfo.fetchedAt).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
+                    : `Fetched: ${new Date(weatherInfo.fetchedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`}
+                </span>
+              </span>
+            )}
+
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-800/60 text-amber-700 dark:text-amber-400 font-bold">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping" />
+              <span>
+                {isFa ? `بروزرسانی خودکار (${refreshMinutes} دقیقه): ${formattedCountdown}` : `Auto-Sync (${refreshMinutes}m): ${formattedCountdown}`}
+              </span>
+            </span>
           </div>
         </div>
 
-        {/* Location Search, Site Select, GPS, Internet IP & Refresh Controls */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
-          {/* Quick Industrial Site Dropdown */}
-          <select
-            onChange={(e) => {
-              const val = e.target.value;
-              if (val === '') return;
-              const site = industrialSites[Number(val)];
-              if (site) {
-                onSelectSite(site.lat, site.lon, isFa ? site.nameFa : site.name);
-              }
-            }}
-            defaultValue=""
-            className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 text-xs rounded-xl px-3 py-2.5 focus:outline-none focus:border-blue-500 font-semibold cursor-pointer"
-            aria-label={isFa ? 'انتخاب ایستگاه صنعتی' : 'Select Industrial Site'}
-          >
-            <option value="" disabled>
-              {isFa ? 'انتخاب سریع سایت صنعتی...' : 'Quick Select Site...'}
-            </option>
-            {industrialSites.map((site, idx) => (
-              <option key={idx} value={idx}>
-                {isFa ? site.nameFa : site.name}
+        {/* Row 2: Location Search, Site Select, Data Source, GPS, Internet IP & Refresh Controls */}
+        <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
+          {/* Form Selects and Search City */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 flex-1 min-w-0">
+            {/* Quick Industrial Site Dropdown */}
+            <select
+              onChange={(e) => {
+                const val = e.target.value;
+                if (val === '') return;
+                const site = industrialSites[Number(val)];
+                if (site) {
+                  onSelectSite(site.lat, site.lon, isFa ? site.nameFa : site.name);
+                }
+              }}
+              defaultValue=""
+              className="w-full sm:w-auto sm:min-w-[180px] bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 text-xs rounded-xl px-3 py-2.5 focus:outline-none focus:border-blue-500 font-semibold cursor-pointer shadow-2xs"
+              aria-label={isFa ? 'انتخاب ایستگاه صنعتی' : 'Select Industrial Site'}
+            >
+              <option value="" disabled>
+                {isFa ? 'انتخاب سریع سایت صنعتی...' : 'Quick Select Site...'}
               </option>
-            ))}
-          </select>
+              {industrialSites.map((site, idx) => (
+                <option key={idx} value={idx}>
+                  {isFa ? site.nameFa : site.name}
+                </option>
+              ))}
+            </select>
 
-          {/* Search City Input */}
-          <div className="relative flex-1 sm:w-56">
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => onSearchChange(e.target.value)}
-              placeholder={isFa ? 'جستجوی شهر یا ایستگاه...' : 'Search city or station...'}
-              className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 text-xs rounded-xl py-2.5 pr-3 pl-9 focus:outline-none focus:border-blue-500"
-            />
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-            {suggestions.length > 0 && (
-              <div className="absolute left-0 right-0 top-full mt-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl max-h-48 overflow-y-auto z-50 p-1.5 space-y-1">
-                {suggestions.map((s, idx) => (
-                  <button
-                    key={idx}
-                    type="button"
-                    onClick={() => onSelectSuggestion(s)}
-                    className="w-full text-right text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 px-3 py-2 rounded-lg transition cursor-pointer flex items-center justify-between"
-                  >
-                    <span className="font-bold">{s.name}</span>
-                    <span className="text-[10px] text-slate-400">{s.admin1 ? `${s.admin1}, ` : ''}{s.country}</span>
-                  </button>
-                ))}
-              </div>
-            )}
+            {/* Quick Data Source Select Dropdown */}
+            <select
+              value={selectedProvider || 'auto'}
+              onChange={(e) => onSelectProvider?.(e.target.value)}
+              className="w-full sm:w-auto sm:min-w-[190px] bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 text-xs rounded-xl px-3 py-2.5 focus:outline-none focus:border-sky-500 font-semibold cursor-pointer shadow-2xs"
+              title={isFa ? 'انتخاب منبع داده هواشناسی' : 'Select Weather Data Source'}
+              aria-label={isFa ? 'انتخاب منبع داده هواشناسی' : 'Select Weather Data Source'}
+            >
+              {WEATHER_PROVIDERS.map((prov) => (
+                <option key={prov.id} value={prov.id}>
+                  {isFa ? `منبع: ${prov.nameFa}` : `Source: ${prov.nameEn}`}
+                </option>
+              ))}
+            </select>
+
+            {/* Search City Input */}
+            <div className="relative flex-1 min-w-0 sm:min-w-[180px]">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => onSearchChange(e.target.value)}
+                placeholder={isFa ? 'جستجوی شهر یا ایستگاه...' : 'Search city or station...'}
+                className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 text-xs rounded-xl py-2.5 pr-3 pl-9 focus:outline-none focus:border-blue-500 shadow-2xs"
+              />
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5 pointer-events-none" />
+              {suggestions.length > 0 && (
+                <div className="absolute left-0 right-0 top-full mt-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl max-h-48 overflow-y-auto z-50 p-1.5 space-y-1">
+                  {suggestions.map((s, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => onSelectSuggestion(s)}
+                      className="w-full text-right text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 px-3 py-2 rounded-lg transition cursor-pointer flex items-center justify-between"
+                    >
+                      <span className="font-bold">{s.name}</span>
+                      <span className="text-[10px] text-slate-400">{s.admin1 ? `${s.admin1}, ` : ''}{s.country}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          {/* Action Buttons: GPS, IP, Refresh */}
+          <div className="flex items-center gap-2 w-full lg:w-auto justify-end shrink-0">
             <button
               type="button"
               onClick={onLocateGps}
               disabled={gpsLoading}
-              className="px-3 py-2.5 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 transition flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+              className="flex-1 sm:flex-initial px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 transition flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap shadow-2xs"
               title={isFa ? 'دریافت موقعیت دقیق با GPS' : 'Locate via GPS'}
             >
               <MapPin className="w-3.5 h-3.5 text-amber-500" />
@@ -894,7 +972,7 @@ export default function WeatherDashboardView({
                 type="button"
                 onClick={onLocateInternet}
                 disabled={gpsLoading}
-                className="px-3 py-2.5 bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/25 rounded-xl text-xs font-bold text-sky-700 dark:text-sky-300 transition flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+                className="flex-1 sm:flex-initial px-3.5 py-2.5 bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/25 rounded-xl text-xs font-bold text-sky-700 dark:text-sky-300 transition flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap shadow-2xs"
                 title={isFa ? 'استخراج موقعیت مکانی از شبکه اینترنت (IP)' : 'Locate via Internet IP'}
               >
                 <Globe className="w-3.5 h-3.5 text-sky-500" />
@@ -910,7 +988,7 @@ export default function WeatherDashboardView({
                 fetchMultiSourceComparison();
               }}
               disabled={isLoading}
-              className="px-3.5 py-2.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-60 text-white font-extrabold text-xs rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 shadow-xs"
+              className="flex-1 sm:flex-initial px-4 py-2.5 bg-amber-500 hover:bg-amber-600 active:scale-[0.98] disabled:opacity-60 text-white font-extrabold text-xs rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap shadow-sm shadow-amber-500/20"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
               <span>{isFa ? 'به‌روزرسانی' : 'Refresh'}</span>
@@ -1422,7 +1500,7 @@ export default function WeatherDashboardView({
                 </div>
 
                 <div className="h-52 sm:h-56 w-full pt-2" dir="ltr">
-                  <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={175}>
+                  <ResponsiveContainer width="100%" height={210} minWidth={0} minHeight={175}>
                     <AreaChart data={summaryChartSlots} margin={{ top: 26, right: 24, left: 24, bottom: 6 }}>
                       <defs>
                         <linearGradient id="summaryTempFillAdaptive" x1="0" y1="0" x2="0" y2="1">
@@ -1944,6 +2022,7 @@ export default function WeatherDashboardView({
                     <th className="py-2.5 px-3">{isFa ? 'سرعت باد (km/h)' : 'Wind (km/h)'}</th>
                     <th className="py-2.5 px-3">{isFa ? 'تخمین WBGT (°C)' : 'Est. WBGT (°C)'}</th>
                     <th className="py-2.5 px-3">{isFa ? 'زمان سنجش ایستگاه' : 'Observed At'}</th>
+                    <th className="py-2.5 px-3 text-center">{isFa ? 'اقدام و انتخاب' : 'Select Source'}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800/70">
@@ -1993,6 +2072,24 @@ export default function WeatherDashboardView({
                         {src.observedAt
                           ? new Date(src.observedAt).toLocaleTimeString(isFa ? 'fa-IR' : [], { hour: '2-digit', minute: '2-digit' })
                           : '—'}
+                      </td>
+                      <td className="py-2.5 px-3 text-center">
+                        {src.status === 'online' && onSelectProvider ? (
+                          <button
+                            type="button"
+                            onClick={() => onSelectProvider(src.providerId)}
+                            className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition inline-flex items-center gap-1 cursor-pointer ${
+                              selectedProvider === src.providerId
+                                ? 'bg-sky-600 text-white shadow-2xs'
+                                : 'bg-slate-100 hover:bg-sky-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700'
+                            }`}
+                          >
+                            <Check className="w-3 h-3" />
+                            <span>{selectedProvider === src.providerId ? (isFa ? 'منبع فعال' : 'Active') : (isFa ? 'فعال‌سازی' : 'Select')}</span>
+                          </button>
+                        ) : (
+                          <span className="text-[10px] text-slate-400">—</span>
+                        )}
                       </td>
                     </tr>
                   ))}

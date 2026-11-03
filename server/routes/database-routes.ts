@@ -567,17 +567,25 @@ router.get('/fire-equipment', requireAuth, async (req: Request, res: Response) =
 
 router.post('/fire-equipment', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR', 'HSE_MANAGER', 'SAFETY_OFFICER'), async (req: Request, res: Response) => {
   try {
-    const item = await dbServices.upsertFireEquipment(req.body);
+    const actor = (req.user as any)?.fullName || req.user?.name || req.user?.username || 'system';
+    const item = await dbServices.upsertFireEquipment(req.body, actor);
     broadcastDataMutation('fireEquipment', 'upsert', item);
     res.json({ success: true, data: item });
   } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+    const status = error?.statusCode || 500;
+    res.status(status).json({
+      success: false,
+      error: error.message || 'خطا در ثبت اطلاعات تجهیز آتش‌نشانی',
+      code: error?.code,
+      existingRecord: error?.existingRecord || null,
+    });
   }
 });
 
 router.delete('/fire-equipment/:id', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR', 'HSE_MANAGER', 'SAFETY_OFFICER'), async (req: Request, res: Response) => {
   try {
-    await dbServices.deleteFireEquipment(req.params.id);
+    const actor = (req.user as any)?.fullName || req.user?.name || req.user?.username || 'system';
+    await dbServices.deleteFireEquipment(req.params.id, actor);
     broadcastDataMutation('fireEquipment', 'delete', { id: req.params.id });
     res.json({ success: true });
   } catch (error: any) {

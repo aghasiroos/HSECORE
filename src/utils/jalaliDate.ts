@@ -35,6 +35,19 @@ export const PERSIAN_WEEK_DAYS_FA = [
   { key: 'fri', short: 'ج', full: 'جمعه' }
 ];
 
+/**
+ * Persian weekday names indexed by JS Date.prototype.getDay() where 0 = Sunday, 6 = Saturday
+ */
+export const PERSIAN_WEEKDAYS_BY_JS_DAY = [
+  'یکشنبه',
+  'دوشنبه',
+  'سه‌شنبه',
+  'چهارشنبه',
+  'پنج‌شنبه',
+  'جمعه',
+  'شنبه'
+] as const;
+
 export const GREGORIAN_MONTH_NAMES_EN = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December'
