@@ -35,7 +35,10 @@ async function run() {
   console.log('PASS AI tool ACL: worker, safety officer, admin, and unauthenticated contexts');
   const originalGetPersistedModuleConfigs = aiToolsRegistry.getPersistedModuleConfigs;
   aiToolsRegistry.getPersistedModuleConfigs = (async () => ({
-    system: [{ key: 'future-module', titleFa: 'ماژول آینده', enabled: true }],
+    system: [
+      { key: 'future-module', titleFa: 'ماژول آینده', enabled: true },
+      { key: 'documents', titleFa: 'مستندات', enabled: true, children: [{ key: 'nested-secret-tab', titleFa: 'تب محرمانه مستندات', enabled: true }] },
+    ],
     fireDepartment: [
       { key: 'دليج ولواسپرينكلرon,off ولو', titleFa: 'دلویج ولو و اسپرینکلر', titleEn: 'Deluge & Sprinklers', enabled: true },
       { key: 'گازيابها', titleFa: 'گازیاب‌ها و دتکتورها', titleEn: 'Gas Detectors', enabled: true },
@@ -69,6 +72,10 @@ async function run() {
       assert.equal(actualCoverage.filter(item => item.moduleId === id).length, 1, 'duplicate fire category: ' + id);
     }
     assert.equal(coverageIds.has('future-module'), true, 'persisted future module must appear');
+    assert.equal(coverageIds.has('documents-nested-secret-tab'), true, 'nested document tab must appear');
+    const restrictedCoverage = await aiOrchestrator.getModuleCoverage({ uid: 'restricted-user', role: 'CUSTOM_ROLE' });
+    assert.equal(restrictedCoverage.find(item => item.moduleId === 'documents-nested-secret-tab')?.connected, false, 'nested document tab must inherit documents:read ACL');
+    assert.equal(restrictedCoverage.find(item => item.moduleId === 'user-mgmt')?.connected, false, 'user management must remain administrator-only');
     console.log('PASS module catalog covers all 24 main modules, known nested tabs, canonical fire categories, and future persisted modules');
   } finally {
     aiToolsRegistry.getPersistedModuleConfigs = originalGetPersistedModuleConfigs;
