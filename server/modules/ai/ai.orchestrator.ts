@@ -534,13 +534,17 @@ export class AIOrchestrator {
               )))
             : undefined;
           if (requestedModel && !modelInfo) throw new Error('مدل انتخاب‌شده نصب نیست یا برای گفت‌وگو قابل استفاده نیست.');
-          return await localAIProvider.chat(messages, {
+          const chatOptions = {
             model: modelInfo?.name || modelInfo?.model,
             num_ctx: request.contextTokens,
             temperature: 0.3,
             max_tokens: 1500,
             timeoutMs: remainingMs,
-          });
+          };
+          if (request.onToken) {
+            return await localAIProvider.chatStream(messages, chatOptions, request.onToken, request.signal);
+          }
+          return await localAIProvider.chat(messages, chatOptions);
         },
         {
           userId: userContext?.id,
