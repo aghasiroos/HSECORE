@@ -561,8 +561,23 @@ export class AIOrchestrator {
       retrievedReferenceContext += `\n[محدوده انتخاب‌شده توسط کاربر: ${requestAllScope ? 'همه ماژول‌های دارای ابزار تحلیلی' : selectedModules.join('، ')}]\n`;
       retrievedReferenceContext += '[قید دقت تحلیلی: بعضی زیرماژول‌ها در حال حاضر از ابزار تحلیلی ماژول والد استفاده می‌کنند. فقط در صورتی نتیجه را مختص زیرماژول اعلام کنید که داده استخراج‌شده واقعاً آن تفکیک را داشته باشد؛ در غیر این صورت سطح تجمیع داده را صریح اعلام کنید.]\n';
     }
-    if (requestAllScope && toolResults.length > 0) {
-      retrievedReferenceContext += '\n[دامنه درخواست: تحلیل چندماژولی /ALL؛ فقط منابعی که در بالا واقعاً استخراج شده‌اند پوشش داده شده‌اند. برای ماژول فاقد ابزار یا داده، نتیجه‌گیری نکنید.]\n';
+    if (requestAllScope) {
+      const coverage = await this.getModuleCoverage(userContext);
+      const liveToolModules = coverage.filter(item => item.connected && item.tools.length > 0);
+      const knowledgeOnlyModules = coverage.filter(item => item.connected && item.tools.length === 0);
+      const unavailableModules = coverage.filter(item => !item.connected);
+      const listNames = (items: typeof coverage) => items.map(item =>
+        item.moduleNameFa + (item.notes ? ` — ${item.notes}` : '')
+      ).join('؛ ');
+      retrievedReferenceContext += '\n[دامنه درخواست: تحلیل چندماژولی /ALL؛ کاتالوگ کامل ساختار واقعی HSECORE]\n';
+      retrievedReferenceContext += `• تعداد گره‌های ماژول/زیرماژول/تب شناسایی‌شده: ${coverage.length}\n`;
+      retrievedReferenceContext += `• بخش‌های دارای ابزار داده‌خوان مجاز: ${liveToolModules.length}\n`;
+      retrievedReferenceContext += `• بخش‌های متکی به پایگاه دانش RAG: ${knowledgeOnlyModules.length}\n`;
+      retrievedReferenceContext += `• بخش‌های فاقد Adapter، غیرفعال یا خارج از مجوز کاربر: ${unavailableModules.length}\n`;
+      if (liveToolModules.length) retrievedReferenceContext += `• بخش‌های دارای ابزار: ${listNames(liveToolModules)}\n`;
+      if (knowledgeOnlyModules.length) retrievedReferenceContext += `• بخش‌های RAG: ${listNames(knowledgeOnlyModules)}\n`;
+      if (unavailableModules.length) retrievedReferenceContext += `• بخش‌های فاقد اتصال/دسترسی: ${listNames(unavailableModules)}\n`;
+      retrievedReferenceContext += '[قید اجباری /ALL: فقط ابزارهای مجاز و منابعی که واقعاً در بالا با موفقیت استخراج شده‌اند مبنای عدد و نتیجه هستند. برای بخش‌های فاقد Adapter، غیرفعال یا خارج از مجوز، هیچ داده یا نتیجه‌ای نسازید. اگر ابزار منبعی شکست خورد، همان منبع را ناموفق و پوشش را ناقص اعلام کنید.]\n';
     }
 
     const messages = buildAIConversationMessages({
@@ -963,7 +978,14 @@ export class AIOrchestrator {
         Boolean(_userContext && (globalAdmin || checkUserHasPermission(_userContext, 'documents:read')));
       const permitted = item.connected &&
         (permittedTools.length > 0 || permittedKnowledge || (item.tools.length === 0 && !documentOnlyModules.has(item.moduleId)));
-      return { ...item, connected: permitted };
+      if (permitted) return item;
+      return {
+        ...item,
+        connected: false,
+        notes: item.connected
+          ? 'منبع داده برای این بخش تعریف شده است، اما کاربر مجوز مشاهده آن را ندارد.'
+          : (item.notes || 'برای این بخش هنوز Adapter داده‌خوان ثبت نشده یا در تنظیمات غیرفعال است.'),
+      };
     });
   }
 }
