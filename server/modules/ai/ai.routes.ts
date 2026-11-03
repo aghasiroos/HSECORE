@@ -86,7 +86,12 @@ router.post('/sessions/import-local', requireAuth, (req, res, next) => {
   aiController.importLocalSessions(req, res).catch(next);
 });
 
-// AI Module Registry / coverage report
+// Live module catalog and adapter coverage used by the slash-command picker.
+router.get('/modules', requireAuth, (req, res, next) => {
+  aiController.getModuleCoverage(req, res).catch(next);
+});
+
+// Backward-compatible coverage endpoint.
 router.get('/coverage', requireAuth, (req, res, next) => {
   aiController.getModuleCoverage(req, res).catch(next);
 });
