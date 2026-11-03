@@ -394,6 +394,8 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
     setSelectedModuleIds(current => current.includes(moduleId)
       ? current.filter(id => id !== moduleId)
       : [...current, moduleId]);
+    setInputMessage(current => current.replace(/(?:^|\\s)\\/[^\\s]*$/, '').trimEnd());
+    setModulePickerOpen(true);
   };
 
   const clearSlashCommand = () => {
@@ -438,6 +440,8 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
     }
 
     setInputMessage('');
+    setModulePickerOpen(false);
+    setModuleSearch('');
 
     const userMsg: ChatMessage = {
       id: `msg-${Date.now()}`,
@@ -867,7 +871,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
                             onChange={() => toggleModuleSelection(item.moduleId)}
                             className="accent-violet-600"
                           />
-                          <span className="flex-1 text-slate-700 dark:text-slate-200">{item.moduleNameFa}</span>
+                          <span className="flex-1 text-slate-700 dark:text-slate-200">{item.parentId ? '↳ ' : ''}{item.moduleNameFa}</span>
                           <span className={`text-[10px] ${item.connected ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
                             {!item.enabled ? 'غیرفعال' : !item.allowed ? 'بدون مجوز' : item.connected ? 'داده متصل' : 'بدون اتصال داده'}
                           </span>
