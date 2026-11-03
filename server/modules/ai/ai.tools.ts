@@ -840,7 +840,7 @@ export class AIToolsRegistry {
       const settingIssuances: any[] = Array.isArray(settingsMap.get('hse_ppe_issuance')) ? settingsMap.get('hse_ppe_issuance') : [];
       const categories: any[] = Array.isArray(settingsMap.get('hse_ppe_categories')) ? settingsMap.get('hse_ppe_categories') : [];
       const issuanceRecords: any[] = settingIssuances.length > 0 ? settingIssuances : normalizedIssuances as any[];
-      const totalIssuances = Math.max(settingIssuances.length, normalizedIssuances.length);
+      const totalIssuances = issuanceRecords.length;
       const totalQuantity = issuanceRecords.reduce((sum, record) => sum + Math.max(0, Number(record.quantity || 1)), 0);
 
       const byStatusMap = new Map<string, { records: number; quantity: number }>();
