@@ -465,7 +465,7 @@ export class AIOrchestrator {
       ? request.selectedModules.map(id => String(id).trim().toLowerCase()).filter(id => /^[a-z0-9\u0600-\u06ff_-]{1,80}$/.test(id)).slice(0, 40)
       : [];
     if (selectedModules.length > 0 && !selectedModules.includes('all')) {
-      const coverage = await this.getModuleCoverage(userContext);
+      const coverage = (await this.getModuleCoverage(userContext)).filter(item => !item.internal);
       const coverageById = new Map(coverage.map(item => [item.moduleId, item] as const));
       const unavailable = selectedModules.filter(id => !coverageById.get(id)?.connected);
       if (unavailable.length > 0) {
@@ -771,7 +771,7 @@ export class AIOrchestrator {
         notes: 'تب واقعی رابط کاربری شناسایی شده است؛ ابزار داده‌خوان مستقل و مجاز برای این تب هنوز ثبت نشده است.',
       })),
       { moduleId: 'heat', moduleNameFa: 'پایش استرس گرمایی', connected: true, tools: toolMap.heat, assistantIds: ['GENERAL_HSE'] },
-      { moduleId: 'ptw', moduleNameFa: 'پروانه کار ایمن (PTW)', connected: true, tools: toolMap.ptw, assistantIds: ['GENERAL_HSE', 'PTW_SHERPA'] },
+      { moduleId: 'ptw', moduleNameFa: 'پروانه کار ایمن (PTW)', connected: true, tools: toolMap.ptw, assistantIds: ['GENERAL_HSE', 'PTW_SHERPA'], internal: true },
       ...([
         ['dashboard', 'داشبورد پروانه‌های فعال'], ['hot', 'پروانه کار گرم'], ['cold', 'پروانه کار سرد'],
         ['excavation', 'الحاقی حفاری'], ['process-mechanical', 'الحاقی جداسازی فرآیندی و مکانیکی'],
@@ -793,10 +793,10 @@ export class AIOrchestrator {
         parentModuleId: 'incidents', level: 1,
         notes: 'ابزار فعلی خلاصه تجمیعی حوادث است؛ تفکیک اختصاصی تب تا زمان افزودن Adapter مستقل تضمین نشده است.',
       })),
-      { moduleId: 'health', moduleNameFa: 'واحد بهداشت و محیط زیست / طب کار', connected: true, tools: toolMap.health, assistantIds: ['GENERAL_HSE', 'OCCUPATIONAL_HEALTH', 'NUTRITION_LIFESTYLE'] },
-      { moduleId: 'risks', moduleNameFa: 'ارزیابی ریسک هوشمند (AI JSA)', connected: true, tools: toolMap.risks, assistantIds: ['GENERAL_HSE', 'RISK_ASSESSMENT'] },
-      { moduleId: 'five_s', moduleNameFa: 'نظام آراستگی ۵S و بازرسی‌ها', connected: true, tools: toolMap.five_s, assistantIds: ['GENERAL_HSE', 'INSPECTION_5S'] },
-      { moduleId: 'fire', moduleNameFa: 'واحد آتش‌نشانی و امداد', connected: true, tools: toolMap.fire, assistantIds: ['GENERAL_HSE'] },
+      { moduleId: 'health', moduleNameFa: 'واحد بهداشت و محیط زیست / طب کار', connected: true, tools: toolMap.health, assistantIds: ['GENERAL_HSE', 'OCCUPATIONAL_HEALTH', 'NUTRITION_LIFESTYLE'], internal: true },
+      { moduleId: 'risks', moduleNameFa: 'ارزیابی ریسک هوشمند (AI JSA)', connected: true, tools: toolMap.risks, assistantIds: ['GENERAL_HSE', 'RISK_ASSESSMENT'], internal: true },
+      { moduleId: 'five_s', moduleNameFa: 'نظام آراستگی ۵S و بازرسی‌ها', connected: true, tools: toolMap.five_s, assistantIds: ['GENERAL_HSE', 'INSPECTION_5S'], internal: true },
+      { moduleId: 'fire', moduleNameFa: 'واحد آتش‌نشانی و امداد', connected: true, tools: toolMap.fire, assistantIds: ['GENERAL_HSE'], internal: true },
       { moduleId: 'warnings', moduleNameFa: 'ثبت و پیگیری اخطارها', connected: true, tools: toolMap.warnings, assistantIds: ['GENERAL_HSE'] },
       { moduleId: 'warnings-records', moduleNameFa: 'اخطارها / سوابق ثبت و پیگیری', connected: true, tools: toolMap.warnings, assistantIds: ['GENERAL_HSE'], parentModuleId: 'warnings', level: 1, notes: 'ابزار فعلی خلاصه تجمیعی اخطارها است؛ تفکیک اختصاصی تب تضمین نشده است.' },
       { moduleId: 'warnings-charts', moduleNameFa: 'اخطارها / نمودارهای تحلیلی', connected: true, tools: toolMap.warnings, assistantIds: ['GENERAL_HSE'], parentModuleId: 'warnings', level: 1, notes: 'ابزار فعلی خلاصه تجمیعی اخطارها است؛ تفکیک اختصاصی تب تضمین نشده است.' },
@@ -821,9 +821,9 @@ export class AIOrchestrator {
         parentModuleId: 'ppe', level: 1,
         notes: 'ابزار فعلی خلاصه تجمیعی PPE است؛ تفکیک اختصاصی تب تا زمان افزودن Adapter مستقل تضمین نشده است.',
       })),
-      { moduleId: 'environment', moduleNameFa: 'محیط زیست و پسماند', connected: true, tools: toolMap.environment, assistantIds: ['GENERAL_HSE', 'ENVIRONMENT_WASTE'] },
-      { moduleId: 'personnel', moduleNameFa: 'پرونده جامع پرسنل / ساختار سازمانی', connected: true, tools: toolMap.personnel, assistantIds: ['GENERAL_HSE'] },
-      { moduleId: 'workflows', moduleNameFa: 'کارتابل اسناد و فرآیندها', connected: true, tools: toolMap.workflows, assistantIds: ['GENERAL_HSE'] },
+      { moduleId: 'environment', moduleNameFa: 'محیط زیست و پسماند', connected: true, tools: toolMap.environment, assistantIds: ['GENERAL_HSE', 'ENVIRONMENT_WASTE'], internal: true },
+      { moduleId: 'personnel', moduleNameFa: 'پرونده جامع پرسنل / ساختار سازمانی', connected: true, tools: toolMap.personnel, assistantIds: ['GENERAL_HSE'], internal: true },
+      { moduleId: 'workflows', moduleNameFa: 'کارتابل اسناد و فرآیندها', connected: true, tools: toolMap.workflows, assistantIds: ['GENERAL_HSE'], internal: true },
       { moduleId: 'documents', moduleNameFa: 'دستورالعمل‌ها و مستندات (RAG)', connected: true, tools: [], assistantIds: ['GENERAL_HSE'], notes: 'از طریق پایگاه دانش RAG' },
       { moduleId: 'non-conformances', moduleNameFa: 'مدیریت عدم انطباق‌ها (CAPA)', connected: true, tools: toolMap.non_conformances, assistantIds: ['GENERAL_HSE'] },
       { moduleId: 'notifications', moduleNameFa: 'مدیریت هشدار و اعلان‌ها', connected: true, tools: toolMap.notifications, assistantIds: ['GENERAL_HSE'] },
