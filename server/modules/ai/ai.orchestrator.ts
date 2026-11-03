@@ -68,10 +68,14 @@ export class AIOrchestrator {
   private async resolveToolsToExecute(
     message: string,
     allowTools: boolean = true,
-    userContext?: UserContext
+    userContext?: UserContext,
+    selectedModules: string[] = [],
   ): Promise<AIToolResult[]> {
     if (!allowTools || !userContext) return [];
 
+    const selected = new Set(selectedModules.map(id => String(id).trim().toLowerCase()).filter(Boolean));
+    const selectAll = selected.has('all');
+    const isSelected = (moduleId: string) => selectAll || selected.has(moduleId.toLowerCase());
     const norm = normalizePersianText(message);
     const results: AIToolResult[] = [];
     const executedToolNames = new Set<string>();
@@ -305,7 +309,10 @@ export class AIOrchestrator {
     }
 
     // 3. Resolve Safe Real-Data Tools across all HSECORE modules
-    const toolResults = await this.resolveToolsToExecute(sanitized, request.allowTools ?? true, userContext);
+    const selectedModules = Array.isArray(request.selectedModules)
+      ? request.selectedModules.map(id => String(id).trim().toLowerCase()).filter(id => /^[a-z0-9_-]{1,80}$/.test(id)).slice(0, 40)
+      : [];
+    const toolResults = await this.resolveToolsToExecute(sanitized, request.allowTools ?? true, userContext, selectedModules);
     const toolsUsed = toolResults.map(t => t.titleFa);
     const citations: string[] = [
       'قانون کار ج.ا.ا (فصل چهارم - حفاظت فنی و بهداشت کار)',
@@ -362,6 +369,14 @@ export class AIOrchestrator {
       logger.warn('[AIOrchestrator] RAG retrieval skipped or failed', { error: String(ragErr) });
     }
 
+    if (selectedModules.length > 0 && toolResults.length === 0) {
+      throw new Error('برای ماژول‌های انتخاب‌شده داده قابل‌دسترسی یا ابزار تحلیلی فعال پیدا نشد. دسترسی کاربر و پوشش تحلیلی ماژول را بررسی کنید.');
+    }
+
+    if (selectedModules.includes('all') && toolResults.length > 0) {
+      retrievedReferenceContext += '\\n[دامنه درخواست: تحلیل چندماژولی /ALL؛ فقط منابعی که در بالا واقعاً استخراج شده‌اند پوشش داده شده‌اند. برای ماژول فاقد ابزار یا داده، نتیجه‌گیری نکنید.]\\n';
+    }
+
     const messages = buildAIConversationMessages({
       systemPrompt: assistant.systemPrompt,
       history: request.history,
@@ -377,7 +392,14 @@ export class AIOrchestrator {
     try {
       const queueResult = await aiRequestQueue.enqueue(
         async (remainingMs) => {
+          const installedModels = await aiService.listInstalledModels();
+          const requestedModel = typeof request.model === 'string' ? request.model.trim() : '';
+          const modelInfo = requestedModel
+            ? installedModels.find((item: any) => [item.name, item.model].some((name: any) => typeof name === 'string' && name.toLowerCase() === requestedModel.toLowerCase()))
+            : undefined;
+          if (requestedModel && !modelInfo) throw new Error('مدل انتخاب‌شده نصب نیست یا در دسترس نیست.');
           return await localAIProvider.chat(messages, {
+            model: modelInfo?.name || modelInfo?.model,
             temperature: 0.3,
             max_tokens: 1500,
             timeoutMs: remainingMs,
