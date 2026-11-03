@@ -539,7 +539,7 @@ export class AIOrchestrator {
       : [];
     if (selectedModules.length > 0 && !selectedModules.includes('all')) {
       const coverage = (await this.getModuleCoverage(userContext)).filter(item => !item.internal);
-      const coverageById = new Map(coverage.map(item => [item.moduleId, item] as const));
+      const coverageById = new Map(coverage.map(item => [String(item.moduleId).trim().toLowerCase(), item] as const));
       const unavailable = selectedModules.filter(id => !coverageById.get(id)?.connected);
       if (unavailable.length > 0) {
         throw new Error('یک یا چند بخش انتخاب‌شده در کاتالوگ تحلیلی فعال نیست یا منبع داده مجاز ندارد: ' + unavailable.join('، '));

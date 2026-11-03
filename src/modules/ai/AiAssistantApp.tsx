@@ -261,7 +261,8 @@ export default function AiAssistantApp({
       setActiveSessionId(prev => (prev && list.some(s => s.id === prev) ? prev : list[0]?.id || ''));
     } catch (err: any) {
       setSessionsError(err?.message || 'خطا در بارگذاری گفتگوها');
-      setSessions([]);
+      // Preserve the last successfully loaded sessions during transient failures.
+
     } finally {
       setSessionsLoading(false);
     }
@@ -517,13 +518,22 @@ export default function AiAssistantApp({
     );
 
     try {
-      await authFetch(`/api/v1/ai/sessions/${sessionId}/messages`, {
+      const saveResponse = await authFetch(`/api/v1/ai/sessions/${sessionId}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ role: 'user', content: text }),
       });
-    } catch {
-      // non-blocking
+      const saveResult = await saveResponse.json().catch(() => ({}));
+      if (!saveResponse.ok || saveResult.success === false) {
+        throw new Error(saveResult.message || `ذخیره پیام ناموفق بود (HTTP ${saveResponse.status})`);
+      }
+    } catch (saveError: any) {
+      setSessions(prev => prev.map(s => s.id === sessionId
+        ? { ...s, messages: (session.messages || []) }
+        : s));
+      setInputMessage(text);
+      setSessionsError(saveError?.message || 'پیام در پایگاه داده ذخیره نشد؛ ارسال به هوش مصنوعی متوقف شد تا سابقه ناقص نشود.');
+      return;
     }
 
     setIsLoading(true);
@@ -655,7 +665,7 @@ export default function AiAssistantApp({
       );
 
       try {
-        await authFetch(`/api/v1/ai/sessions/${sessionId}/messages`, {
+        const saveResponse = await authFetch(`/api/v1/ai/sessions/${sessionId}/messages`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -667,8 +677,12 @@ export default function AiAssistantApp({
             model: responseModel,
           }),
         });
-      } catch {
-        // non-blocking
+        const saveResult = await saveResponse.json().catch(() => ({}));
+        if (!saveResponse.ok || saveResult.success === false) {
+          throw new Error(saveResult.message || 'ذخیره پاسخ هوش مصنوعی ناموفق بود.');
+        }
+      } catch (saveError: any) {
+        setSessionsError(saveError?.message || 'پاسخ تولید شد اما ذخیره آن در تاریخچه ناموفق بود؛ لطفاً وضعیت پایگاه داده را بررسی کنید.');
       }
     } catch (requestError: any) {
       const nowTime = new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
