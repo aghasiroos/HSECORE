@@ -35,24 +35,25 @@ interface ModuleDefinition {
   enabled?: boolean;
   explicitPermission?: boolean;
   notes?: string;
+  permissions?: string[];
 }
 
-const TOOL_ACCESS: Record<string, { permission?: string; adminOnly?: boolean; explicitPermission?: boolean }> = {
+const TOOL_ACCESS: Record<string, { permission?: string; permissions?: string[]; adminOnly?: boolean; explicitPermission?: boolean }> = {
   heat_weather_summary: {},
   ptw_summary: { permission: 'ptw:read' },
-  ptw_audit_summary: { permission: 'audit:read' },
+  ptw_audit_summary: { permissions: ['audit:read', 'ptw:read'] },
   incidents_summary: { permission: 'incidents:read' },
   health_medical_summary: { permission: 'health:read', adminOnly: true, explicitPermission: true },
   nutrition_high_risk_summary: { permission: 'health:read', adminOnly: true, explicitPermission: true },
-  risk_assessment_summary: { permission: 'risks:read' },
+  risk_assessment_summary: { permissions: ['risks:read', 'reports:read'] },
   five_s_inspections_summary: { permission: 'five_s:read' },
-  fire_safety_summary: { permission: 'fire:read' },
+  fire_safety_summary: { permission: 'fire_equipment:read' },
   warnings_anomalies_summary: { permission: 'warnings:read' },
-  training_summary: { permission: 'training:read' },
-  ppe_summary: { permission: 'ppe:read' },
-  environment_summary: { permission: 'environment:read' },
+  training_summary: { permissions: ['training:read', 'personnel:read', 'reports:read'] },
+  ppe_summary: { permissions: ['ppe:read', 'safety_equipment:read', 'reports:read'] },
+  environment_summary: { permissions: ['environment:read', 'health:read', 'reports:read'] },
   personnel_org_summary: { permission: 'personnel:read', adminOnly: true },
-  workflow_referrals_summary: { permission: 'workflows:read' },
+  workflow_referrals_summary: { permission: 'workflow:read' },
   kpi_management_summary: { permission: 'reports:read' },
   non_conformances_summary: { permission: 'audit:read' },
   notifications_summary: { permission: 'notifications:read' },
@@ -67,20 +68,20 @@ const MODULE_ADAPTERS: Record<string, Partial<ModuleDefinition>> = {
   'hse-ms': { tools: ['kpi_management_summary'], permission: 'reports:read' },
   reports: { tools: ['kpi_management_summary'], permission: 'reports:read' },
   'safety-unit': { tools: ['five_s_inspections_summary', 'non_conformances_summary'] },
-  'fire-dept': { tools: ['fire_safety_summary'], permission: 'fire:read' },
+  'fire-dept': { tools: ['fire_safety_summary'], permission: 'fire_equipment:read' },
   'health-env': { tools: ['health_medical_summary', 'nutrition_high_risk_summary', 'environment_summary'] },
   permit: { tools: ['ptw_summary'], permission: 'ptw:read' },
-  'ptw-audit': { tools: ['ptw_audit_summary'], permission: 'audit:read' },
-  risk: { tools: ['risk_assessment_summary'], permission: 'risks:read' },
-  ppe: { tools: ['ppe_summary'], permission: 'ppe:read' },
+  'ptw-audit': { tools: ['ptw_audit_summary'], permissions: ['audit:read', 'ptw:read'] },
+  risk: { tools: ['risk_assessment_summary'], permissions: ['risks:read', 'reports:read'] },
+  ppe: { tools: ['ppe_summary'], permissions: ['ppe:read', 'safety_equipment:read', 'reports:read'] },
   incidents: { tools: ['incidents_summary'], permission: 'incidents:read' },
   warnings: { tools: ['warnings_anomalies_summary'], permission: 'warnings:read' },
   'personnel-history': { tools: ['personnel_org_summary'], permission: 'personnel:read', adminOnly: true },
-  training: { tools: ['training_summary'], permission: 'training:read' },
+  training: { tools: ['training_summary'], permissions: ['training:read', 'personnel:read', 'reports:read'] },
   documents: { rag: true },
-  'pending-documents': { tools: ['workflow_referrals_summary'], permission: 'workflows:read' },
+  'pending-documents': { tools: ['workflow_referrals_summary'], permission: 'workflow:read' },
   'non-conformances': { tools: ['non_conformances_summary'], permission: 'audit:read' },
-  'process-management': { tools: ['workflow_referrals_summary'], permission: 'workflows:read' },
+  'process-management': { tools: ['workflow_referrals_summary'], permission: 'workflow:read' },
   notifications: { tools: ['notifications_summary'], permission: 'notifications:read' },
   'user-mgmt': { tools: ['users_roles_summary'], adminOnly: true },
   system: { tools: ['settings_backup_summary', 'system_architecture_summary'], adminOnly: true },
@@ -110,7 +111,7 @@ const HEALTH_CHILD_ADAPTERS: Record<string, Partial<ModuleDefinition>> = {
 };
 
 const FIRE_CHILD_ADAPTERS: Record<string, Partial<ModuleDefinition>> = {
-  dashboard: { tools: ['fire_safety_summary'], permission: 'fire:read' },
+  dashboard: { tools: ['fire_safety_summary'], permission: 'fire_equipment:read' },
   vehicles: {
     tools: ['fire_safety_summary'],
     notes: 'منبع فعلی فقط تعداد خودروهای ثبت‌شده را گزارش می‌کند؛ جزئیات بازرسی و تعمیرات متصل نیست.',
@@ -228,6 +229,7 @@ function canUseTool(user: UserContext, toolName: string): boolean {
   const access = TOOL_ACCESS[toolName] || {};
   const globalAdmin = isGlobalAdminUser(user);
   if (access.explicitPermission && (!access.permission || !checkUserHasPermission(user, access.permission))) return false;
+  if (access.permissions?.length && !globalAdmin && !access.permissions.some(permission => checkUserHasPermission(user, permission))) return false;
   if (access.adminOnly && !globalAdmin) return false;
   if (access.permission && !access.explicitPermission && !globalAdmin && !checkUserHasPermission(user, access.permission)) return false;
   return true;
@@ -237,6 +239,7 @@ function canAccessDefinition(user: UserContext, definition: ModuleDefinition): b
   const globalAdmin = isGlobalAdminUser(user);
   if (definition.adminOnly && !globalAdmin) return false;
   if (definition.explicitPermission && (!definition.permission || !checkUserHasPermission(user, definition.permission))) return false;
+  if (definition.permissions?.length && !globalAdmin && !definition.permissions.some(permission => checkUserHasPermission(user, permission))) return false;
   if (definition.permission && !definition.explicitPermission && !globalAdmin && !checkUserHasPermission(user, definition.permission)) return false;
   return true;
 }
