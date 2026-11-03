@@ -138,7 +138,7 @@ const DEFAULT_CHILDREN: Record<string, ModuleDefinition[]> = {
   ],
   'ptw-audit': [
     { id: 'dashboard', titleFa: 'داشبورد ممیزی پروانه کار', titleEn: 'PTW Audit Dashboard', tools: ['ptw_audit_summary'] },
-    { id: 'list', titleFa: 'فهرست و سوابق ممیزی‌ها', titleEn: 'PTW Audit Records', tools: ['ptw_audit_summary'] },
+    { id: 'list', titleFa: 'فهرست و سوابق ممیزی‌ها', titleEn: 'PTW Audit Records', tools: ['ptw_audit_summary'], notes: '۲۰ رکورد آخر با شماره پروانه، تاریخ، واحد و شاخص‌های ممیزی ارائه می‌شود؛ نام امضاکنندگان، شناسه پرسنلی، امضا و پیوست‌ها در خروجی AI حذف می‌شوند.' },
   ],
   'health-env': [
     {
