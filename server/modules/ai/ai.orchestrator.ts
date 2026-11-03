@@ -19,6 +19,29 @@ import { logger } from '../../core/logger.ts';
 import { checkUserHasPermission, isGlobalAdminUser, type UserContext } from '../../core/middleware/auth.ts';
 import { buildAIConversationMessages } from './ai.prompt-security.ts';
 
+const AI_TOOL_REQUIRED_PERMISSIONS: Record<string, string> = {
+  heat_weather_summary: '',
+  ptw_summary: 'ptw:read',
+  incidents_summary: 'incidents:read',
+  health_medical_summary: 'health:read',
+  nutrition_high_risk_summary: 'health:read',
+  risk_assessment_summary: 'reports:read',
+  five_s_inspections_summary: 'five_s:read',
+  fire_safety_summary: 'fire_equipment:read',
+  warnings_anomalies_summary: 'warnings:read',
+  training_summary: 'reports:read',
+  ppe_summary: 'safety_equipment:read',
+  environment_summary: 'reports:read',
+  personnel_org_summary: 'personnel:read',
+  workflow_referrals_summary: 'workflow:action',
+  kpi_management_summary: 'reports:read',
+  non_conformances_summary: 'reports:read',
+  notifications_summary: 'notifications:read',
+  users_roles_summary: '',
+  settings_backup_summary: '',
+};
+const AI_ADMIN_ONLY_TOOLS = new Set(['users_roles_summary', 'settings_backup_summary']);
+
 export function isExplicitAllModulesCommand(message: string): boolean {
   return /(?:^|\s)\/\s*all(?:\s|$)/i.test(String(message || '').trim());
 }
@@ -152,35 +175,10 @@ export class AIOrchestrator {
 
     const hasAnyTerm = (terms: string[]) => terms.some(t => norm.includes(normalizePersianText(t)));
 
-    const toolPermissions: Record<string, string> = {
-      heat_weather_summary: '', // Meteorological & WBGT station telemetry available to all authenticated users
-      ptw_summary: 'ptw:read',
-      incidents_summary: 'incidents:read',
-      health_medical_summary: 'health:read',
-      nutrition_high_risk_summary: 'health:read',
-      risk_assessment_summary: 'reports:read',
-      five_s_inspections_summary: 'five_s:read',
-      fire_safety_summary: 'fire_equipment:read',
-      warnings_anomalies_summary: 'warnings:read',
-      training_summary: 'reports:read',
-      ppe_summary: 'safety_equipment:read',
-      environment_summary: 'reports:read',
-      personnel_org_summary: 'personnel:read',
-      workflow_referrals_summary: 'workflow:action',
-      kpi_management_summary: 'reports:read',
-      non_conformances_summary: 'reports:read',
-      notifications_summary: 'notifications:read',
-      users_roles_summary: '',
-      settings_backup_summary: '',
-    };
-
-    // Health and personnel summary tools return aggregate counts only and remain
-    // protected by their module-specific read permissions. Only tools that expose
-    // account/administrative configuration require global administrator scope.
-    const sensitiveToolsRequiringGlobalScope = new Set([
-      'users_roles_summary',
-      'settings_backup_summary',
-    ]);
+    // Keep module-picker availability aligned with the exact permissions enforced
+    // immediately before tool execution below.
+    const toolPermissions: Record<string, string> = AI_TOOL_REQUIRED_PERMISSIONS;
+    const sensitiveToolsRequiringGlobalScope = AI_ADMIN_ONLY_TOOLS;
 
     const checkAndExecute = async (toolName: string, execFn: () => Promise<AIToolResult>) => {
       if (executedToolNames.has(toolName)) return;
@@ -873,41 +871,26 @@ export class AIOrchestrator {
     for (const root of roots) walk(root, 0);
     for (const item of modules) if (!visited.has(item.moduleId)) walk(item, 0);
 
-    // The picker is a discovery surface, not an authorization boundary. Still,
-    // hide unavailable modules here and independently enforce the same ACL
-    // again when a tool is executed.
+    // The picker is a discovery surface, not an authorization boundary.
+    // Use the same tool-permission registry as runtime execution; never invent
+    // a second module-to-permission matrix.
     const globalAdmin = Boolean(_userContext && isGlobalAdminUser(_userContext));
-    const requiredPermissionByModule: Record<string, string> = {
-      dashboard: 'reports:read', 'hse-ms': 'reports:read', reports: 'reports:read',
-      'fire-dept': 'fire_equipment:read', fire: 'fire_equipment:read',
-      'health-env': 'health:read', health: 'health:read', clinic: 'health:read',
-      'periodic-exams': 'health:read', 'non-periodic-exams': 'health:read',
-      nutrition: 'health:read', 'health-env-checklists': 'health:read',
-      'comprehensive-dashboard': 'health:read',
-      permit: 'ptw:read', ptw: 'ptw:read', 'ptw-audit': 'ptw:read',
-      incidents: 'incidents:read', risk: 'reports:read', risks: 'reports:read',
-      'risk-overview': 'reports:read', 'risk-method-records': 'reports:read',
-      'safety-unit': 'five_s:read', 'safety-unit-dashboard': 'five_s:read',
-      'safety-checklists': 'five_s:read', 'five-s': 'five_s:read', five_s: 'five_s:read',
-      warnings: 'warnings:read', training: 'reports:read', ppe: 'safety_equipment:read',
-      environment: 'reports:read', 'env-dashboard': 'reports:read', 'env-monitoring': 'reports:read',
-      'waste-management': 'reports:read', wastewater: 'reports:read', 'air-water-soil': 'reports:read',
-      'env-reports': 'reports:read', personnel: 'personnel:read', 'personnel-history': 'personnel:read',
-      workflows: 'workflow:action', 'pending-documents': 'workflow:action',
-      'process-management': 'workflow:action', 'process-catalog': 'workflow:action',
-      'process-tasks': 'workflow:action', 'process-tracker': 'workflow:action', 'process-rules': 'workflow:action',
-      'non-conformances': 'reports:read', notifications: 'notifications:read',
-      documents: 'documents:read', 'org-procedures': 'documents:read',
-      'equipment-certificates': 'documents:read', 'org-forms-checklists': 'documents:read',
-      'other-hse-docs': 'documents:read',
-    };
-    const adminOnlyModules = new Set(['users', 'user-mgmt', 'settings', 'system']);
+    const documentOnlyModules = new Set([
+      'documents', 'org-procedures', 'equipment-certificates',
+      'org-forms-checklists', 'other-hse-docs',
+    ]);
     return ordered.map(item => {
-      const permission = requiredPermissionByModule[item.moduleId];
-      const permitted = globalAdmin ||
-        (!adminOnlyModules.has(item.moduleId) &&
-          (!permission || Boolean(_userContext && checkUserHasPermission(_userContext, permission))));
-      return permitted ? item : { ...item, connected: false };
+      const permittedTools = item.tools.filter(toolName => {
+        if (AI_ADMIN_ONLY_TOOLS.has(toolName)) return globalAdmin;
+        const permission = AI_TOOL_REQUIRED_PERMISSIONS[toolName];
+        return globalAdmin || !permission ||
+          Boolean(_userContext && checkUserHasPermission(_userContext, permission));
+      });
+      const permittedKnowledge = documentOnlyModules.has(item.moduleId) &&
+        Boolean(_userContext && (globalAdmin || checkUserHasPermission(_userContext, 'documents:read')));
+      const permitted = item.connected &&
+        (permittedTools.length > 0 || permittedKnowledge || (item.tools.length === 0 && !documentOnlyModules.has(item.moduleId)));
+      return { ...item, connected: permitted };
     });
   }
 }
