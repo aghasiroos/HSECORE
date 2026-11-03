@@ -221,17 +221,44 @@ export default function AiAssistantApp({
           if (raw) {
             const localSessions = JSON.parse(raw);
             if (Array.isArray(localSessions) && localSessions.length > 0) {
-              await authFetch('/api/v1/ai/sessions/import-local', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ sessions: localSessions }),
-              });
-              localStorage.removeItem('hsecore_ai_sessions');
-              const res2 = await authFetch('/api/v1/ai/sessions');
-              const data2 = await res2.json();
-              if (data2.success && Array.isArray(data2.data)) {
-                list = data2.data.map(toEmptyChatSession);
+              // Import in bounded batches. The server operation is idempotent by session/message ID,
+              // so an interrupted migration can safely be retried without deleting the local source.
+              for (let offset = 0; offset < localSessions.length; offset += 30) {
+                const batch = localSessions.slice(offset, offset + 30);
+                const importRes = await authFetch('/api/v1/ai/sessions/import-local', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ sessions: batch }),
+                });
+                const importData = await importRes.json().catch(() => ({}));
+                if (!importRes.ok || !importData.success || Number(importData.data?.imported) !== batch.length) {
+                  throw new Error(importData.message || 'انتقال کامل تاریخچه گفتگوها تأیید نشد.');
+                }
               }
+
+              const res2 = await authFetch('/api/v1/ai/sessions');
+              const data2 = await res2.json().catch(() => ({}));
+              if (!res2.ok || !data2.success || !Array.isArray(data2.data)) {
+                throw new Error('تأیید تاریخچه منتقل‌شده از پایگاه داده ناموفق بود.');
+              }
+              const importedById = new Map(data2.data.map((item: any) => [String(item.id), item]));
+              const allSessionsVerified = localSessions.every((local: any) => {
+                const remote: any = importedById.get(String(local?.id || ''));
+                if (!remote) return false;
+                const expectedMessages = Array.isArray(local?.messages)
+                  ? local.messages.filter((message: any) =>
+                      Boolean(message?.content) && (message.role === 'user' || message.role === 'assistant')
+                    ).length
+                  : 0;
+                return Number(remote.messageCount || 0) >= Math.min(expectedMessages, 100);
+              });
+              if (!allSessionsVerified) {
+                throw new Error('تعداد گفتگوها یا پیام‌های منتقل‌شده با تاریخچه محلی مطابقت ندارد؛ نسخه محلی حفظ شد.');
+              }
+
+              // Remove the source only after every batch and the server-side read-back are verified.
+              localStorage.removeItem('hsecore_ai_sessions');
+              list = data2.data.map(toEmptyChatSession);
             }
           }
         } catch {
