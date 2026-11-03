@@ -87,7 +87,8 @@ export class AIOrchestrator {
       'گزارش کلی سامانه', 'گزارش جامع سامانه', 'تحلیل کلی سامانه',
       'تحلیل جامع سامانه', 'عملکرد کل سامانه', 'تمام ماژول های سامانه',
       'همه ماژول های سامانه', 'گزارش همه ماژول ها', 'overall system report',
-      'system-wide analysis', 'all modules',
+      'system-wide analysis', 'all modules', 'همه ماژول ها', 'تمام ماژول ها',
+      'کل سامانه', 'گزارش کل سامانه', 'تحلیل کل سامانه', 'گزارش کلی', 'تحلیل کلی', 'گزارش جامع', 'تحلیل جامع',
     ];
     const selectAll = selected.has('all') || (selected.size === 0 && allScopeTerms.some(term => norm.includes(normalizePersianText(term))));
     const moduleAliases: Record<string, string[]> = {
