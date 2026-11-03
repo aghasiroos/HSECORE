@@ -344,7 +344,7 @@ export function getSelectedModuleDescriptions(selectedModuleIds: string[], catal
     selected: entries.map(item => item.moduleNameFa),
     connected: entries.filter(item => item.allowed && item.connected).map(item => item.moduleNameFa),
     unavailable: entries.filter(item => !item.allowed || !item.connected).map(item =>
-      `${item.moduleNameFa}: ${item.notes || 'داده‌ای برای این بخش متصل نیست.'}`
+      item.moduleNameFa
     ),
   };
 }
