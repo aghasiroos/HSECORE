@@ -8,7 +8,7 @@ import jwt from 'jsonwebtoken';
 import { config } from '../server/core/config.ts';
 import { aiRagService } from '../server/modules/ai/ai.rag.service.ts';
 import aiRoutes from '../server/modules/ai/ai.routes.ts';
-import { aiOrchestrator, isExplicitAllModulesCommand } from '../server/modules/ai/ai.orchestrator.ts';
+import { aiOrchestrator, canUserAccessAITool, isExplicitAllModulesCommand } from '../server/modules/ai/ai.orchestrator.ts';
 
 function tokenFor(uid: string, role: string): string {
   return jwt.sign({ uid, role }, config.security.jwtSecret, { expiresIn: '5m' });
@@ -21,6 +21,16 @@ async function run() {
   assert.equal(isExplicitAllModulesCommand('/ptw'), false);
   assert.equal(isExplicitAllModulesCommand('گزارش کلی سامانه'), false);
   console.log('PASS typed /ALL command parser accepts case/spacing variants without matching other slash commands');
+  assert.equal(canUserAccessAITool('ptw_summary', { uid: 'worker-1', role: 'WORKER' }), true);
+  assert.equal(canUserAccessAITool('health_medical_summary', { uid: 'worker-1', role: 'WORKER' }), false);
+  assert.equal(canUserAccessAITool('users_roles_summary', { uid: 'worker-1', role: 'WORKER' }), false);
+  assert.equal(canUserAccessAITool('fire_safety_summary', { uid: 'safety-1', role: 'SAFETY_OFFICER' }), true);
+  assert.equal(canUserAccessAITool('health_medical_summary', { uid: 'safety-1', role: 'SAFETY_OFFICER' }), false);
+  assert.equal(canUserAccessAITool('workflow_referrals_summary', { uid: 'safety-1', role: 'SAFETY_OFFICER' }), true);
+  assert.equal(canUserAccessAITool('users_roles_summary', { uid: 'admin-1', role: 'ADMIN' }), true);
+  assert.equal(canUserAccessAITool('settings_backup_summary', { uid: 'admin-1', role: 'ADMIN' }), true);
+  assert.equal(canUserAccessAITool('ptw_summary', undefined), false);
+  console.log('PASS AI tool ACL: worker, safety officer, admin, and unauthenticated contexts');
   const originalIndex = aiRagService.indexDocument;
   const originalCanAccess = aiRagService.canAccessDocument;
   const originalDelete = aiRagService.deleteDocument;
