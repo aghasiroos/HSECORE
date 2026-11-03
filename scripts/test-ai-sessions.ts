@@ -89,7 +89,7 @@ async function run() {
     );
     await db.execute(sql.raw(`DROP TRIGGER IF EXISTS ${insertTrigger} ON ai_chat_messages`));
     await db.execute(sql.raw(`DROP FUNCTION IF EXISTS ${insertFunction}()`));
-    const afterFailedWrite = await freshService.getMessages(sessionId, userA);
+    const afterFailedWrite = await service.getMessages(sessionId, userA);
     assert.equal(afterFailedWrite.length, 2);
     console.log('PASS failed message writes are rejected and do not appear in history');
 
