@@ -604,6 +604,7 @@ export default function AiAssistantApp({
       const decoder = new TextDecoder();
       let pending = '';
       let streamError = '';
+      let serverHistorySaved = false;
       const applyEvent = (line: string) => {
         if (!line.startsWith('data:')) return;
         let payload: any;
@@ -638,6 +639,7 @@ export default function AiAssistantApp({
         }
         if (Array.isArray(payload.toolsUsed)) responseToolsUsed = payload.toolsUsed;
         if (Array.isArray(payload.citations)) responseCitations = payload.citations;
+        if (payload.historySaved === true) serverHistorySaved = true;
         if (payload.historySaved === false) {
           setSessionsError('پاسخ تولید شد اما ذخیره سمت سرور ناموفق بود؛ لطفاً پایگاه داده را بررسی کنید.');
         }
@@ -671,25 +673,27 @@ export default function AiAssistantApp({
         )
       );
 
-      try {
-        const saveResponse = await authFetch(`/api/v1/ai/sessions/${sessionId}/messages`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            role: 'assistant',
-            content: assistantText,
-            toolsUsed: responseToolsUsed,
-            citations: responseCitations,
-            durationMs,
-            model: responseModel,
-          }),
-        });
-        const saveResult = await saveResponse.json().catch(() => ({}));
-        if (!saveResponse.ok || saveResult.success === false) {
-          throw new Error(saveResult.message || 'ذخیره پاسخ هوش مصنوعی ناموفق بود.');
+      if (!serverHistorySaved) {
+        try {
+          const saveResponse = await authFetch(`/api/v1/ai/sessions/${sessionId}/messages`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              role: 'assistant',
+              content: assistantText,
+              toolsUsed: responseToolsUsed,
+              citations: responseCitations,
+              durationMs,
+              model: responseModel,
+            }),
+          });
+          const saveResult = await saveResponse.json().catch(() => ({}));
+          if (!saveResponse.ok || saveResult.success === false) {
+            throw new Error(saveResult.message || 'ذخیره پاسخ هوش مصنوعی ناموفق بود.');
+          }
+        } catch (saveError: any) {
+          setSessionsError(saveError?.message || 'پاسخ تولید شد اما ذخیره آن در تاریخچه ناموفق بود؛ لطفاً وضعیت پایگاه داده را بررسی کنید.');
         }
-      } catch (saveError: any) {
-        setSessionsError(saveError?.message || 'پاسخ تولید شد اما ذخیره آن در تاریخچه ناموفق بود؛ لطفاً وضعیت پایگاه داده را بررسی کنید.');
       }
     } catch (requestError: any) {
       const nowTime = new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
