@@ -128,7 +128,7 @@ export class AIOrchestrator {
     };
 
     // 1. Heat Stress, Weather, Temperature & Humidity (استرس گرمایی، دما، رطوبت، WBGT، هواشناسی)
-    if (
+    if (isSelected('heat') ||
       hasAnyTerm([
         'استرس گرمایی', 'تنش حرارتی', 'گرما', 'حرارت', 'دما', 'دمای هوا', 'رطوبت', 'شرجی',
         'wbgt', '태양', 'گوی سان', 'گوی‌سان', 'دمای تر', 'هواشناسی', 'اب و هوا', 'آب و هوا',
@@ -139,7 +139,7 @@ export class AIOrchestrator {
     }
 
     // 2. PTW & Work Permits (پروانه کار، مجوز کار، کار گرم، کار سرد، فضای بسته، حفاری، کار در ارتفاع)
-    if (
+    if (isSelected('ptw') ||
       hasAnyTerm([
         'پروانه', 'مجوز', 'پرمیت', 'permit', 'ptw', 'کار گرم', 'کار سرد', 'فضای بسته',
         'فضای محصور', 'کار در ارتفاع', 'حفاری', 'گودبرداری', 'ایزولاسیون', 'loto', 'ممیزی پروانه', 'sherpa',
@@ -149,7 +149,7 @@ export class AIOrchestrator {
     }
 
     // 3. Incidents & Near Misses (حادثه، حوادث، شبه حادثه، رویداد، صدمه، فوتی، روز کاری از دست رفته)
-    if (
+    if (isSelected('incidents') ||
       hasAnyTerm([
         'حادثه', 'حوادث', 'شبه حادثه', 'شبه‌حادثه', 'near miss', 'incident', 'accident',
         'رویداد', 'سوانح', 'سانحه', 'مصدوم', 'جراحت', 'تلفات', 'علت ریشه', 'rca', 'capa', 'lti',
@@ -159,7 +159,7 @@ export class AIOrchestrator {
     }
 
     // 4. Occupational Health & Medical Exams (طب کار، معاینات، شنوایی، ادیومتری، اسپیرومتری، بینایی، تناسب شغلی)
-    if (
+    if (isSelected('health') ||
       hasAnyTerm([
         'طب کار', 'معاینه', 'معاینات', 'ادیومتری', 'شنوایی', 'اسپیرومتری', 'تنفس', 'ریه',
         'اپتومتری', 'بینایی', 'تناسب شغلی', 'صلاحیت پزشکی', 'بیماری شغلی', 'پرونده پزشکی',
@@ -170,7 +170,7 @@ export class AIOrchestrator {
     }
 
     // 5. Nutrition, BMI & High-Risk Patients (تغذیه، چاقی، اضافه وزن، رژیم، قند خون، فشار خون، دیابت، BMI)
-    if (
+    if (isSelected('health') ||
       hasAnyTerm([
         'تغذیه', 'چاقی', 'اضافه وزن', 'وزن', 'bmi', 'توده بدنی', 'رژیم', 'فشار خون',
         'قند خون', 'دیابت', 'fbs', 'پرخطر', 'متابولیک', 'کالری',
@@ -180,7 +180,7 @@ export class AIOrchestrator {
     }
 
     // 6. Risk Assessment & Hazards (ارزیابی ریسک، خطر، مخاطره، JSA، HAZID، ماتریس ریسک)
-    if (
+    if (isSelected('risks') ||
       hasAnyTerm([
         'ریسک', 'مخاطره', 'مخاطرات', 'خطر', 'خطرات', 'jsa', 'hazid', 'fmea', 'ماتریس ریسک', 'ارزیابی ریسک',
       ])
@@ -189,7 +189,7 @@ export class AIOrchestrator {
     }
 
     // 7. 5S & Safety Inspections (آراستگی، 5S، ۵S، بازرسی، چک لیست، ممیزی کارگاه)
-    if (
+    if (isSelected('five_s') ||
       hasAnyTerm([
         '5s', '۵s', 'پنج اس', 'اراستگی', 'آراستگی', 'بازرسی', 'چک لیست', 'چک‌لیست',
         'داربست', 'جرثقیل', 'لیفتراک', 'نظم و انضباط',
@@ -199,7 +199,7 @@ export class AIOrchestrator {
     }
 
     // 8. Fire Safety & Extinguishers (آتش نشانی، اطفا حریق، کپسول، هیدرانت، خودرو آتش نشانی)
-    if (
+    if (isSelected('fire') ||
       hasAnyTerm([
         'اتش نشانی', 'آتش نشانی', 'آتش‌نشانی', 'اطفا', 'اطفاء', 'حریق', 'کپسول', 'خاموش کننده',
         'هیدرانت', 'پودر و گاز', 'co2', 'فوم', 'خودرو اتش نشانی', 'nfpa',
@@ -209,7 +209,7 @@ export class AIOrchestrator {
     }
 
     // 9. Safety Warnings & Non-Conformances (اخطار، تخلف، عدم انطباق، ناهنجاری)
-    if (
+    if (isSelected('warnings') ||
       hasAnyTerm([
         'اخطار', 'تخلف', 'تخلفات', 'عدم انطباق', 'ناهنجاری', 'انضباطی', 'nc', 'non-conformance',
       ])
@@ -218,7 +218,7 @@ export class AIOrchestrator {
     }
 
     // 10. Training & Competency (آموزش، دوره، گواهینامه، صلاحیت، ساعت آموزشی)
-    if (
+    if (isSelected('training') ||
       hasAnyTerm([
         'اموزش', 'آموزش', 'دوره', 'کارگاه آموزشی', 'گواهینامه', 'ماتریس شایستگی', 'بدو استخدام', 'بازاموزی',
       ])
@@ -227,7 +227,7 @@ export class AIOrchestrator {
     }
 
     // 11. PPE Management (تجهیزات حفاظت فردی، کفش ایمنی، کلاه ایمنی، دستکش، ماسک، گوشی)
-    if (
+    if (isSelected('ppe') ||
       hasAnyTerm([
         'حفاظت فردی', 'ppe', 'کلاه ایمنی', 'کفش ایمنی', 'دستکش', 'ماسک', 'عینک ایمنی',
         'گوشی ایمنی', 'لباس کار', 'کمربند ایمنی', 'هارنس', 'لنیارد',
@@ -237,7 +237,7 @@ export class AIOrchestrator {
     }
 
     // 12. Environment & Waste (محیط زیست، پسماند، پساب، فاضلاب، آلاینده، هوا، خاک)
-    if (
+    if (isSelected('environment') ||
       hasAnyTerm([
         'محیط زیست', 'پسماند', 'زباله', 'پساب', 'فاضلاب', 'الاینده', 'آلاینده',
         'گازهای گلخانه', 'دودکش', 'bod', 'cod', 'iso 14001',
@@ -247,7 +247,7 @@ export class AIOrchestrator {
     }
 
     // 13. Personnel & Org Hierarchy (پرسنل، کارکنان، نفرات، ساختار سازمانی، دپارتمان، واحدها)
-    if (
+    if (isSelected('personnel') ||
       hasAnyTerm([
         'پرسنل', 'کارکنان', 'کارگران', 'چند نفر', 'تعداد نفرات', 'ساختار سازمانی',
         'چارت سازمانی', 'واحدهای عملیاتی', 'دپارتمان', 'کد پرسنلی',
@@ -257,7 +257,7 @@ export class AIOrchestrator {
     }
 
     // 14. Workflows, BPMN & Referrals (فرآیند، گردش کار، کارتابل، ارجاع، BPMN)
-    if (
+    if (isSelected('workflows') ||
       hasAnyTerm([
         'فرایند', 'فرآیند', 'گردش کار', 'bpmn', 'کارتابل', 'ارجاع', 'ارجاعات',
       ])
@@ -266,7 +266,7 @@ export class AIOrchestrator {
     }
 
     // 15. Management KPI & TRIR (شاخص کلیدی، TRIR، داشبورد مدیریتی، نفر ساعت)
-    if (
+    if (isSelected('reports') ||
       hasAnyTerm([
         'شاخص کلیدی', 'trir', 'ltifr', 'kpi', 'نفر ساعت', 'نفر-ساعت', 'داشبورد', 'عملکرد کلی',
       ])
