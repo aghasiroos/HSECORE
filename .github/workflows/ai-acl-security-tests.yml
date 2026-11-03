@@ -12,6 +12,7 @@ on:
       - 'scripts/test-ai-acl.ts'
       - 'scripts/test-ai-auth.ts'
       - 'scripts/test-ai-rag-db.ts'
+      - 'scripts/test-ai-sessions.ts'
       - 'scripts/test-ai-routes.ts'
       - 'scripts/test-ai-queue.ts'
       - 'scripts/test-ai-model-pull.ts'
@@ -128,6 +129,8 @@ jobs:
         run: npm run test:ai-auth
       - name: Run PostgreSQL RAG integration tests
         run: npm run test:ai-rag-db
+      - name: Run PostgreSQL AI chat session persistence tests
+        run: npm run test:ai-sessions
       - name: Run AI knowledge HTTP authorization tests
         run: npm run test:ai-routes
       - name: AI request queue regression tests
