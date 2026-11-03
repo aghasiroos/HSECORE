@@ -371,7 +371,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
   moduleCatalog.forEach(appendCatalogTree);
   useEffect(() => {
     if (moduleCatalogLoading || moduleCatalog.length === 0 ||
-        !/(?:^|\\s)\\/all\\s*$/i.test(inputMessage)) return;
+        !/(?:^|\s)\/all\s*$/i.test(inputMessage)) return;
     const allItems: AIModulePickerItem[] = [];
     const visit = (item: AIModulePickerItem) => {
       allItems.push(item);
@@ -379,7 +379,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
     };
     moduleCatalog.forEach(visit);
     setSelectedModuleIds(allItems.filter(item => item.allowed).map(item => item.moduleId));
-    setInputMessage(current => current.replace(/(?:^|\\s)\\/all\\s*$/i, '').trimStart());
+    setInputMessage(current => current.replace(/(?:^|\s)\/all\s*$/i, '').trimStart());
     setModulePickerOpen(false);
     setModuleSearch('');
   }, [moduleCatalogLoading, moduleCatalog, inputMessage]);
