@@ -790,7 +790,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
                     /ALL — تحلیل همه ماژول‌های دارای اتصال تحلیلی
                   </button>
                   {moduleCatalog.map(item => (
-                    <button key={item.moduleId} type="button"
+                    <button key={item.moduleId} type="button" disabled={!item.connected}
                       onClick={() => {
                         setSelectedModules(current => {
                           const next = current.includes(item.moduleId)
@@ -801,7 +801,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
                         setInputMessage('');
                         setShowModulePicker(false);
                       }}
-                      className="w-full flex items-center justify-between gap-2 text-right px-3 py-2 rounded-lg text-xs hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200">
+                      className="w-full flex items-center justify-between gap-2 text-right px-3 py-2 rounded-lg text-xs hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed" title={item.notes || item.moduleNameFa}>
                       <span>{item.moduleNameFa}</span>
                       <span className="text-[10px] text-slate-400">{item.connected ? 'اتصال تحلیلی' : 'پوشش محدود / بدون ابزار'}</span>
                     </button>
