@@ -116,10 +116,6 @@ export class AIOrchestrator {
       'equipment-certificates': ['documents'],
       'org-forms-checklists': ['documents'],
       'other-hse-docs': ['documents'],
-      'non-periodic-exams': ['health'],
-      'health-env-checklists': ['health'],
-      'env-dashboard': ['environment'],
-      'five-s': ['five_s'],
       'fire-extinguisher-capsol': ['fire'],
       'hydrants-monitors': ['fire'],
       'fire-boxs': ['fire'],
@@ -128,10 +124,6 @@ export class AIOrchestrator {
       'deluge-sprinklers': ['fire'],
       'gas-detectors': ['fire'],
       'emergency-eyewash': ['fire'],
-      'org-procedures': ['documents'],
-      'equipment-certificates': ['documents'],
-      'org-forms-checklists': ['documents'],
-      'other-hse-docs': ['documents'],
     };
     const isSelected = (moduleId: string) => selectAll || selected.has(moduleId.toLowerCase()) ||
       Object.entries(moduleAliases).some(([alias, targets]) => selected.has(alias) && targets.includes(moduleId.toLowerCase()));
