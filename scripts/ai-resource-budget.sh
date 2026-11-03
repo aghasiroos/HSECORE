@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 # HSECORE AI resource budget helper.
 # Reads .env as data (never sources it) and applies conservative host-aware defaults.
-set -euo pipefail
-
 ai_env_get() {
   local key="$1" file="$2"
   awk -F= -v key="$key" '$1 == key { value=substr($0,index($0,"=")+1) } END {
@@ -74,5 +72,6 @@ apply_ai_resource_budget() {
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  set -euo pipefail
   apply_ai_resource_budget "${1:-.env}"
 fi
