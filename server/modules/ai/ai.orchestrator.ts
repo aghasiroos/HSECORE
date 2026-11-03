@@ -417,6 +417,15 @@ export class AIOrchestrator {
     const selectedModules = Array.isArray(request.selectedModules)
       ? request.selectedModules.map(id => String(id).trim().toLowerCase()).filter(id => /^[a-z0-9_-]{1,80}$/.test(id)).slice(0, 40)
       : [];
+    if (selectedModules.length > 0 && !selectedModules.includes('all')) {
+      const coverage = await this.getModuleCoverage(userContext);
+      const coverageById = new Map(coverage.map(item => [item.moduleId, item] as const));
+      const unavailable = selectedModules.filter(id => !coverageById.get(id)?.connected);
+      if (unavailable.length > 0) {
+        throw new Error('یک یا چند بخش انتخاب‌شده در کاتالوگ تحلیلی فعال نیست یا منبع داده مجاز ندارد: ' + unavailable.join('، '));
+      }
+    }
+
     const normalizedRequest = normalizePersianText(sanitized);
     const requestAllScope = selectedModules.includes('all') || (selectedModules.length === 0 && [
       'گزارش کلی سامانه', 'گزارش جامع سامانه', 'تحلیل کلی سامانه',
