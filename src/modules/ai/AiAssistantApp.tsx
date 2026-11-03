@@ -816,7 +816,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
                         setShowModulePicker(false);
                       }}
                       className="w-full flex items-center justify-between gap-2 text-right px-3 py-2 rounded-lg text-xs hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed" title={item.notes || item.moduleNameFa}>
-                      <span className={item.parentModuleId ? 'pr-4' : ''}>{item.parentModuleId ? '↳ ' : ''}{item.moduleNameFa}</span>
+                      <span style={{ paddingRight: item.parentModuleId ? `${Math.min(item.level || 1, 4) * 12}px` : '0px' }}>{item.parentModuleId ? '↳ ' : ''}{item.moduleNameFa}</span>
                       <span className="text-[10px] text-slate-400">{item.connected ? 'اتصال تحلیلی' : 'پوشش محدود / بدون ابزار'}</span>
                     </button>
                   ))}
