@@ -7,6 +7,7 @@ on:
       - security/p0-ai-acl-org-tests
     paths:
       - 'server/modules/ai/**'
+      - 'src/modules/ai/**'
       - 'server/core/middleware/auth.ts'
       - 'server/core/middleware/security.ts'
       - 'scripts/test-ai-acl.ts'
@@ -36,6 +37,7 @@ on:
       - main
     paths:
       - 'server/modules/ai/**'
+      - 'src/modules/ai/**'
       - 'server/core/middleware/auth.ts'
       - 'server/core/middleware/security.ts'
       - 'scripts/test-ai-acl.ts'
