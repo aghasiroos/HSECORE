@@ -169,10 +169,10 @@ export class AIOrchestrator {
       settings_backup_summary: '',
     };
 
+    // Health and personnel summary tools return aggregate counts only and remain
+    // protected by their module-specific read permissions. Only tools that expose
+    // account/administrative configuration require global administrator scope.
     const sensitiveToolsRequiringGlobalScope = new Set([
-      'health_medical_summary',
-      'nutrition_high_risk_summary',
-      'personnel_org_summary',
       'users_roles_summary',
       'settings_backup_summary',
     ]);
