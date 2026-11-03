@@ -9,6 +9,7 @@ import { config } from '../server/core/config.ts';
 import { aiRagService } from '../server/modules/ai/ai.rag.service.ts';
 import aiRoutes from '../server/modules/ai/ai.routes.ts';
 import { aiOrchestrator, canUserAccessAITool, isExplicitAllModulesCommand } from '../server/modules/ai/ai.orchestrator.ts';
+import { aiToolsRegistry } from '../server/modules/ai/ai.tools.ts';
 
 function tokenFor(uid: string, role: string): string {
   return jwt.sign({ uid, role }, config.security.jwtSecret, { expiresIn: '5m' });
@@ -32,6 +33,46 @@ async function run() {
   assert.equal(canUserAccessAITool('ptw_summary', undefined), false);
   assert.equal(canUserAccessAITool('unregistered_tool', { uid: 'admin-1', role: 'ADMIN' }), false);
   console.log('PASS AI tool ACL: worker, safety officer, admin, and unauthenticated contexts');
+  const originalGetPersistedModuleConfigs = aiToolsRegistry.getPersistedModuleConfigs;
+  aiToolsRegistry.getPersistedModuleConfigs = (async () => ({
+    system: [{ key: 'future-module', titleFa: 'ماژول آینده', enabled: true }],
+    fireDepartment: [
+      { key: 'دليج ولواسپرينكلرon,off ولو', titleFa: 'دلویج ولو و اسپرینکلر', titleEn: 'Deluge & Sprinklers', enabled: true },
+      { key: 'گازيابها', titleFa: 'گازیاب‌ها و دتکتورها', titleEn: 'Gas Detectors', enabled: true },
+      { key: 'دوش و چشم شوی اضطراری', titleFa: 'دوش و چشم‌شوی اضطراری', titleEn: 'Emergency Eyewash', enabled: true },
+    ],
+  })) as typeof aiToolsRegistry.getPersistedModuleConfigs;
+  try {
+    const actualCoverage = await aiOrchestrator.getModuleCoverage({ uid: 'catalog-admin', role: 'ADMIN' });
+    const coverageIds = new Set(actualCoverage.map(item => item.moduleId));
+    const requiredMainModules = [
+      'dashboard','heat','hse-ms','reports','ai-assistant','safety-unit','fire-dept','health-env',
+      'permit','ptw-audit','risk','ppe','incidents','warnings','personnel-history','training',
+      'documents','pending-documents','non-conformances','process-management','notifications',
+      'user-mgmt','system','profile',
+    ];
+    for (const id of requiredMainModules) assert.equal(coverageIds.has(id), true, 'missing main module: ' + id);
+    for (const id of [
+      'periodic-exams-dashboard','periodic-exams-personnel','periodic-exams-exams','periodic-exams-lab',
+      'periodic-exams-bmi','periodic-exams-reports','periodic-exams-compare','periodic-exams-personcompare',
+      'periodic-exams-import','ptw-hot','ptw-cold','ptw-excavation','ptw-process-mechanical',
+      'ptw-confined-space','ptw-electrical-isolation','ptw-radiation','ptw-vehicle-crane',
+      'personnel-history-overview','personnel-history-identity','personnel-history-health',
+      'personnel-history-training','personnel-history-permits','personnel-history-incidents',
+      'personnel-history-capa','personnel-history-risks','personnel-history-inspections',
+      'personnel-history-referrals','personnel-history-warnings','personnel-history-ppe',
+      'personnel-history-attachments','personnel-history-audit-logs',
+      'incidents-reports','incidents-pyramid','incidents-stats','warnings-records','warnings-charts',
+    ]) assert.equal(coverageIds.has(id), true, 'missing nested tab: ' + id);
+    for (const id of ['deluge-sprinklers','gas-detectors','emergency-eyewash']) {
+      assert.equal(coverageIds.has(id), true, 'missing canonical fire category: ' + id);
+      assert.equal(actualCoverage.filter(item => item.moduleId === id).length, 1, 'duplicate fire category: ' + id);
+    }
+    assert.equal(coverageIds.has('future-module'), true, 'persisted future module must appear');
+    console.log('PASS module catalog covers all 24 main modules, known nested tabs, canonical fire categories, and future persisted modules');
+  } finally {
+    aiToolsRegistry.getPersistedModuleConfigs = originalGetPersistedModuleConfigs;
+  }
   const originalIndex = aiRagService.indexDocument;
   const originalCanAccess = aiRagService.canAccessDocument;
   const originalDelete = aiRagService.deleteDocument;
