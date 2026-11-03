@@ -26,6 +26,7 @@ interface ModuleDefinition {
   rag?: boolean;
   enabled?: boolean;
   explicitPermission?: boolean;
+  notes?: string;
 }
 
 const TOOL_ACCESS: Record<string, { permission?: string; adminOnly?: boolean; explicitPermission?: boolean }> = {
@@ -61,7 +62,7 @@ const DEFAULT_MODULES: ModuleDefinition[] = [
   { id: 'fire-dept', titleFa: 'واحد آتش‌نشانی و امداد', titleEn: 'Fire Department & Emergency', tools: ['fire_safety_summary'], permission: 'fire:read' },
   { id: 'health-env', titleFa: 'واحد بهداشت و محیط زیست', titleEn: 'Health & Environment Department', tools: ['health_medical_summary', 'nutrition_high_risk_summary', 'environment_summary'] },
   { id: 'permit', titleFa: 'پروانه کار ایمن (PTW)', titleEn: 'Permit to Work (PTW)', tools: ['ptw_summary'], permission: 'ptw:read' },
-  { id: 'ptw-audit', titleFa: 'ممیزی پروانه‌های کار (PTW Audit)', titleEn: 'Permit to Work Audit System', permission: 'ptw:read' },
+  { id: 'ptw-audit', titleFa: 'ممیزی پروانه‌های کار (PTW Audit)', titleEn: 'Permit to Work Audit System', tools: ['ptw_summary'], permission: 'ptw:read', notes: 'Adapter فعلی فقط تعداد ممیزی‌ها را گزارش می‌کند؛ جزئیات رکوردهای ممیزی به‌صورت مستقل متصل نیست.' },
   { id: 'risk', titleFa: 'ارزیابی ریسک هوشمند (AI JSA)', titleEn: 'AI Risk Assessment (JSA/FMEA)', tools: ['risk_assessment_summary'], permission: 'risks:read' },
   { id: 'ppe', titleFa: 'تجهیزات حفاظت فردی (PPE)', titleEn: 'PPE Matrix Management', tools: ['ppe_summary'], permission: 'ppe:read' },
   { id: 'incidents', titleFa: 'گزارشات ناهنجاری و حوادث', titleEn: 'Safety Incidents & Anomalies', tools: ['incidents_summary'], permission: 'incidents:read' },
@@ -79,6 +80,17 @@ const DEFAULT_MODULES: ModuleDefinition[] = [
 ];
 
 const DEFAULT_CHILDREN: Record<string, ModuleDefinition[]> = {
+  permit: [
+    { id: 'hot-work', titleFa: 'پروانه کار گرم', titleEn: 'Hot Work Permit', tools: ['ptw_summary'] },
+    { id: 'cold-work', titleFa: 'پروانه کار سرد', titleEn: 'Cold Work Permit', tools: ['ptw_summary'] },
+    { id: 'confined-space', titleFa: 'پروانه فضای بسته', titleEn: 'Confined Space Permit', tools: ['ptw_summary'] },
+    { id: 'work-at-height', titleFa: 'پروانه کار در ارتفاع', titleEn: 'Work at Height Permit', tools: ['ptw_summary'] },
+    { id: 'excavation', titleFa: 'پروانه حفاری و گودبرداری', titleEn: 'Excavation Permit', tools: ['ptw_summary'] },
+    { id: 'electrical', titleFa: 'پروانه برق و ایزولاسیون', titleEn: 'Electrical Isolation Permit', tools: ['ptw_summary'] },
+  ],
+  'ptw-audit': [
+    { id: 'audit-summary', titleFa: 'خلاصه ممیزی پروانه کار', titleEn: 'PTW Audit Summary', tools: ['ptw_summary'], notes: 'فقط تعداد ممیزی‌ها در منبع فعلی موجود است؛ جزئیات و یافته‌های ممیزی هنوز Adapter مستقل ندارند.' },
+  ],
   'health-env': [
     { id: 'clinic', titleFa: 'بهداری و مراجعات سرپایی', titleEn: 'Clinic Visits' },
     { id: 'periodic-exams', titleFa: 'سامانه معاینات ادواری طب کار', titleEn: 'Periodic Medical Exams', tools: ['health_medical_summary'], permission: 'health:read', adminOnly: true, explicitPermission: true },
@@ -96,7 +108,15 @@ const DEFAULT_CHILDREN: Record<string, ModuleDefinition[]> = {
   'fire-dept': [
     { id: 'dashboard', titleFa: 'داشبورد و وضعیت کل', titleEn: 'Overview Dashboard', tools: ['fire_safety_summary'], permission: 'fire:read' },
     { id: 'daily-report', titleFa: 'گزارش روزانه آتش‌نشانی', titleEn: 'Daily Station Report' },
-    { id: 'vehicles', titleFa: 'مدیریت و بازرسی خودروها', titleEn: 'Fire Vehicles Fleet' },
+    { id: 'vehicles', titleFa: 'مدیریت و بازرسی خودروها', titleEn: 'Fire Vehicles Fleet', tools: ['fire_safety_summary'], notes: 'منبع فعلی فقط تعداد خودروهای ثبت‌شده را گزارش می‌کند؛ جزئیات بازرسی و تعمیرات متصل نیست.' },
+    { id: 'Fire Extinguisher Capsol', titleFa: 'کپسول‌های اطفاء حریق (Fire Extinguisher)', titleEn: 'Fire Extinguisher Capsol', tools: ['fire_safety_summary'] },
+    { id: 'Hydrants & Monitors', titleFa: 'هایدرانت‌ها و مانیتورهای آب/فوم', titleEn: 'Hydrants & Monitors', tools: ['fire_safety_summary'] },
+    { id: 'Fire Boxs', titleFa: 'جعبه‌های هوزریل و هوزباکس آتش‌نشانی', titleEn: 'Fire Boxes & Hose Reels' },
+    { id: 'Foam Pakages', titleFa: 'پکیج‌ها و مخازن فوم اطفاء حریق', titleEn: 'Foam Packages & Proportioners', tools: ['fire_safety_summary'] },
+    { id: 'FM 200', titleFa: 'سیستم‌های اطفاء گازی پاک FM 200', titleEn: 'FM 200 Clean Agent Systems' },
+    { id: 'دليج ولواسپرينكلرon,off ولو', titleFa: 'دلویج ولو، اسپرینکلر و شیرهای On/Off', titleEn: 'Deluge, Sprinklers & On/Off Valves' },
+    { id: 'گازيابها', titleFa: 'گازیاب‌ها و دتکتورهای ثابت و پرتابل', titleEn: 'Fixed & Portable Gas Detectors' },
+    { id: 'دوش و چشم شوی اضطراری', titleFa: 'دوش و چشم‌شوی‌های اضطراری ایمنی', titleEn: 'Emergency Eyewash & Safety Showers' },
   ],
   'safety-unit': [
     { id: 'dashboard', titleFa: 'داشبورد واحد ایمنی', titleEn: 'Safety Dashboard', tools: ['five_s_inspections_summary'], permission: 'five_s:read' },
@@ -198,7 +218,7 @@ function toCatalogItem(definition: ModuleDefinition, user: UserContext, parentId
   const notes = !allowed
     ? 'برای مشاهده و تحلیل این بخش، مجوز دسترسی لازم را ندارید.'
     : connected
-      ? (definition.rag ? 'بازیابی مستندات از مسیر RAG انجام می‌شود.' : 'خلاصه‌ساز داده متصل است؛ این اتصال لزوماً همه تب‌ها، فرم‌ها و فیلدهای این ماژول را پوشش نمی‌دهد.')
+      ? (definition.rag ? 'بازیابی مستندات از مسیر RAG انجام می‌شود.' : (definition.notes || 'خلاصه‌ساز داده متصل است؛ این اتصال لزوماً همه تب‌ها، فرم‌ها و فیلدهای این ماژول را پوشش نمی‌دهد.'))
       : configuredTools.length > 0
         ? 'Adapter داده برای این بخش وجود دارد، اما مجوزهای لازم برای کاربر جاری فراهم نیست.'
         : 'در حال حاضر Adapter خواندن داده برای این بخش متصل نیست؛ مدل نباید درباره داده‌های آن حدس بزند.';
