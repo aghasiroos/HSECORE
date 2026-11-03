@@ -370,12 +370,7 @@ export class AIOrchestrator {
       await checkAndExecute('settings_backup_summary', () => aiToolsRegistry.getSettingsAndBackupSummary());
     }
 
-    // 20. System architecture and enabled capabilities — administrator-only data
-    if (isSelected('system_architecture') || hasAnyTerm(['معماری سامانه', 'قابلیت‌های سامانه', 'ماژول‌های فعال'])) {
-      await checkAndExecute('system_architecture_summary', () => aiToolsRegistry.getSystemArchitectureAndCapabilitiesSummary());
-    }
-
-    // 21. Universal Deep Search across records when specific terms/names/codes are queried or no specific summary matched
+    // 20. Universal Deep Search across records when specific terms/names/codes are queried or no specific summary matched
     if (isGlobalAdminUser(userContext) && (selectedModules.length === 0 || selectAll)) {
       const deepSearchResult = await aiToolsRegistry.searchAcrossAllModules(message, true);
       if (deepSearchResult) {
