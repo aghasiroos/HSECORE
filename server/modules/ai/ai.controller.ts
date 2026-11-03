@@ -10,7 +10,6 @@ import { aiJobManager } from './ai.job-manager.ts';
 import { checkUserHasPermission, type UserContext } from '../../core/middleware/auth.ts';
 import { config } from '../../core/config.ts';
 import { localAIProvider } from './ai.local-provider.ts';
-import { buildAIConversationMessages } from './ai.prompt-security.ts';
 import { AIMemoryEstimator } from './ai.memory-estimator.ts';
 
 export class AIController {
