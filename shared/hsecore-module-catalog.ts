@@ -30,6 +30,12 @@ export const HSECORE_SYSTEM_MODULES = [
   { key: 'profile', titleFa: 'شناسنامه و تنظیمات کاربری', titleEn: 'My Personal Profile & Security', groupId: 'system', category: 'مدیریت و پیکربندی سامانه', enabled: true, descriptionFa: 'مشخصات حساب کاربری جاری، تغییر رمز عبور و تنظیمات شخصی' },
 ] as const;
 
+export const HSECORE_HEALTH_ENV_OVERVIEW = {
+  key: 'comprehensive-dashboard',
+  titleFa: 'داشبورد جامع مدیریتی',
+  titleEn: 'Unified Executive Dashboard',
+} as const;
+
 export const HSECORE_DOCUMENTS_SUBITEMS = [
   { key: 'ORG_PROCEDURES', titleFa: 'دستورالعمل‌ها و روش‌های اجرایی سازمانی', titleEn: 'Organizational Procedures' },
   { key: 'EQUIPMENT_CERTIFICATES', titleFa: 'گواهینامه‌ها و سرتیفیکیت ماشین‌آلات و تجهیزات', titleEn: 'Machinery & Equipment Certificates' },
