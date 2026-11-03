@@ -375,7 +375,7 @@ export class AIOrchestrator {
     }
 
     // 21. Universal Deep Search across records when specific terms/names/codes are queried or no specific summary matched
-    if (isGlobalAdminUser(userContext)) {
+    if (isGlobalAdminUser(userContext) && (selectedModules.length === 0 || selectAll)) {
       const deepSearchResult = await aiToolsRegistry.searchAcrossAllModules(message, true);
       if (deepSearchResult) {
         results.push(deepSearchResult);
@@ -445,6 +445,30 @@ export class AIOrchestrator {
       }
       if (isGlobalAdmin || checkUserHasPermission(userContext, 'environment:read')) {
         allowedKnowledgeCategories.push('ENVIRONMENT');
+      }
+
+      // Respect explicit module selection when retrieving RAG documents.
+      // General and standards documents remain available as shared reference material.
+      if (selectedModules.length > 0 && !selectedModules.includes('all')) {
+        const selected = new Set(selectedModules);
+        const wants = (...ids: string[]) => ids.some(id => selected.has(id));
+        const selectedCategories = new Set(['GENERAL', 'STANDARDS']);
+        if (wants('ptw', 'permit', 'ptw-audit')) selectedCategories.add('PTW');
+        if (wants('health', 'health-env', 'clinic', 'periodic-exams', 'non-periodic-exams', 'nutrition')) {
+          selectedCategories.add('HEALTH');
+          selectedCategories.add('OCCUPATIONAL_HEALTH');
+        }
+        if (wants('incidents', 'warnings', 'five_s', 'five-s', 'safety-unit', 'safety-checklists')) {
+          selectedCategories.add('SAFETY');
+          selectedCategories.add('INCIDENT');
+          selectedCategories.add('5S');
+        }
+        if (wants('environment', 'health-env', 'env-dashboard', 'env-monitoring', 'waste-management', 'wastewater', 'air-water-soil', 'env-reports')) {
+          selectedCategories.add('ENVIRONMENT');
+        }
+        for (let index = allowedKnowledgeCategories.length - 1; index >= 0; index--) {
+          if (!selectedCategories.has(allowedKnowledgeCategories[index])) allowedKnowledgeCategories.splice(index, 1);
+        }
       }
 
       const knowledgeChunks = await aiRagService.queryRelevantChunks(sanitized, {
