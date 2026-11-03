@@ -360,20 +360,19 @@ export class AIOrchestrator {
     if (selectedModuleDescriptions && selectedModuleDescriptions.selected.length !== new Set(request.selectedModuleIds).size) {
       throw new Error('یک یا چند ماژول انتخاب‌شده در فهرست معتبر سامانه وجود ندارد.');
     }
-    if (selectedModuleDescriptions && selectedModuleDescriptions.selected.some(name =>
-      moduleCatalog.flatMap(module => [module, ...(module.children || [])])
-        .some(item => item.moduleNameFa === name && !item.allowed)
-    )) {
-      throw new Error('برای تحلیل یک یا چند ماژول انتخاب‌شده مجوز کافی ندارید.');
+    if (request.selectedModuleIds?.length) {
+      const selectedIds = new Set(request.selectedModuleIds);
+      const selectedItems = moduleCatalog.flatMap(module => [module, ...(module.children || [])])
+        .filter(item => selectedIds.has(item.moduleId));
+      if (selectedItems.some(item => !item.allowed)) {
+        throw new Error('برای تحلیل یک یا چند ماژول انتخاب‌شده مجوز کافی ندارید.');
+      }
     }
     const toolResults = await this.resolveToolsToExecute(
       sanitized, request.allowTools ?? true, userContext, request.selectedModuleIds, moduleCatalog
     );
     const toolsUsed = toolResults.map(t => t.titleFa);
-    const citations: string[] = [
-      'قانون کار ج.ا.ا (فصل چهارم - حفاظت فنی و بهداشت کار)',
-      'آیین‌نامه‌های شورای عالی حفاظت فنی و حدود مجاز وزارت بهداشت (OEL)',
-    ];
+    const citations: string[] = [];
 
     let retrievedReferenceContext = '';
 
@@ -453,6 +452,7 @@ export class AIOrchestrator {
         async (remainingMs) => {
           const options = {
             model: request.model,
+            num_ctx: request.contextTokens,
             temperature: 0.3,
             max_tokens: 1500,
             timeoutMs: remainingMs,
