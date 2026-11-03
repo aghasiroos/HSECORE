@@ -46,6 +46,7 @@ export function canUserAccessAITool(toolName: string, userContext?: UserContext)
   if (!userContext) return false;
   const globalAdmin = isGlobalAdminUser(userContext);
   if (AI_ADMIN_ONLY_TOOLS.has(toolName)) return globalAdmin;
+  if (!Object.prototype.hasOwnProperty.call(AI_TOOL_REQUIRED_PERMISSIONS, toolName)) return false;
   const permission = AI_TOOL_REQUIRED_PERMISSIONS[toolName];
   return globalAdmin || !permission || checkUserHasPermission(userContext, permission);
 }
