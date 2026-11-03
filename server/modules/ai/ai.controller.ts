@@ -769,13 +769,18 @@ export class AIController {
       const system = AIMemoryEstimator.getSystemMemoryMetrics();
       const loadedModels = await localAIProvider.getLoadedModels();
       const diagnostics = AIMemoryEstimator.getOomDiagnostics();
+      const engineStatus = await localAIProvider.checkHealth();
       return res.json({
         success: true,
         data: {
           system,
           loadedModels,
           diagnostics,
-          queue: aiRequestQueue.telemetry,
+          queue: {
+            activeRequests: engineStatus.activeRequests,
+            queuedRequests: engineStatus.queuedRequests,
+            maxConcurrency: config.aiEngine.maxConcurrency || 1,
+          },
         },
       });
     } catch (err: any) {
