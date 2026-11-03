@@ -665,9 +665,12 @@ export class AIToolsRegistry {
         ratingMap.set(rating, (ratingMap.get(rating) || 0) + 1);
         departmentMap.set(department, (departmentMap.get(department) || 0) + 1);
       }
-      const openActionsCount = settingFiveSNc.filter((item: any) =>
-        ['open', 'in_progress', 'overdue'].includes(String(item.status || '').toLowerCase())
-      ).length + fiveSRecords.reduce((sum: number, record: any) => sum + Math.max(0, Number(record.openActionsCount || 0)), 0);
+      const openActionsCount = Math.max(
+        settingFiveSNc.filter((item: any) =>
+          ['open', 'in_progress', 'overdue'].includes(String(item.status || '').toLowerCase())
+        ).length,
+        fiveSRecords.reduce((sum: number, record: any) => sum + Math.max(0, Number(record.openActionsCount || 0)), 0)
+      );
       const totalFiveSNc = Math.max(
         settingFiveSNc.length,
         fiveSRecords.reduce((sum: number, record: any) => sum + Math.max(0, Number(record.nonConformancesCount || 0)), 0)
