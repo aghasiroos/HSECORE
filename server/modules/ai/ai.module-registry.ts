@@ -1,6 +1,13 @@
 import { db, schema } from '../../core/db.ts';
 import { inArray } from 'drizzle-orm';
 import { checkUserHasPermission, isGlobalAdminUser, type UserContext } from '../../core/middleware/auth.ts';
+import {
+  HSECORE_SYSTEM_MODULES,
+  HSECORE_DOCUMENTS_SUBITEMS,
+  HSECORE_HEALTH_ENV_SUBITEMS,
+  HSECORE_FIRE_DEPT_SUBITEMS,
+  HSECORE_SAFETY_DEPT_SUBITEMS,
+} from '../../../shared/hsecore-module-catalog.ts';
 
 export interface AIModuleCatalogItem {
   moduleId: string;
@@ -52,32 +59,68 @@ const TOOL_ACCESS: Record<string, { permission?: string; adminOnly?: boolean; ex
   system_architecture_summary: { adminOnly: true },
 };
 
-const DEFAULT_MODULES: ModuleDefinition[] = [
-  { id: 'dashboard', titleFa: 'داشبورد جامع مدیریتی', titleEn: 'Unified Executive Dashboard', tools: ['kpi_management_summary'], permission: 'reports:read' },
-  { id: 'heat', titleFa: 'پایش استرس گرمایی', titleEn: 'Thermal Heat Stress Monitor', tools: ['heat_weather_summary'] },
-  { id: 'hse-ms', titleFa: 'پایش نرخ رویدادها (TRIR)', titleEn: 'TRIR Incident Rate', tools: ['kpi_management_summary'], permission: 'reports:read' },
-  { id: 'reports', titleFa: 'گزارشات و تحلیل‌های آماری', titleEn: 'Statistical Reports & BI', tools: ['kpi_management_summary'], permission: 'reports:read' },
-  { id: 'ai-assistant', titleFa: 'هوش مصنوعی HSECORE', titleEn: 'HSECORE AI Assistant' },
-  { id: 'safety-unit', titleFa: 'واحد ایمنی و بازرسی‌ها', titleEn: 'Safety Operations Department', tools: ['five_s_inspections_summary', 'non_conformances_summary'] },
-  { id: 'fire-dept', titleFa: 'واحد آتش‌نشانی و امداد', titleEn: 'Fire Department & Emergency', tools: ['fire_safety_summary'], permission: 'fire:read' },
-  { id: 'health-env', titleFa: 'واحد بهداشت و محیط زیست', titleEn: 'Health & Environment Department', tools: ['health_medical_summary', 'nutrition_high_risk_summary', 'environment_summary'] },
-  { id: 'permit', titleFa: 'پروانه کار ایمن (PTW)', titleEn: 'Permit to Work (PTW)', tools: ['ptw_summary'], permission: 'ptw:read' },
-  { id: 'ptw-audit', titleFa: 'ممیزی پروانه‌های کار (PTW Audit)', titleEn: 'Permit to Work Audit System', tools: ['ptw_summary'], permission: 'ptw:read', notes: 'Adapter فعلی فقط تعداد ممیزی‌ها را گزارش می‌کند؛ جزئیات رکوردهای ممیزی به‌صورت مستقل متصل نیست.' },
-  { id: 'risk', titleFa: 'ارزیابی ریسک هوشمند (AI JSA)', titleEn: 'AI Risk Assessment (JSA/FMEA)', tools: ['risk_assessment_summary'], permission: 'risks:read' },
-  { id: 'ppe', titleFa: 'تجهیزات حفاظت فردی (PPE)', titleEn: 'PPE Matrix Management', tools: ['ppe_summary'], permission: 'ppe:read' },
-  { id: 'incidents', titleFa: 'گزارشات ناهنجاری و حوادث', titleEn: 'Safety Incidents & Anomalies', tools: ['incidents_summary'], permission: 'incidents:read' },
-  { id: 'warnings', titleFa: 'ثبت و پیگیری اخطارها', titleEn: 'Personnel Written Warnings', tools: ['warnings_anomalies_summary'], permission: 'warnings:read' },
-  { id: 'personnel-history', titleFa: 'پرونده جامع ۳۶۰ درجه پرسنل', titleEn: 'Personnel 360 History Dossier', tools: ['personnel_org_summary'], permission: 'personnel:read', adminOnly: true },
-  { id: 'training', titleFa: 'مدیریت و تقویم آموزش', titleEn: 'Training Management & Calendar', tools: ['training_summary'], permission: 'training:read' },
-  { id: 'documents', titleFa: 'دستورالعمل‌ها و مستندات', titleEn: 'Instructions & Documents', rag: true },
-  { id: 'pending-documents', titleFa: 'کارتابل و اسناد در انتظار اقدام', titleEn: 'Documents Awaiting Action', tools: ['workflow_referrals_summary'], permission: 'workflows:read' },
-  { id: 'non-conformances', titleFa: 'مدیریت عدم انطباق‌ها (CAPA)', titleEn: 'Non-Conformities & CAPA', tools: ['non_conformances_summary'], permission: 'audit:read' },
-  { id: 'process-management', titleFa: 'مدیریت فرآیندها (BPMN)', titleEn: 'Process Management', tools: ['workflow_referrals_summary'], permission: 'workflows:read' },
-  { id: 'notifications', titleFa: 'مدیریت هشدار و اعلان‌ها', titleEn: 'Alerts & Notifications Management', tools: ['notifications_summary'], permission: 'notifications:read' },
-  { id: 'user-mgmt', titleFa: 'مدیریت کاربران و دسترسی‌ها', titleEn: 'User Management & RBAC', tools: ['users_roles_summary'], adminOnly: true },
-  { id: 'system', titleFa: 'تنظیمات و ساختار سازمانی', titleEn: 'System Settings & Architecture', tools: ['settings_backup_summary', 'system_architecture_summary'], adminOnly: true },
-  { id: 'profile', titleFa: 'شناسنامه و تنظیمات کاربری', titleEn: 'My Personal Profile & Security' },
-];
+const MODULE_ADAPTERS: Record<string, Partial<ModuleDefinition>> = {
+  dashboard: { tools: ['kpi_management_summary'], permission: 'reports:read' },
+  heat: { tools: ['heat_weather_summary'] },
+  'hse-ms': { tools: ['kpi_management_summary'], permission: 'reports:read' },
+  reports: { tools: ['kpi_management_summary'], permission: 'reports:read' },
+  'safety-unit': { tools: ['five_s_inspections_summary', 'non_conformances_summary'] },
+  'fire-dept': { tools: ['fire_safety_summary'], permission: 'fire:read' },
+  'health-env': { tools: ['health_medical_summary', 'nutrition_high_risk_summary', 'environment_summary'] },
+  permit: { tools: ['ptw_summary'], permission: 'ptw:read' },
+  'ptw-audit': {
+    tools: ['ptw_summary'],
+    permission: 'ptw:read',
+    notes: 'Adapter فعلی فقط تعداد ممیزی‌ها را گزارش می‌کند؛ جزئیات رکوردهای ممیزی به‌صورت مستقل متصل نیست.',
+  },
+  risk: { tools: ['risk_assessment_summary'], permission: 'risks:read' },
+  ppe: { tools: ['ppe_summary'], permission: 'ppe:read' },
+  incidents: { tools: ['incidents_summary'], permission: 'incidents:read' },
+  warnings: { tools: ['warnings_anomalies_summary'], permission: 'warnings:read' },
+  'personnel-history': { tools: ['personnel_org_summary'], permission: 'personnel:read', adminOnly: true },
+  training: { tools: ['training_summary'], permission: 'training:read' },
+  documents: { rag: true },
+  'pending-documents': { tools: ['workflow_referrals_summary'], permission: 'workflows:read' },
+  'non-conformances': { tools: ['non_conformances_summary'], permission: 'audit:read' },
+  'process-management': { tools: ['workflow_referrals_summary'], permission: 'workflows:read' },
+  notifications: { tools: ['notifications_summary'], permission: 'notifications:read' },
+  'user-mgmt': { tools: ['users_roles_summary'], adminOnly: true },
+  system: { tools: ['settings_backup_summary', 'system_architecture_summary'], adminOnly: true },
+};
+
+const DEFAULT_MODULES: ModuleDefinition[] = HSECORE_SYSTEM_MODULES.map(module => ({
+  id: module.key,
+  titleFa: module.titleFa,
+  titleEn: module.titleEn,
+  enabled: module.enabled,
+  ...(MODULE_ADAPTERS[module.key] || {}),
+}));
+
+const HEALTH_CHILD_ADAPTERS: Record<string, Partial<ModuleDefinition>> = {
+  clinic: { permission: 'health:read', adminOnly: true, explicitPermission: true },
+  'periodic-exams': { tools: ['health_medical_summary'], permission: 'health:read', adminOnly: true, explicitPermission: true },
+  'non-periodic-exams': { tools: ['health_medical_summary'], permission: 'health:read', adminOnly: true, explicitPermission: true },
+  nutrition: { tools: ['nutrition_high_risk_summary'], permission: 'health:read', adminOnly: true, explicitPermission: true },
+  'health-env-checklists': { permission: 'health:read', adminOnly: true, explicitPermission: true },
+  'env-dashboard': { tools: ['environment_summary'], permission: 'environment:read' },
+  'env-monitoring': { tools: ['environment_summary'], permission: 'environment:read' },
+  'waste-management': { tools: ['environment_summary'], permission: 'environment:read' },
+  wastewater: { tools: ['environment_summary'], permission: 'environment:read' },
+  'air-water-soil': { tools: ['environment_summary'], permission: 'environment:read' },
+  'five-s': { tools: ['five_s_inspections_summary'], permission: 'five_s:read' },
+  'env-reports': { tools: ['environment_summary'], permission: 'environment:read' },
+};
+
+const FIRE_CHILD_ADAPTERS: Record<string, Partial<ModuleDefinition>> = {
+  dashboard: { tools: ['fire_safety_summary'], permission: 'fire:read' },
+  vehicles: {
+    tools: ['fire_safety_summary'],
+    notes: 'منبع فعلی فقط تعداد خودروهای ثبت‌شده را گزارش می‌کند؛ جزئیات بازرسی و تعمیرات متصل نیست.',
+  },
+  'Fire Extinguisher Capsol': { tools: ['fire_safety_summary'] },
+  'Hydrants & Monitors': { tools: ['fire_safety_summary'] },
+  'Foam Pakages': { tools: ['fire_safety_summary'] },
+};
 
 const DEFAULT_CHILDREN: Record<string, ModuleDefinition[]> = {
   permit: [
@@ -91,43 +134,34 @@ const DEFAULT_CHILDREN: Record<string, ModuleDefinition[]> = {
   'ptw-audit': [
     { id: 'audit-summary', titleFa: 'خلاصه ممیزی پروانه کار', titleEn: 'PTW Audit Summary', tools: ['ptw_summary'], notes: 'فقط تعداد ممیزی‌ها در منبع فعلی موجود است؛ جزئیات و یافته‌های ممیزی هنوز Adapter مستقل ندارند.' },
   ],
-  'health-env': [
-    { id: 'clinic', titleFa: 'بهداری و مراجعات سرپایی', titleEn: 'Clinic Visits', permission: 'health:read', adminOnly: true, explicitPermission: true },
-    { id: 'periodic-exams', titleFa: 'سامانه معاینات ادواری طب کار', titleEn: 'Periodic Medical Exams', tools: ['health_medical_summary'], permission: 'health:read', adminOnly: true, explicitPermission: true },
-    { id: 'non-periodic-exams', titleFa: 'معاینات غیر دوره‌ای', titleEn: 'Non-Periodic Exams', tools: ['health_medical_summary'], permission: 'health:read', adminOnly: true, explicitPermission: true },
-    { id: 'nutrition', titleFa: 'کارشناس تغذیه و رژیم‌درمانی', titleEn: 'Nutrition Specialist', tools: ['nutrition_high_risk_summary'], permission: 'health:read', adminOnly: true, explicitPermission: true },
-    { id: 'health-env-checklists', titleFa: 'چک‌لیست‌های عملیاتی بهداشت و محیط زیست', titleEn: 'Health & Environment Checklists', permission: 'health:read', adminOnly: true, explicitPermission: true },
-    { id: 'env-dashboard', titleFa: 'داشبورد محیط‌زیست', titleEn: 'Environment Dashboard', tools: ['environment_summary'], permission: 'environment:read' },
-    { id: 'env-monitoring', titleFa: 'پایش‌های محیط‌زیستی', titleEn: 'Environmental Monitoring', tools: ['environment_summary'], permission: 'environment:read' },
-    { id: 'waste-management', titleFa: 'مدیریت پسماند (EMP)', titleEn: 'Waste Management', tools: ['environment_summary'], permission: 'environment:read' },
-    { id: 'wastewater', titleFa: 'مدیریت پساب (ETP)', titleEn: 'Wastewater Management', tools: ['environment_summary'], permission: 'environment:read' },
-    { id: 'air-water-soil', titleFa: 'پایش دودکش، آب و خاک', titleEn: 'Stacks, Water & Soil', tools: ['environment_summary'], permission: 'environment:read' },
-    { id: 'five-s', titleFa: 'ساماندهی 5S', titleEn: '5S System', tools: ['five_s_inspections_summary'], permission: 'five_s:read' },
-    { id: 'env-reports', titleFa: 'گزارش‌های محیط‌زیست', titleEn: 'Environment Reports', tools: ['environment_summary'], permission: 'environment:read' },
-  ],
-  'fire-dept': [
-    { id: 'dashboard', titleFa: 'داشبورد و وضعیت کل', titleEn: 'Overview Dashboard', tools: ['fire_safety_summary'], permission: 'fire:read' },
-    { id: 'daily-report', titleFa: 'گزارش روزانه آتش‌نشانی', titleEn: 'Daily Station Report' },
-    { id: 'vehicles', titleFa: 'مدیریت و بازرسی خودروها', titleEn: 'Fire Vehicles Fleet', tools: ['fire_safety_summary'], notes: 'منبع فعلی فقط تعداد خودروهای ثبت‌شده را گزارش می‌کند؛ جزئیات بازرسی و تعمیرات متصل نیست.' },
-    { id: 'Fire Extinguisher Capsol', titleFa: 'کپسول‌های اطفاء حریق (Fire Extinguisher)', titleEn: 'Fire Extinguisher Capsol', tools: ['fire_safety_summary'] },
-    { id: 'Hydrants & Monitors', titleFa: 'هایدرانت‌ها و مانیتورهای آب/فوم', titleEn: 'Hydrants & Monitors', tools: ['fire_safety_summary'] },
-    { id: 'Fire Boxs', titleFa: 'جعبه‌های هوزریل و هوزباکس آتش‌نشانی', titleEn: 'Fire Boxes & Hose Reels' },
-    { id: 'Foam Pakages', titleFa: 'پکیج‌ها و مخازن فوم اطفاء حریق', titleEn: 'Foam Packages & Proportioners', tools: ['fire_safety_summary'] },
-    { id: 'FM 200', titleFa: 'سیستم‌های اطفاء گازی پاک FM 200', titleEn: 'FM 200 Clean Agent Systems' },
-    { id: 'دليج ولواسپرينكلرon,off ولو', titleFa: 'دلویج ولو، اسپرینکلر و شیرهای On/Off', titleEn: 'Deluge, Sprinklers & On/Off Valves' },
-    { id: 'گازيابها', titleFa: 'گازیاب‌ها و دتکتورهای ثابت و پرتابل', titleEn: 'Fixed & Portable Gas Detectors' },
-    { id: 'دوش و چشم شوی اضطراری', titleFa: 'دوش و چشم‌شوی‌های اضطراری ایمنی', titleEn: 'Emergency Eyewash & Safety Showers' },
-  ],
-  'safety-unit': [
-    { id: 'dashboard', titleFa: 'داشبورد واحد ایمنی', titleEn: 'Safety Dashboard', tools: ['five_s_inspections_summary'], permission: 'five_s:read' },
-    { id: 'checklists', titleFa: 'سوابق و اجرای بازرسی', titleEn: 'Inspection Checklists', tools: ['five_s_inspections_summary'], permission: 'five_s:read' },
-  ],
-  documents: [
-    { id: 'ORG_PROCEDURES', titleFa: 'دستورالعمل‌ها و روش‌های اجرایی سازمانی', titleEn: 'Organizational Procedures', rag: true },
-    { id: 'EQUIPMENT_CERTIFICATES', titleFa: 'گواهینامه‌ها و سرتیفیکیت تجهیزات', titleEn: 'Equipment Certificates', rag: true },
-    { id: 'ORG_FORMS_CHECKLISTS', titleFa: 'فرم‌ها و چک‌لیست‌های سازمانی', titleEn: 'Organizational Forms & Checklists', rag: true },
-    { id: 'OTHER_HSE_DOCS', titleFa: 'سایر مستندات مرتبط با HSE', titleEn: 'Other HSE Documents', rag: true },
-  ],
+  'health-env': HSECORE_HEALTH_ENV_SUBITEMS.map(item => ({
+    id: item.key,
+    titleFa: item.titleFa,
+    titleEn: item.titleEn,
+    enabled: item.enabled,
+    ...(HEALTH_CHILD_ADAPTERS[item.key] || {}),
+  })),
+  'fire-dept': HSECORE_FIRE_DEPT_SUBITEMS.map(item => ({
+    id: item.key,
+    titleFa: item.titleFa,
+    titleEn: item.titleEn,
+    enabled: item.enabled,
+    ...(FIRE_CHILD_ADAPTERS[item.key] || {}),
+  })),
+  'safety-unit': HSECORE_SAFETY_DEPT_SUBITEMS.map(item => ({
+    id: item.key,
+    titleFa: item.titleFa,
+    titleEn: item.titleEn,
+    enabled: item.enabled,
+    tools: ['five_s_inspections_summary'],
+    permission: 'five_s:read',
+  })),
+  documents: HSECORE_DOCUMENTS_SUBITEMS.map(item => ({
+    id: item.key,
+    titleFa: item.titleFa,
+    titleEn: item.titleEn,
+    rag: true,
+  })),
 };
 
 const DEFAULT_GRANDCHILDREN: Record<string, ModuleDefinition[]> = {
