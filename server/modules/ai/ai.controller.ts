@@ -150,18 +150,13 @@ export class AIController {
         selectedModules,
         contextTokens: Number.isInteger(body.contextTokens) && body.contextTokens >= 1024 && body.contextTokens <= 32768
           ? body.contextTokens : undefined,
-        onToken: streaming ? (token: string) => {
-          if (!res.destroyed && !res.writableEnded) {
-            res.write(`data: ${JSON.stringify({ token })}\\n\\n`);
-            (res as any).flush?.();
-          }
-        } : undefined,
         signal: streaming ? abortController.signal : undefined,
         allowTools: true,
       }, req.user);
 
       if (streaming) {
         if (!res.destroyed && !res.writableEnded) {
+          res.write(`data: ${JSON.stringify({ token: result.reply })}\\n\\n`);
           res.write(`data: ${JSON.stringify({
             done: true,
             model: result.model,
