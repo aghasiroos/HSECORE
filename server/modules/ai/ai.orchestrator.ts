@@ -566,17 +566,19 @@ export class AIOrchestrator {
       const liveToolModules = coverage.filter(item => item.connected && item.tools.length > 0);
       const knowledgeOnlyModules = coverage.filter(item => item.connected && item.tools.length === 0);
       const unavailableModules = coverage.filter(item => !item.connected);
-      const listNames = (items: typeof coverage) => items.map(item =>
-        item.moduleNameFa + (item.notes ? ` — ${item.notes}` : '')
-      ).join('؛ ');
+      const accessRestrictedModules = unavailableModules.filter(item => item.notes?.includes('مجوز'));
+      const noAdapterModules = unavailableModules.filter(item => !item.notes?.includes('مجوز'));
+      const listNames = (items: typeof coverage) => items.map(item => item.moduleNameFa).join('، ');
       retrievedReferenceContext += '\n[دامنه درخواست: تحلیل چندماژولی /ALL؛ کاتالوگ کامل ساختار واقعی HSECORE]\n';
       retrievedReferenceContext += `• تعداد گره‌های ماژول/زیرماژول/تب شناسایی‌شده: ${coverage.length}\n`;
       retrievedReferenceContext += `• بخش‌های دارای ابزار داده‌خوان مجاز: ${liveToolModules.length}\n`;
       retrievedReferenceContext += `• بخش‌های متکی به پایگاه دانش RAG: ${knowledgeOnlyModules.length}\n`;
-      retrievedReferenceContext += `• بخش‌های فاقد Adapter، غیرفعال یا خارج از مجوز کاربر: ${unavailableModules.length}\n`;
+      retrievedReferenceContext += `• بخش‌های خارج از مجوز کاربر: ${accessRestrictedModules.length}\n`;
+      retrievedReferenceContext += `• بخش‌های فاقد Adapter یا غیرفعال: ${noAdapterModules.length}\n`;
       if (liveToolModules.length) retrievedReferenceContext += `• بخش‌های دارای ابزار: ${listNames(liveToolModules)}\n`;
       if (knowledgeOnlyModules.length) retrievedReferenceContext += `• بخش‌های RAG: ${listNames(knowledgeOnlyModules)}\n`;
-      if (unavailableModules.length) retrievedReferenceContext += `• بخش‌های فاقد اتصال/دسترسی: ${listNames(unavailableModules)}\n`;
+      if (accessRestrictedModules.length) retrievedReferenceContext += `• بخش‌های خارج از مجوز: ${listNames(accessRestrictedModules)}\n`;
+      if (noAdapterModules.length) retrievedReferenceContext += `• بخش‌های فاقد Adapter/غیرفعال: ${listNames(noAdapterModules)}\n`;
       retrievedReferenceContext += '[قید اجباری /ALL: فقط ابزارهای مجاز و منابعی که واقعاً در بالا با موفقیت استخراج شده‌اند مبنای عدد و نتیجه هستند. برای بخش‌های فاقد Adapter، غیرفعال یا خارج از مجوز، هیچ داده یا نتیجه‌ای نسازید. اگر ابزار منبعی شکست خورد، همان منبع را ناموفق و پوشش را ناقص اعلام کنید.]\n';
     }
 
