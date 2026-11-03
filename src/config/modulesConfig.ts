@@ -122,18 +122,18 @@ export interface SafetyDeptSubItemConfig {
 }
 
 export const ALL_SYSTEM_MODULES: SystemModuleConfig[] =
-  HSECORE_SYSTEM_MODULES as unknown as SystemModuleConfig[];
+  HSECORE_SYSTEM_MODULES.map(module => ({ ...module })) as unknown as SystemModuleConfig[];
 
-export const ALL_DOCUMENTS_SUBITEMS = HSECORE_DOCUMENTS_SUBITEMS;
+export const ALL_DOCUMENTS_SUBITEMS = HSECORE_DOCUMENTS_SUBITEMS.map(item => ({ ...item }));
 
 export const ALL_HEALTH_ENV_SUBITEMS: HealthEnvSubItemConfig[] =
-  HSECORE_HEALTH_ENV_SUBITEMS as unknown as HealthEnvSubItemConfig[];
+  HSECORE_HEALTH_ENV_SUBITEMS.map(item => ({ ...item })) as unknown as HealthEnvSubItemConfig[];
 
 export const ALL_FIRE_DEPT_SUBITEMS: FireDeptSubItemConfig[] =
-  HSECORE_FIRE_DEPT_SUBITEMS as unknown as FireDeptSubItemConfig[];
+  HSECORE_FIRE_DEPT_SUBITEMS.map(item => ({ ...item })) as unknown as FireDeptSubItemConfig[];
 
 export const ALL_SAFETY_DEPT_SUBITEMS: SafetyDeptSubItemConfig[] =
-  HSECORE_SAFETY_DEPT_SUBITEMS as unknown as SafetyDeptSubItemConfig[];
+  HSECORE_SAFETY_DEPT_SUBITEMS.map(item => ({ ...item })) as unknown as SafetyDeptSubItemConfig[];
 
 export const STORAGE_KEY = 'hse_ui_config_v3';
 export const PREV_STORAGE_KEY = 'hse_ui_config_v2';
