@@ -709,7 +709,7 @@ export class AIOrchestrator {
     // Merge persisted navigation metadata so newly configured modules/tabs appear
     // automatically. Unknown nodes remain visible but disabled until a safe data tool is wired.
     const persisted = await aiToolsRegistry.getPersistedModuleConfigs().catch(() => ({}));
-    const byId = new Map(modules.map(item => [item.moduleId, item]));
+    const byId = new Map<string, import('./ai.types.ts').AIModuleCoverage>(modules.map(item => [item.moduleId, item] as const));
     const staticParents: Record<string, string> = {
       'clinic': 'health', 'periodic-exams': 'health', 'nutrition': 'health',
       'non-periodic-exams': 'health', 'health-env-checklists': 'health',
