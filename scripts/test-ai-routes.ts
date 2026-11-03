@@ -8,13 +8,19 @@ import jwt from 'jsonwebtoken';
 import { config } from '../server/core/config.ts';
 import { aiRagService } from '../server/modules/ai/ai.rag.service.ts';
 import aiRoutes from '../server/modules/ai/ai.routes.ts';
-import { aiOrchestrator } from '../server/modules/ai/ai.orchestrator.ts';
+import { aiOrchestrator, isExplicitAllModulesCommand } from '../server/modules/ai/ai.orchestrator.ts';
 
 function tokenFor(uid: string, role: string): string {
   return jwt.sign({ uid, role }, config.security.jwtSecret, { expiresIn: '5m' });
 }
 
 async function run() {
+  assert.equal(isExplicitAllModulesCommand('/ALL'), true);
+  assert.equal(isExplicitAllModulesCommand('/all گزارش جامع'), true);
+  assert.equal(isExplicitAllModulesCommand('  / ALL  '), true);
+  assert.equal(isExplicitAllModulesCommand('/ptw'), false);
+  assert.equal(isExplicitAllModulesCommand('گزارش کلی سامانه'), false);
+  console.log('PASS typed /ALL command parser accepts case/spacing variants without matching other slash commands');
   const originalIndex = aiRagService.indexDocument;
   const originalCanAccess = aiRagService.canAccessDocument;
   const originalDelete = aiRagService.deleteDocument;
