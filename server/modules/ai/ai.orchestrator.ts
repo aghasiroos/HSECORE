@@ -362,8 +362,12 @@ export class AIOrchestrator {
     }
     if (request.selectedModuleIds?.length) {
       const selectedIds = new Set(request.selectedModuleIds);
-      const selectedItems = moduleCatalog.flatMap(module => [module, ...(module.children || [])])
-        .filter(item => selectedIds.has(item.moduleId));
+      const selectedItems: AIModuleCatalogItem[] = [];
+      const visitSelected = (item: AIModuleCatalogItem) => {
+        if (selectedIds.has(item.moduleId)) selectedItems.push(item);
+        (item.children || []).forEach(visitSelected);
+      };
+      moduleCatalog.forEach(visitSelected);
       if (selectedItems.some(item => !item.allowed)) {
         throw new Error('برای تحلیل یک یا چند ماژول انتخاب‌شده مجوز کافی ندارید.');
       }
