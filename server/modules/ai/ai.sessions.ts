@@ -586,11 +586,12 @@ export class AISessionService {
     if (status !== 'owned') {
       throw new Error('دسترسی به این گفتگو مجاز نیست یا گفتگو یافت نشد.');
     }
-    this.inMemorySessions.delete(sessionId);
     try {
       await db.delete(schema.aiChatSessions).where(eq(schema.aiChatSessions.id, sessionId));
+      this.inMemorySessions.delete(sessionId);
     } catch (err: any) {
-      logger.warn('[AISessionService] Database error deleting session', { error: err?.message || err });
+      logger.error('[AISessionService] Database error deleting session', { error: err?.message || err });
+      throw new Error('حذف گفتگو در پایگاه داده ناموفق بود؛ سابقه موجود حفظ شد.');
     }
   }
 
