@@ -529,10 +529,19 @@ export class AIOrchestrator {
         async (remainingMs) => {
           const installedModels = await aiService.listInstalledModels();
           const requestedModel = typeof request.model === 'string' ? request.model.trim() : '';
+          const generativeModels = installedModels.filter((item: any) => {
+            const family = String(item?.details?.family || '').toLowerCase();
+            return family !== 'bert' && !/embed|embedding/i.test(String(item?.name || ''));
+          });
+          const normalizedModel = requestedModel.toLowerCase();
           const modelInfo = requestedModel
-            ? installedModels.find((item: any) => [item.name, item.model].some((name: any) => typeof name === 'string' && name.toLowerCase() === requestedModel.toLowerCase()))
+            ? generativeModels.find((item: any) => [item.name, item.model].some((name: any) => typeof name === 'string' && (
+                name.toLowerCase() === normalizedModel ||
+                name.toLowerCase() === `${normalizedModel}:latest` ||
+                `${name.toLowerCase()}:latest` === normalizedModel
+              )))
             : undefined;
-          if (requestedModel && !modelInfo) throw new Error('مدل انتخاب‌شده نصب نیست یا در دسترس نیست.');
+          if (requestedModel && !modelInfo) throw new Error('مدل انتخاب‌شده نصب نیست یا برای گفت‌وگو قابل استفاده نیست.');
           return await localAIProvider.chat(messages, {
             model: modelInfo?.name || modelInfo?.model,
             num_ctx: request.contextTokens,
