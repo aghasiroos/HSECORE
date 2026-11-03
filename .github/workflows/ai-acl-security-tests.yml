@@ -10,6 +10,10 @@ on:
       - 'server/core/middleware/auth.ts'
       - 'server/core/middleware/security.ts'
       - 'scripts/test-ai-acl.ts'
+      - 'scripts/test-ai-module-registry.ts'
+      - 'src/modules/ai/AiAssistantApp.tsx'
+      - 'src/config/modulesConfig.ts'
+      - 'shared/hsecore-module-catalog.ts'
       - 'scripts/test-ai-auth.ts'
       - 'scripts/test-ai-rag-db.ts'
       - 'scripts/test-ai-routes.ts'
@@ -38,6 +42,10 @@ on:
       - 'server/core/middleware/auth.ts'
       - 'server/core/middleware/security.ts'
       - 'scripts/test-ai-acl.ts'
+      - 'scripts/test-ai-module-registry.ts'
+      - 'src/modules/ai/AiAssistantApp.tsx'
+      - 'src/config/modulesConfig.ts'
+      - 'shared/hsecore-module-catalog.ts'
       - 'scripts/test-ai-auth.ts'
       - 'scripts/test-ai-rag-db.ts'
       - 'scripts/test-ai-routes.ts'
@@ -124,6 +132,8 @@ jobs:
         run: npm audit --audit-level=high
       - name: Run document ACL and prompt-security regression tests
         run: npm run test:ai-acl
+      - name: Run AI module registry and nested selection tests
+        run: npm run test:ai-module-registry
       - name: Run JWT authentication regression tests
         run: npm run test:ai-auth
       - name: Run PostgreSQL RAG integration tests

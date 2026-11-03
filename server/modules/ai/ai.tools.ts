@@ -4,6 +4,7 @@
  * Strictly read-only; no raw SQL mutation.
  */
 
+import { HighRiskNutritionService } from '../../../src/modules/health-env/services/highRiskNutritionService.ts';
 import { db, schema } from '../../core/db.ts';
 import { desc } from 'drizzle-orm';
 import { ptwRepository } from '../ptw/ptw.repository.ts';
@@ -11,6 +12,8 @@ import { incidentRepository } from '../incidents/incident.repository.ts';
 import { weatherService } from '../../weather/service.ts';
 import { AIToolResult } from './ai.types.ts';
 import { logger } from '../../core/logger.ts';
+import type { UserContext } from '../../core/middleware/auth.ts';
+import { getAIModuleCatalog } from './ai.module-registry.ts';
 
 /**
  * Normalize Persian/Arabic characters, digits, and spacing for colloquial & cross-script matching
@@ -196,6 +199,227 @@ export class AIToolsRegistry {
   }
 
   /**
+   * Dedicated read-only PTW Audit analytics. Only aggregate data is returned;
+   * signer names, personnel identifiers, signatures and attachment payloads are excluded.
+   */
+  async getPTWAuditSummary(): Promise<AIToolResult> {
+    try {
+      const settingsMap = await this.loadSettingsMap();
+      const rawAudits = settingsMap.get('hse_ptw_audit_records_v2');
+      const legacySeedIds = new Set([
+        'ptw-aud-1405-001', 'ptw-aud-1405-002', 'ptw-aud-1405-003',
+        'ptw-aud-1405-004', 'ptw-aud-1405-005', 'ptw-aud-1405-006',
+        'ptw-aud-1404-001', 'ptw-aud-1404-002', 'ptw-aud-1404-003',
+        'ptw-aud-1403-001', 'ptw-aud-1403-002',
+      ]);
+      const audits: any[] = Array.isArray(rawAudits)
+        ? rawAudits.filter((audit: any) => audit && typeof audit.id === 'string' && !legacySeedIds.has(audit.id))
+        : [];
+
+      const metrics = audits.map((audit: any) => {
+        const items = Array.isArray(audit.inspectionItems) ? audit.inspectionItems : [];
+        const hazards = Array.isArray(audit.environmentalHazards) ? audit.environmentalHazards : [];
+        const ppe = Array.isArray(audit.requiredPpe) ? audit.requiredPpe : [];
+        const precautions = Array.isArray(audit.precautionsTaken) ? audit.precautionsTaken : [];
+        const passed = items.filter((item: any) => ['P', 'PASS'].includes(String(item.status || '').toUpperCase())).length;
+        const questionDefects = items.filter((item: any) => ['O', 'DEFECT'].includes(String(item.status || '').toUpperCase())).length;
+        const na = items.filter((item: any) => ['-', 'NA'].includes(String(item.status || '').toUpperCase())).length;
+        const missedHazards = hazards.filter((item: any) => item?.missed === true).length;
+        const missedPpe = ppe.filter((item: any) => item?.missed === true).length;
+        const missedPrecautions = precautions.filter((item: any) => item?.missed === true).length;
+        const computedDefects = questionDefects + missedHazards + missedPpe + missedPrecautions;
+        const explicitDefects = Number(audit.defectsCount);
+        const defects = Number.isFinite(explicitDefects) && audit.defectsCount !== null && audit.defectsCount !== undefined
+          ? Math.max(0, explicitDefects)
+          : computedDefects;
+        const explicitPassed = Number(audit.passedCount);
+        const passedCount = Number.isFinite(explicitPassed) && audit.passedCount !== null && audit.passedCount !== undefined
+          ? Math.max(0, explicitPassed)
+          : passed;
+        const explicitScore = Number(audit.complianceScore);
+        const evaluated = passedCount + defects;
+        const score = Number.isFinite(explicitScore) && audit.complianceScore !== null &&
+          audit.complianceScore !== undefined && explicitScore >= 0 && explicitScore <= 100
+          ? explicitScore
+          : evaluated > 0 ? Number(((passedCount / evaluated) * 100).toFixed(1)) : null;
+        return {
+          audit,
+          defects,
+          passedCount,
+          na,
+          missedHazards,
+          missedPpe,
+          missedPrecautions,
+          score,
+          defective: defects > 0 || String(audit.status || '').toUpperCase() === 'CRITICAL_NC',
+        };
+      });
+
+      const totalAudits = metrics.length;
+      const finalizedCount = metrics.filter(x => String(x.audit.status || '').toUpperCase() === 'FINALIZED').length;
+      const draftCount = metrics.filter(x => String(x.audit.status || '').toUpperCase() === 'DRAFT').length;
+      const criticalNcCount = metrics.filter(x => String(x.audit.status || '').toUpperCase() === 'CRITICAL_NC').length;
+      const defectiveAuditsCount = metrics.filter(x => x.defective).length;
+      const totalDefectsIdentified = metrics.reduce((sum, x) => sum + x.defects, 0);
+      const scoreValues = metrics.map(x => x.score).filter((x): x is number => typeof x === 'number' && Number.isFinite(x));
+      const avgComplianceScore = scoreValues.length
+        ? Number((scoreValues.reduce((sum, x) => sum + x, 0) / scoreValues.length).toFixed(1))
+        : null;
+      const hotPermitCount = metrics.filter(x => String(x.audit.permitType || '').toUpperCase() === 'HOT').length;
+      const coldPermitCount = metrics.filter(x => String(x.audit.permitType || '').toUpperCase() === 'COLD').length;
+      const confinedSpacePermitCount = metrics.filter(x =>
+        String(x.audit.permitType || '').toUpperCase() === 'CONFINED_SPACE' ||
+        String(x.audit.attachedPermitType || '').toLowerCase() === 'confinedspace'
+      ).length;
+      const attachedPermitCount = metrics.filter(x =>
+        x.audit.hasAttachedPermit === true ||
+        (x.audit.attachedPermitType && String(x.audit.attachedPermitType).toUpperCase() !== 'NONE')
+      ).length;
+      const totalMissedHazards = metrics.reduce((sum, x) => sum + x.missedHazards, 0);
+      const totalMissedPpe = metrics.reduce((sum, x) => sum + x.missedPpe, 0);
+      const totalMissedPrecautions = metrics.reduce((sum, x) => sum + x.missedPrecautions, 0);
+
+      const categoryMap = new Map<string, number>();
+      const unitMap = new Map<string, { total: number; defective: number; defects: number; scores: number[] }>();
+      const monthMap = new Map<string, { total: number; defective: number; defects: number; scores: number[] }>();
+      const addCategory = (label: unknown) => {
+        const name = String(label || '').trim();
+        if (name) categoryMap.set(name, (categoryMap.get(name) || 0) + 1);
+      };
+
+      for (const item of metrics) {
+        const audit = item.audit;
+        const unitName = String(audit.unitName || 'واحد نامشخص').trim() || 'واحد نامشخص';
+        const unit = unitMap.get(unitName) || { total: 0, defective: 0, defects: 0, scores: [] };
+        unit.total += 1;
+        unit.defective += item.defective ? 1 : 0;
+        unit.defects += item.defects;
+        if (item.score !== null) unit.scores.push(item.score);
+        unitMap.set(unitName, unit);
+
+        const date = String(audit.auditDate || '');
+        const dateParts = date.split('/');
+        if (dateParts.length >= 2 && /^\d{4}$/.test(dateParts[0]) && /^\d{1,2}$/.test(dateParts[1])) {
+          const monthKey = `${dateParts[0]}/${String(Number(dateParts[1])).padStart(2, '0')}`;
+          const month = monthMap.get(monthKey) || { total: 0, defective: 0, defects: 0, scores: [] };
+          month.total += 1;
+          month.defective += item.defective ? 1 : 0;
+          month.defects += item.defects;
+          if (item.score !== null) month.scores.push(item.score);
+          monthMap.set(monthKey, month);
+        }
+
+        const inspectionItems = Array.isArray(audit.inspectionItems) ? audit.inspectionItems : [];
+        inspectionItems.filter((question: any) =>
+          ['O', 'DEFECT'].includes(String(question.status || '').toUpperCase())
+        ).forEach((question: any) => addCategory(question.category || question.questionFa));
+        (Array.isArray(audit.environmentalHazards) ? audit.environmentalHazards : [])
+          .filter((entry: any) => entry?.missed === true).forEach((entry: any) => addCategory(entry.labelFa || 'خطر محیطی انتخاب‌نشده'));
+        (Array.isArray(audit.requiredPpe) ? audit.requiredPpe : [])
+          .filter((entry: any) => entry?.missed === true).forEach((entry: any) => addCategory(entry.labelFa || 'PPE الزامی تأمین‌نشده'));
+        (Array.isArray(audit.precautionsTaken) ? audit.precautionsTaken : [])
+          .filter((entry: any) => entry?.missed === true).forEach((entry: any) => addCategory(entry.labelFa || 'تمهید ایمنی انجام‌نشده'));
+      }
+
+      const topDefectCategories = Array.from(categoryMap.entries())
+        .map(([category, count]) => ({ category, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 10);
+      const byUnit = Array.from(unitMap.entries())
+        .map(([unitName, value]) => ({
+          unitName,
+          totalAudits: value.total,
+          defectiveAudits: value.defective,
+          totalDefects: value.defects,
+          defectRate: value.total ? Number(((value.defective / value.total) * 100).toFixed(1)) : 0,
+          avgComplianceScore: value.scores.length
+            ? Number((value.scores.reduce((sum, score) => sum + score, 0) / value.scores.length).toFixed(1))
+            : null,
+        }))
+        .sort((a, b) => b.totalDefects - a.totalDefects)
+        .slice(0, 10);
+      const monthlyTrend = Array.from(monthMap.entries())
+        .map(([month, value]) => ({
+          month,
+          totalAudits: value.total,
+          defectiveAudits: value.defective,
+          totalDefects: value.defects,
+          defectRate: value.total ? Number(((value.defective / value.total) * 100).toFixed(1)) : 0,
+          avgComplianceScore: value.scores.length
+            ? Number((value.scores.reduce((sum, score) => sum + score, 0) / value.scores.length).toFixed(1))
+            : null,
+        }))
+        .sort((a, b) => a.month.localeCompare(b.month));
+      const recentAudits = metrics
+        .slice()
+        .sort((a, b) => `${String(b.audit.auditDate || '')} ${String(b.audit.auditTime || '')}`
+          .localeCompare(`${String(a.audit.auditDate || '')} ${String(a.audit.auditTime || '')}`))
+        .slice(0, 20)
+        .map(item => ({
+          auditDate: item.audit.auditDate,
+          auditTime: item.audit.auditTime,
+          unitName: item.audit.unitName,
+          subUnitName: item.audit.subUnitName || null,
+          permitNumber: item.audit.permitNumber,
+          permitType: item.audit.permitType,
+          attachedPermitType: item.audit.attachedPermitType || 'NONE',
+          status: item.audit.status,
+          complianceScore: item.score,
+          passedCount: item.passedCount,
+          defectsCount: item.defects,
+          missedHazards: item.missedHazards,
+          missedPpe: item.missedPpe,
+          missedPrecautions: item.missedPrecautions,
+        }));
+
+      return {
+        toolName: 'ptw_audit_summary',
+        titleFa: 'ماژول ممیزی پروانه‌های کار (PTW Audit)',
+        summary: [
+          `• تعداد ممیزی‌های معتبر: ${totalAudits} مورد؛ نهایی: ${finalizedCount}، پیش‌نویس: ${draftCount}، عدم انطباق بحرانی: ${criticalNcCount}`,
+          `• ممیزی‌های دارای نقص: ${defectiveAuditsCount} مورد؛ مجموع عدم انطباق‌ها: ${totalDefectsIdentified}`,
+          `• میانگین امتیاز انطباق: ${avgComplianceScore === null ? 'داده کافی موجود نیست' : `${avgComplianceScore}٪`}`,
+          `• نوع پروانه ممیزی‌شده: ${hotPermitCount} گرم، ${coldPermitCount} سرد، ${confinedSpacePermitCount} فضای بسته؛ پروانه الحاقی: ${attachedPermitCount}`,
+          `• عدم انطباق‌های اقلام جانبی: خطرات ${totalMissedHazards}، PPE ${totalMissedPpe}، تمهیدات ${totalMissedPrecautions}`,
+          `• ${recentAudits.length} رکورد آخر ممیزی به‌صورت خلاصه و بدون نام امضاکنندگان در داده مرجع موجود است.`,
+        ].join('\n'),
+        data: {
+          totalAudits,
+          finalizedCount,
+          draftCount,
+          criticalNcCount,
+          defectiveAuditsCount,
+          cleanAuditsCount: Math.max(0, totalAudits - defectiveAuditsCount),
+          totalDefectsIdentified,
+          avgComplianceScore,
+          hotPermitCount,
+          coldPermitCount,
+          confinedSpacePermitCount,
+          attachedPermitCount,
+          totalMissedHazards,
+          totalMissedPpe,
+          totalMissedPrecautions,
+          topDefectCategories,
+          byUnit,
+          monthlyTrend,
+          recentAudits,
+          privacy: 'Sanitized read-only records. Signer names, personnel identifiers, signatures, and attachment contents are excluded.',
+        },
+        timestamp: new Date().toISOString(),
+      };
+    } catch (err: any) {
+      logger.warn('[AITools] PTW audit analytics unavailable', { error: err?.message });
+      return {
+        toolName: 'ptw_audit_summary',
+        titleFa: 'ماژول ممیزی پروانه‌های کار (PTW Audit)',
+        summary: 'داده‌های ممیزی پروانه کار در این لحظه از پایگاه داده قابل دریافت نیست؛ هیچ آماری حدس زده نشده است.',
+        data: {},
+        timestamp: new Date().toISOString(),
+      };
+    }
+  }
+
+  /**
    * Tool 3: Incidents, Near Misses & CAPA Real-Time Summary (حوادث و شبه‌حوادث)
    */
   async getIncidentSummary(): Promise<AIToolResult> {
@@ -293,81 +517,254 @@ export class AIToolsRegistry {
    */
   async getNutritionHighRiskSummary(): Promise<AIToolResult> {
     try {
-      const exams = await db.select().from(schema.periodicMedicalExams).catch(() => []);
-      let normalBmi = 0;
-      let overweight = 0;
-      let obeseGrade1 = 0;
-      let obeseGrade2 = 0;
-      let obeseGrade3 = 0;
-      let highBloodPressure = 0;
-      let highBloodSugar = 0;
+      const [dbExams, settingsMap] = await Promise.all([
+        db.select().from(schema.periodicMedicalExams).catch(() => []),
+        this.loadSettingsMap(),
+      ]);
+      const settingsArray = (key: string): any[] => {
+        const value = settingsMap.get(key);
+        return Array.isArray(value) ? value : [];
+      };
+      const nutritionRecords = settingsArray('hse_nutrition_records_v1');
+      const occData = settingsMap.get('OCC_HEALTH_EXAMS_DATA_V2');
+      const occExams: any[] = Array.isArray(occData)
+        ? occData
+        : Array.isArray(occData?.examinations) ? occData.examinations : [];
+      const settingsExams = settingsArray('hse_medical_exams_v4');
+      const periodicRecords = settingsArray('hse_medical_records_v4');
+      const structuredLabs = settingsArray('hse_structured_lab_results_v1');
 
-      for (const exam of exams) {
-        const raw = ((exam as any).rawData || (exam as any).extraData || {}) as Record<string, any>;
-        const bmi = Number((exam as any).bmi || raw.bmi || 0);
-        if (bmi > 0 && bmi < 25) normalBmi++;
-        else if (bmi >= 25 && bmi < 30) overweight++;
-        else if (bmi >= 30 && bmi < 35) obeseGrade1++;
-        else if (bmi >= 35 && bmi < 40) obeseGrade2++;
-        else if (bmi >= 40) obeseGrade3++;
+      const parseObject = (value: any): Record<string, any> => {
+        if (value && typeof value === 'object' && !Array.isArray(value)) return value;
+        if (typeof value === 'string') {
+          try {
+            const parsed = JSON.parse(value);
+            return parsed && typeof parsed === 'object' ? parsed : {};
+          } catch { return {}; }
+        }
+        return {};
+      };
+      const normalizeExam = (record: any) => {
+        const raw = parseObject(record.rawData || record.extraData);
+        const merged = { ...raw, ...record };
+        const rawFindings = parseObject(raw.findings);
+        const recordFindings = parseObject(record.findings);
+        const findings = { ...rawFindings, ...recordFindings };
+        const employeeCode = merged.employeeCode || merged.employee_code || merged.personnelCode || merged.personnel_code || merged.pcode;
+        const nationalCode = merged.nationalCode || merged.national_code || merged.nid;
+        const systolic = merged.systolicBp ?? merged.bp_sys ?? merged.systolic ?? raw.bp_sys;
+        const diastolic = merged.diastolicBp ?? merged.bp_dia ?? merged.diastolic ?? raw.bp_dia;
+        const bloodPressure = findings.bloodPressure || merged.bloodPressure ||
+          (systolic || diastolic ? `${systolic || ''}/${diastolic || ''}` : undefined);
+        return {
+          ...merged,
+          id: merged.id || merged.examId || merged.exam_id,
+          employeeCode,
+          nationalCode,
+          examYear: Number(merged.examYear ?? merged.exam_year ?? merged.year ?? 0) || undefined,
+          examDate: merged.examDate || merged.exam_date || merged.date || undefined,
+          height: merged.height ?? merged.heightCm ?? findings.heightCm,
+          weight: merged.weight ?? merged.weightKg ?? findings.weightKg,
+          bmi: merged.bmi ?? findings.bmi,
+          bp_sys: systolic,
+          bp_dia: diastolic,
+          fbs: merged.fbs ?? raw.fbs,
+          randomBs: merged.randomBs ?? merged.random_bs ?? raw.randomBs,
+          hba1c: merged.hba1c ?? raw.hba1c,
+          cholesterol: merged.cholesterol ?? raw.cholesterol,
+          triglycerides: merged.triglycerides ?? raw.triglycerides,
+          findings: {
+            ...findings,
+            heightCm: findings.heightCm ?? merged.heightCm ?? merged.height,
+            weightKg: findings.weightKg ?? merged.weightKg ?? merged.weight,
+            bmi: findings.bmi ?? merged.bmi,
+            bloodPressure,
+            bloodTests: findings.bloodTests || merged.bloodTests || merged.blood_tests,
+            generalConclusion: findings.generalConclusion || merged.generalConclusion || merged.final_opinion,
+          },
+          recommendations: merged.recommendations || merged.final_advice,
+          description: merged.description || merged.clinicalNotes,
+        };
+      };
 
-        const sys = Number((exam as any).systolicBp || raw.bloodPressureSystolic || 0);
-        const dia = Number((exam as any).diastolicBp || raw.bloodPressureDiastolic || 0);
-        if (sys >= 140 || dia >= 90) highBloodPressure++;
+      const examMap = new Map<string, any>();
+      [...settingsExams, ...occExams, ...(dbExams as any[])].forEach((record, index) => {
+        const normalized = normalizeExam(record);
+        const identity = String(normalized.employeeCode || normalized.nationalCode || normalized.id || 'unknown').trim().toLowerCase();
+        const period = String(normalized.examYear || normalized.examDate || index);
+        const key = `${identity}:${period}`;
+        examMap.set(key, { ...(examMap.get(key) || {}), ...normalized });
+      });
+      const unifiedExams = Array.from(examMap.values());
 
-        const fbs = Number(raw.fbs || 0);
-        if (fbs >= 126) highBloodSugar++;
+      const dateParts = new Intl.DateTimeFormat('en-US-u-ca-persian', {
+        year: 'numeric', month: '2-digit', day: '2-digit',
+      }).formatToParts(new Date());
+      const datePart = (type: string) => dateParts.find(part => part.type === type)?.value || '01';
+      const todayJalali = `${datePart('year')}/${datePart('month')}/${datePart('day')}`;
+
+      // Reuse the same domain rules as the Nutrition > High-Risk & Follow-up tab.
+      // Only aggregated counts are returned; personnel names and identifiers never leave this method.
+      const highRiskService = new HighRiskNutritionService();
+      const profiles = highRiskService.buildHighRiskProfiles(
+        nutritionRecords as any[],
+        unifiedExams as any[],
+        periodicRecords as any[],
+        [],
+        todayJalali,
+        structuredLabs as any[],
+      );
+
+      const categoryMap = new Map<string, Set<string>>();
+      const priorityMap = new Map<string, number>();
+      const bmiMap = new Map<string, number>();
+      const unitMap = new Map<string, { total: number; urgent: number; overdue: number }>();
+      for (const profile of profiles as any[]) {
+        const profileKey = String(profile.id || profile.personnelCode || profile.nationalCode || 'anonymous');
+        const seenCategories = new Set<string>();
+        for (const match of Array.isArray(profile.riskCategories) ? profile.riskCategories : []) {
+          const category = String(match.category || '');
+          if (!category || seenCategories.has(category)) continue;
+          seenCategories.add(category);
+          const people = categoryMap.get(category) || new Set<string>();
+          people.add(profileKey);
+          categoryMap.set(category, people);
+        }
+        const priority = String(profile.overallPriority || 'routine');
+        priorityMap.set(priority, (priorityMap.get(priority) || 0) + 1);
+        const bmiCategory = String(profile.bmiCategory || 'unknown');
+        if (Number(profile.bmi) > 0) bmiMap.set(bmiCategory, (bmiMap.get(bmiCategory) || 0) + 1);
+        const unitName = String(profile.unit || 'واحد نامشخص');
+        const unit = unitMap.get(unitName) || { total: 0, urgent: 0, overdue: 0 };
+        unit.total += 1;
+        unit.urgent += priority === 'urgent' ? 1 : 0;
+        unit.overdue += profile.isFollowUpOverdue || profile.followUpStatus === 'missed' ? 1 : 0;
+        unitMap.set(unitName, unit);
       }
 
+      const categoryCounts = Array.from(categoryMap.entries())
+        .map(([category, people]) => ({ category, personnelCount: people.size }))
+        .sort((a, b) => b.personnelCount - a.personnelCount);
+      const bmiDistribution = Array.from(bmiMap.entries()).map(([category, personnelCount]) => ({ category, personnelCount }));
+      const byUnit = Array.from(unitMap.entries())
+        .map(([unit, value]) => ({ unit, ...value }))
+        .sort((a, b) => b.total - a.total)
+        .slice(0, 10);
+      const overdueFollowUps = profiles.filter((profile: any) =>
+        profile.isFollowUpOverdue || profile.followUpStatus === 'missed'
+      ).length;
+      const dueFollowUps = categoryMap.get('followup_due')?.size || 0;
+      const needsReview = categoryMap.get('needs_review')?.size || 0;
+      const countFor = (category: string) => categoryMap.get(category)?.size || 0;
+      const dataAvailable = nutritionRecords.length + unifiedExams.length + structuredLabs.length;
+
       return {
         toolName: 'nutrition_high_risk_summary',
-        titleFa: 'ماژول تغذیه، شاخص توده بدنی (BMI) و بیماران پرخطر',
+        titleFa: 'ماژول تغذیه، BMI و شناسایی افراد پرخطر و پیگیری',
         summary: [
-          `• وضعیت وزن و BMI در پرونده‌های سلامت: ${normalBmi} نفر وزن نرمال، ${overweight} نفر اضافه‌وزن (BMI 25-29.9)، ${obeseGrade1} نفر چاقی درجه ۱، ${obeseGrade2} نفر چاقی درجه ۲ و ${obeseGrade3} نفر چاقی مفرط (BMI ≥ 40)`,
-          `• شاخص‌های متابولیک پرخطر: ${highBloodPressure} نفر دارای فشار خون بالا (≥140/90) و ${highBloodSugar} نفر دارای قند خون ناشتای بالا (FBS ≥ 126)`,
+          dataAvailable === 0
+            ? '• در منابع متصل، داده‌ای برای تحلیل تغذیه و معاینات ادواری یافت نشد.'
+            : `• بر اساس قواعد همان تب «بیماری‌های پرخطر و پیگیری»، ${profiles.length} پروفایل پرخطر یکتا شناسایی شد.`,
+          `• اولویت بالینی: فوری ${priorityMap.get('urgent') || 0}، پرخطر ${priorityMap.get('high_risk') || 0}، پیگیری معمول ${priorityMap.get('routine') || 0}`,
+          `• BMI: اضافه‌وزن ${countFor('bmi_overweight')}، چاقی درجه ۱ ${countFor('bmi_obese_1')}، درجه ۲ ${countFor('bmi_obese_2')}، درجه ۳ ${countFor('bmi_obese_3')}`,
+          `• شاخص‌های بالینی: فشار خون ${countFor('hypertension')}، قند خون ${countFor('hyperglycemia')}، کبد چرب گرید ۲/۳ ${countFor('fatty_liver')}`,
+          `• پیگیری: ${dueFollowUps} مورد نیازمند پیگیری، ${overdueFollowUps} مورد معوق؛ نتایج نیازمند بررسی: ${needsReview}`,
+          `• پوشش داده: ${nutritionRecords.length} پرونده تغذیه، ${unifiedExams.length} سابقه معاینه یکتا، ${structuredLabs.length} نتیجه آزمایش ساختاریافته`,
         ].join('\n'),
-        data: { normalBmi, overweight, obeseGrade1, obeseGrade2, obeseGrade3, highBloodPressure, highBloodSugar },
+        data: {
+          highRiskPersonnelCount: profiles.length,
+          priorityDistribution: Array.from(priorityMap.entries()).map(([priority, count]) => ({ priority, count })),
+          categoryCounts,
+          bmiDistribution,
+          hypertensionCount: countFor('hypertension'),
+          hyperglycemiaCount: countFor('hyperglycemia'),
+          fattyLiverCount: countFor('fatty_liver'),
+          urgentClinicalCount: countFor('clinical_urgent'),
+          followUpDueCount: dueFollowUps,
+          overdueFollowUpCount: overdueFollowUps,
+          needsReviewCount: needsReview,
+          byUnit,
+          sourceCounts: {
+            nutritionRecords: nutritionRecords.length,
+            periodicExams: unifiedExams.length,
+            structuredLabResults: structuredLabs.length,
+            medicalRecords: periodicRecords.length,
+          },
+          methodology: 'Same HighRiskNutritionService rules used by the Nutrition > High-Risk & Follow-up UI; category counts are unique people and may overlap.',
+          privacy: 'Aggregate-only output. Personnel names, personnel codes, national IDs, phones and individual medical records are excluded.',
+        },
         timestamp: new Date().toISOString(),
       };
-    } catch {
+    } catch (err: any) {
+      logger.warn('[AITools] nutrition high-risk summary unavailable', { error: err?.message });
       return {
         toolName: 'nutrition_high_risk_summary',
-        titleFa: 'ماژول تغذیه و بیماران پرخطر',
-        summary: 'اطلاعات پایش تغذیه در دسترس نیست.',
+        titleFa: 'ماژول تغذیه و افراد پرخطر',
+        summary: 'اطلاعات تغذیه و معاینات ادواری در این لحظه قابل دریافت یا تحلیل نیست؛ هیچ آماری حدس زده نشده است.',
         data: {},
         timestamp: new Date().toISOString(),
       };
     }
   }
 
-  /**
-   * Tool 6: Risk Assessment & Hazard Identification (ارزیابی ریسک و مخاطرات)
-   */
-  async getRiskAssessmentsSummary(): Promise<AIToolResult> {
+  async getRiskAssessmentsSummary(selectedMethodologies?: string[]): Promise<AIToolResult> {
     try {
-      const risks = await db.select().from(schema.riskAssessments).catch(() => []);
+      const allRisks = await db.select().from(schema.riskAssessments);
+      const selectedMethods = Array.isArray(selectedMethodologies)
+        ? selectedMethodologies.map(method => String(method).toUpperCase()).filter(Boolean)
+        : [];
+      const risks = selectedMethods.length
+        ? allRisks.filter((risk: any) => selectedMethods.includes(String(risk.methodology || '').toUpperCase()))
+        : allRisks;
       const total = risks.length;
-      const highRisks = risks.filter((r: any) => ['HIGH', 'EXTREME', 'CRITICAL'].includes(String(r.initialRiskLevel || r.riskLevel || '').toUpperCase())).length;
-      const mediumRisks = risks.filter((r: any) => String(r.initialRiskLevel || r.riskLevel || '').toUpperCase() === 'MEDIUM').length;
+      const highRisks = risks.filter((r: any) => ['HIGH', 'EXTREME', 'CRITICAL'].includes(String(r.initialRiskLevel || '').toUpperCase())).length;
+      const mediumRisks = risks.filter((r: any) => String(r.initialRiskLevel || '').toUpperCase() === 'MEDIUM').length;
       const lowRisks = Math.max(0, total - highRisks - mediumRisks);
-
-      const topHazards = risks.slice(0, 5).map((r: any) => `${r.activityTitle}: ${r.hazardDescription} (سطح ریسک: ${r.initialRiskLevel || 'متوسط'})`);
+      const byMethodMap = new Map<string, { total: number; high: number; medium: number; low: number }>();
+      const byStatusMap = new Map<string, number>();
+      for (const risk of risks as any[]) {
+        const method = String(risk.methodology || 'نامشخص').toUpperCase();
+        const bucket = byMethodMap.get(method) || { total: 0, high: 0, medium: 0, low: 0 };
+        bucket.total += 1;
+        const level = String(risk.initialRiskLevel || '').toUpperCase();
+        if (['HIGH', 'EXTREME', 'CRITICAL'].includes(level)) bucket.high += 1;
+        else if (level === 'MEDIUM') bucket.medium += 1;
+        else bucket.low += 1;
+        byMethodMap.set(method, bucket);
+        const status = String(risk.status || 'نامشخص').toUpperCase();
+        byStatusMap.set(status, (byStatusMap.get(status) || 0) + 1);
+      }
+      const byMethod = Array.from(byMethodMap.entries()).map(([method, value]) => ({ method, ...value }));
+      const byStatus = Array.from(byStatusMap.entries()).map(([status, count]) => ({ status, count }));
+      const residualHighRisks = risks.filter((r: any) => ['HIGH', 'EXTREME', 'CRITICAL'].includes(String(r.residualRiskLevel || '').toUpperCase())).length;
+      const topHazards = (risks as any[])
+        .slice()
+        .sort((a: any, b: any) => Number(b.initialRiskScore || 0) - Number(a.initialRiskScore || 0))
+        .slice(0, 5)
+        .map((r: any) =>
+        `${r.activityTitle || 'فعالیت نامشخص'}: ${r.hazardDescription || 'شرح خطر ثبت نشده'} (ریسک اولیه: ${r.initialRiskLevel || 'نامشخص'}؛ ریسک باقیمانده: ${r.residualRiskLevel || 'ثبت نشده'})`
+      );
 
       return {
         toolName: 'risk_assessment_summary',
-        titleFa: 'ماژول ارزیابی ریسک و شناسایی مخاطرات (JSA / HAZID)',
+        titleFa: 'ماژول ارزیابی ریسک و شناسایی مخاطرات (JSA / FMEA / FTA / HHA)',
         summary: [
-          `• کل ارزیابی‌های ریسک ثبت‌شده: ${total} مورد (${highRisks} ریسک بالا/بحرانی، ${mediumRisks} ریسک متوسط، ${lowRisks} ریسک پایین/کنترل‌شده)`,
+          `• روش‌های انتخاب‌شده: ${selectedMethods.join('، ') || 'همه روش‌ها'}`,
+          `• کل ارزیابی‌های ریسک ثبت‌شده: ${total} مورد (${highRisks} بالا/بحرانی، ${mediumRisks} متوسط، ${lowRisks} پایین/سایر)`,
+          `• ریسک‌های باقیمانده بالا/بحرانی: ${residualHighRisks} مورد`,
+          `• تفکیک روش ارزیابی: ${byMethod.map(x => `${x.method}: ${x.total} (بالا/بحرانی ${x.high})`).join('؛ ') || 'داده‌ای ثبت نشده'}`,
+          `• وضعیت گردش کار: ${byStatus.map(x => `${x.status}: ${x.count}`).join('؛ ') || 'داده‌ای ثبت نشده'}`,
           topHazards.length > 0 ? `• نمونه مخاطرات ثبت‌شده: ${topHazards.join(' | ')}` : '',
         ].filter(Boolean).join('\n'),
-        data: { totalRisks: total, highRisks, mediumRisks, lowRisks, topHazards },
+        data: { selectedMethodologies: selectedMethods, totalRisks: total, highRisks, mediumRisks, lowRisks, residualHighRisks, byMethod, byStatus, topHazards },
         timestamp: new Date().toISOString(),
       };
-    } catch {
+    } catch (err: any) {
+      logger.warn('[AITools] risk assessment summary unavailable', { error: err?.message });
       return {
         toolName: 'risk_assessment_summary',
         titleFa: 'ماژول ارزیابی ریسک',
-        summary: 'اطلاعات ارزیابی ریسک در دسترس نیست.',
+        summary: 'اطلاعات ارزیابی ریسک در این لحظه از پایگاه داده قابل دریافت نیست؛ هیچ آماری حدس زده نشده است.',
         data: {},
         timestamp: new Date().toISOString(),
       };
@@ -386,26 +783,80 @@ export class AIToolsRegistry {
       ]);
 
       const settingFiveS: any[] = Array.isArray(settingsMap.get('hse_5s_inspections_v3')) ? settingsMap.get('hse_5s_inspections_v3') : [];
+      const settingFiveSNc: any[] = Array.isArray(settingsMap.get('hse_5s_nc_v3')) ? settingsMap.get('hse_5s_nc_v3') : [];
+      const settingFiveSSchedules: any[] = Array.isArray(settingsMap.get('hse_5s_schedules_v3')) ? settingsMap.get('hse_5s_schedules_v3') : [];
       const settingInsp: any[] = Array.isArray(settingsMap.get('hse_safety_dept_inspections_v1')) ? settingsMap.get('hse_safety_dept_inspections_v1') : [];
-
+      const fiveSRecords: any[] = settingFiveS.length > 0 ? settingFiveS : fiveSRows as any[];
       const totalFiveS = Math.max(fiveSRows.length, settingFiveS.length);
       const totalInsp = Math.max(inspections.length, settingInsp.length);
-      const avgFiveS = fiveSRows.length > 0
-        ? Math.round((fiveSRows as any[]).reduce((s: number, r: any) => s + Number(r.totalScore || 0), 0) / fiveSRows.length)
-        : 0;
+      const scores = fiveSRecords
+        .map((record: any) => Number(record.scores?.total ?? record.totalScore ?? record.score))
+        .filter((score: number) => Number.isFinite(score) && score >= 0 && score <= 100);
+      const avgFiveS = scores.length
+        ? Number((scores.reduce((sum: number, score: number) => sum + score, 0) / scores.length).toFixed(1))
+        : null;
+      const statusMap = new Map<string, number>();
+      const ratingMap = new Map<string, number>();
+      const departmentMap = new Map<string, number>();
+      for (const record of fiveSRecords) {
+        const status = String(record.status || 'نامشخص');
+        const rating = String(record.generalRating || 'نامشخص');
+        const department = String(record.department || 'واحد نامشخص');
+        statusMap.set(status, (statusMap.get(status) || 0) + 1);
+        ratingMap.set(rating, (ratingMap.get(rating) || 0) + 1);
+        departmentMap.set(department, (departmentMap.get(department) || 0) + 1);
+      }
+      const openActionsCount = Math.max(
+        settingFiveSNc.filter((item: any) =>
+          ['open', 'in_progress', 'overdue'].includes(String(item.status || '').toLowerCase())
+        ).length,
+        fiveSRecords.reduce((sum: number, record: any) => sum + Math.max(0, Number(record.openActionsCount || 0)), 0)
+      );
+      const totalFiveSNc = Math.max(
+        settingFiveSNc.length,
+        fiveSRecords.reduce((sum: number, record: any) => sum + Math.max(0, Number(record.nonConformancesCount || 0)), 0)
+      );
+      const byInspectionType = new Map<string, number>();
+      const byInspectionStatus = new Map<string, number>();
+      for (const record of (settingInsp.length > 0 ? settingInsp : inspections) as any[]) {
+        const type = String(record.inspectionType || record.type || 'نوع نامشخص');
+        const status = String(record.status || 'وضعیت نامشخص');
+        byInspectionType.set(type, (byInspectionType.get(type) || 0) + 1);
+        byInspectionStatus.set(status, (byInspectionStatus.get(status) || 0) + 1);
+      }
 
       return {
         toolName: 'five_s_inspections_summary',
         titleFa: 'ماژول نظام آراستگی ۵S و بازرسی‌های فنی ایمنی',
-        summary: `• مجموع ممیزی‌های نظام آراستگی ۵S: ${totalFiveS} مورد (میانگین امتیاز: ${avgFiveS}%)\n• مجموع بازرسی‌های فنی و چک‌لیست‌های ایمنی (تجهیزات، داربست، جرثقیل، برق و حفاری): ${totalInsp} مورد`,
-        data: { totalFiveSAudits: totalFiveS, averageFiveSScore: avgFiveS, totalInspections: totalInsp },
+        summary: [
+          `• ممیزی‌های ۵S: ${totalFiveS} مورد؛ میانگین امتیاز: ${avgFiveS === null ? 'امتیاز ثبت‌شده کافی نیست' : `${avgFiveS}٪`}`,
+          `• وضعیت ممیزی‌ها: ${Array.from(statusMap.entries()).map(([status, count]) => `${status}: ${count}`).join('؛ ') || 'ثبت نشده'}`,
+          `• رتبه‌بندی عمومی: ${Array.from(ratingMap.entries()).map(([rating, count]) => `${rating}: ${count}`).join('؛ ') || 'ثبت نشده'}`,
+          `• عدم انطباق‌های ۵S: ${totalFiveSNc} مورد؛ اقدامات باز/درحال انجام/معوق: ${openActionsCount}`,
+          `• بازرسی‌های عملیاتی ایمنی: ${totalInsp} مورد؛ برنامه‌های زمان‌بندی ۵S: ${settingFiveSSchedules.length}`,
+          `• تفکیک نوع بازرسی ایمنی: ${Array.from(byInspectionType.entries()).map(([type, count]) => `${type}: ${count}`).join('؛ ') || 'ثبت نشده'}`,
+        ].join('\n'),
+        data: {
+          totalFiveSAudits: totalFiveS,
+          averageFiveSScore: avgFiveS,
+          fiveSStatus: Array.from(statusMap.entries()).map(([status, count]) => ({ status, count })),
+          fiveSRatings: Array.from(ratingMap.entries()).map(([rating, count]) => ({ rating, count })),
+          fiveSByDepartment: Array.from(departmentMap.entries()).map(([department, count]) => ({ department, count })),
+          fiveSNonConformances: totalFiveSNc,
+          fiveSOpenActions: openActionsCount,
+          fiveSSchedules: settingFiveSSchedules.length,
+          totalSafetyInspections: totalInsp,
+          safetyInspectionsByType: Array.from(byInspectionType.entries()).map(([type, count]) => ({ type, count })),
+          safetyInspectionsByStatus: Array.from(byInspectionStatus.entries()).map(([status, count]) => ({ status, count })),
+        },
         timestamp: new Date().toISOString(),
       };
-    } catch {
+    } catch (err: any) {
+      logger.warn('[AITools] 5S and safety inspections summary unavailable', { error: err?.message });
       return {
         toolName: 'five_s_inspections_summary',
         titleFa: 'ماژول ۵S و بازرسی‌های ایمنی',
-        summary: 'اطلاعات بازرسی و ۵S در دسترس نیست.',
+        summary: 'اطلاعات بازرسی و ۵S در این لحظه از پایگاه داده قابل دریافت نیست؛ هیچ آماری حدس زده نشده است.',
         data: {},
         timestamp: new Date().toISOString(),
       };
@@ -498,28 +949,73 @@ export class AIToolsRegistry {
         db.select().from(schema.trainingAttendances).catch(() => []),
         this.loadSettingsMap(),
       ]);
-      const settingCourses: any[] = Array.isArray(settingsMap.get('hse_training_courses_v2')) ? settingsMap.get('hse_training_courses_v2') : [];
-      const totalCourses = Math.max(courses.length, new Set(settingCourses.map((c: any) => c.courseCode || c.title)).size);
-      const totalAttendances = Math.max(attendances.length, settingCourses.length);
-      const totalHours = (courses as any[]).reduce((s: number, c: any) => s + Number(c.durationHours || 0), 0) + settingCourses.reduce((s: number, c: any) => s + Number(c.hours || 0), 0);
-      const courseNames = courses.slice(0, 5).map((c: any) => c.courseTitle);
+      const settingAttendanceRecords: any[] = Array.isArray(settingsMap.get('hse_training_courses_v2'))
+        ? settingsMap.get('hse_training_courses_v2') : [];
+      const courseDefinitions: any[] = Array.isArray(settingsMap.get('hse_training_course_defs'))
+        ? settingsMap.get('hse_training_course_defs') : [];
+      const trainingNeeds: any[] = Array.isArray(settingsMap.get('hse_training_needs'))
+        ? settingsMap.get('hse_training_needs') : [];
+      const contractors: any[] = Array.isArray(settingsMap.get('hse_training_contractors'))
+        ? settingsMap.get('hse_training_contractors') : [];
+      const calendarEvents: any[] = Array.isArray(settingsMap.get('hse_training_calendar_events'))
+        ? settingsMap.get('hse_training_calendar_events') : [];
+
+      const uniqueCourseCodes = new Set(settingAttendanceRecords
+        .map((record: any) => String(record.courseCode || '').trim())
+        .filter(Boolean));
+      const totalCourses = Math.max(courses.length, courseDefinitions.length, uniqueCourseCodes.size);
+      // The UI's hse_training_courses_v2 records are person-course attendance rows.
+      // Use the larger of the settings and normalized DB representations to avoid double-counting.
+      const totalAttendanceRecords = Math.max(attendances.length, settingAttendanceRecords.length);
+      const settingAttendeeHours = settingAttendanceRecords.reduce(
+        (sum: number, record: any) => sum + Math.max(0, Number(record.hours || 0)), 0
+      );
+      const courseHoursById = new Map((courses as any[]).map(course => [Number(course.id), Number(course.durationHours || 0)]));
+      const normalizedAttendeeHours = (attendances as any[]).reduce(
+        (sum: number, attendance: any) => sum + Math.max(0, Number(courseHoursById.get(Number(attendance.trainingId)) || 0)), 0
+      );
+      const totalAttendeeHours = settingAttendanceRecords.length > 0 ? settingAttendeeHours : normalizedAttendeeHours;
+      const courseDurationHours = courseDefinitions.length > 0
+        ? courseDefinitions.reduce((sum: number, course: any) => sum + Math.max(0, Number(course.duration || course.durationHours || 0)), 0)
+        : (courses as any[]).reduce((sum: number, course: any) => sum + Math.max(0, Number(course.durationHours || 0)), 0);
+      const courseNames = Array.from(new Set([
+        ...courseDefinitions.map((course: any) => String(course.title || course.name || '').trim()),
+        ...(courses as any[]).map((course: any) => String(course.courseTitle || '').trim()),
+      ].filter(Boolean))).slice(0, 10);
 
       return {
         toolName: 'training_summary',
         titleFa: 'ماژول آموزش‌های ایمنی و ماتریس شایستگی کارکنان',
         summary: [
-          `• کل دوره‌های آموزشی تعریف‌شده: ${totalCourses} دوره | مجموع حضور در دوره‌ها: ${totalAttendances} نفر-دوره`,
-          `• مجموع ساعات آموزشی ثبت‌شده: ${totalHours} ساعت`,
-          courseNames.length > 0 ? `• عناوین دوره‌های فعال: ${courseNames.join('، ')}` : '',
+          `• دوره‌های آموزشی تعریف‌شده: ${totalCourses} دوره`,
+          `• سوابق حضور ثبت‌شده: ${totalAttendanceRecords} نفر-دوره`,
+          `• مجموع ساعات حضور-نفر ثبت‌شده: ${totalAttendeeHours} ساعت`,
+          `• مجموع مدت دوره‌های تعریف‌شده: ${courseDurationHours} ساعت`,
+          `• نیازهای آموزشی: ${trainingNeeds.length} مورد؛ پیمانکاران آموزشی: ${contractors.length}؛ رویدادهای تقویم: ${calendarEvents.length}`,
+          courseNames.length > 0 ? `• عناوین دوره‌های تعریف‌شده: ${courseNames.join('، ')}` : '',
         ].filter(Boolean).join('\n'),
-        data: { totalCourses, totalAttendances, totalHours, courseNames },
+        data: {
+          totalCourses,
+          totalAttendanceRecords,
+          totalAttendeeHours,
+          courseDurationHours,
+          trainingNeedsCount: trainingNeeds.length,
+          contractorsCount: contractors.length,
+          calendarEventsCount: calendarEvents.length,
+          courseNames,
+          sourceCoverage: {
+            attendanceRecords: settingAttendanceRecords.length > 0 ? 'hse_training_courses_v2' : 'training_attendances',
+            courseDefinitions: courseDefinitions.length > 0 ? 'hse_training_course_defs' : 'hse_trainings',
+          },
+        },
         timestamp: new Date().toISOString(),
       };
-    } catch {
+    } catch (err: any) {
+      logger.warn('[AITools] training summary unavailable', { error: err?.message });
       return {
         toolName: 'training_summary',
         titleFa: 'ماژول آموزش‌های ایمنی',
-        summary: 'اطلاعات آموزش در دسترس نیست.',
+        summary: 'اطلاعات آموزش در این لحظه از پایگاه داده قابل دریافت نیست؛ هیچ آماری حدس زده نشده است.',
         data: {},
         timestamp: new Date().toISOString(),
       };
@@ -531,26 +1027,95 @@ export class AIToolsRegistry {
    */
   async getPPESummary(): Promise<AIToolResult> {
     try {
-      const ppeList = await db.select().from(schema.ppeIssuances).catch(() => []);
-      const total = ppeList.length;
-      const totalQty = (ppeList as any[]).reduce((s: number, p: any) => s + Number(p.quantity || 1), 0);
-      const recentItems = ppeList.slice(0, 5).map((p: any) => `${p.itemName} (${p.itemCategory} - تعداد: ${p.quantity})`);
+      const [settingsMap, normalizedIssuances] = await Promise.all([
+        this.loadSettingsMap(),
+        db.select().from(schema.ppeIssuances).catch(() => []),
+      ]);
+      const ppeItems: any[] = Array.isArray(settingsMap.get('hse_ppe_items')) ? settingsMap.get('hse_ppe_items') : [];
+      const settingIssuances: any[] = Array.isArray(settingsMap.get('hse_ppe_issuance')) ? settingsMap.get('hse_ppe_issuance') : [];
+      const categories: any[] = Array.isArray(settingsMap.get('hse_ppe_categories')) ? settingsMap.get('hse_ppe_categories') : [];
+      const issuanceRecords: any[] = settingIssuances.length > 0 ? settingIssuances : normalizedIssuances as any[];
+      const totalIssuances = issuanceRecords.length;
+      const totalQuantity = issuanceRecords.reduce((sum, record) => sum + Math.max(0, Number(record.quantity || 1)), 0);
+
+      const byStatusMap = new Map<string, { records: number; quantity: number }>();
+      const byCategoryMap = new Map<string, { records: number; quantity: number }>();
+      const byDepartmentMap = new Map<string, number>();
+      for (const record of issuanceRecords) {
+        const status = String(record.status || 'نامشخص');
+        const category = String(record.category || 'دسته‌بندی نامشخص');
+        const department = String(record.department || 'واحد نامشخص');
+        const quantity = Math.max(0, Number(record.quantity || 1));
+        const statusBucket = byStatusMap.get(status) || { records: 0, quantity: 0 };
+        statusBucket.records += 1;
+        statusBucket.quantity += quantity;
+        byStatusMap.set(status, statusBucket);
+        const categoryBucket = byCategoryMap.get(category) || { records: 0, quantity: 0 };
+        categoryBucket.records += 1;
+        categoryBucket.quantity += quantity;
+        byCategoryMap.set(category, categoryBucket);
+        byDepartmentMap.set(department, (byDepartmentMap.get(department) || 0) + quantity);
+      }
+
+      const byStatus = Array.from(byStatusMap.entries()).map(([status, value]) => ({ status, ...value }));
+      const byCategory = Array.from(byCategoryMap.entries()).map(([category, value]) => ({ category, ...value }));
+      const byDepartment = Array.from(byDepartmentMap.entries())
+        .map(([department, quantity]) => ({ department, quantity }))
+        .sort((a, b) => b.quantity - a.quantity)
+        .slice(0, 10);
+      const expiredCount = byStatusMap.get('Expired')?.records || 0;
+      const dueForReplacementCount = byStatusMap.get('Due for Replacement')?.records || 0;
+      const activeCount = byStatusMap.get('Active')?.records || 0;
+      const damagedCount = byStatusMap.get('Damaged/Replaced')?.records || 0;
+      const returnedCount = byStatusMap.get('Returned')?.records || 0;
+      const recentIssuances = issuanceRecords
+        .slice()
+        .sort((a, b) => String(b.issueDate || '').localeCompare(String(a.issueDate || '')))
+        .slice(0, 10)
+        .map(record => ({
+          issueDate: record.issueDate,
+          itemName: record.ppeItemName || 'نام قلم ثبت نشده',
+          category: record.category || 'نامشخص',
+          quantity: Math.max(0, Number(record.quantity || 1)),
+          status: record.status || 'نامشخص',
+          department: record.department || 'نامشخص',
+        }));
 
       return {
         toolName: 'ppe_summary',
         titleFa: 'ماژول مدیریت تجهیزات حفاظت فردی (PPE)',
         summary: [
-          `• کل رکوردهای تحویل تجهیزات حفاظت فردی: ${total} نوبت (مجموع اقلام توزیع‌شده: ${totalQty} عدد)`,
-          recentItems.length > 0 ? `• آخرین اقلام تحویلی: ${recentItems.join(' | ')}` : '',
-        ].filter(Boolean).join('\n'),
-        data: { totalIssuances: total, totalQuantity: totalQty, recentItems },
+          `• اقلام تعریف‌شده در کاتالوگ: ${ppeItems.length} قلم؛ دسته‌بندی‌های سفارشی: ${categories.length}`,
+          `• سوابق تحویل: ${totalIssuances} نوبت؛ مجموع اقلام تحویلی: ${totalQuantity} عدد`,
+          `• وضعیت تحویل: فعال ${activeCount}، منقضی ${expiredCount}، نیازمند تعویض ${dueForReplacementCount}، آسیب‌دیده/جایگزین‌شده ${damagedCount}، مرجوعی ${returnedCount}`,
+          `• تفکیک دسته‌های PPE: ${byCategory.map(item => `${item.category}: ${item.records} رکورد / ${item.quantity} عدد`).join('؛ ') || 'داده‌ای ثبت نشده'}`,
+          `• واحدهای دارای بیشترین تحویل: ${byDepartment.map(item => `${item.department}: ${item.quantity} عدد`).join('؛ ') || 'داده‌ای ثبت نشده'}`,
+        ].join('\n'),
+        data: {
+          catalogItemCount: ppeItems.length,
+          customCategoryCount: categories.length,
+          totalIssuances,
+          totalQuantity,
+          activeCount,
+          expiredCount,
+          dueForReplacementCount,
+          damagedCount,
+          returnedCount,
+          byStatus,
+          byCategory,
+          byDepartment,
+          recentIssuances,
+          privacy: 'Personnel names, personnel codes, issuer names, serial numbers, and free-text notes are excluded from AI output.',
+          sourceCoverage: settingIssuances.length > 0 ? 'hse_ppe_issuance' : 'ppe_issuances',
+        },
         timestamp: new Date().toISOString(),
       };
-    } catch {
+    } catch (err: any) {
+      logger.warn('[AITools] PPE summary unavailable', { error: err?.message });
       return {
         toolName: 'ppe_summary',
         titleFa: 'ماژول تجهیزات حفاظت فردی (PPE)',
-        summary: 'اطلاعات تجهیزات حفاظت فردی در دسترس نیست.',
+        summary: 'اطلاعات تجهیزات حفاظت فردی در این لحظه از پایگاه داده قابل دریافت نیست؛ هیچ آماری حدس زده نشده است.',
         data: {},
         timestamp: new Date().toISOString(),
       };
@@ -562,27 +1127,107 @@ export class AIToolsRegistry {
    */
   async getEnvironmentSummary(): Promise<AIToolResult> {
     try {
-      const envLogs = await db.select().from(schema.environmentalLogs).orderBy(desc(schema.environmentalLogs.createdAt)).catch(() => []);
-      const total = envLogs.length;
-      const compliant = envLogs.filter((e: any) => e.isCompliant !== false).length;
-      const nonCompliant = total - compliant;
-      const recentParams = envLogs.slice(0, 5).map((e: any) => `${e.parameterName || e.category}: ${e.measuredValue ?? '-'} ${e.unit || ''} (${e.isCompliant ? 'منطبق با استاندارد' : 'فراتر از حد مجاز'})`);
+      const [settingsMap, environmentalLogs] = await Promise.all([
+        this.loadSettingsMap(),
+        db.select().from(schema.environmentalLogs).orderBy(desc(schema.environmentalLogs.createdAt)).catch(() => []),
+      ]);
+      const settingArray = (key: string): any[] => {
+        const value = settingsMap.get(key);
+        return Array.isArray(value) ? value : [];
+      };
+      const mergeById = (base: any[], additions: any[]) => {
+        const map = new Map<string, any>();
+        [...base, ...additions].forEach((item: any, index: number) => {
+          if (!item || typeof item !== 'object') return;
+          const id = String(item.id || `fallback-${index}`);
+          map.set(id, { ...(map.get(id) || {}), ...item });
+        });
+        return Array.from(map.values());
+      };
+      const logs = environmentalLogs as any[];
+      const fromLogCategory = (category: string) => logs
+        .filter(log => String(log.category || '').toUpperCase() === category)
+        .map(log => log.extraData && typeof log.extraData === 'object' ? { ...log.extraData, id: log.extraData.id || log.id } : log)
+        .filter(item => item && item.id);
+
+      const monitoring = mergeById(settingArray('hse_env_monitoring_v5'), fromLogCategory('MONITORING'));
+      const waste = mergeById(settingArray('hse_waste_records_v5'), fromLogCategory('WASTE'));
+      const wastewater = mergeById(settingArray('hse_wastewater_records_v5'), fromLogCategory('WASTEWATER'));
+      const airQuality = mergeById(settingArray('hse_air_quality_v5'), fromLogCategory('AIR_EMISSIONS'));
+      const waterSoil = mergeById(settingArray('hse_water_soil_v5'), fromLogCategory('SOIL'));
+      const nonConformances = mergeById(settingArray('hse_env_health_nc_v5'), fromLogCategory('NON_CONFORMANCE'));
+
+      const categories = [
+        { category: 'پایش‌های محیط‌زیستی', records: monitoring },
+        { category: 'مدیریت پسماند', records: waste },
+        { category: 'مدیریت پساب', records: wastewater },
+        { category: 'پایش آلاینده‌های هوا و دودکش', records: airQuality },
+        { category: 'پایش آب و خاک', records: waterSoil },
+        { category: 'عدم انطباق‌های محیط‌زیستی', records: nonConformances },
+      ].map(group => ({
+        category: group.category,
+        total: group.records.length,
+        nonCompliant: group.records.filter((record: any) => record.isCompliant === false || record.status === 'NON_COMPLIANT').length,
+      }));
+      const totalRecords = categories.reduce((sum, item) => sum + item.total, 0);
+      const nonCompliantRecords = categories.reduce((sum, item) => sum + item.nonCompliant, 0);
+      const complianceKnownRecords = [...monitoring, ...waste, ...wastewater, ...airQuality, ...waterSoil]
+        .filter((record: any) => typeof record.isCompliant === 'boolean').length;
+      const compliantRecords = [...monitoring, ...waste, ...wastewater, ...airQuality, ...waterSoil]
+        .filter((record: any) => record.isCompliant === true).length;
+      const unknownComplianceRecords = Math.max(0, totalRecords - nonConformances.length - complianceKnownRecords);
+
+      const recentRecords = [
+        ...monitoring.map(record => ({ ...record, sourceCategory: 'پایش محیط‌زیستی' })),
+        ...waste.map(record => ({ ...record, sourceCategory: 'پسماند' })),
+        ...wastewater.map(record => ({ ...record, sourceCategory: 'پساب' })),
+        ...airQuality.map(record => ({ ...record, sourceCategory: 'هوا و دودکش' })),
+        ...waterSoil.map(record => ({ ...record, sourceCategory: 'آب و خاک' })),
+      ].sort((a, b) => String(b.date || b.sampleDate || b.createdAt || '').localeCompare(String(a.date || a.sampleDate || a.createdAt || '')))
+        .slice(0, 10)
+        .map(record => ({
+          category: record.sourceCategory,
+          date: record.date || record.sampleDate || record.createdAt || null,
+          parameter: record.parameterName || record.parameter || record.wasteType || record.testName || 'شاخص ثبت‌شده',
+          measuredValue: record.measuredValue ?? record.value ?? null,
+          unit: record.unit || null,
+          isCompliant: typeof record.isCompliant === 'boolean' ? record.isCompliant : null,
+        }));
 
       return {
         toolName: 'environment_summary',
         titleFa: 'ماژول پایش محیط زیست، پساب و مدیریت پسماند',
         summary: [
-          `• کل رکوردهای پایش زیست‌محیطی و پسماند: ${total} مورد (${compliant} منطبق با استاندارد، ${nonCompliant} عدم انطباق زیست‌محیطی)`,
-          recentParams.length > 0 ? `• آخرین سنجش‌ها: ${recentParams.join(' | ')}` : '',
-        ].filter(Boolean).join('\n'),
-        data: { totalLogs: total, compliant, nonCompliant, recentParams },
+          `• مجموع رکوردهای محیط‌زیستی متصل: ${totalRecords} مورد`,
+          `• تفکیک بخش‌ها: ${categories.map(item => `${item.category}: ${item.total} (عدم انطباق ثبت‌شده: ${item.nonCompliant})`).join('؛ ')}`,
+          `• رکوردهای دارای وضعیت انطباق مشخص: ${complianceKnownRecords}؛ منطبق: ${compliantRecords}؛ وضعیت نامشخص: ${unknownComplianceRecords}`,
+          `• عدم انطباق‌های ثبت‌شده در چک‌لیست/سامانه: ${nonConformances.length} مورد`,
+        ].join('\n'),
+        data: {
+          totalRecords,
+          nonCompliantRecords,
+          complianceKnownRecords,
+          compliantRecords,
+          unknownComplianceRecords,
+          categories,
+          recentRecords,
+          sourceCoverage: {
+            monitoring: monitoring.length,
+            waste: waste.length,
+            wastewater: wastewater.length,
+            airQuality: airQuality.length,
+            waterSoil: waterSoil.length,
+            nonConformances: nonConformances.length,
+          },
+        },
         timestamp: new Date().toISOString(),
       };
-    } catch {
+    } catch (err: any) {
+      logger.warn('[AITools] environment summary unavailable', { error: err?.message });
       return {
         toolName: 'environment_summary',
         titleFa: 'ماژول محیط زیست و پسماند',
-        summary: 'اطلاعات محیط زیست در دسترس نیست.',
+        summary: 'اطلاعات محیط زیست در این لحظه از پایگاه داده قابل دریافت نیست؛ هیچ آماری حدس زده نشده است.',
         data: {},
         timestamp: new Date().toISOString(),
       };
@@ -841,45 +1486,58 @@ export class AIToolsRegistry {
   /**
    * Tool 20: Complete HSECORE System Architecture & Blueprint (معماری جامع، ماژول‌ها، تب‌ها، فرم‌ها و قابلیت‌ها)
    */
-  async getSystemArchitectureAndCapabilitiesSummary(): Promise<AIToolResult> {
+  async getSystemArchitectureAndCapabilitiesSummary(userContext?: UserContext): Promise<AIToolResult> {
+    if (!userContext) {
+      return {
+        toolName: 'system_architecture_summary',
+        titleFa: 'رجیستری ساختار و پوشش ماژول‌های HSECORE',
+        summary: 'برای مشاهده ساختار و سطح اتصال ماژول‌ها، احراز هویت لازم است.',
+        data: {},
+        timestamp: new Date().toISOString(),
+      };
+    }
+
+    const modules = await getAIModuleCatalog(userContext);
+    const allItems: Array<{ moduleId: string; moduleNameFa: string; connected: boolean; allowed: boolean }> = [];
+    const visit = (item: any) => {
+      allItems.push(item);
+      (item.children || []).forEach(visit);
+    };
+    modules.forEach(visit);
+    const connected = allItems.filter(item => item.allowed && item.connected);
+    const unavailable = allItems.filter(item => item.allowed && !item.connected);
+    const restricted = allItems.filter(item => !item.allowed);
+
     return {
       toolName: 'system_architecture_summary',
-      titleFa: 'نقشه معماری جامع، ساختار ماژول‌ها، تب‌ها، فرم‌ها و قابلیت‌های HSECORE',
+      titleFa: 'رجیستری زنده ساختار و پوشش ماژول‌های HSECORE',
       summary: [
-        `🏛️ **معماری جامع سامانه یکپارچه HSECORE:**`,
-        `۱. **ماژول‌ها و تب‌های عملیاتی سامانه (۲۴ ماژول یکپارچه):**`,
-        `   • داشبورد مدیریتی (Dashboard): تب‌های شاخص‌های کلیدی، نمودارهای TRIR/LTIFR، تقویم HSE، خلاصه وضعیت ایستگاه‌های کاری`,
-        `   • استرس گرمایی (Heat Stress): تب هواشناسی آنلاین، محاسبه دمای تر گوی‌سان (WBGT آفتاب و سایه طبق ISO 7243)، رژیم کار-استراحت، آلارم صوتی`,
-        `   • پروانه کار ایمن (PTW): تب‌های کار گرم، سرد، فضای بسته، ارتفاع، حفاری، ایزولاسیون LOTO، تست گاز و ارجاعات الکترونیکی`,
-        `   • واحد ایمنی (Safety Unit): تب بازرسی‌های کارگاهی، چک‌لیست‌های دوره‌ای، کمیته‌های حفاظت فنی و ایمنی ماشین‌آلات`,
-        `   • آتش‌نشانی و امداد (Fire Dept): تب بازرسی کپسول‌ها، فایرباکس، سناریوهای واکنش در شرایط اضطراری (ERP) و مانورها`,
-        `   • بهداشت و محیط زیست (Health & Env): تب‌های طب کار (معاینات ادواری و بدو استخدام)، ارگونومی، پایش عوامل زیان‌آور فیزیکی/شیمیایی، پسماند و پساب`,
-        `   • ارزیابی ریسک (Risk Assessment): تب متدولوژی‌های JSA, FMEA, HAZOP، ماتریس ۵×۵ و سلسله‌مراتب اقدامات کنترلی`,
-        `   • حوادث و شبه‌حوادث (Incidents): تب ثبت رخداد، ماتریس علل ریشه‌ای (RCA / Fishbone)، اقدامات اصلاحی (CAPA) و آمار خسارات`,
-        `   • اخطارها و ناهنجاری‌ها (Warnings): تب ثبت شرایط و اعمال ناایمن، تعیین مهلت رفع و پیگیری بازرسی‌ها`,
-        `   • عدم انطباق‌ها (Non-Conformances): تب ممیزی داخلی و خارجی، استانداردهای ISO 45001 / ISO 14001 و تاییدیه رفع`,
-        `   • آموزش و صلاحیت (Training): تب تقویم آموزشی سالیانه، ماتریس شایستگی، سوابق دوره‌ها و صدور گواهینامه`,
-        `   • تجهیزات حفاظت فردی (PPE): تب جدول استحقاق، انبارداری اقلام، تاریخ انقضا و فرم‌های تحویل به پرسنل`,
-        `   • پرونده پرسنلی (Personnel): تب مشخصات، سوابق سلامت، حوادث گذشته، جایگاه در چارت سازمانی و مدارک پیوست`,
-        `   • فرآیندها و گردش کار (BPMN): تب دیاگرام‌های فرآیندی استاندارد، کارتابل اسناد، امضاهای دیجیتال چندمرحله‌ای`,
-        `   • کتابخانه مستندات (Documents & RAG): تب خط‌مشی‌ها، آیین‌نامه‌ها، دستورالعمل‌های کاری و جستجوی معنایی هوش مصنوعی`,
-        `   • کاربران و نقش‌ها (User Management & RBAC): تب تعریف کاربران، نقش‌ها (مدیر، کارشناس، پزشک، ناظر) و حدود دسترسی`,
-        `   • تنظیمات سامانه و پشتیبان‌گیری (System Settings): تب پارامترهای سرور، پیکربندی هوش مصنوعی، پایگاه داده و بکاپ خودکار`,
-        `   • هشدارها و اعلان‌ها (Notifications): تب هشدارهای بلادرنگ کارتابل، رویدادهای بحرانی و اعلان‌های درون‌برنامه‌ای`,
-        `۲. **فرم‌های ثبت اطلاعات:**`,
-        `   • فرم صدور PTW، فرم گازسنجی، فرم ایزولاسیون مکانیکی/الکتریکی، فرم گزارش حادثه، فرم JSA، فرم معاینات طب کار، فرم تحویل PPE، فرم بازرسی آتش‌نشانی و فرم‌های ممیزی ۵S`,
-        `۳. **پایگاه داده و جداول:**`,
-        `   • بیش از ۲۵ جدول رابطه‌ای PostgreSQL شامل users, personnel, work_permits, incidents, risk_assessments, notifications, non_conformances, system_settings و audit_logs`,
-        `۴. **قابلیت‌های فعلی و آینده:**`,
-        `   • قابلیت‌های فعلی: همگام‌سازی آفلاین، موتور هوش مصنوعی محلی Ollama، جستجوی عمیق RAG، امضای دیجیتال و محاسبات فیزیک هواشناسی`,
-        `   • قابلیت‌های نقشه راه آینده: اتصال سنسورهای اینترنت اشیاء (IoT) برای گازسنجی آنلاین، هوش مصنوعی بینایی ماشین برای تشخیص PPE و پیش‌بینی ریسک حوادث`,
+        `• تعداد ماژول‌های اصلی ثبت‌شده: ${modules.length}`,
+        `• تعداد زیرماژول‌ها و تب‌های ثبت‌شده: ${allItems.length - modules.length}`,
+        `• بخش‌های دارای منبع داده متصل و مجاز: ${connected.length}`,
+        `• بخش‌های مجاز بدون Adapter داده: ${unavailable.length}`,
+        `• بخش‌های خارج از سطح دسترسی کاربر: ${restricted.length}`,
+        `• فهرست ماژول‌ها: ${modules.map(item => item.moduleNameFa).join('، ')}`,
+        'این گزارش از رجیستری واقعی و وضعیت Adapterهای خواندن ساخته شده است؛ قابلیت‌های آینده یا داده‌های فاقد اتصال در آن به‌عنوان قابلیت موجود معرفی نمی‌شوند.',
       ].join('\n'),
       data: {
-        totalModules: 24,
-        hasBPMN: true,
-        hasIoTSupport: true,
-        databaseType: 'PostgreSQL with Drizzle ORM',
-        offlineSupport: true,
+        totalModules: modules.length,
+        totalSubmodulesAndTabs: allItems.length - modules.length,
+        connectedAccessibleSections: connected.length,
+        unavailableAccessibleSections: unavailable.length,
+        restrictedSections: restricted.length,
+        modules: modules.map(item => {
+          const serializeTree = (node: any): any => ({
+            moduleId: node.moduleId,
+            moduleNameFa: node.moduleNameFa,
+            connected: node.connected,
+            allowed: node.allowed,
+            tools: node.tools,
+            notes: node.notes,
+            children: (node.children || []).map(serializeTree),
+          });
+          return serializeTree(item);
+        }),
       },
       timestamp: new Date().toISOString(),
     };
@@ -889,7 +1547,7 @@ export class AIToolsRegistry {
    * Tool 21: Universal Cross-Module Deep Search (جستجوی هوشمند رکوردها در تمامی ماژول‌های سامانه)
    * Matches colloquial terms, names, codes, locations, or descriptions across all database tables.
    */
-  async searchAcrossAllModules(rawQuery: string, includeSensitivePersonnel = true): Promise<AIToolResult | null> {
+  async searchAcrossAllModules(rawQuery: string): Promise<AIToolResult | null> {
     const normalizedQ = normalizePersianText(rawQuery);
     const stopWords = new Set([
       'از', 'به', 'در', 'با', 'برای', 'چه', 'چند', 'چطور', 'کجا', 'کی', 'ماژول', 'بخش', 'قسمت',
@@ -906,7 +1564,7 @@ export class AIToolsRegistry {
     if (tokens.length === 0) return null;
 
     try {
-      const [permits, incidents, risks, warnings, ncs, fireEq, trainings, envLogs, personnelList, notifsList, usersList] = await Promise.all([
+      const [permits, incidents, risks, warnings, ncs, fireEq, trainings, envLogs, notifsList] = await Promise.all([
         ptwRepository.findAll().catch(() => []),
         incidentRepository.findAll().catch(() => []),
         db.select().from(schema.riskAssessments).catch(() => []),
@@ -915,9 +1573,7 @@ export class AIToolsRegistry {
         db.select().from(schema.fireEquipment).catch(() => []),
         db.select().from(schema.hseTrainings).catch(() => []),
         db.select().from(schema.environmentalLogs).catch(() => []),
-        includeSensitivePersonnel ? db.select().from(schema.personnel).catch(() => []) : Promise.resolve([]),
         db.select().from(schema.notifications).catch(() => []),
-        includeSensitivePersonnel ? db.select().from(schema.users).catch(() => []) : Promise.resolve([]),
       ]);
 
       const matchesToken = (text: string): number => {
@@ -1002,29 +1658,11 @@ export class AIToolsRegistry {
         }
       }
 
-      // Search Personnel
-      for (const p of personnelList as any[]) {
-        const blob = `${p.firstName || ''} ${p.lastName || ''} ${p.personnelCode || ''} ${p.nationalCode || ''} ${p.jobTitle || ''}`;
-        if (matchesToken(blob) > 0) {
-          matchedLines.push(`• [پرونده پرسنلی] نام: ${p.firstName} ${p.lastName} | کد پرسنلی: ${p.personnelCode} | سمت: ${p.jobTitle || '-'} | وضعیت: ${p.status}`);
-          if (matchedLines.length >= 12) break;
-        }
-      }
-
       // Search Notifications & Alerts
       for (const n of (notifsList || []) as any[]) {
         const blob = `${n.title || ''} ${n.body || ''} ${n.sourceModule || ''} ${n.priority || ''}`;
         if (matchesToken(blob) > 0) {
           matchedLines.push(`• [اعلان/هشدار] عنوان: ${n.title} | اولویت: ${n.priority || '-'} | مبدأ: ${n.sourceModule || 'سامانه'}`);
-          if (matchedLines.length >= 12) break;
-        }
-      }
-
-      // Search Users & Roles
-      for (const u of (usersList || []) as any[]) {
-        const blob = `${u.username || ''} ${u.fullName || ''} ${u.email || ''} ${u.role || ''} ${u.personnelNumber || ''}`;
-        if (matchesToken(blob) > 0) {
-          matchedLines.push(`• [کاربر سامانه] نام: ${u.fullName || u.username} | نقش: ${u.role} | ایمیل: ${u.email}`);
           if (matchedLines.length >= 12) break;
         }
       }

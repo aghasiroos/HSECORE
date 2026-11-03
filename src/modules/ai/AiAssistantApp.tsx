@@ -15,6 +15,8 @@ import {
   Search,
   Square,
   Sliders,
+  Layers,
+  X,
 } from 'lucide-react';
 import { UserProfile } from '../../types';
 import { authFetch } from '../../services/apiDatabaseClient';
@@ -28,6 +30,18 @@ export interface ChatMessage {
   citations?: string[];
   durationMs?: number;
   model?: string;
+  moduleScope?: string[];
+}
+
+interface AIModulePickerItem {
+  moduleId: string;
+  moduleNameFa: string;
+  connected: boolean;
+  allowed: boolean;
+  enabled?: boolean;
+  parentId?: string;
+  notes?: string;
+  children?: AIModulePickerItem[];
 }
 
 export interface ChatSession {
@@ -51,8 +65,8 @@ export function getAiAllowToolsSetting(): boolean {
 const GENERAL_AI_ASSISTANT = {
   id: 'GENERAL_HSE',
   nameFa: 'دستیار هوش مصنوعی',
-  title: 'گفت‌وگوی عمومی با مدل‌های زبانی محلی نصب‌شده',
-  description: 'هر پرسشی دارید مطرح کنید؛ پاسخ‌ها مستقیماً توسط مدل انتخاب‌شده در موتور محلی Ollama تولید می‌شوند.',
+  title: 'گفت‌وگوی عمومی و تحلیل داده‌های HSECORE',
+  description: 'گفت‌وگوی عمومی با مدل محلی یا تحلیل مستند ماژول‌ها و گزارش مدیریتی با انتخاب / و /ALL.',
   promptSuggestions: [
     'مفهوم هوش مصنوعی مولد را ساده و با مثال توضیح بده.',
     'برای یادگیری یک مهارت جدید، برنامه ۳۰ روزه طراحی کن.',
@@ -80,6 +94,11 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string>('');
   const [searchSessionQuery, setSearchSessionQuery] = useState<string>('');
+  const [moduleCatalog, setModuleCatalog] = useState<AIModulePickerItem[]>([]);
+  const [selectedModuleIds, setSelectedModuleIds] = useState<string[]>([]);
+  const [modulePickerOpen, setModulePickerOpen] = useState(false);
+  const [moduleSearch, setModuleSearch] = useState('');
+  const [moduleCatalogLoading, setModuleCatalogLoading] = useState(false);
 
   const activeSession = sessions.find(s => s.id === activeSessionId) || sessions[0];
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -215,6 +234,21 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
 
   useEffect(() => {
     loadSessionsFromServer();
+    void (async () => {
+      setModuleCatalogLoading(true);
+      try {
+        const response = await authFetch('/api/v1/ai/modules');
+        const payload = await response.json();
+        if (!response.ok || !payload?.success || !Array.isArray(payload.data)) {
+          throw new Error(payload?.message || 'فهرست ماژول‌های هوش مصنوعی دریافت نشد.');
+        }
+        setModuleCatalog(payload.data);
+      } catch {
+        setModuleCatalog([]);
+      } finally {
+        setModuleCatalogLoading(false);
+      }
+    })();
     void refreshInstalledModels();
     // Runtime can be enabled or models can be installed while this module is open.
     // Refresh from the live backend inventory without requiring a page reload.
@@ -329,8 +363,74 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
     setTimeout(() => setCopiedId(null), 2000);
   };
 
+  const flatModuleCatalog: AIModulePickerItem[] = [];
+  const appendCatalogTree = (item: AIModulePickerItem) => {
+    flatModuleCatalog.push(item);
+    (item.children || []).forEach(appendCatalogTree);
+  };
+  moduleCatalog.forEach(appendCatalogTree);
+  useEffect(() => {
+    if (moduleCatalogLoading || moduleCatalog.length === 0 ||
+        !/(?:^|\s)\/all\s*$/i.test(inputMessage)) return;
+    const allItems: AIModulePickerItem[] = [];
+    const visit = (item: AIModulePickerItem) => {
+      allItems.push(item);
+      (item.children || []).forEach(visit);
+    };
+    moduleCatalog.forEach(visit);
+    setSelectedModuleIds(allItems.filter(item => item.allowed).map(item => item.moduleId));
+    setInputMessage(current => current.replace(/(?:^|\s)\/all\s*$/i, '').trimStart());
+    setModulePickerOpen(false);
+    setModuleSearch('');
+  }, [moduleCatalogLoading, moduleCatalog, inputMessage]);
+
+
+  const handleComposerChange = (value: string) => {
+    const slashMatch = value.match(/(?:^|\s)\/([^\s]*)$/);
+    if (slashMatch) {
+      const query = slashMatch[1] || '';
+      if (/^all$/i.test(query)) {
+        if (moduleCatalogLoading || moduleCatalog.length === 0) {
+          setInputMessage(value);
+          setModuleSearch('');
+          setModulePickerOpen(true);
+          return;
+        }
+        setSelectedModuleIds(flatModuleCatalog.filter(item => item.allowed).map(item => item.moduleId));
+        setInputMessage(value.replace(/(?:^|\s)\/all\s*$/i, '').trimStart());
+        setModulePickerOpen(false);
+        setModuleSearch('');
+        return;
+      }
+      setInputMessage(value);
+      setModuleSearch(query);
+      setModulePickerOpen(true);
+      return;
+    }
+    setInputMessage(value);
+    setModulePickerOpen(false);
+  };
+
+  const toggleModuleSelection = (moduleId: string) => {
+    setSelectedModuleIds(current => current.includes(moduleId)
+      ? current.filter(id => id !== moduleId)
+      : [...current, moduleId]);
+    setInputMessage(current => current.replace(/(?:^|\s)\/[^\s]*$/, '').trimEnd());
+    setModulePickerOpen(true);
+  };
+
+  const clearSlashCommand = () => {
+    setInputMessage(current => current.replace(/(?:^|\s)\/[^\s]*$/, '').trimEnd());
+    setModulePickerOpen(false);
+    setModuleSearch('');
+  };
+
+  const selectedModuleNames = selectedModuleIds
+    .map(id => flatModuleCatalog.find(item => item.moduleId === id)?.moduleNameFa)
+    .filter((name): name is string => Boolean(name));
+
   const handleSendMessage = async (textToSend?: string) => {
-    const text = (textToSend || inputMessage).trim();
+    const text = (textToSend || inputMessage).replace(/(?:^|\s)\/[^\s]*$/, '').trim();
     if (!text || isLoading) return;
 
     // If user deleted all sessions, create one on first send
@@ -361,11 +461,14 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
     }
 
     setInputMessage('');
+    setModulePickerOpen(false);
+    setModuleSearch('');
 
     const userMsg: ChatMessage = {
       id: `msg-${Date.now()}`,
       role: 'user',
       content: text,
+      moduleScope: [...selectedModuleNames],
       timestamp: new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }),
     };
 
@@ -415,6 +518,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
           stream: true,
           num_ctx: selectedContext === 'auto' ? undefined : Number(selectedContext),
           contextTokens: selectedContext === 'auto' ? undefined : Number(selectedContext),
+          selectedModuleIds: selectedModuleIds.length > 0 ? selectedModuleIds : undefined,
         }),
         signal: requestController.signal,
       });
@@ -440,6 +544,8 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
       const decoder = new TextDecoder();
       let pending = '';
       let streamError = '';
+      let responseToolsUsed: string[] = [];
+      let responseCitations: string[] = [];
       const applyEvent = (line: string) => {
         if (!line.startsWith('data:')) return;
         const payload = JSON.parse(line.slice(5).trim());
@@ -452,6 +558,18 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
         }
         if (payload.model) { responseModel = payload.model; partialResponseModel = responseModel; }
         if (payload.durationMs) { durationMs = payload.durationMs; partialDurationMs = durationMs; }
+        if (Array.isArray(payload.toolsUsed)) {
+          responseToolsUsed = payload.toolsUsed;
+          setSessions(prev => prev.map(s => s.id === sessionId ? {
+            ...s, messages: s.messages.map(m => m.id === assistantId ? { ...m, toolsUsed: responseToolsUsed } : m),
+          } : s));
+        }
+        if (Array.isArray(payload.citations)) {
+          responseCitations = payload.citations;
+          setSessions(prev => prev.map(s => s.id === sessionId ? {
+            ...s, messages: s.messages.map(m => m.id === assistantId ? { ...m, citations: responseCitations } : m),
+          } : s));
+        }
         if (payload.error) streamError = payload.error;
       };
       while (true) {
@@ -472,7 +590,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            role: 'assistant', content: assistantText, toolsUsed: [], citations: [],
+            role: 'assistant', content: assistantText, toolsUsed: responseToolsUsed, citations: responseCitations,
             durationMs, model: responseModel,
           }),
         });
@@ -485,6 +603,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
           id: partialAssistantId, role: 'assistant', content: partialAssistantText,
           timestamp: new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }),
           model: partialResponseModel, durationMs: partialDurationMs,
+          toolsUsed: responseToolsUsed, citations: responseCitations,
         };
         setSessions(prev => prev.map(s => s.id === sessionId ? {
           ...s, messages: [...s.messages.filter(m => m.id !== partialAssistantId), partialMessage],
@@ -493,7 +612,7 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
           await authFetch(`/api/v1/ai/sessions/${sessionId}/messages`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              role: 'assistant', content: partialAssistantText, toolsUsed: [], citations: [],
+              role: 'assistant', content: partialAssistantText, toolsUsed: responseToolsUsed, citations: responseCitations,
               durationMs: partialDurationMs, model: partialResponseModel,
             }),
           });
@@ -582,6 +701,8 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
                 <div
                   key={session.id}
                   onClick={() => {
+                    if (activeSessionId !== session.id) setSelectedModuleIds([]);
+                    setModulePickerOpen(false);
                     setActiveSessionId(session.id);
                     setSidebarOpen(false);
                   }}
@@ -707,6 +828,9 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
                     : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-200 rounded-ts-sm'
                 }`}
               >
+                {msg.moduleScope && msg.moduleScope.length > 0 && (
+                  <div className="mb-2 text-[10px] text-violet-100/90">دامنه تحلیل: {msg.moduleScope.join('، ')}</div>
+                )}
                 <div className="whitespace-pre-wrap">{msg.content}</div>
                 {(msg.toolsUsed?.length || msg.citations?.length) ? (
                   <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-800 space-y-1">
@@ -763,15 +887,64 @@ export default function AiAssistantApp({ language = 'fa' }: AiAssistantAppProps)
               </div>
             )}
             <div className="relative rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/90 shadow-sm focus-within:border-violet-500 focus-within:ring-2 focus-within:ring-violet-500/20 transition-all p-2.5">
+              {modulePickerOpen && (
+                <div className="absolute bottom-full inset-x-0 mb-2 z-30 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-xl overflow-hidden">
+                  <div className="flex items-center justify-between px-3 py-2 border-b border-slate-100 dark:border-slate-800">
+                    <div className="flex items-center gap-2 text-xs font-bold text-slate-700 dark:text-slate-200">
+                      <Layers className="w-4 h-4 text-violet-500" />
+                      انتخاب ماژول‌ها و زیرماژول‌ها
+                    </div>
+                    <button type="button" onClick={clearSlashCommand} className="text-[11px] text-violet-600 dark:text-violet-400">تأیید انتخاب</button>
+                  </div>
+                  <div className="max-h-64 overflow-y-auto p-2 space-y-1">
+                    {moduleCatalogLoading && <div className="p-3 text-xs text-slate-400">در حال دریافت فهرست واقعی ماژول‌ها...</div>}
+                    {!moduleCatalogLoading && flatModuleCatalog
+                      .filter(item => !moduleSearch || item.moduleNameFa.toLowerCase().includes(moduleSearch.toLowerCase()) || item.moduleId.toLowerCase().includes(moduleSearch.toLowerCase()))
+                      .map(item => (
+                        <label key={item.moduleId} title={item.notes || item.moduleId} className={`flex items-center gap-2 rounded-lg px-2 py-2 text-xs ${item.allowed ? 'cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800' : 'opacity-45 cursor-not-allowed'}`}>
+                          <input
+                            type="checkbox"
+                            checked={selectedModuleIds.includes(item.moduleId)}
+                            disabled={!item.allowed}
+                            onChange={() => toggleModuleSelection(item.moduleId)}
+                            className="accent-violet-600"
+                          />
+                          <span className="flex-1 text-slate-700 dark:text-slate-200">{item.parentId ? '↳ ' : ''}{item.moduleNameFa}</span>
+                          <span className={`text-[10px] ${item.connected ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                            {!item.enabled ? 'غیرفعال' : !item.allowed ? 'بدون مجوز' : item.connected ? 'داده متصل' : 'بدون اتصال داده'}
+                          </span>
+                        </label>
+                      ))}
+                    {!moduleCatalogLoading && flatModuleCatalog.filter(item => !moduleSearch || item.moduleNameFa.toLowerCase().includes(moduleSearch.toLowerCase()) || item.moduleId.toLowerCase().includes(moduleSearch.toLowerCase())).length === 0 && (
+                      <div className="p-3 text-xs text-slate-400">ماژولی با این عنوان پیدا نشد.</div>
+                    )}
+                  </div>
+                  <div className="flex items-center justify-between px-3 py-2 border-t border-slate-100 dark:border-slate-800 text-[10px] text-slate-400">
+                    <span>{selectedModuleIds.length} بخش انتخاب‌شده · برای انتخاب همه بنویسید /ALL</span>
+                    <button type="button" onClick={() => setSelectedModuleIds(flatModuleCatalog.filter(item => item.allowed).map(item => item.moduleId))} className="text-violet-600 dark:text-violet-400 font-semibold">انتخاب همه مجاز</button>
+                  </div>
+                </div>
+              )}
               <textarea
                 value={inputMessage}
-                onChange={e => setInputMessage(e.target.value)}
+                onChange={e => handleComposerChange(e.target.value)}
                 onKeyDown={handleKeyDown}
                 rows={2}
-                placeholder="پیام خود را بنویسید...‎"
+                placeholder="پیام خود را بنویسید؛ برای انتخاب ماژول / را تایپ کنید..."
                 className="w-full resize-none bg-transparent border-0 px-2 py-1 text-sm outline-none text-slate-800 dark:text-slate-100 placeholder:text-slate-400 max-h-40"
                 disabled={isLoading || sessionsLoading}
               />
+              {selectedModuleNames.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 px-1 pt-1">
+                  {selectedModuleNames.map((name, index) => (
+                    <span key={selectedModuleIds[index]} className="inline-flex items-center gap-1 rounded-full bg-violet-50 dark:bg-violet-950/40 border border-violet-200 dark:border-violet-800 px-2 py-1 text-[10px] text-violet-700 dark:text-violet-300">
+                      {name}
+                      <button type="button" onClick={() => setSelectedModuleIds(ids => ids.filter(id => id !== selectedModuleIds[index]))} title="حذف انتخاب"><X className="w-3 h-3" /></button>
+                    </span>
+                  ))}
+                  <button type="button" onClick={() => setSelectedModuleIds([])} className="text-[10px] text-slate-400 hover:text-rose-500">پاک‌کردن انتخاب‌ها</button>
+                </div>
+              )}
               <div className="flex items-center justify-between pt-2 border-t border-slate-200/60 dark:border-slate-700/60 mt-1 gap-2">
                 {/* Right side in RTL (start): Professional Model & Provider Selector and Context Tuning */}
                 <div className="flex items-center gap-2 flex-1 min-w-0 flex-wrap">
