@@ -209,6 +209,13 @@ export class AIOrchestrator {
         results.push(res);
       } catch (err) {
         logger.warn(`[AIOrchestrator] Failed to execute tool: ${toolName}`, { error: String(err) });
+        results.push({
+          toolName: `failed_${toolName}`,
+          titleFa: `خطا در استخراج داده: ${toolName}`,
+          summary: 'استخراج داده از این منبع با خطا مواجه شد؛ بنابراین این منبع در تحلیل حاضر پوشش داده نشده است. نتیجه‌ای برای آن حدس زده نشده است.',
+          data: { status: 'failed', sourceTool: toolName },
+          timestamp: new Date().toISOString(),
+        });
       }
     };
 
