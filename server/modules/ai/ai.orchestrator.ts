@@ -101,6 +101,7 @@ export class AIOrchestrator {
       notifications_summary: 'notifications:read',
       users_roles_summary: '',
       settings_backup_summary: '',
+      system_architecture_summary: '',
     };
 
     const sensitiveToolsRequiringGlobalScope = new Set([
@@ -109,6 +110,7 @@ export class AIOrchestrator {
       'personnel_org_summary',
       'users_roles_summary',
       'settings_backup_summary',
+      'system_architecture_summary',
     ]);
 
     const checkAndExecute = async (toolName: string, execFn: () => Promise<AIToolResult>) => {
@@ -162,6 +164,7 @@ export class AIOrchestrator {
         notifications_summary: () => aiToolsRegistry.getNotificationsAndAlertsSummary(),
         users_roles_summary: () => aiToolsRegistry.getUsersAndRolesSummary(),
         settings_backup_summary: () => aiToolsRegistry.getSettingsAndBackupSummary(),
+        system_architecture_summary: () => aiToolsRegistry.getSystemArchitectureAndCapabilitiesSummary(userContext),
       };
       for (const toolName of selectedTools) {
         const executor = executors[toolName];
