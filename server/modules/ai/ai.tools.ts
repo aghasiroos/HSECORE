@@ -596,7 +596,11 @@ export class AIToolsRegistry {
       const byMethod = Array.from(byMethodMap.entries()).map(([method, value]) => ({ method, ...value }));
       const byStatus = Array.from(byStatusMap.entries()).map(([status, count]) => ({ status, count }));
       const residualHighRisks = risks.filter((r: any) => ['HIGH', 'EXTREME', 'CRITICAL'].includes(String(r.residualRiskLevel || '').toUpperCase())).length;
-      const topHazards = (risks as any[]).slice(0, 5).map((r: any) =>
+      const topHazards = (risks as any[])
+        .slice()
+        .sort((a: any, b: any) => Number(b.initialRiskScore || 0) - Number(a.initialRiskScore || 0))
+        .slice(0, 5)
+        .map((r: any) =>
         `${r.activityTitle || 'فعالیت نامشخص'}: ${r.hazardDescription || 'شرح خطر ثبت نشده'} (ریسک اولیه: ${r.initialRiskLevel || 'نامشخص'}؛ ریسک باقیمانده: ${r.residualRiskLevel || 'ثبت نشده'})`
       );
 
