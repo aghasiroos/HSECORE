@@ -22,6 +22,7 @@ import { getAIModuleCatalog, getAIModuleToolNames, getSelectedModuleDescriptions
 const ALL_MODULE_TOOLS = [
   'heat_weather_summary',
   'ptw_summary',
+  'ptw_audit_summary',
   'incidents_summary',
   'health_medical_summary',
   'nutrition_high_risk_summary',
@@ -35,6 +36,11 @@ const ALL_MODULE_TOOLS = [
   'personnel_org_summary',
   'workflow_referrals_summary',
   'kpi_management_summary',
+  'non_conformances_summary',
+  'notifications_summary',
+  'users_roles_summary',
+  'settings_backup_summary',
+  'system_architecture_summary',
   'universal_search',
 ];
 
@@ -43,7 +49,7 @@ export const COMPREHENSIVE_HSE_ASSISTANT: AIAssistantMetadata = {
   name: 'Comprehensive HSE & Legal Consultant',
   nameFa: 'مشاور جامع HSE و مراجع قانونی',
   title: 'مرجع تخصصی قوانین کار، آیین‌نامه‌های حفاظت فنی، استانداردهای ملی و بین‌المللی و پایش جامع ماژول‌های HSECORE',
-  description: 'پاسخگویی مستند به مراجع قانونی کشور (فصل چهارم قانون کار، شورای عالی حفاظت فنی، وزارت بهداشت، سازمان محیط زیست)، استانداردهای OSHA / ISO 45001 / ISO 14001 / NFPA / ACGIH و استخراج برخط داده‌های تمامی ماژول‌های سامانه.',
+  description: 'پاسخگویی مستند به مراجع قانونی و استانداردهای HSE و تحلیل برخط داده‌های ماژول‌هایی که Adapter خواندن و مجوز دسترسی معتبر دارند؛ بخش‌های فاقد اتصال داده صریحاً مشخص می‌شوند.',
   systemPrompt: `شما «مشاور جامع HSE و مراجع قانونی» در سامانه سازمانی HSECORE هستید.
 وظیفه شما ارائه مشاوره جامع، دقیق، علمی و مستند در تمامی حوزه‌های ایمنی، بهداشت حرفه‌ای، طب کار، ارگونومی، آتش‌نشانی، فرآیند و محیط زیست است.
 در تمامی پاسخ‌های خود اصول زیر را رعایت فرمایید:
