@@ -7,7 +7,7 @@ import { weatherService } from '../weather/service.ts';
 import { isWeatherRecordStale } from '../weather/physics.ts';
 import { logger } from '../core/logger.ts';
 import { broadcastDataMutation } from '../core/socket.ts';
-import { DEFAULT_DASHBOARD_CARDS_LAYOUT } from '../../src/hooks/useDashboardMetrics.ts';
+import { DEFAULT_DASHBOARD_CARDS_LAYOUT } from '../../src/config/modulesConfig.ts';
 
 export const dashboardRouter = Router();
 

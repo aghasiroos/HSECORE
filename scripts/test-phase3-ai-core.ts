@@ -56,8 +56,32 @@ async function runPhase3Tests() {
   }
   console.log('  -> [PASS] Unified Comprehensive Legal Consultant verified.\n');
 
-  // Test 4: Chat Orchestration with Tool Grounding & Fallback
+  // Test 4: Chat Orchestration with Autonomous Tool Grounding & Pure LLM Execution
   console.log('[Test 4] Testing Chat Orchestration with Autonomous Tool Grounding:');
+  const { localAIProvider } = await import('../server/modules/ai/ai.local-provider.ts');
+  const { aiService } = await import('../server/modules/ai/ai.service.ts');
+
+  // Verify that without models installed, it throws clean error and does NOT fall back to internal analytical search engine
+  let blockedFallback = false;
+  try {
+    await aiOrchestrator.processChat(
+      { message: 'گزارش پروانه‌های کار', assistantId: 'GENERAL_HSE', allowTools: true },
+      { uid: 'test-admin-uid', id: 1, name: 'مدیر ارشد HSE', role: 'ADMIN', permissions: ['*'] }
+    );
+  } catch (err: any) {
+    if (err?.message?.includes('هیچ مدل زبانی') || err?.message?.includes('خطا در پردازش')) {
+      blockedFallback = true;
+    }
+  }
+  if (!blockedFallback) throw new Error('Expected internal search fallback to be disabled when no LLM is installed!');
+  console.log('  - Verified: Internal search/analytical engine fallback is completely disabled.');
+
+  // Verify pure LLM response when model is available
+  const origList = aiService.listInstalledModels;
+  const origChat = localAIProvider.chat;
+  aiService.listInstalledModels = async () => [{ name: 'qwen2.5:1.5b', model: 'qwen2.5:1.5b' }] as any;
+  localAIProvider.chat = async () => ({ text: 'تحلیل پروانه‌های کار و حوادث بر اساس داده‌های مجاز استخراج‌شده انجام شد.', model: 'qwen2.5:1.5b', durationMs: 120 });
+
   const chatResponse = await aiOrchestrator.processChat(
     {
       message: 'گزارش پروانه‌های کار و حوادث فعال امروز را خلاصه کن.',
@@ -67,12 +91,16 @@ async function runPhase3Tests() {
     { uid: 'test-admin-uid', id: 1, name: 'مدیر ارشد HSE', role: 'ADMIN', permissions: ['*'] }
   );
 
+  aiService.listInstalledModels = origList;
+  localAIProvider.chat = origChat;
+
   console.log(`  - Response Success : ${chatResponse.success}`);
   console.log(`  - Assistant Used   : ${chatResponse.assistantId}`);
+  console.log(`  - Model Returned   : ${chatResponse.model}`);
   console.log(`  - Tools Executed   : ${chatResponse.toolsUsed.join(', ')}`);
-  console.log(`  - Duration         : ${chatResponse.durationMs}ms`);
   console.log(`  - Reply Snippet    : "${chatResponse.reply.slice(0, 140)}..."`);
-  console.log('  -> [PASS] Chat Orchestration executed cleanly with tool grounding.\n');
+  if (chatResponse.model.includes('analytical-engine')) throw new Error('Model should never be internal analytical engine!');
+  console.log('  -> [PASS] Pure LLM Chat Orchestration verified (zero internal analytical fallback).\n');
 
   // Test 5: Queue & Audit Telemetry
   console.log('[Test 5] Testing Queue Telemetry & Audit Trail:');

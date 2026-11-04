@@ -105,7 +105,6 @@ const ALL_MODULE_TOOLS = [
   'notifications_summary',
   'users_roles_summary',
   'settings_backup_summary',
-  'universal_search',
 ];
 
 export const COMPREHENSIVE_HSE_ASSISTANT: AIAssistantMetadata = {
@@ -482,6 +481,12 @@ export class AIOrchestrator {
     if (isExplicitAllModulesCommand(trimmed) && allowTools) {
       const crossAnalysis = await aiToolsRegistry.getAllModulesCrossAnalysis(userContext);
       toolResults.push(crossAnalysis);
+      return {
+        isSlashCommand: false,
+        toolResults,
+        toolsUsed: [crossAnalysis.titleFa],
+        citations: [crossAnalysis.titleFa],
+      };
     }
 
     const resolved = await this.resolveToolsToExecute(trimmed, allowTools, userContext, selectedModules);
@@ -536,7 +541,7 @@ export class AIOrchestrator {
         toolsUsed: [tree.titleFa],
         citations: [tree.titleFa],
         durationMs,
-        model: config.aiEngine.defaultChatModel || 'hsecore-analytical-engine',
+        model: config.aiEngine.defaultChatModel || 'system',
         queueWaitMs: 0,
       };
     }
@@ -690,7 +695,7 @@ export class AIOrchestrator {
     // 5. Execute locally by default. Cloud fallback is explicitly opt-in to protect organizational data.
     let replyText = '';
     let queueWaitMs = 0;
-    let modelName = config.aiEngine.defaultChatModel || 'hsecore-analytical-engine';
+    let modelName = config.aiEngine.defaultChatModel || '';
 
     try {
       const queueResult = await aiRequestQueue.enqueue(
@@ -775,53 +780,19 @@ export class AIOrchestrator {
       ) {
         throw execErr;
       }
-      logger.warn('[AIOrchestrator] Local Ollama inference unavailable; using internal HSECORE analytical engine', {
+      logger.error('[AIOrchestrator] Local Ollama model execution failed; internal search fallback is disabled', {
         error: execErr?.message,
       });
 
-      // Ensure the user ALWAYS receives an accurate, RBAC-governed response even right after VPS install
-      // before an Ollama LLM model has been downloaded or started.
-      if (toolResults.length === 0 && matchedChunks.length === 0 && allowTools && selectedModules.length === 0) {
-        try {
-          const fallbackOverview = await aiToolsRegistry.getAllModulesCrossAnalysis(userContext);
-          toolResults.push(fallbackOverview);
-          if (!toolsUsed.includes(fallbackOverview.titleFa)) toolsUsed.push(fallbackOverview.titleFa);
-          if (!citations.includes(fallbackOverview.titleFa)) citations.push(fallbackOverview.titleFa);
-        } catch {
-          // ignore fallback overview error
-        }
+      const rawMsg = String(execErr?.message || '');
+      let userFacingError = `خطا در پردازش توسط مدل هوش مصنوعی: ${rawMsg || 'مدل هوش مصنوعی پاسخگو نیست'}.`;
+      if (rawMsg.includes('نصب یا فعال نشده') || rawMsg.includes('مدل زبانی محلی')) {
+        userFacingError = 'هیچ مدل زبانی در سرویس هوش مصنوعی Ollama نصب یا فعال نشده است. لطفاً از بخش مدیریت هوش مصنوعی یک مدل گفت‌وگو نصب نمایید.';
+      } else if (rawMsg.includes('ECONNREFUSED') || rawMsg.includes('در دسترس نیست') || rawMsg.includes('connect')) {
+        userFacingError = 'ارتباط با سرویس محلی هوش مصنوعی (Ollama) برقرار نشد. لطفاً وضعیت سرویس Ollama را در سرور بررسی نمایید.';
       }
 
-      const sections: string[] = [];
-      sections.push(`### پاسخ تحلیلی سامانه هوشمند HSECORE`);
-      sections.push(`درخواست شما: «${sanitized.slice(0, 200)}»`);
-
-      if (toolResults.length > 0) {
-        sections.push(`\n#### ۱. داده‌ها و شاخص‌های برخط استخراج‌شده از ماژول‌های مجاز:`);
-        for (const tr of toolResults) {
-          sections.push(`**• ${tr.titleFa}:**\n${tr.summary}`);
-        }
-      }
-
-      if (matchedChunks.length > 0) {
-        sections.push(`\n#### ۲. مستندات و الزامات بازیابی‌شده از پایگاه دانش (RAG):`);
-        for (const kc of matchedChunks) {
-          sections.push(`**• سند «${kc.docTitle}»:**\n${kc.chunkText}`);
-        }
-      }
-
-      if (toolResults.length === 0 && matchedChunks.length === 0) {
-        sections.push(
-          `\nدر حال حاضر داده اختصاصی منطبق با عبارت واردشده در محدوده مجوزهای کاربری شما یافت نشد. می‌توانید از دستور \`/\` برای مشاهده فهرست ماژول‌ها یا \`/ALL\` برای دریافت گزارش جامع ماژول‌های مجاز استفاده نمایید.`
-        );
-      }
-
-      sections.push(
-        `\n---\n💡 **راهنمای فعال‌سازی مدل زبانی مولد (LLM):** این پاسخ توسط **موتور تحلیلی داخلی HSECORE** بر پایه داده‌های واقعی پایگاه داده تولید شده است. برای فعال‌سازی تحلیل متنی پیشرفته (Ollama)، از بخش **تنظیمات سامانه ← مدیریت هوش مصنوعی** یک مدل گفت‌وگو (مانند \`qwen2.5:1.5b\` یا \`llama3.2\`) دانلود و نصب نمایید و یا در سرور دستور \`sudo bash scripts/manage-ai.sh\` را اجرا کنید.`
-      );
-
-      replyText = aiSecurityService.sanitizeOutput(sections.join('\n\n'));
-      modelName = 'hsecore-analytical-engine';
+      throw new Error(userFacingError);
     }
 
     const durationMs = Date.now() - startTime;
@@ -885,7 +856,6 @@ export class AIOrchestrator {
       notifications: ['notifications_summary'],
       users: ['users_roles_summary'],
       settings: ['settings_backup_summary'],
-      search: ['universal_search'],
     };
 
     const modules: import('./ai.types.ts').AIModuleCoverage[] = [

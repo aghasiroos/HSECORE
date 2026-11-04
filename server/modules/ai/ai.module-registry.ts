@@ -109,7 +109,7 @@ export class AIModuleRegistry {
       dashboard: { tools: ['kpi_management_summary'], perm: 'reports:read', tables: ['trir_monthly_records', 'incidents'] },
       heat: { tools: ['heat_weather_summary'], perm: '', tables: ['system_settings'] },
       'hse-ms': { tools: ['kpi_management_summary'], perm: 'reports:read', tables: ['trir_monthly_records'] },
-      reports: { tools: ['kpi_management_summary', 'universal_search'], perm: 'reports:read', tables: ['trir_monthly_records', 'incidents', 'safety_warnings'] },
+      reports: { tools: ['kpi_management_summary'], perm: 'reports:read', tables: ['trir_monthly_records', 'incidents', 'safety_warnings'] },
       'ai-assistant': { tools: ['system_architecture_summary', 'all_modules_cross_analysis'], perm: '', tables: ['ai_sessions', 'ai_messages', 'ai_audit_logs'] },
       'safety-unit': { tools: ['five_s_inspections_summary'], perm: 'safety:read', tables: ['safety_inspections', 'safety_templates'] },
       'fire-dept': { tools: ['fire_safety_summary'], perm: 'fire:read', tables: ['fire_equipment', 'system_settings'] },
@@ -122,7 +122,7 @@ export class AIModuleRegistry {
       warnings: { tools: ['warnings_anomalies_summary'], perm: 'warnings:read', tables: ['safety_warnings'] },
       'personnel-history': { tools: ['personnel_org_summary', 'personnel_dossier'], perm: 'personnel:read', tables: ['personnel', 'periodic_medical_exams', 'training_attendances', 'ppe_issuances', 'safety_warnings'] },
       training: { tools: ['training_summary'], perm: 'training:read', tables: ['hse_trainings', 'training_attendances'] },
-      documents: { tools: ['universal_search'], perm: 'documents:read', tables: ['system_files', 'ai_knowledge_docs'] },
+      documents: { tools: [], perm: 'documents:read', tables: ['system_files', 'ai_knowledge_docs'] },
       'pending-documents': { tools: ['workflow_referrals_summary'], perm: 'workflows:read', tables: ['workflow_instances', 'workflow_steps'] },
       'non-conformances': { tools: ['non_conformances_summary', 'warnings_anomalies_summary'], perm: 'safety:read', tables: ['non_conformances'] },
       'process-management': { tools: ['workflow_referrals_summary'], perm: 'workflows:read', tables: ['bpmn_processes', 'bpmn_instances'] },
@@ -133,7 +133,7 @@ export class AIModuleRegistry {
     };
 
     for (const mod of ALL_SYSTEM_MODULES) {
-      const binding = toolsByModule[mod.key] || { tools: ['universal_search'], tables: [] };
+      const binding = toolsByModule[mod.key] || { tools: [], tables: [] };
       let subitems: AIModuleSubitem[] | undefined;
       if (mod.key === 'health-env') subitems = healthEnvSubitems;
       else if (mod.key === 'fire-dept') subitems = fireSubitems;

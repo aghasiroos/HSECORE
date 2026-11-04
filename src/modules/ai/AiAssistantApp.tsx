@@ -20,6 +20,7 @@ import {
   WifiOff,
   Menu,
   ArrowLeft,
+  ArrowUp,
   X,
   ChevronDown,
   Settings,
@@ -749,6 +750,12 @@ export default function AiAssistantApp({
     const text = (textToSend || inputMessage).trim();
     if (!text || isLoading) return;
 
+    if (installedModels.length === 0 && !selectedModel && text !== '/') {
+      setActiveSheet('model');
+      setSessionsError('هیچ مدل زبانی برای پاسخگویی هوش مصنوعی نصب نشده است. لطفاً از بخش مدیریت هوش مصنوعی یک مدل نصب فرمایید.');
+      return;
+    }
+
     let session = activeSession;
     if (!session) {
       try {
@@ -1083,7 +1090,7 @@ export default function AiAssistantApp({
 
   return (
     <div
-      className="relative flex h-[100dvh] sm:h-[calc(100vh-124px)] min-h-[540px] w-full bg-[#F8FAFC] dark:bg-slate-950 sm:rounded-3xl sm:border border-slate-200/80 dark:border-slate-800/80 sm:shadow-sm overflow-hidden select-text"
+      className="relative flex flex-1 h-full max-h-full min-h-0 w-full bg-[#F8FAFC] dark:bg-slate-950 sm:rounded-3xl sm:border border-slate-200/80 dark:border-slate-800/80 sm:shadow-sm overflow-hidden select-text"
       dir="rtl"
     >
       {/* ── Mobile Slide-Over Backdrop for Chat History Drawer ── */}
@@ -1097,7 +1104,7 @@ export default function AiAssistantApp({
 
       {/* ── Chat History Sidebar (Desktop Fixed Column & Mobile Slide-Over Drawer) ── */}
       <aside
-        className={`w-[82vw] max-w-[310px] md:w-72 lg:w-80 flex-shrink-0 bg-white dark:bg-slate-900 border-l border-slate-200/80 dark:border-slate-800 flex flex-col transition-transform duration-300 z-50 ${
+        className={`w-[82vw] max-w-[310px] md:w-72 lg:w-80 h-full min-h-0 overflow-hidden flex-shrink-0 bg-white dark:bg-slate-900 border-l border-slate-200/80 dark:border-slate-800 flex flex-col transition-transform duration-300 z-50 ${
           sidebarOpen
             ? 'fixed inset-y-0 start-0 translate-x-0 shadow-2xl md:static md:shadow-none'
             : 'hidden md:flex'
@@ -1237,10 +1244,10 @@ export default function AiAssistantApp({
         </div>
       </aside>
 
-      {/* ── Main Chat Column (Sticky Header + Scrollable Messages + Sticky Bottom Composer) ── */}
-      <main className="flex-1 flex flex-col min-w-0 h-full bg-[#F8FAFC] dark:bg-slate-950 relative">
+      {/* ── Main Chat Column (Fixed Header + Scrollable Messages + Fixed Bottom Composer) ── */}
+      <main className="flex-1 flex flex-col min-w-0 min-h-0 h-full overflow-hidden bg-[#F8FAFC] dark:bg-slate-950 relative">
         {/* ۱. هدر ثابت و سبک (Fixed & Lightweight Header) */}
-        <header className="sticky top-0 z-20 shrink-0 h-14 sm:h-16 px-3 sm:px-5 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800/80 flex items-center justify-between gap-2">
+        <header className="shrink-0 h-14 sm:h-16 px-3 sm:px-5 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800/80 flex items-center justify-between gap-2 z-20">
           {/* Right side in RTL: Menu, Brand Logo & Title, Active Model Status */}
           <div className="flex items-center gap-1.5 sm:gap-2.5 min-w-0">
             {onOpenGlobalMenu && (
@@ -1290,13 +1297,13 @@ export default function AiAssistantApp({
                     className={`w-1.5 h-1.5 rounded-full shrink-0 ${
                       installedModels.length > 0 && selectedModel
                         ? 'bg-emerald-500 animate-pulse'
-                        : 'bg-sky-500 animate-pulse'
+                        : 'bg-amber-400'
                     }`}
                   />
                   <span className="truncate">
                     {installedModels.length > 0 && selectedModel
                       ? `مدل فعال: ${selectedModel}`
-                      : 'موتور تحلیلی داخلی HSE آماده'}
+                      : 'مدل گفت‌وگو انتخاب نشده است'}
                   </span>
                 </button>
               </div>
@@ -1359,7 +1366,7 @@ export default function AiAssistantApp({
         </header>
 
         {/* ۲. ناحیه اصلی چت (Scrollable Chat Canvas) */}
-        <div className="flex-1 overflow-y-auto px-3 sm:px-6 py-4 sm:py-6 space-y-5 custom-scrollbar">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 sm:px-6 py-4 sm:py-6 space-y-5 custom-scrollbar">
           <div className="max-w-3xl mx-auto space-y-5">
             {/* حالت خالی جذاب (Empty State when no messages exist) */}
             {(!activeSession || activeSession.messages.length === 0) && !isLoading && (
@@ -1483,8 +1490,8 @@ export default function AiAssistantApp({
           </div>
         </div>
 
-        {/* ۳. ناحیه ورودی پیام در پایین (Sticky Bottom Message Composer) */}
-        <div className="sticky bottom-0 z-20 shrink-0 px-3 sm:px-6 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-gradient-to-t from-[#F8FAFC] via-[#F8FAFC]/95 to-transparent dark:from-slate-950 dark:via-slate-950/95">
+        {/* ۳. ناحیه ورودی پیام در پایین (Fixed Bottom Message Composer) */}
+        <div className="shrink-0 z-20 px-3 sm:px-6 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-gradient-to-t from-[#F8FAFC] via-[#F8FAFC]/95 to-transparent dark:from-slate-950 dark:via-slate-950/95">
           <div className="max-w-3xl mx-auto">
             {/* Quick Slash Command Inline Picker when typing '/' */}
             {showSlashModulePicker && (
@@ -1618,7 +1625,7 @@ export default function AiAssistantApp({
                       title="ارسال پیام"
                       aria-label="ارسال پیام"
                     >
-                      <Send className="w-4 h-4 -rotate-90 rtl:rotate-180" />
+                      <ArrowUp className="w-5 h-5 stroke-[2.5]" />
                     </button>
                   )}
                 </div>
@@ -1637,7 +1644,7 @@ export default function AiAssistantApp({
                   >
                     <Bot className="w-4 h-4 text-[#5B4BFF] shrink-0" />
                     <span className="max-w-[115px] sm:max-w-[180px] truncate">
-                      {selectedModel || installedModels[0]?.name || 'موتور داخلی HSE'}
+                      {selectedModel || installedModels[0]?.name || 'انتخاب مدل هوش مصنوعی'}
                     </span>
                     <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                   </button>

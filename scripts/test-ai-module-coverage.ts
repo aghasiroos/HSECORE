@@ -83,7 +83,7 @@ async function runTests() {
     descriptionFa: 'سامانه پایش هوایی و گشت پهپادی سایت‌های عملیاتی',
     enabled: true,
     aiStatus: 'AI_READY',
-    tools: ['universal_search'],
+    tools: ['ptw_summary'],
     dbTables: [],
   });
   const updatedAll = aiModuleRegistry.getAllModules();

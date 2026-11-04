@@ -1,7 +1,6 @@
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
-import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
 import { config } from './server/core/config.ts';
 import { logger } from './server/core/logger.ts';
@@ -443,6 +442,7 @@ async function startServer() {
 
   // 9. Vite Frontend Integration with proper Cache-Control
   if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: {
         middlewareMode: true,

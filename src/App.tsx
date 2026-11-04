@@ -1198,11 +1198,11 @@ export default function App() {
   )}
 
   {/* Core Sub-Module View Render */}
-  <main className={`flex-1 min-w-0 overflow-y-auto custom-scrollbar ${activeTab === 'ai-assistant' ? 'p-0 sm:px-4 sm:py-3 lg:px-6' : `px-3 sm:px-4 lg:px-6 ${showTopNavbar ? 'py-2.5 sm:py-3 lg:py-3.5' : 'py-3.5 sm:py-4 lg:py-5'}`}`} id="app-main-stage">
-      <div className={`w-full max-w-[1920px] mx-auto ${activeTab === 'ai-assistant' ? 'h-full' : 'space-y-6'}`}>
+  <main className={`flex-1 min-w-0 min-h-0 ${activeTab === 'ai-assistant' ? 'overflow-hidden flex flex-col p-0 sm:px-4 sm:py-2.5 lg:px-6 lg:py-3' : `overflow-y-auto custom-scrollbar px-3 sm:px-4 lg:px-6 ${showTopNavbar ? 'py-2.5 sm:py-3 lg:py-3.5' : 'py-3.5 sm:py-4 lg:py-5'}`}`} id="app-main-stage">
+      <div className={`w-full max-w-[1920px] mx-auto ${activeTab === 'ai-assistant' ? 'flex-1 h-full min-h-0 flex flex-col overflow-hidden' : 'space-y-6'}`}>
        <ModuleErrorBoundary isFa={isFa} key={activeTab}>
          <React.Suspense fallback={<ModuleLoadingFallback isFa={isFa} />}>
-           <div className={activeTab === 'ai-assistant' ? 'h-full' : ''}>
+           <div className={activeTab === 'ai-assistant' ? 'flex-1 h-full min-h-0 flex flex-col overflow-hidden' : ''}>
          {activeTab === 'dashboard' && (
  <Dashboard 
  heatRecord={activeHeatRecord}

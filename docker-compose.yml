@@ -41,8 +41,10 @@ services:
       - "AI_ENGINE_URL=${AI_ENGINE_URL:-http://hse-ai-engine:11434}"
       - "AI_DEFAULT_CHAT_MODEL=${AI_DEFAULT_CHAT_MODEL:-qwen2.5:1.5b}"
       - "AI_DEFAULT_EMBED_MODEL=${AI_DEFAULT_EMBED_MODEL:-bge-m3}"
-      - "AI_MAX_CONCURRENCY=${AI_MAX_CONCURRENCY:-1}"
-      - "AI_REQUEST_TIMEOUT_MS=${AI_REQUEST_TIMEOUT_MS:-60000}"
+      - "AI_MAX_CONCURRENCY=${AI_MAX_CONCURRENCY:-4}"
+      - "AI_REQUEST_TIMEOUT_MS=${AI_REQUEST_TIMEOUT_MS:-180000}"
+      - "NODE_OPTIONS=--dns-result-order=ipv4first --max-old-space-size=${APP_MAX_OLD_SPACE_MB:-1024}"
+      - "UV_THREADPOOL_SIZE=${UV_THREADPOOL_SIZE:-4}"
     volumes:
       - ./data/uploads:/app/uploads
       - ./data/backups:/app/backups
@@ -50,12 +52,17 @@ services:
       - "host.docker.internal:host-gateway"
     ports:
       - "${DOCKER_BIND_IP:-127.0.0.1}:${APP_INTERNAL_PORT:-3000}:3000"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 3
-      start_period: 25s
+      start_period: 20s
     networks:
       - hse-network
     depends_on:
@@ -70,10 +77,11 @@ services:
       - .env
     environment:
       - "OLLAMA_HOST=0.0.0.0:11434"
-      - "OLLAMA_NUM_PARALLEL=${AI_NUM_PARALLEL:-1}"
-      - "OLLAMA_MAX_LOADED_MODELS=${AI_MAX_LOADED_MODELS:-1}"
+      - "OLLAMA_NUM_PARALLEL=${AI_NUM_PARALLEL:-4}"
+      - "OLLAMA_MAX_LOADED_MODELS=${AI_MAX_LOADED_MODELS:-3}"
       - "OLLAMA_KEEP_ALIVE=${AI_KEEP_ALIVE:-15m}"
-      - "OLLAMA_FLASH_ATTENTION=0"
+      - "OLLAMA_FLASH_ATTENTION=${AI_FLASH_ATTENTION:-0}"
+      - "OLLAMA_KV_CACHE_TYPE=${AI_KV_CACHE_TYPE:-q8_0}"
       - "OLLAMA_ORIGINS="
       - "OMP_NUM_THREADS=${AI_CPU_THREADS:-4}"
     volumes:
@@ -82,6 +90,11 @@ services:
       - "11434"
     ports:
       - "${AI_BIND_IP:-127.0.0.1}:${AI_HOST_PORT:-11434}:11434"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     deploy:
       resources:
         limits:

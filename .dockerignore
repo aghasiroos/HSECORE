@@ -2,10 +2,14 @@ node_modules
 npm-debug.log
 dist
 .git
+.github
 .gitignore
+.gitattributes
 .DS_Store
 .npm
 *.log
+*.md
+docs
 data
 uploads
 backups
@@ -25,3 +29,10 @@ backups
 .restore-stage.*
 tmp
 bun.lock*
+install.sh
+deploy.sh
+docker-compose*.yml
+Dockerfile*
+scripts/*
+!scripts/test-db-connection.ts
+!scripts/build-windows-icon.js

@@ -2,6 +2,7 @@ import { db } from '../../src/db';
 import * as schema from '../../src/db/schema';
 import { eq, or, sql, isNull, and } from 'drizzle-orm';
 import moment from 'moment-jalaali';
+import { normalizeDigits } from '../../src/utils/textNormalization';
 
 export const PTW_UNAUTHORIZED_MESSAGE =
   'کاربر غیرمجاز است؛ دوره آموزشی صدور پروانه کار را با موفقیت نگذرانده یا صلاحیت گواهینامه، نوع پروانه یا مسئولیت امضای وی معتبر نیست.';
@@ -23,15 +24,6 @@ export interface PtwVerificationResult {
   };
 }
 
-/**
- * Normalizes digits to English ASCII
- */
-function normalizeDigits(str: string): string {
-  if (!str) return '';
-  return str
-    .replace(/[۰-۹]/g, d => String.fromCharCode(d.charCodeAt(0) - 1728))
-    .replace(/[٠-٩]/g, d => String.fromCharCode(d.charCodeAt(0) - 1584));
-}
 
 /**
  * Calculate Jalali expiration date based on issue date and duration

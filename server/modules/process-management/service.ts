@@ -1,24 +1,26 @@
-import { Camunda8 } from '@camunda8/sdk';
-
-let c8: Camunda8 | null = null;
 let zbc: any = null;
 let tasklist: any = null;
+let initialized = false;
 
-try {
-  // Only attempt to initialize if some basic Camunda config is present
-  if (process.env.ZEEBE_ADDRESS || process.env.CAMUNDA_CLUSTER_ID) {
-    c8 = new Camunda8();
+async function ensureCamundaClients() {
+  if (initialized) return;
+  initialized = true;
+  if (!process.env.ZEEBE_ADDRESS && !process.env.CAMUNDA_CLUSTER_ID) {
+    return;
+  }
+  try {
+    const { Camunda8 } = await import('@camunda8/sdk');
+    const c8 = new Camunda8();
     zbc = c8.getZeebeGrpcApiClient();
     tasklist = c8.getTasklistApiClient();
-  } else {
-    console.log("Camunda 8 config not found. Running in mock mode.");
+  } catch {
+    // Running in internal customEngine mode
   }
-} catch (e) {
-  console.log("Camunda 8 configuration missing or invalid. Running in mock mode.");
 }
 
 export const camundaService = {
   deploy: async (xml: string, processName: string) => {
+    await ensureCamundaClients();
     if (zbc) {
       return await zbc.deployResource({
         processDefinition: Buffer.from(xml),
@@ -29,6 +31,7 @@ export const camundaService = {
   },
   
   startInstance: async (bpmnProcessId: string, variables: any) => {
+    await ensureCamundaClients();
     if (zbc) {
       return await zbc.createProcessInstance({
         bpmnProcessId,
@@ -38,7 +41,8 @@ export const camundaService = {
     return { processInstanceKey: 'mock-instance-key', bpmnProcessId };
   },
   
-  getTasks: async (assignee?: string, group?: string) => {
+  getTasks: async (assignee?: string, _group?: string) => {
+    await ensureCamundaClients();
     if (tasklist) {
       const query: any = { state: 'CREATED' };
       if (assignee) query.assignee = assignee;
@@ -50,6 +54,7 @@ export const camundaService = {
   },
   
   completeTask: async (taskId: string, variables: any) => {
+    await ensureCamundaClients();
     if (tasklist) {
       return await tasklist.completeTask(taskId, variables);
     }

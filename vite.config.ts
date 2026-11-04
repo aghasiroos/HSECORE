@@ -31,9 +31,7 @@ export default defineConfig(() => {
         'uuid',
         'idb-keyval',
         'qrcode.react',
-        'chart.js',
         'xlsx',
-        'papaparse',
         'html-to-image',
         'fast-xml-parser',
         'motion',
@@ -48,26 +46,23 @@ export default defineConfig(() => {
       sourcemap: false,
       reportCompressedSize: false,
       chunkSizeWarningLimit: 4000,
-      minify: false,
+      minify: 'esbuild',
       cssCodeSplit: true,
       rollupOptions: {
         maxParallelFileOps: 24,
         output: {
           manualChunks(id) {
-            if (id.includes('node_modules/three') || id.includes('node_modules/@react-three')) {
-              return 'vendor-three';
-            }
             if (id.includes('node_modules/bpmn-js') || id.includes('node_modules/camunda-bpmn-moddle') || id.includes('node_modules/@bpmn-io')) {
               return 'vendor-bpmn';
             }
-            if (id.includes('node_modules/xlsx') || id.includes('node_modules/papaparse') || id.includes('node_modules/jspdf') || id.includes('node_modules/html2canvas')) {
+            if (id.includes('node_modules/xlsx') || id.includes('node_modules/html-to-image')) {
               return 'vendor-docs';
             }
-            if (id.includes('node_modules/recharts') || id.includes('node_modules/chart.js')) {
+            if (id.includes('node_modules/recharts')) {
               return 'vendor-charts';
             }
-            if (id.includes('node_modules/@mui') || id.includes('node_modules/@emotion')) {
-              return 'vendor-mui';
+            if (id.includes('node_modules/lucide-react')) {
+              return 'vendor-icons';
             }
           },
         },

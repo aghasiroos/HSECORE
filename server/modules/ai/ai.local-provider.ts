@@ -259,7 +259,7 @@ export class LocalAIProvider {
 
     if (Date.now() < this.offlineUntil) {
       status.latencyMs = 0;
-      status.error = 'موتور محلی Ollama در این محیط در دسترس نیست (استفاده از موتور داخلی HSECORE).';
+      status.error = 'موتور محلی Ollama در این محیط در دسترس نیست.';
       return status;
     }
 

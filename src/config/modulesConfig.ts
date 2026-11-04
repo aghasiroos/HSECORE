@@ -1,4 +1,37 @@
-import { apiDb } from '../services/apiDatabaseClient';
+async function fetchSettingFromServer(key: string): Promise<any> {
+  if (typeof window === 'undefined') return null;
+  try {
+    const token = sessionStorage.getItem('hse_auth_token') || localStorage.getItem('hse_auth_token');
+    const headers: Record<string, string> = { Accept: 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const res = await fetch(`/api/settings/${encodeURIComponent(key)}`, {
+      headers,
+      credentials: 'include',
+    });
+    if (!res.ok) return null;
+    const json = await res.json();
+    return json?.value !== undefined ? json.value : null;
+  } catch {
+    return null;
+  }
+}
+
+async function saveSettingToServer(key: string, value: any, description?: string): Promise<void> {
+  if (typeof window === 'undefined') return;
+  try {
+    const token = sessionStorage.getItem('hse_auth_token') || localStorage.getItem('hse_auth_token');
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    await fetch(`/api/settings/${encodeURIComponent(key)}`, {
+      method: 'PUT',
+      headers,
+      credentials: 'include',
+      body: JSON.stringify({ value, description }),
+    });
+  } catch {
+    // ignore network error; localStorage remains fallback
+  }
+}
 
 export interface SystemModuleGroup {
   id: string;
@@ -214,10 +247,10 @@ export async function syncModuleConfigsFromDb(): Promise<void> {
   if (typeof window === 'undefined') return;
   try {
     const [uiCfg, healthCfg, fireCfg, safetyCfg] = await Promise.all([
-      apiDb.getSetting(STORAGE_KEY).catch(() => null),
-      apiDb.getSetting(STORAGE_KEY_HEALTH_ENV).catch(() => null),
-      apiDb.getSetting(STORAGE_KEY_FIRE_DEPT).catch(() => null),
-      apiDb.getSetting(STORAGE_KEY_SAFETY_DEPT).catch(() => null),
+      fetchSettingFromServer(STORAGE_KEY),
+      fetchSettingFromServer(STORAGE_KEY_HEALTH_ENV),
+      fetchSettingFromServer(STORAGE_KEY_FIRE_DEPT),
+      fetchSettingFromServer(STORAGE_KEY_SAFETY_DEPT),
     ]);
 
     if (Array.isArray(uiCfg) && uiCfg.length > 0) {
@@ -230,7 +263,7 @@ export async function syncModuleConfigsFromDb(): Promise<void> {
         try {
           const parsed = JSON.parse(localUi);
           if (Array.isArray(parsed) && parsed.length > 0) {
-            apiDb.saveSetting(STORAGE_KEY, parsed, 'System Navigation Modules Config').catch(() => {});
+            void saveSettingToServer(STORAGE_KEY, parsed, 'System Navigation Modules Config');
           }
         } catch {}
       }
@@ -349,7 +382,7 @@ export function saveUiConfig(modules: SystemModuleConfig[]): boolean {
   try {
     memoryUiConfig = modules;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(modules));
-    apiDb.saveSetting(STORAGE_KEY, modules, 'System Navigation Modules Config').catch(() => {});
+    void saveSettingToServer(STORAGE_KEY, modules, 'System Navigation Modules Config');
     window.dispatchEvent(new Event('hse_ui_config_updated'));
     return true;
   } catch (err) {
@@ -367,7 +400,7 @@ export function resetUiConfig(): void {
     localStorage.removeItem(STORAGE_KEY);
     localStorage.removeItem(PREV_STORAGE_KEY);
     localStorage.removeItem(LEGACY_STORAGE_KEY);
-    apiDb.saveSetting(STORAGE_KEY, [], 'Reset System Navigation Modules Config').catch(() => {});
+    void saveSettingToServer(STORAGE_KEY, [], 'Reset System Navigation Modules Config');
     window.dispatchEvent(new Event('hse_ui_config_updated'));
   } catch (e) {
     console.error('Failed to reset UI config', e);
@@ -430,7 +463,7 @@ export function saveHealthEnvConfig(items: HealthEnvSubItemConfig[]): boolean {
   try {
     memoryHealthEnvConfig = items;
     localStorage.setItem(STORAGE_KEY_HEALTH_ENV, JSON.stringify(items));
-    apiDb.saveSetting(STORAGE_KEY_HEALTH_ENV, items, 'Health & Env Subitems Config').catch(() => {});
+    void saveSettingToServer(STORAGE_KEY_HEALTH_ENV, items, 'Health & Env Subitems Config');
     window.dispatchEvent(new Event('health_env_config_updated'));
     return true;
   } catch (err) {
@@ -443,7 +476,7 @@ export function resetHealthEnvConfig(): void {
   try {
     memoryHealthEnvConfig = null;
     localStorage.removeItem(STORAGE_KEY_HEALTH_ENV);
-    apiDb.saveSetting(STORAGE_KEY_HEALTH_ENV, [], 'Reset Health & Env Subitems Config').catch(() => {});
+    void saveSettingToServer(STORAGE_KEY_HEALTH_ENV, [], 'Reset Health & Env Subitems Config');
     window.dispatchEvent(new Event('health_env_config_updated'));
   } catch (err) {
     console.error('Failed to reset Health & Env config:', err);
@@ -506,7 +539,7 @@ export function saveFireDeptConfig(items: FireDeptSubItemConfig[]): boolean {
   try {
     memoryFireDeptConfig = items;
     localStorage.setItem(STORAGE_KEY_FIRE_DEPT, JSON.stringify(items));
-    apiDb.saveSetting(STORAGE_KEY_FIRE_DEPT, items, 'Fire Dept Subitems Config').catch(() => {});
+    void saveSettingToServer(STORAGE_KEY_FIRE_DEPT, items, 'Fire Dept Subitems Config');
     window.dispatchEvent(new Event('fire_dept_config_updated'));
     return true;
   } catch (err) {
@@ -519,7 +552,7 @@ export function resetFireDeptConfig(): void {
   try {
     memoryFireDeptConfig = null;
     localStorage.removeItem(STORAGE_KEY_FIRE_DEPT);
-    apiDb.saveSetting(STORAGE_KEY_FIRE_DEPT, [], 'Reset Fire Dept Subitems Config').catch(() => {});
+    void saveSettingToServer(STORAGE_KEY_FIRE_DEPT, [], 'Reset Fire Dept Subitems Config');
     window.dispatchEvent(new Event('fire_dept_config_updated'));
   } catch (err) {
     console.error('Failed to reset Fire Dept config:', err);
@@ -582,7 +615,7 @@ export function saveSafetyDeptConfig(items: SafetyDeptSubItemConfig[]): boolean 
   try {
     memorySafetyDeptConfig = items;
     localStorage.setItem(STORAGE_KEY_SAFETY_DEPT, JSON.stringify(items));
-    apiDb.saveSetting(STORAGE_KEY_SAFETY_DEPT, items, 'Safety Dept Subitems Config').catch(() => {});
+    void saveSettingToServer(STORAGE_KEY_SAFETY_DEPT, items, 'Safety Dept Subitems Config');
     window.dispatchEvent(new Event('safety_dept_config_updated'));
     return true;
   } catch (err) {
@@ -595,11 +628,58 @@ export function resetSafetyDeptConfig(): void {
   try {
     memorySafetyDeptConfig = null;
     localStorage.removeItem(STORAGE_KEY_SAFETY_DEPT);
-    apiDb.saveSetting(STORAGE_KEY_SAFETY_DEPT, [], 'Reset Safety Dept Subitems Config').catch(() => {});
+    void saveSettingToServer(STORAGE_KEY_SAFETY_DEPT, [], 'Reset Safety Dept Subitems Config');
     window.dispatchEvent(new Event('safety_dept_config_updated'));
   } catch (err) {
     console.error('Failed to reset Safety Dept config:', err);
   }
 }
 
+export interface CardLayoutItem {
+  id: string;
+  visible: boolean;
+  order: number;
+  colSpan?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12;
+  height?: 'compact' | 'normal' | 'expanded' | 'custom';
+  customHeight?: number;
+  minHeight?: number;
+}
 
+export interface DashboardLayoutConfig {
+  cards: CardLayoutItem[];
+  updatedAt?: string;
+  updatedBy?: string;
+  isUserCustom?: boolean;
+}
+
+export const DEFAULT_DASHBOARD_CARDS_LAYOUT: CardLayoutItem[] = [
+  { id: 'kpi-incidents', visible: true, order: 0, colSpan: 3, height: 'normal' },
+  { id: 'kpi-trir-target', visible: true, order: 1, colSpan: 3, height: 'normal' },
+  { id: 'kpi-safe-hours', visible: true, order: 2, colSpan: 3, height: 'normal' },
+  { id: 'kpi-permits', visible: true, order: 3, colSpan: 3, height: 'normal' },
+  { id: 'card-hsi-gauge', visible: true, order: 4, colSpan: 4, height: 'normal' },
+  { id: 'card-incident-chart', visible: true, order: 5, colSpan: 8, height: 'normal' },
+  { id: 'kpi-training-rate', visible: true, order: 6, colSpan: 3, height: 'normal' },
+  { id: 'kpi-anomalies-count', visible: true, order: 7, colSpan: 3, height: 'normal' },
+  { id: 'kpi-ptw-audit-rate', visible: true, order: 8, colSpan: 3, height: 'normal' },
+  { id: 'kpi-safety-inspection-rate', visible: true, order: 9, colSpan: 3, height: 'normal' },
+  { id: 'card-training-chart', visible: true, order: 10, colSpan: 6, height: 'normal' },
+  { id: 'card-anomalies-chart', visible: true, order: 11, colSpan: 6, height: 'normal' },
+  { id: 'card-ptw-audit-chart', visible: true, order: 12, colSpan: 6, height: 'normal' },
+  { id: 'card-safety-inspection-chart', visible: true, order: 13, colSpan: 6, height: 'normal' },
+  { id: 'card-health-chart', visible: true, order: 14, colSpan: 6, height: 'normal' },
+  { id: 'card-fire-dept-chart', visible: true, order: 15, colSpan: 6, height: 'normal' },
+  { id: 'card-ptw-chart', visible: true, order: 16, colSpan: 6, height: 'normal' },
+  { id: 'card-risk-matrix', visible: true, order: 17, colSpan: 6, height: 'normal' },
+  { id: 'card-5s-trend', visible: true, order: 18, colSpan: 6, height: 'normal' },
+  { id: 'card-warnings-trend', visible: true, order: 19, colSpan: 6, height: 'normal' },
+  { id: 'kpi-heat-index', visible: true, order: 20, colSpan: 3, height: 'normal' },
+  { id: 'kpi-wbgt', visible: true, order: 21, colSpan: 3, height: 'normal' },
+  { id: 'kpi-health-rate', visible: true, order: 22, colSpan: 3, height: 'normal' },
+  { id: 'kpi-fire-readiness', visible: true, order: 23, colSpan: 3, height: 'normal' },
+  { id: 'kpi-5s-score', visible: true, order: 24, colSpan: 3, height: 'normal' },
+  { id: 'kpi-risk-high', visible: true, order: 25, colSpan: 3, height: 'normal' },
+  { id: 'kpi-warnings', visible: true, order: 26, colSpan: 3, height: 'normal' },
+  { id: 'card-notifications', visible: true, order: 27, colSpan: 4, height: 'normal' },
+  { id: 'card-quick-actions', visible: true, order: 28, colSpan: 8, height: 'normal' },
+];

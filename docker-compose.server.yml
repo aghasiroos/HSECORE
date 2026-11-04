@@ -50,6 +50,8 @@ services:
       - "HOST_TOTAL_RAM_MB=${HOST_TOTAL_RAM_MB:-}"
       - "HOST_TOTAL_SWAP_MB=${HOST_TOTAL_SWAP_MB:-}"
       - "HOST_CPU_CORES=${HOST_CPU_CORES:-}"
+      - "NODE_OPTIONS=--dns-result-order=ipv4first --max-old-space-size=${APP_MAX_OLD_SPACE_MB:-1024}"
+      - "UV_THREADPOOL_SIZE=${UV_THREADPOOL_SIZE:-4}"
     volumes:
       - ./data/uploads:/app/uploads
       - /proc/meminfo:/host/proc/meminfo:ro
@@ -57,12 +59,17 @@ services:
       - "host.docker.internal:host-gateway"
     ports:
       - "${DOCKER_BIND_IP:-127.0.0.1}:${APP_INTERNAL_PORT:-3000}:3000"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 3
-      start_period: 25s
+      start_period: 20s
     networks:
       - hse-network
   # Optional Local AI Engine (Ollama - Offline CPU Inference)
@@ -79,7 +86,8 @@ services:
       - "OLLAMA_NUM_PARALLEL=${AI_NUM_PARALLEL:-4}"
       - "OLLAMA_MAX_LOADED_MODELS=${AI_MAX_LOADED_MODELS:-3}"
       - "OLLAMA_KEEP_ALIVE=${AI_KEEP_ALIVE:-15m}"
-      - "OLLAMA_FLASH_ATTENTION=0"
+      - "OLLAMA_FLASH_ATTENTION=${AI_FLASH_ATTENTION:-0}"
+      - "OLLAMA_KV_CACHE_TYPE=${AI_KV_CACHE_TYPE:-q8_0}"
       - "OLLAMA_ORIGINS="
       # Keep Ollama HTTP API private to the Docker network; wildcard CORS is not needed.
       - "OMP_NUM_THREADS=${AI_CPU_THREADS:-4}"
@@ -89,6 +97,11 @@ services:
       - "11434"
     ports:
       - "${AI_BIND_IP:-127.0.0.1}:${AI_HOST_PORT:-11434}:11434"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     deploy:
       resources:
         limits:

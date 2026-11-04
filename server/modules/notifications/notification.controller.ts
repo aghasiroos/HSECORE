@@ -243,7 +243,9 @@ export class NotificationController {
   }
 
   async streamCustomSiren(req: Request, res: Response) {
-    const filePath = path.resolve(process.cwd(), 'public/assets/custom-siren.mp3');
+    const publicSiren = path.resolve(process.cwd(), 'public/assets/custom-siren.mp3');
+    const distSiren = path.resolve(process.cwd(), 'dist/assets/custom-siren.mp3');
+    const filePath = fs.existsSync(publicSiren) ? publicSiren : distSiren;
     if (!fs.existsSync(filePath)) {
       return res.status(404).json({ success: false, error: 'Custom siren not found' });
     }

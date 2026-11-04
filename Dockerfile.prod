@@ -41,11 +41,13 @@ RUN echo ">>> [Builder 1/3] Probing npm registry connectivity..." && \
 # 3. Copy project source files (.dockerignore excludes host node_modules and dist)
 COPY . .
 
-# 4. Compile production bundle and prune devDependencies locally without re-downloading
+# 4. Compile production bundle, prune devDependencies, and strip non-runtime artifacts
 RUN echo ">>> [Builder 3/3] Compiling frontend (Vite) and backend (esbuild) bundles..." && \
     npm run build && \
-    echo ">>> [Builder 3/3] Pruning devDependencies..." && \
+    echo ">>> [Builder 3/3] Pruning devDependencies and stripping non-runtime files..." && \
     npm prune --omit=dev --no-audit --no-fund --no-progress --loglevel=error && \
+    find /app/node_modules -type f \( -name "*.d.ts" -o -name "*.d.mts" -o -name "*.map" -o -iname "README*" -o -iname "CHANGELOG*" -o -iname "HISTORY*" \) -delete 2>/dev/null || true && \
+    npm cache clean --force 2>/dev/null || true && \
     echo ">>> [Builder 3/3] Build stage completed successfully."
 
 # Final Lightweight Runner Stage
@@ -54,10 +56,12 @@ FROM ${NODE_BASE_IMAGE} AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production \
+    NODE_OPTIONS="--dns-result-order=ipv4first --max-old-space-size=1024" \
+    UV_THREADPOOL_SIZE=4 \
     NPM_CONFIG_LOGLEVEL=error \
     NPM_CONFIG_UPDATE_NOTIFIER=false
 
-# Install poppler-utils, poppler-data, ghostscript and font support for perfect Persian PDF rendering
+# Install poppler-utils, poppler-data, ghostscript, font support and prepare writable runtime dirs in one layer
 RUN apk add --no-cache \
     poppler-utils \
     poppler-data \
@@ -66,7 +70,9 @@ RUN apk add --no-cache \
     ttf-dejavu \
     ttf-freefont \
     font-noto-arabic && \
-    fc-cache -f
+    fc-cache -f && \
+    mkdir -p /app/uploads /app/backups /app/data /app/public/assets && \
+    chown -R node:node /app
 
 ARG APP_VERSION=0.2.8
 ARG BUILD_ID=unknown
@@ -81,17 +87,18 @@ LABEL org.opencontainers.image.title="HSECORE Enterprise" \
       org.opencontainers.image.version="$APP_VERSION" \
       org.opencontainers.image.revision="$GIT_COMMIT"
 
-# Copy manifests, pruned production node_modules, compiled bundle, and migrations from builder
-COPY package.json package-lock.json .npmrc* ./
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/drizzle ./drizzle
-COPY create-user-cli.js ./
+# Copy manifests, pruned production node_modules, compiled bundle, and migrations with --chown=node:node to avoid layer duplication
+COPY --chown=node:node package.json package-lock.json .npmrc* ./
+COPY --from=builder --chown=node:node /app/node_modules ./node_modules
+COPY --from=builder --chown=node:node /app/dist ./dist
+COPY --from=builder --chown=node:node /app/drizzle ./drizzle
+COPY --chown=node:node create-user-cli.js ./
 
-# Run as non-root (Alpine node image provides uid 1000 "node")
-RUN mkdir -p /app/uploads /app/backups /app/data && chown -R node:node /app
 USER node
 
 EXPOSE 3000
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=25s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:3000/api/health || exit 1
 
 CMD ["node", "dist/server.cjs"]

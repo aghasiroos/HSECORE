@@ -17,10 +17,11 @@ services:
         required: false
     environment:
       - "OLLAMA_HOST=0.0.0.0:11434"
-      - "OLLAMA_NUM_PARALLEL=${AI_NUM_PARALLEL:-1}"
-      - "OLLAMA_MAX_LOADED_MODELS=${AI_MAX_LOADED_MODELS:-1}"
-      - "OLLAMA_KEEP_ALIVE=${AI_KEEP_ALIVE:-5m}"
-      - "OLLAMA_FLASH_ATTENTION=0"
+      - "OLLAMA_NUM_PARALLEL=${AI_NUM_PARALLEL:-4}"
+      - "OLLAMA_MAX_LOADED_MODELS=${AI_MAX_LOADED_MODELS:-3}"
+      - "OLLAMA_KEEP_ALIVE=${AI_KEEP_ALIVE:-15m}"
+      - "OLLAMA_FLASH_ATTENTION=${AI_FLASH_ATTENTION:-0}"
+      - "OLLAMA_KV_CACHE_TYPE=${AI_KV_CACHE_TYPE:-q8_0}"
       - "OLLAMA_ORIGINS="
       - "OMP_NUM_THREADS=${AI_CPU_THREADS:-4}"
     volumes:
@@ -32,6 +33,11 @@ services:
     # Bound to local loopback (127.0.0.1) ONLY for local host diagnostics/CLI, strictly hidden from public internet
     ports:
       - "${AI_BIND_IP:-127.0.0.1}:${AI_HOST_PORT:-11434}:11434"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     deploy:
       resources:
         limits:

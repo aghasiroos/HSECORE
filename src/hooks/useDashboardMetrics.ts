@@ -166,74 +166,13 @@ export interface DashboardMetricsData {
   notifications: any[];
 }
 
-export interface CardLayoutItem {
-  id: string;
-  visible: boolean;
-  order: number;
-  colSpan?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12;
-  height?: 'compact' | 'normal' | 'expanded' | 'custom';
-  customHeight?: number; // In pixels (140px to 750px)
-  minHeight?: number;
-}
-
-export interface DashboardLayoutConfig {
-  cards: CardLayoutItem[];
-  updatedAt?: string;
-  updatedBy?: string;
-  isUserCustom?: boolean;
-}
-
-// ── COMPREHENSIVE OPTIMAL AUTO LAYOUT INCLUDING ALL 6 NEW MODULES ──
-export const DEFAULT_DASHBOARD_CARDS_LAYOUT: CardLayoutItem[] = [
-  // 1. Top Executive Vital KPIs (4 Cards)
-  { id: 'kpi-incidents', visible: true, order: 0, colSpan: 3, height: 'normal' },
-  { id: 'kpi-trir-target', visible: true, order: 1, colSpan: 3, height: 'normal' },
-  { id: 'kpi-safe-hours', visible: true, order: 2, colSpan: 3, height: 'normal' },
-  { id: 'kpi-permits', visible: true, order: 3, colSpan: 3, height: 'normal' },
-
-  // 2. Core Industrial Climatic SCADA & Incident Trend
-  { id: 'card-hsi-gauge', visible: true, order: 4, colSpan: 4, height: 'normal' },
-  { id: 'card-incident-chart', visible: true, order: 5, colSpan: 8, height: 'normal' },
-
-  // 3. Operational KPIs Row (4 Cards)
-  { id: 'kpi-training-rate', visible: true, order: 6, colSpan: 3, height: 'normal' },
-  { id: 'kpi-anomalies-count', visible: true, order: 7, colSpan: 3, height: 'normal' },
-  { id: 'kpi-ptw-audit-rate', visible: true, order: 8, colSpan: 3, height: 'normal' },
-  { id: 'kpi-safety-inspection-rate', visible: true, order: 9, colSpan: 3, height: 'normal' },
-
-  // 4. Training Management & Anomalies Reports (Dual Grid)
-  { id: 'card-training-chart', visible: true, order: 10, colSpan: 6, height: 'normal' },
-  { id: 'card-anomalies-chart', visible: true, order: 11, colSpan: 6, height: 'normal' },
-
-  // 5. PTW Audits & Safety Checklists Unit (Dual Grid)
-  { id: 'card-ptw-audit-chart', visible: true, order: 12, colSpan: 6, height: 'normal' },
-  { id: 'card-safety-inspection-chart', visible: true, order: 13, colSpan: 6, height: 'normal' },
-
-  // 6. Occupational Health Unit & Fire Department Unit (Dual Grid)
-  { id: 'card-health-chart', visible: true, order: 14, colSpan: 6, height: 'normal' },
-  { id: 'card-fire-dept-chart', visible: true, order: 15, colSpan: 6, height: 'normal' },
-
-  // 7. Work Permits Distribution & Risk Matrix
-  { id: 'card-ptw-chart', visible: true, order: 16, colSpan: 6, height: 'normal' },
-  { id: 'card-risk-matrix', visible: true, order: 17, colSpan: 6, height: 'normal' },
-
-  // 8. 5S Housekeeping & Warnings
-  { id: 'card-5s-trend', visible: true, order: 18, colSpan: 6, height: 'normal' },
-  { id: 'card-warnings-trend', visible: true, order: 19, colSpan: 6, height: 'normal' },
-
-  // 9. Secondary KPI Cards
-  { id: 'kpi-heat-index', visible: true, order: 20, colSpan: 3, height: 'normal' },
-  { id: 'kpi-wbgt', visible: true, order: 21, colSpan: 3, height: 'normal' },
-  { id: 'kpi-health-rate', visible: true, order: 22, colSpan: 3, height: 'normal' },
-  { id: 'kpi-fire-readiness', visible: true, order: 23, colSpan: 3, height: 'normal' },
-  { id: 'kpi-5s-score', visible: true, order: 24, colSpan: 3, height: 'normal' },
-  { id: 'kpi-risk-high', visible: true, order: 25, colSpan: 3, height: 'normal' },
-  { id: 'kpi-warnings', visible: true, order: 26, colSpan: 3, height: 'normal' },
-
-  // 10. Emergency Notifications Console & Quick Actions Hub
-  { id: 'card-notifications', visible: true, order: 27, colSpan: 4, height: 'normal' },
-  { id: 'card-quick-actions', visible: true, order: 28, colSpan: 8, height: 'normal' },
-];
+import {
+  CardLayoutItem,
+  DashboardLayoutConfig,
+  DEFAULT_DASHBOARD_CARDS_LAYOUT,
+} from '../config/modulesConfig';
+export type { CardLayoutItem, DashboardLayoutConfig };
+export { DEFAULT_DASHBOARD_CARDS_LAYOUT };
 
 let globalMetricsInFlight: Promise<any> | null = null;
 let lastMetricsFetchTime = 0;

@@ -4,6 +4,7 @@ import {
   WorkerTaskResponse,
   WorkerTaskType
 } from './types';
+import { normalizeDigits, normalizeForMatching } from '../utils/textNormalization';
 
 interface PendingTask {
   resolve: (value: any) => void;
@@ -330,35 +331,11 @@ self.onmessage = function(event) {
 };
 `;
 
-function normalizeDigits(str: any): string {
-  if (str === null || str === undefined) return '';
-  const s = String(str);
-  const faToEn: Record<string, string> = {
-    '۰': '0', '۱': '1', '۲': '2', '۳': '3', '۴': '4',
-    '۵': '5', '۶': '6', '۷': '7', '۸': '8', '۹': '9',
-    '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4',
-    '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9'
-  };
-  return s.replace(/[۰-۹٠-٩]/g, d => faToEn[d] || d).trim();
-}
-
 function normalizeNationalCode(code?: string): string {
   if (!code) return '';
-  const digits = normalizeDigits(code).replace(/\D/g, '');
+  const digits = normalizeDigits(code, true);
   if (!digits) return '';
   return digits.padStart(10, '0');
-}
-
-function normalizeForMatching(val: any): string {
-  if (val === null || val === undefined) return '';
-  return String(val)
-    .replace(/[ي]/g, 'ی')
-    .replace(/[ك]/g, 'ک')
-    .replace(/[ة]/g, 'ه')
-    .replace(/[\u200C\u200B\u200E\u200F]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toLowerCase();
 }
 
 function extractRawCellValue(val: any): string {
