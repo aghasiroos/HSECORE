@@ -8,6 +8,7 @@ import { UserContext } from '../../core/middleware/auth.ts';
 
 import { generateNextPermitNumber } from '../../services/permitNumberService.ts';
 import { dispatchDomainWebhookEvent } from '../../services/webhookDispatcher.ts';
+import { validateHotWorkHolidayIssuance } from '../../services/ptwHolidayService.ts';
 
 export class PTWService {
   async checkClashes(location: string, startDateStr: string, endDateStr: string, excludePermitNumber?: string) {
@@ -42,6 +43,12 @@ export class PTWService {
   async createPermit(req: PTWCreateRequest, user?: UserContext) {
     if (!req.title || !req.location || !req.startDate || !req.endDate) {
       throw new ValidationError('عنوان، موقعیت مکانی، تاریخ شروع و تاریخ پایان مجوز الزامی هستند.');
+    }
+
+    // Hot Work Holiday and Senior Duty Officer validation
+    const holidayVal = await validateHotWorkHolidayIssuance(req, user);
+    if (!holidayVal.allowed) {
+      throw new ValidationError(holidayVal.errorMessage || holidayVal.warningMessage || 'صدور پروانه کار گرم در روز تعطیل مجاز نمی‌باشد.');
     }
 
     // Clash detection check

@@ -409,11 +409,11 @@ tui_report_error() {
   echo -e "${RED}${BOLD}==================================================================${NC}" >&2
   echo -e "${RED}${BOLD}  [${ch_x}] INSTALLATION ERROR DIAGNOSTIC REPORT${NC}" >&2
   echo -e "${RED}${BOLD}==================================================================${NC}" >&2
-  echo -e "  ${BOLD}Stopped Step (مرحله متوقف‌شده):${NC} ${YELLOW}[${CURRENT_STEP_NUM:-?}/15] ${CURRENT_STEP_TITLE:-Unknown}${NC}" >&2
-  echo -e "  ${BOLD}Failed Operation (عملیات):${NC}      ${task_title} (Exit Code: ${exit_code})" >&2
+  echo -e "  ${BOLD}Stopped Step:${NC}               ${YELLOW}[${CURRENT_STEP_NUM:-?}/15] ${CURRENT_STEP_TITLE:-Unknown}${NC}" >&2
+  echo -e "  ${BOLD}Failed Operation:${NC}           ${task_title} (Exit Code: ${exit_code})" >&2
 
   if [[ -n "${err_log_file}" && -s "${err_log_file}" ]]; then
-    echo -e "  ${BOLD}Error Cause / Last Logs (علت خطا و خروجی دستور):${NC}" >&2
+    echo -e "  ${BOLD}Error Cause / Last Logs:${NC}" >&2
     local line_item clean_item
     while IFS= read -r line_item; do
       clean_item="$(sanitize_log_line "${line_item}")"
@@ -423,7 +423,7 @@ tui_report_error() {
     done < <(tail -n 8 "${err_log_file}" 2>/dev/null || true)
   fi
 
-  echo -e "  ${BOLD}Suggested Solution (راهکار پیشنهادی):${NC}" >&2
+  echo -e "  ${BOLD}Suggested Solution:${NC}" >&2
   echo -e "    ${CYAN}→${NC} ${remediation}" >&2
   echo -e "    ${CYAN}→${NC} Full log file: ${BOLD}${LOCAL_LOG_FILE}${NC}" >&2
   echo -e "    ${CYAN}→${NC} Resume after fixing: ${BOLD}sudo ./install.sh --resume${NC}" >&2
@@ -1215,7 +1215,7 @@ build_hsecore_production_image() {
 
 
 # ==============================================================================
-# مرحله 1 — System Check
+# Step 1 — System Check
 # ==============================================================================
 step1_system_check() {
   step_header 1 "System Check"
@@ -1292,7 +1292,7 @@ step1_system_check() {
 }
 
 # ==============================================================================
-# مرحله 2 — Install Dependencies & Node.js LTS (Including Nginx, Certbot & SSL)
+# Step 2 — Install Dependencies & Node.js LTS (Including Nginx, Certbot & SSL)
 # ==============================================================================
 step2_install_dependencies() {
   step_header 2 "Install Dependencies & Node.js LTS"
@@ -1382,7 +1382,7 @@ step2_install_dependencies() {
 }
 
 # ==============================================================================
-# مرحله 3 — Install Docker
+# Step 3 — Install Docker
 # ==============================================================================
 step3_install_docker() {
   step_header 3 "Install Docker"
@@ -1415,7 +1415,7 @@ step3_install_docker() {
 }
 
 # ==============================================================================
-# مرحله 4 — Install PostgreSQL (Native on Ubuntu Host)
+# Step 4 — Install PostgreSQL (Native on Ubuntu Host)
 # ==============================================================================
 step4_install_postgresql() {
   step_header 4 "Install PostgreSQL (Native VPS Host)"
@@ -1514,7 +1514,7 @@ EOF
 }
 
 # ==============================================================================
-# مرحله 5 — Configure PostgreSQL
+# Step 5 — Configure PostgreSQL
 # ==============================================================================
 step5_configure_postgresql() {
   step_header 5 "Configure Database"
@@ -1731,7 +1731,7 @@ step5_configure_postgresql() {
 }
 
 # ==============================================================================
-# مرحله 6 — Configure Access (IP vs Domain), SSL & Ports
+# Step 6 — Configure Access (IP vs Domain), SSL & Ports
 # ==============================================================================
 step6_configure_ports() {
   step_header 6 "Configure Access (IP vs Domain), SSL & Ports"
@@ -1841,7 +1841,7 @@ step6_configure_ports() {
     if [[ -n "${APP_PORT:-}" && "${APP_PORT}" != "3000" && "${APP_PORT}" != "0" ]]; then
       def_ssl_port="${APP_PORT}"
     fi
-    echo -e "${YELLOW}[!] نکته مهم اتصال شبکه: استفاده از پورت استاندارد ۴۴۳ جهت تضمین دسترسی کامل و بدون اختلال از کلیه اپراتورها (همراه اول، ایرانسل، رایتل و مخابرات) قویاً توصیه می‌شود.${NC}"
+    echo -e "${YELLOW}[!] Network Note: Using standard HTTPS port 443 is strongly recommended to ensure uninterrupted access across all mobile and ISP networks.${NC}"
     while true; do
       read -r -p "Enter Public HTTPS Port [${def_ssl_port}]: " input_ssl_port
       APP_PORT="${input_ssl_port:-$def_ssl_port}"
@@ -1956,7 +1956,7 @@ step6_configure_ports() {
 }
 
 # ==============================================================================
-# مرحله 7 — Create Database & User
+# Step 7 — Create Database & User
 # ==============================================================================
 step7_create_database_and_user() {
   step_header 7 "Create Database & User"
@@ -2031,7 +2031,7 @@ step7_create_database_and_user() {
 }
 
 # ==============================================================================
-# مرحله 8 — Test PostgreSQL Connection
+# Step 8 — Test PostgreSQL Connection
 # ==============================================================================
 step8_test_postgresql_connection() {
   step_header 8 "Test Database Connection"
@@ -2144,7 +2144,7 @@ step8_test_postgresql_connection() {
 }
 
 # ==============================================================================
-# مرحله 9 — Configure Environment
+# Step 9 — Configure Environment
 # ==============================================================================
 step9_configure_environment() {
   step_header 9 "Configure Environment"
@@ -2261,14 +2261,30 @@ EOF
   set_completed_step 9
 }
 
+ensure_docker_network_and_volumes() {
+  docker network inspect hse-network >/dev/null 2>&1 || {
+    docker network create --driver bridge \
+      --label com.docker.compose.network=hse-network \
+      --label com.docker.compose.project=hsecore \
+      hse-network >/dev/null 2>&1 || docker network create --driver bridge hse-network
+  }
+  docker volume inspect hse_ai_models >/dev/null 2>&1 || {
+    docker volume create \
+      --label com.docker.compose.volume=hse_ai_models \
+      --label com.docker.compose.project=hsecore \
+      hse_ai_models >/dev/null 2>&1 || docker volume create hse_ai_models
+  }
+}
+
 # ==============================================================================
-# مرحله 10 — Build HSECORE Docker Images
+# Step 10 — Build HSECORE Docker Images
 # ==============================================================================
 step10_build_docker_images() {
   step_header 10 "Build HSECORE Docker Images"
 
   cd "${PROJECT_DIR}"
   load_answers_cache
+  ensure_docker_network_and_volumes
 
   # Auto-heal legacy unquoted ':?' error colons in compose YAML files if present
   local dc_file
@@ -2311,13 +2327,14 @@ step10_build_docker_images() {
 }
 
 # ==============================================================================
-# مرحله 11 — Database Diagnostic, Migration & Initial Administrator Creation
+# Step 11 — Database Diagnostic, Migration & Initial Administrator Creation
 # ==============================================================================
 step11_run_database_migration() {
   step_header 11 "Database Diagnostic, Migration & Admin Setup"
 
   cd "${PROJECT_DIR}"
   load_answers_cache
+  ensure_docker_network_and_volumes
 
   if ! docker image inspect hsecore-enterprise:latest >/dev/null 2>&1; then
     tui_run_task \
@@ -2447,7 +2464,7 @@ step11_run_database_migration() {
 }
 
 # ==============================================================================
-# مرحله 12 — Start HSECORE Container
+# Step 12 — Start HSECORE Container
 # ==============================================================================
 step12_start_hsecore() {
   step_header 12 "Start HSECORE Application Container"
@@ -2523,7 +2540,7 @@ EOF
 }
 
 # ==============================================================================
-# مرحله 13 — Configure SSL, Nginx Reverse Proxy & Firewall
+# Step 13 — Configure SSL, Nginx Reverse Proxy & Firewall
 # ==============================================================================
 step13_configure_firewall() {
   step_header 13 "Configure SSL, Nginx Reverse Proxy & Firewall"
@@ -2836,7 +2853,7 @@ EOF
 }
 
 # ==============================================================================
-# مرحله 14 — Final Health Check
+# Step 14 — Final Health Check
 # ==============================================================================
 step14_final_health_check() {
   step_header 14 "Final Health Check"
@@ -2969,7 +2986,7 @@ step14_final_health_check() {
 }
 
 # ==============================================================================
-# مرحله 15 — Installation Complete
+# Step 15 — Installation Complete
 # ==============================================================================
 step15_installation_complete() {
   step_header 15 "Installation Complete"
@@ -4120,22 +4137,22 @@ manage_ai_infrastructure() {
         echo -e "${BOLD}${CYAN}==================================================================${NC}"
         echo -e "   ${BOLD}${BLUE}HSECORE AI${NC} ${GREEN}Local Engine & Infrastructure Manager${NC}"
         echo -e "${BOLD}${CYAN}==================================================================${NC}"
-        echo " 1) نصب زیرساخت هوش مصنوعی (Install / Deploy AI Infrastructure)"
-        echo " 2) راه‌اندازی موتور Local LLM (Start AI Engine Container)"
-        echo " 3) دانلود و افزودن مدل دلخواه (Pull/Download any Ollama model)"
-        echo " 4) مشاهده مدل‌های نصب‌شده (List Installed Models in Volume)"
-        echo " 5) تغییر مدل پیش‌فرض سامانه (Change Default Model in .env)"
-        echo " 6) فعال‌سازی یا غیرفعال‌سازی هوش مصنوعی (Toggle AI Engine Enabled/Disabled)"
-        echo " 7) به‌روزرسانی موتور و ایمیج کانتینر (Update Engine Image & Recreate)"
-        echo " 8) بررسی سلامت سرویس و API داخلی (Health Check & Connectivity)"
-        echo " 9) بررسی منابع پردازنده و رم سرور (System Hardware & Sizing Analysis)"
-        echo "10) پایش لاگ‌ها و وضعیت زنده کانتینر (Container Logs & Status)"
-        echo "11) حذف مدل از حافظه پایدار (Remove Specific Model)"
-        echo "12) حذف کامل کانتینر و زیرساخت هوش مصنوعی (Uninstall AI Infrastructure)"
-        echo "13) تخلیه فوری حافظه RAM و آزادسازی مدل‌های مقیم (Unload Models from RAM)"
-        echo "14) بهینه‌سازی پویا سقف حافظه کانتینر (Auto-Tune Container Memory Ceiling)"
-        echo "15) پیکربندی حافظه مجازی Swap برای سرور (Configure 4GB Swap Space)"
-        echo "16) بازگشت به منوی اصلی (Return to Main Menu)"
+        echo " 1) Install / Deploy AI Infrastructure"
+        echo " 2) Start Local LLM Engine Container"
+        echo " 3) Pull / Download an Ollama Model"
+        echo " 4) List Installed Models in Volume"
+        echo " 5) Change Default Chat Model in .env"
+        echo " 6) Toggle AI Engine (Enable / Disable)"
+        echo " 7) Update Engine Image & Recreate Container"
+        echo " 8) Health Check & Internal API Connectivity"
+        echo " 9) System Hardware & Sizing Analysis (CPU / RAM)"
+        echo "10) View Live Container Logs & Status"
+        echo "11) Remove a Specific Model from Storage"
+        echo "12) Uninstall AI Engine & Infrastructure"
+        echo "13) Unload Active Models from RAM Immediately"
+        echo "14) Auto-Tune Container Memory Ceiling"
+        echo "15) Configure 4GB System Swap Space"
+        echo "16) Return to Main Menu"
         echo ""
         read -r -p "Select AI option [1-16]: " ai_choice
         ai_choice="$(echo "${ai_choice:-1}" | tr -d '[:space:]')"
@@ -4203,8 +4220,8 @@ main() {
 
   # Check root privileges for all administrative operations on VPS (Allow --help and -h)
   if [[ "${1:-}" != "--help" && "${1:-}" != "-h" && $EUID -ne 0 ]]; then
-    echo -e "${RED}${BOLD}[ERROR] Root or sudo privileges required on Ubuntu VPS.${NC}"
-    echo -e "${YELLOW}دسترسی ریشه (sudo/root) برای اجرای مدیریت نصب و راه‌اندازی روی سرور الزامی است.${NC}"
+    echo -e "${RED}${BOLD}[ERROR] Root or sudo privileges are required on Ubuntu VPS.${NC}"
+    echo -e "${YELLOW}Administrative privileges (sudo/root) are required to run the installer and server manager.${NC}"
     echo -e "Please execute: ${BOLD}sudo ./install.sh $*${NC}"
     echo ""
     exit 1

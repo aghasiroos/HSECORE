@@ -134,7 +134,7 @@ if [[ -n "${PRIMARY_CHAT_MODEL}" ]]; then
   if printf '%s\n' "${MODEL_LIST}" | awk 'NR > 1 {print $1}' | grep -Fxq "${PRIMARY_CHAT_MODEL}"; then
     echo -e "${GREEN}[✓] Configured chat model is installed: ${PRIMARY_CHAT_MODEL}${NC}"
     echo -e "${CYAN}Running a short inference check...${NC}"
-    TEST_PROMPT="لطفاً در یک جمله کاربرد سامانه HSECORE را توضیح بده."
+    TEST_PROMPT="Briefly describe the purpose of an enterprise HSE management system in one sentence."
     TEST_OUTPUT="$(docker exec "${CONTAINER_NAME}" ollama run "${PRIMARY_CHAT_MODEL}" "${TEST_PROMPT}" 2>&1)" || fail "Inference test failed for ${PRIMARY_CHAT_MODEL}: ${TEST_OUTPUT}"
     echo -e "Inference response: ${TEST_OUTPUT:0:200}"
   else

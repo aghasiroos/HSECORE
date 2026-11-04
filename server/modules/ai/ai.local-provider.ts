@@ -107,12 +107,29 @@ export class LocalAIProvider {
 
   private getCandidateUrls(): string[] {
     const urls = [config.aiEngine.url];
-    if (config.aiEngine.url.includes('hse-ai-engine')) {
-      urls.push('http://host.docker.internal:11434', 'http://127.0.0.1:11434');
-    } else if (config.aiEngine.url.includes('127.0.0.1') || config.aiEngine.url.includes('localhost')) {
-      urls.push('http://hse-ai-engine:11434');
+    if (config.aiEngine.url.includes(':11434')) {
+      if (config.aiEngine.url.includes('hse-ai-engine')) {
+        urls.push(
+          'http://127.0.0.1:11434',
+          'http://localhost:11434',
+          'http://host.docker.internal:11434',
+          'http://172.17.0.1:11434'
+        );
+      } else if (config.aiEngine.url.includes('127.0.0.1') || config.aiEngine.url.includes('localhost')) {
+        urls.push(
+          'http://hse-ai-engine:11434',
+          'http://host.docker.internal:11434',
+          'http://172.17.0.1:11434'
+        );
+      }
     }
     return [...new Set(urls.map(u => u.trim().replace(/\/$/, '')))];
+  }
+
+  private async ensureRuntimeReachable(): Promise<void> {
+    if (!this.isEngineEnabled && Date.now() >= this.offlineUntil) {
+      await this.checkHealth().catch(() => null);
+    }
   }
 
   private normalizeModelName(name: string): string | null {
@@ -273,8 +290,30 @@ export class LocalAIProvider {
           const installedNames = new Set(status.installedModels.flatMap(model =>
             [model.name, model.model].filter((name): name is string => typeof name === 'string')
           ).map(name => this.canonicalModelName(name)).filter((name): name is string => name !== null));
-          status.chatModelInstalled = installedNames.has(this.canonicalModelName(config.aiEngine.defaultChatModel) || '');
-          status.embeddingModelInstalled = installedNames.has(this.canonicalModelName(config.aiEngine.defaultEmbedModel) || '');
+          const configuredChatCanonical = this.canonicalModelName(config.aiEngine.defaultChatModel);
+          const configuredEmbedCanonical = this.canonicalModelName(config.aiEngine.defaultEmbedModel);
+          const firstGenerativeModel = status.installedModels.find(model => {
+            const family = String(model?.details?.family || '').toLowerCase();
+            const name = String(model?.name || model?.model || '');
+            return Boolean(name) && family !== 'bert' && !/embed|embedding|bge-m3|nomic-embed|mxbai-embed/i.test(name);
+          });
+          const firstEmbeddingModel = status.installedModels.find(model => {
+            const family = String(model?.details?.family || '').toLowerCase();
+            const name = String(model?.name || model?.model || '');
+            return Boolean(name) && (family === 'bert' || /embed|embedding|bge-m3|nomic-embed|mxbai-embed/i.test(name));
+          });
+          status.chatModelInstalled = configuredChatCanonical
+            ? installedNames.has(configuredChatCanonical)
+            : Boolean(firstGenerativeModel);
+          status.embeddingModelInstalled = configuredEmbedCanonical
+            ? installedNames.has(configuredEmbedCanonical)
+            : Boolean(firstEmbeddingModel);
+          if (!status.defaultChatModel && firstGenerativeModel) {
+            status.defaultChatModel = firstGenerativeModel.name || firstGenerativeModel.model;
+          }
+          if (!status.defaultEmbedModel && firstEmbeddingModel) {
+            status.defaultEmbedModel = firstEmbeddingModel.name || firstEmbeddingModel.model;
+          }
           status.localInferenceReady = status.chatModelInstalled;
 
           // Query version
@@ -416,20 +455,48 @@ export class LocalAIProvider {
   }
 
   /**
-   * Evict any other loaded model from RAM before loading a new one to prevent OOM
+   * Intelligently manages loaded model residency in RAM.
+   * Allows multiple models to remain resident in RAM up to maxLoadedModels (default 3)
+   * so multiple concurrent users and models respond instantly without reload thrashing.
+   * Evicts unneeded models only when exceeding capacity or when system memory is low.
    */
   async evictOtherLoadedModels(targetModel: string): Promise<void> {
     try {
       const loaded = await this.getLoadedModels();
+      const targetAlreadyLoaded = loaded.some(m => m.name && this.sameModelName(m.name, targetModel));
+      const maxAllowedLoaded = (config.aiEngine as any).maxLoadedModels || 3;
+
+      if (targetAlreadyLoaded && loaded.length <= maxAllowedLoaded) {
+        return;
+      }
+
+      let memoryCritical = false;
+      try {
+        const metrics = AIMemoryEstimator.getSystemMemoryMetrics();
+        if (metrics.availableHostRamMB < 600 || metrics.freeHostRamMB < 400) {
+          memoryCritical = true;
+        }
+      } catch {
+        // ignore metric lookup failure
+      }
+
+      if (!memoryCritical && loaded.length < maxAllowedLoaded) {
+        return;
+      }
+
       for (const m of loaded) {
         if (m.name && !this.sameModelName(m.name, targetModel)) {
-          logger.info(`[LocalAIProvider] Evicting model ${m.name} from RAM to prevent concurrent model OOM before loading ${targetModel}`);
+          logger.info(`[LocalAIProvider] Freeing resident model ${m.name} from RAM to accommodate ${targetModel}`);
           await fetch(`${this.baseUrl}/api/generate`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ model: m.name, keep_alive: 0 }),
             signal: AbortSignal.timeout(5000),
           }).catch(() => null);
+
+          if (!memoryCritical && loaded.length - 1 < maxAllowedLoaded) {
+            break;
+          }
         }
       }
     } catch {
@@ -455,6 +522,7 @@ export class LocalAIProvider {
       return { success: false, message: 'برای جلوگیری از فشار حافظه، دریافت مدل هنگام اجرای درخواست‌های AI مجاز نیست.' };
     }
 
+    await this.ensureRuntimeReachable();
     this.pullInProgress = true;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), config.aiEngine.modelPullTimeoutMs);
@@ -592,6 +660,7 @@ export class LocalAIProvider {
     messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>,
     options?: LocalChatOptions
   ): Promise<{ text: string; model: string; durationMs: number }> {
+    await this.ensureRuntimeReachable();
     if (!this.isEngineEnabled || Date.now() < this.offlineUntil) {
       throw new Error('Local AI engine is offline');
     }
@@ -676,6 +745,7 @@ export class LocalAIProvider {
     onToken: (token: string) => void,
     signal?: AbortSignal
   ): Promise<{ text: string; model: string; durationMs: number }> {
+    await this.ensureRuntimeReachable();
     if (!this.isEngineEnabled || Date.now() < this.offlineUntil) {
       throw new Error('Local AI engine is offline');
     }
@@ -692,7 +762,11 @@ export class LocalAIProvider {
       const safeCtx = AIMemoryEstimator.getSafeContextTokens(model, requestedCtx);
 
       const controller = new AbortController();
-      const abortFromCaller = () => controller.abort();
+      let activeReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+      const abortFromCaller = () => {
+        controller.abort();
+        try { activeReader?.cancel().catch(() => null); } catch {}
+      };
       if (signal?.aborted) controller.abort();
       else signal?.addEventListener('abort', abortFromCaller, { once: true });
       const timeout = setTimeout(() => controller.abort(), Math.min(options.timeoutMs || remainingMs, remainingMs));
@@ -721,11 +795,15 @@ export class LocalAIProvider {
 
         this.offlineUntil = 0;
         const reader = response.body.getReader();
+        activeReader = reader;
         const decoder = new TextDecoder();
         let pending = '';
         let fullText = '';
         let returnedModel = model;
         while (true) {
+          if (signal?.aborted) {
+            throw new DOMException('The user aborted a request.', 'AbortError');
+          }
           const { value, done } = await reader.read();
           if (done) break;
           pending += decoder.decode(value, { stream: true });
@@ -764,6 +842,7 @@ export class LocalAIProvider {
       } finally {
         clearTimeout(timeout);
         signal?.removeEventListener('abort', abortFromCaller);
+        try { activeReader?.releaseLock(); } catch {}
       }
     }, options.timeoutMs || config.aiEngine.timeoutMs || 180000);
   }
@@ -775,6 +854,7 @@ export class LocalAIProvider {
     prompt: string,
     options?: LocalChatOptions
   ): Promise<{ text: string; model: string; durationMs: number }> {
+    await this.ensureRuntimeReachable();
     if (!this.isEngineEnabled || Date.now() < this.offlineUntil) {
       throw new Error('Local AI engine is offline');
     }
@@ -845,6 +925,7 @@ export class LocalAIProvider {
     prompt: string,
     modelName?: string
   ): Promise<{ embedding: number[]; model: string; durationMs: number }> {
+    await this.ensureRuntimeReachable();
     if (!this.isEngineEnabled || Date.now() < this.offlineUntil) {
       throw new Error('Local AI engine is offline');
     }

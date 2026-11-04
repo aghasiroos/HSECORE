@@ -257,11 +257,11 @@ cmd_bench() {
     return 1
   fi
   echo -e "${BLUE}[*] Running inference benchmark on model '${model}'...${NC}"
-  echo -e "${DIM}Prompt: تست تحلیل خطرات شغلی در کار در ارتفاع و الزامات PTW${NC}"
+  echo -e "${DIM}Prompt: List three key safety hazards for working at height and PTW requirements.${NC}"
   echo ""
   local start_ts end_ts
   start_ts="$(date +%s)"
-  docker exec "${CONTAINER_NAME}" ollama run "${model}" "در سه بند کوتاه خطرات اصلی کار در ارتفاع در پتروشیمی را نام ببر."
+  docker exec "${CONTAINER_NAME}" ollama run "${model}" "Briefly list three main safety hazards of working at height in a petrochemical plant."
   end_ts="$(date +%s)"
   echo ""
   echo -e "${GREEN}[✓] Benchmark completed in $((end_ts - start_ts)) seconds.${NC}"

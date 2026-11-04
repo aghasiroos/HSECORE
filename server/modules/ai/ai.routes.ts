@@ -61,6 +61,11 @@ router.post('/chat', requireAuth, (req, res, next) => {
   aiController.chat(req, res).catch(next);
 });
 
+// Explicit chat abortion endpoint
+router.post('/chat/abort', requireAuth, (req, res, next) => {
+  aiController.abortChat(req, res).catch(next);
+});
+
 // ---------- Persistent Chat Sessions (user-isolated, replaces localStorage) ----------
 router.get('/sessions', requireAuth, (req, res, next) => {
   aiController.listSessions(req, res).catch(next);

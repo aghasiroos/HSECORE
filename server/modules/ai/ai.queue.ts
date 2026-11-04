@@ -39,13 +39,18 @@ export class AIRequestQueue {
 
   async enqueue<T>(
     taskFn: (remainingMs: number) => Promise<T>,
-    options?: { userId?: string | number; role?: string; timeoutMs?: number }
+    options?: { userId?: string | number; role?: string; timeoutMs?: number; signal?: AbortSignal }
   ): Promise<{ data: T; queueWaitMs: number }> {
     const queueEntryTime = Date.now();
     const timeoutLimit = options?.timeoutMs || config.aiEngine.timeoutMs || 60000;
     const maxConcurrency = config.aiEngine.maxConcurrency || 1;
     const isHighPriority = options?.role === 'ADMIN' || options?.role === 'ADMINISTRATOR' || options?.role === 'HSE_MANAGER';
     const priority = isHighPriority ? 10 : 1;
+    const signal = options?.signal;
+
+    if (signal?.aborted) {
+      throw new DOMException('The user aborted a request.', 'AbortError');
+    }
 
     // Check queue capacity
     if (this.queue.length >= this.maxQueueLength) {
@@ -70,6 +75,7 @@ export class AIRequestQueue {
 
     // Queue task
     return new Promise<{ data: T; queueWaitMs: number }>((resolve, reject) => {
+      let abortHandler: (() => void) | null = null;
       const task: AIQueueTask<T> = {
         id: `ai-task-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
         userId: options?.userId,
@@ -77,12 +83,31 @@ export class AIRequestQueue {
         timestamp: queueEntryTime,
         timeoutMs: timeoutLimit,
         execute: taskFn,
-        resolve: (data) => resolve({ data, queueWaitMs: Date.now() - queueEntryTime }),
-        reject,
+        resolve: (data) => {
+          if (abortHandler && signal) signal.removeEventListener('abort', abortHandler);
+          resolve({ data, queueWaitMs: Date.now() - queueEntryTime });
+        },
+        reject: (err) => {
+          if (abortHandler && signal) signal.removeEventListener('abort', abortHandler);
+          reject(err);
+        },
       };
+
+      if (signal) {
+        abortHandler = () => {
+          if (task.queueTimer) clearTimeout(task.queueTimer);
+          const queuedIndex = this.queue.indexOf(task);
+          if (queuedIndex !== -1) {
+            this.queue.splice(queuedIndex, 1);
+          }
+          task.reject(new DOMException('The user aborted a request.', 'AbortError'));
+        };
+        signal.addEventListener('abort', abortHandler, { once: true });
+      }
 
       // The request deadline includes time spent waiting, not only inference time.
       task.queueTimer = setTimeout(() => {
+        if (abortHandler && signal) signal.removeEventListener('abort', abortHandler);
         const queuedIndex = this.queue.indexOf(task);
         if (queuedIndex !== -1) {
           this.queue.splice(queuedIndex, 1);

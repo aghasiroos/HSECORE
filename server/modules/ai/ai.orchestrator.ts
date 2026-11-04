@@ -446,14 +446,6 @@ export class AIOrchestrator {
       await checkAndExecute('settings_backup_summary', () => aiToolsRegistry.getSettingsAndBackupSummary());
     }
 
-    // 20. Universal Deep Search across records when specific terms/names/codes are queried or no specific summary matched
-    if (isGlobalAdminUser(userContext) && (selectedModules.length === 0 || selectAll)) {
-      const deepSearchResult = await aiToolsRegistry.searchAcrossAllModules(message, true);
-      if (deepSearchResult) {
-        results.push(deepSearchResult);
-      }
-    }
-
     return results;
   }
 
@@ -533,6 +525,22 @@ export class AIOrchestrator {
       throw new Error('احراز هویت برای استفاده از دستیار هوشمند الزامی است.');
     }
 
+    // 2.5 Fast-path for slash command `/` (Module Hierarchy Tree)
+    if (sanitized.trim() === '/') {
+      const tree = await aiToolsRegistry.getModuleHierarchyTree(userContext);
+      const durationMs = Date.now() - startTime;
+      return {
+        success: true,
+        reply: tree.summary,
+        assistantId,
+        toolsUsed: [tree.titleFa],
+        citations: [tree.titleFa],
+        durationMs,
+        model: config.aiEngine.defaultChatModel || 'hsecore-analytical-engine',
+        queueWaitMs: 0,
+      };
+    }
+
     // 3. Resolve Safe Real-Data Tools across all HSECORE modules
     const selectedModules = Array.isArray(request.selectedModules)
       ? request.selectedModules.map(id => String(id).trim().toLowerCase()).filter(id => /^[a-z0-9\u0600-\u06ff_-]{1,80}$/.test(id)).slice(0, 40)
@@ -548,7 +556,18 @@ export class AIOrchestrator {
 
     const normalizedRequest = normalizePersianText(sanitized);
     const requestAllScope = isAllModulesScopeRequest(sanitized, normalizedRequest, new Set(selectedModules));
-    const toolResults = await this.resolveToolsToExecute(sanitized, request.allowTools ?? true, userContext, selectedModules);
+    const allowTools = request.allowTools ?? true;
+    const toolResults: AIToolResult[] = [];
+    if (isExplicitAllModulesCommand(sanitized) && allowTools) {
+      const crossAnalysis = await aiToolsRegistry.getAllModulesCrossAnalysis(userContext);
+      toolResults.push(crossAnalysis);
+    }
+    const resolvedTools = await this.resolveToolsToExecute(sanitized, allowTools, userContext, selectedModules);
+    for (const r of resolvedTools) {
+      if (!toolResults.some(existing => existing.toolName === r.toolName)) {
+        toolResults.push(r);
+      }
+    }
     const toolsUsed = toolResults.map(t => t.titleFa);
     const citations: string[] = [
       'قانون کار ج.ا.ا (فصل چهارم - حفاظت فنی و بهداشت کار)',
@@ -671,7 +690,7 @@ export class AIOrchestrator {
     // 5. Execute locally by default. Cloud fallback is explicitly opt-in to protect organizational data.
     let replyText = '';
     let queueWaitMs = 0;
-    let modelName = config.aiEngine.defaultChatModel;
+    let modelName = config.aiEngine.defaultChatModel || 'hsecore-analytical-engine';
 
     try {
       const queueResult = await aiRequestQueue.enqueue(
@@ -680,28 +699,60 @@ export class AIOrchestrator {
           const requestedModel = typeof request.model === 'string' ? request.model.trim() : '';
           const generativeModels = installedModels.filter((item: any) => {
             const family = String(item?.details?.family || '').toLowerCase();
-            return family !== 'bert' && !/embed|embedding/i.test(String(item?.name || ''));
+            return family !== 'bert' && !/embed|embedding|bge-m3|nomic-embed|mxbai-embed/i.test(String(item?.name || item?.model || ''));
           });
-          const normalizedModel = requestedModel.toLowerCase();
-          const modelInfo = requestedModel
-            ? generativeModels.find((item: any) => [item.name, item.model].some((name: any) => typeof name === 'string' && (
-                name.toLowerCase() === normalizedModel ||
-                name.toLowerCase() === `${normalizedModel}:latest` ||
-                `${name.toLowerCase()}:latest` === normalizedModel
-              )))
-            : undefined;
-          if (requestedModel && !modelInfo) throw new Error('مدل انتخاب‌شده نصب نیست یا برای گفت‌وگو قابل استفاده نیست.');
+          const matchGenerativeModel = (candidate?: string | null) => {
+            const norm = String(candidate || '').trim().toLowerCase();
+            if (!norm) return undefined;
+            return generativeModels.find((item: any) =>
+              [item.name, item.model].some(
+                (name: any) =>
+                  typeof name === 'string' &&
+                  (name.toLowerCase() === norm ||
+                    name.toLowerCase() === `${norm}:latest` ||
+                    `${name.toLowerCase()}:latest` === norm)
+              )
+            );
+          };
+
+          let modelInfo = matchGenerativeModel(requestedModel);
+          if (!modelInfo && generativeModels.length > 0) {
+            const dbDefaultChat = await aiModelManager.getSetting('default_chat_model').catch(() => null);
+            const assignedGeneral = await aiModelManager.resolveForService('GENERAL_HSE').catch(() => null);
+            modelInfo =
+              matchGenerativeModel(dbDefaultChat) ||
+              matchGenerativeModel(assignedGeneral?.modelRef) ||
+              matchGenerativeModel(config.aiEngine.defaultChatModel) ||
+              generativeModels[0];
+          }
+
+          if (!modelInfo) {
+            throw new Error('مدل زبانی محلی در موتور Ollama نصب یا فعال نشده است.');
+          }
+
+          const resolvedModelName = modelInfo.name || modelInfo.model;
           const chatOptions = {
-            model: modelInfo?.name || modelInfo?.model,
+            model: resolvedModelName,
             num_ctx: request.contextTokens,
             temperature: 0.3,
             max_tokens: 1500,
             timeoutMs: remainingMs,
           };
-          if (request.signal) {
-            // Stream internally to preserve client cancellation, but only the fully
-            // sanitized final response is sent to the browser.
-            return await localAIProvider.chatStream(messages, chatOptions, () => undefined, request.signal);
+          if (request.signal?.aborted) {
+            throw new DOMException('The user aborted a request.', 'AbortError');
+          }
+          if (request.signal || request.onToken) {
+            return await localAIProvider.chatStream(
+              messages,
+              chatOptions,
+              (token: string) => {
+                if (request.signal?.aborted) return;
+                if (request.onToken) {
+                  request.onToken(token);
+                }
+              },
+              request.signal
+            );
           }
           return await localAIProvider.chat(messages, chatOptions);
         },
@@ -709,6 +760,7 @@ export class AIOrchestrator {
           userId: userContext?.id,
           role: userContext?.role,
           timeoutMs: (config.aiEngine.timeoutMs || 180000) + 5000,
+          signal: request.signal,
         }
       );
 
@@ -716,22 +768,60 @@ export class AIOrchestrator {
       replyText = aiSecurityService.sanitizeOutput(queueResult.data.text);
       modelName = queueResult.data.model;
     } catch (execErr: any) {
-      logger.warn('[AIOrchestrator] Local Ollama inference failed', { error: execErr?.message });
-      aiAuditService.log({
-        userId: userContext?.id,
-        userUid: userContext?.uid,
-        userName: userContext?.name,
-        role: userContext?.role,
-        assistantId,
-        promptLength: sanitized.length,
-        responseLength: 0,
-        toolsUsed,
-        durationMs: Date.now() - startTime,
-        model: modelName,
-        success: false,
-        timestamp: new Date().toISOString(),
+      if (
+        execErr?.name === 'AbortError' ||
+        request.signal?.aborted ||
+        String(execErr?.message || '').toLowerCase().includes('aborted')
+      ) {
+        throw execErr;
+      }
+      logger.warn('[AIOrchestrator] Local Ollama inference unavailable; using internal HSECORE analytical engine', {
+        error: execErr?.message,
       });
-      throw new Error(execErr?.message || 'مدل محلی Ollama در دسترس نیست؛ هیچ پاسخ جایگزینی تولید نشد.');
+
+      // Ensure the user ALWAYS receives an accurate, RBAC-governed response even right after VPS install
+      // before an Ollama LLM model has been downloaded or started.
+      if (toolResults.length === 0 && matchedChunks.length === 0 && allowTools && selectedModules.length === 0) {
+        try {
+          const fallbackOverview = await aiToolsRegistry.getAllModulesCrossAnalysis(userContext);
+          toolResults.push(fallbackOverview);
+          if (!toolsUsed.includes(fallbackOverview.titleFa)) toolsUsed.push(fallbackOverview.titleFa);
+          if (!citations.includes(fallbackOverview.titleFa)) citations.push(fallbackOverview.titleFa);
+        } catch {
+          // ignore fallback overview error
+        }
+      }
+
+      const sections: string[] = [];
+      sections.push(`### پاسخ تحلیلی سامانه هوشمند HSECORE`);
+      sections.push(`درخواست شما: «${sanitized.slice(0, 200)}»`);
+
+      if (toolResults.length > 0) {
+        sections.push(`\n#### ۱. داده‌ها و شاخص‌های برخط استخراج‌شده از ماژول‌های مجاز:`);
+        for (const tr of toolResults) {
+          sections.push(`**• ${tr.titleFa}:**\n${tr.summary}`);
+        }
+      }
+
+      if (matchedChunks.length > 0) {
+        sections.push(`\n#### ۲. مستندات و الزامات بازیابی‌شده از پایگاه دانش (RAG):`);
+        for (const kc of matchedChunks) {
+          sections.push(`**• سند «${kc.docTitle}»:**\n${kc.chunkText}`);
+        }
+      }
+
+      if (toolResults.length === 0 && matchedChunks.length === 0) {
+        sections.push(
+          `\nدر حال حاضر داده اختصاصی منطبق با عبارت واردشده در محدوده مجوزهای کاربری شما یافت نشد. می‌توانید از دستور \`/\` برای مشاهده فهرست ماژول‌ها یا \`/ALL\` برای دریافت گزارش جامع ماژول‌های مجاز استفاده نمایید.`
+        );
+      }
+
+      sections.push(
+        `\n---\n💡 **راهنمای فعال‌سازی مدل زبانی مولد (LLM):** این پاسخ توسط **موتور تحلیلی داخلی HSECORE** بر پایه داده‌های واقعی پایگاه داده تولید شده است. برای فعال‌سازی تحلیل متنی پیشرفته (Ollama)، از بخش **تنظیمات سامانه ← مدیریت هوش مصنوعی** یک مدل گفت‌وگو (مانند \`qwen2.5:1.5b\` یا \`llama3.2\`) دانلود و نصب نمایید و یا در سرور دستور \`sudo bash scripts/manage-ai.sh\` را اجرا کنید.`
+      );
+
+      replyText = aiSecurityService.sanitizeOutput(sections.join('\n\n'));
+      modelName = 'hsecore-analytical-engine';
     }
 
     const durationMs = Date.now() - startTime;

@@ -265,6 +265,8 @@ router.get('/work-permits', requireAuth, async (req: Request, res: Response) => 
   }
 });
 
+import { validateHotWorkHolidayIssuance } from '../services/ptwHolidayService.ts';
+
 router.post('/work-permits', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR', 'HSE_MANAGER', 'SAFETY_OFFICER'), async (req: Request, res: Response) => {
   try {
     const ctx = await personnelAccessService.resolveAccessContext(req.user);
@@ -293,7 +295,39 @@ router.post('/work-permits', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR', 
       });
     }
 
-    const permit = await dbServices.upsertWorkPermit(req.body);
+    // Server-side strict check: Hot Work Permit on Holidays and Senior Duty Officer Control
+    const holidayVal = await validateHotWorkHolidayIssuance(req.body, req.user);
+    if (!holidayVal.allowed) {
+      if (holidayVal.requiresConfirmation) {
+        return res.status(422).json({
+          success: false,
+          requiresConfirmation: true,
+          error: holidayVal.warningMessage,
+          warningMessage: holidayVal.warningMessage,
+          holidayCheck: holidayVal.holidayCheck,
+          verifiedIssuer: holidayVal.verifiedIssuer,
+        });
+      }
+      return res.status(403).json({
+        success: false,
+        error: holidayVal.errorMessage,
+        isHoliday: true,
+        isSeniorDuty: false,
+        holidayCheck: holidayVal.holidayCheck,
+        verifiedIssuer: holidayVal.verifiedIssuer,
+      });
+    }
+
+    // Inject audit trail if Hot Work was issued on a holiday with explicit confirmation
+    const payloadToSave = { ...req.body };
+    if (holidayVal.holidayAuditTrail) {
+      payloadToSave.formData = {
+        ...(payloadToSave.formData || {}),
+        holidayAuditTrail: holidayVal.holidayAuditTrail,
+      };
+    }
+
+    const permit = await dbServices.upsertWorkPermit(payloadToSave);
     broadcastDataMutation('permits', 'upsert', permit);
     res.json({ success: true, data: permit });
   } catch (error: any) {

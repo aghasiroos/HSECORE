@@ -19,7 +19,8 @@ import {
   RotateCcw,
   Check,
   X,
-  FileSignature
+  FileSignature,
+  AlertTriangle
 } from 'lucide-react';
 import {
   WorkPermit,
@@ -53,6 +54,7 @@ import {
 } from '../../utils/personnelHelper';
 import { syncPermitReferral } from '../../utils/referralHelper';
 import { CentralNotificationService } from '../../services/notificationService';
+import { checkIsIranHolidayClient, checkIsSeniorDutyOfficer } from '../../utils/iranCalendarUtils';
 
 interface PermitFormMainProps {
   permitType: 'Hot' | 'Cold';
@@ -60,6 +62,7 @@ interface PermitFormMainProps {
   isFa: boolean;
   initialPermit?: WorkPermit;
   mode?: 'create' | 'edit' | 'view';
+  initialHolidayWarningConfirmed?: boolean;
   onSave: (permit: WorkPermit) => void;
   onCancel: () => void;
 }
@@ -70,6 +73,7 @@ export const PermitFormMain: React.FC<PermitFormMainProps> = ({
   isFa,
   initialPermit,
   mode,
+  initialHolidayWarningConfirmed = false,
   onSave,
   onCancel
 }) => {
@@ -205,6 +209,25 @@ export const PermitFormMain: React.FC<PermitFormMainProps> = ({
       other2: extra.ppeOther2 || ''
     };
   });
+
+  // Holiday & Senior Duty Officer Control State
+  const [showHolidayWarningModal, setShowHolidayWarningModal] = useState(false);
+  const [holidayWarningConfirmed, setHolidayWarningConfirmed] = useState(
+    initialHolidayWarningConfirmed ||
+    Boolean((initialPermit as any)?.holidayWarningConfirmed) ||
+    Boolean(initialPermit?.customFields?.__formExtra?.holidayWarningConfirmed) ||
+    false
+  );
+
+  const holidayInfo = useMemo(() => {
+    return checkIsIranHolidayClient(executionDate || new Date());
+  }, [executionDate]);
+
+  const isSeniorDuty = useMemo(() => {
+    return checkIsSeniorDutyOfficer(currentUser.jobTitle, null, currentUser.role);
+  }, [currentUser]);
+
+  const isHotWorkHolidayBlocked = isHot && holidayInfo.isHoliday && !isSeniorDuty;
 
   // Hazards Checkboxes
   const [hazards, setHazards] = useState(() => {
@@ -1046,9 +1069,30 @@ export const PermitFormMain: React.FC<PermitFormMainProps> = ({
     onSave(draftPermit);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (currentMode === 'view') return;
+
+    // Check Hot Work Permit Holiday Constraints
+    if (isHot && holidayInfo.isHoliday) {
+      if (!isSeniorDuty) {
+        setClosureValidationError({
+          roleTitle: 'محدودیت صادرکننده پروانه کار گرم در روز تعطیل',
+          message: 'شما مجاز به صدور پروانه کار گرم در روزهای تعطیل نیستید. این مجوز صرفاً برای پرسنل دارای سمت شغلی کشیک ارشد فعال است.',
+          missingItems: [
+            `مناسبت تقویمی: ${holidayInfo.holidayTitle || 'تعطیل رسمی'} (${holidayInfo.dateShamsi})`,
+            `سمت شغلی صادرکننده: ${currentUser.jobTitle || currentUser.role || 'غیر از کشیک ارشد'}`
+          ]
+        });
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        return;
+      }
+
+      if (!holidayWarningConfirmed) {
+        setShowHolidayWarningModal(true);
+        return;
+      }
+    }
 
     // Require at least Section 1 (Issuer) to be completed before official issuance
     if (!sectionValidations.issuer.isComplete) {
@@ -1236,6 +1280,38 @@ export const PermitFormMain: React.FC<PermitFormMainProps> = ({
           )}
         </div>
       </div>
+
+      {/* Hot Work Permit Holiday Control Alert Banner */}
+      {isHot && holidayInfo.isHoliday && (
+        <div className={`p-4 rounded-2xl border-2 shadow-md space-y-2 transition-all ${
+          isSeniorDuty
+            ? 'bg-amber-50 dark:bg-amber-950/70 border-amber-400 dark:border-amber-700 text-amber-900 dark:text-amber-200'
+            : 'bg-rose-50 dark:bg-rose-950/80 border-rose-500 dark:border-rose-700 text-rose-900 dark:text-rose-100'
+        }`}>
+          <div className="flex items-start gap-3">
+            <AlertTriangle className={`w-6 h-6 shrink-0 mt-0.5 ${isSeniorDuty ? 'text-amber-600 dark:text-amber-400' : 'text-rose-600 dark:text-rose-400'}`} />
+            <div className="space-y-1.5 flex-1">
+              <div className="flex items-center justify-between gap-2 flex-wrap font-black text-sm">
+                <span>وضعیت تقویمی: {holidayInfo.holidayTitle || 'روز تعطیل'} ({holidayInfo.dateShamsi})</span>
+                {isSeniorDuty ? (
+                  <span className="px-3 py-0.5 rounded-full text-xs font-black bg-emerald-100 text-emerald-800 dark:bg-emerald-900/80 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-700">
+                    سمت صادرکننده: کشیک ارشد (مجاز با اخذ تأییدیه)
+                  </span>
+                ) : (
+                  <span className="px-3 py-0.5 rounded-full text-xs font-black bg-rose-200 text-rose-900 dark:bg-rose-900/90 dark:text-rose-100 border border-rose-400 dark:border-rose-700">
+                    سمت صادرکننده: غیر از کشیک ارشد (صدور مسدود است)
+                  </span>
+                )}
+              </div>
+              <p className="text-xs leading-relaxed opacity-95">
+                {isSeniorDuty
+                  ? 'صدور پروانه کار گرم در روزهای تعطیل مشمول الزامات و محدودیتهای ویژه مطابق با استاندارد و دستورالعمل صدور پروانه کار در روزهای تعطیل میباشد.'
+                  : 'شما مجاز به صدور پروانه کار گرم در روزهای تعطیل نیستید. این مجوز صرفاً برای پرسنل دارای سمت شغلی کشیک ارشد فعال است.'}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Draft State Notification Banner */}
       {initialPermit?.status === 'Draft' && (
@@ -2854,6 +2930,66 @@ export const PermitFormMain: React.FC<PermitFormMainProps> = ({
           isFa={isFa}
           onClose={() => setIsPrintModalOpen(false)}
         />
+      )}
+
+      {/* Hot Work Permit Holiday Confirmation Modal */}
+      {showHolidayWarningModal && (
+        <div className="fixed inset-0 z-[1200] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 border-2 border-amber-500 rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-5" dir="rtl">
+            <div className="flex items-center gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
+              <div className="p-3 rounded-2xl bg-amber-100 dark:bg-amber-950/80 text-amber-600 dark:text-amber-400 shrink-0">
+                <AlertCircle className="w-7 h-7" />
+              </div>
+              <div>
+                <h3 className="font-black text-slate-900 dark:text-white text-base">
+                  تأییدیه صدور پروانه کار گرم در روز تعطیل
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  مناسبت: {holidayInfo.holidayTitle || 'روز تعطیل رسمی'} ({holidayInfo.dateShamsi})
+                </p>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/50 border border-amber-300 dark:border-amber-800/80 text-xs leading-relaxed text-amber-950 dark:text-amber-100 font-bold">
+              توجه! صدور پروانه کار گرم در روزهای تعطیل مشمول الزامات و محدودیتهای ویژه مطابق با استاندارد و دستورالعمل صدور پروانه کار در روزهای تعطیل میباشد. آیا از ضرورت و مجاز بودن صدور این پروانه اطمینان دارید؟
+            </div>
+
+            <div className="text-xs text-slate-600 dark:text-slate-300 space-y-1.5 bg-slate-50 dark:bg-slate-800/60 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-700">
+              <div className="flex justify-between">
+                <span className="text-slate-500">صادرکننده پروانه:</span>
+                <strong className="text-slate-900 dark:text-slate-100">{currentUser.fullName || currentUser.username}</strong>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">سمت شغلی استعلام‌شده:</span>
+                <strong className="text-emerald-700 dark:text-emerald-400 font-black">{currentUser.jobTitle || 'کشیک ارشد'}</strong>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowHolidayWarningModal(false)}
+                className="px-5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+              >
+                انصراف
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setHolidayWarningConfirmed(true);
+                  setShowHolidayWarningModal(false);
+                  setTimeout(() => {
+                    handleSubmit();
+                  }, 50);
+                }}
+                className="px-6 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-black shadow-md transition cursor-pointer flex items-center gap-2"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>تأیید و ادامه صدور</span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

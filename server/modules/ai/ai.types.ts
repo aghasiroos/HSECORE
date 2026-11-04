@@ -59,6 +59,8 @@ export interface AIChatRequest {
   contextTokens?: number;
   /** Internal-only cancellation signal supplied by the authenticated HTTP controller. */
   signal?: AbortSignal;
+  /** Real-time token streaming callback to push tokens directly to the client as they are generated. */
+  onToken?: (token: string) => void;
   allowTools?: boolean;
   model?: string;
 }

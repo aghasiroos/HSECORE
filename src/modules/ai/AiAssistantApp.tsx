@@ -117,25 +117,127 @@ function toEmptyChatSession(raw: { id: string; title: string; createdAt: string 
   };
 }
 
+const AI_SELECTED_MODEL_STORAGE_KEY = 'hsecore_ai_selected_model';
+
+interface InstalledModelItem {
+  name: string;
+  details?: {
+    family?: string;
+    parameter_size?: string;
+    quantization_level?: string;
+  };
+}
+
+interface AiRuntimeCache {
+  userKey: string;
+  sessions: ChatSession[];
+  activeSessionId: string;
+  selectedModel: string;
+  selectedContext: string;
+  selectedModules: string[];
+  installedModels: InstalledModelItem[];
+  isLoading: boolean;
+  migrated: boolean;
+  autoCreated: boolean;
+  activeAbortController: AbortController | null;
+}
+
+const aiRuntimeCache: AiRuntimeCache = {
+  userKey: '',
+  sessions: [],
+  activeSessionId: '',
+  selectedModel: '',
+  selectedContext: 'auto',
+  selectedModules: [],
+  installedModels: [],
+  isLoading: false,
+  migrated: false,
+  autoCreated: false,
+  activeAbortController: null,
+};
+
+const aiRuntimeListeners = new Set<() => void>();
+function notifyAiRuntimeListeners() {
+  aiRuntimeListeners.forEach(listener => {
+    try {
+      listener();
+    } catch {
+      // ignore listener errors
+    }
+  });
+}
+
+function getStoredSelectedModel(): string {
+  try {
+    return localStorage.getItem(AI_SELECTED_MODEL_STORAGE_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+function setStoredSelectedModel(model: string) {
+  try {
+    if (model) {
+      localStorage.setItem(AI_SELECTED_MODEL_STORAGE_KEY, model);
+    }
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function ensureRuntimeCacheForUser(userKey: string) {
+  if (aiRuntimeCache.userKey !== userKey) {
+    aiRuntimeCache.userKey = userKey;
+    aiRuntimeCache.sessions = [];
+    aiRuntimeCache.activeSessionId = '';
+    aiRuntimeCache.selectedModel = getStoredSelectedModel();
+    aiRuntimeCache.selectedContext = 'auto';
+    aiRuntimeCache.selectedModules = [];
+    aiRuntimeCache.installedModels = [];
+    aiRuntimeCache.isLoading = false;
+    aiRuntimeCache.migrated = false;
+    aiRuntimeCache.autoCreated = false;
+    aiRuntimeCache.activeAbortController = null;
+  }
+}
+
 export default function AiAssistantApp({
+  currentUser,
   onOpenGlobalMenu,
   onNavigate,
 }: AiAssistantAppProps) {
+  const userKey = String(
+    (currentUser as any)?.uid || currentUser?.id || currentUser?.username || 'default'
+  );
+  ensureRuntimeCacheForUser(userKey);
+
   const [inputMessage, setInputMessage] = useState<string>('');
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [installedModels, setInstalledModels] = useState<Array<{ name: string; details?: { family?: string; parameter_size?: string; quantization_level?: string } }>>([]);
-  const [selectedModel, setSelectedModel] = useState<string>('');
-  const [selectedContext, setSelectedContext] = useState<string>('auto');
+  const [isLoading, setIsLoadingState] = useState<boolean>(() => aiRuntimeCache.isLoading);
+  const [installedModels, setInstalledModelsState] = useState<InstalledModelItem[]>(
+    () => aiRuntimeCache.installedModels
+  );
+  const [selectedModel, setSelectedModelState] = useState<string>(
+    () => aiRuntimeCache.selectedModel || getStoredSelectedModel()
+  );
+  const [selectedContext, setSelectedContextState] = useState<string>(
+    () => aiRuntimeCache.selectedContext || 'auto'
+  );
   const [allowTools, setAllowTools] = useState<boolean>(() => getAiAllowToolsSetting());
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(false);
   const [activeSheet, setActiveSheet] = useState<ActiveSheetType>('none');
-  const [sessionsLoading, setSessionsLoading] = useState<boolean>(true);
+  const [sessionsLoading, setSessionsLoading] = useState<boolean>(
+    () => aiRuntimeCache.sessions.length === 0
+  );
   const [sessionsError, setSessionsError] = useState<string | null>(null);
-  const [isOnline, setIsOnline] = useState<boolean>(() => (typeof navigator !== 'undefined' ? navigator.onLine : true));
+  const [isOnline, setIsOnline] = useState<boolean>(() =>
+    typeof navigator !== 'undefined' ? navigator.onLine : true
+  );
 
-  const [sessions, setSessions] = useState<ChatSession[]>([]);
-  const [activeSessionId, setActiveSessionId] = useState<string>('');
+  const [sessions, setSessionsState] = useState<ChatSession[]>(() => aiRuntimeCache.sessions);
+  const [activeSessionId, setActiveSessionIdState] = useState<string>(
+    () => aiRuntimeCache.activeSessionId
+  );
   const [searchSessionQuery, setSearchSessionQuery] = useState<string>('');
   const [moduleSearchQuery, setModuleSearchQuery] = useState<string>('');
   const [moduleCatalog, setModuleCatalog] = useState<
@@ -150,16 +252,92 @@ export default function AiAssistantApp({
       internal?: boolean;
     }>
   >([]);
-  const [selectedModules, setSelectedModules] = useState<string[]>([]);
+  const [selectedModules, setSelectedModulesState] = useState<string[]>(
+    () => aiRuntimeCache.selectedModules
+  );
   const [showSlashModulePicker, setShowSlashModulePicker] = useState(false);
+
+  const setSessions: React.Dispatch<React.SetStateAction<ChatSession[]>> = updater => {
+    const next = typeof updater === 'function' ? updater(aiRuntimeCache.sessions) : updater;
+    aiRuntimeCache.sessions = next;
+    setSessionsState(next);
+    notifyAiRuntimeListeners();
+  };
+
+  const setActiveSessionId: React.Dispatch<React.SetStateAction<string>> = updater => {
+    const next =
+      typeof updater === 'function' ? updater(aiRuntimeCache.activeSessionId) : updater;
+    aiRuntimeCache.activeSessionId = next;
+    try {
+      if (next) sessionStorage.setItem(`hsecore_ai_active_session_${userKey}`, next);
+    } catch {
+      // ignore storage errors
+    }
+    setActiveSessionIdState(next);
+    notifyAiRuntimeListeners();
+  };
+
+  const setSelectedModel: React.Dispatch<React.SetStateAction<string>> = updater => {
+    const next = typeof updater === 'function' ? updater(aiRuntimeCache.selectedModel) : updater;
+    aiRuntimeCache.selectedModel = next;
+    if (next) setStoredSelectedModel(next);
+    setSelectedModelState(next);
+    notifyAiRuntimeListeners();
+  };
+
+  const setSelectedContext: React.Dispatch<React.SetStateAction<string>> = updater => {
+    const next =
+      typeof updater === 'function' ? updater(aiRuntimeCache.selectedContext) : updater;
+    aiRuntimeCache.selectedContext = next;
+    setSelectedContextState(next);
+    notifyAiRuntimeListeners();
+  };
+
+  const setSelectedModules: React.Dispatch<React.SetStateAction<string[]>> = updater => {
+    const next =
+      typeof updater === 'function' ? updater(aiRuntimeCache.selectedModules) : updater;
+    aiRuntimeCache.selectedModules = next;
+    setSelectedModulesState(next);
+    notifyAiRuntimeListeners();
+  };
+
+  const setInstalledModels: React.Dispatch<React.SetStateAction<InstalledModelItem[]>> = updater => {
+    const next =
+      typeof updater === 'function' ? updater(aiRuntimeCache.installedModels) : updater;
+    aiRuntimeCache.installedModels = next;
+    setInstalledModelsState(next);
+    notifyAiRuntimeListeners();
+  };
+
+  const setIsLoading: React.Dispatch<React.SetStateAction<boolean>> = updater => {
+    const next = typeof updater === 'function' ? updater(aiRuntimeCache.isLoading) : updater;
+    aiRuntimeCache.isLoading = next;
+    setIsLoadingState(next);
+    notifyAiRuntimeListeners();
+  };
+
+  useEffect(() => {
+    ensureRuntimeCacheForUser(userKey);
+    const syncFromRuntime = () => {
+      setSessionsState(aiRuntimeCache.sessions);
+      setActiveSessionIdState(aiRuntimeCache.activeSessionId);
+      setSelectedModelState(aiRuntimeCache.selectedModel);
+      setSelectedContextState(aiRuntimeCache.selectedContext);
+      setSelectedModulesState(aiRuntimeCache.selectedModules);
+      setInstalledModelsState(aiRuntimeCache.installedModels);
+      setIsLoadingState(aiRuntimeCache.isLoading);
+    };
+    aiRuntimeListeners.add(syncFromRuntime);
+    syncFromRuntime();
+    return () => {
+      aiRuntimeListeners.delete(syncFromRuntime);
+    };
+  }, [userKey]);
 
   const activeSession = sessions.find(s => s.id === activeSessionId) || sessions[0];
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const migratedRef = useRef(false);
-  const autoCreateOnceRef = useRef(false);
   const deletingRef = useRef(false);
-  const activeRequestRef = useRef<AbortController | null>(null);
 
   // Monitor online/offline state
   useEffect(() => {
@@ -205,24 +383,24 @@ export default function AiAssistantApp({
   };
 
   const loadSessionsFromServer = async () => {
-    setSessionsLoading(true);
+    if (aiRuntimeCache.sessions.length === 0) {
+      setSessionsLoading(true);
+    }
     setSessionsError(null);
     try {
       const res = await authFetch('/api/v1/ai/sessions');
       const data = await res.json();
       if (!data.success) throw new Error(data.message || 'خطا در دریافت گفتگوها');
 
-      let list: ChatSession[] = (data.data || []).map(toEmptyChatSession);
+      let rawList: Array<{ id: string; title: string; createdAt: string }> = data.data || [];
 
-      if (!migratedRef.current) {
-        migratedRef.current = true;
+      if (!aiRuntimeCache.migrated) {
+        aiRuntimeCache.migrated = true;
         try {
           const raw = localStorage.getItem('hsecore_ai_sessions');
           if (raw) {
             const localSessions = JSON.parse(raw);
             if (Array.isArray(localSessions) && localSessions.length > 0) {
-              // Import in bounded batches. The server operation is idempotent by session/message ID,
-              // so an interrupted migration can safely be retried without deleting the local source.
               for (let offset = 0; offset < localSessions.length; offset += 30) {
                 const batch = localSessions.slice(offset, offset + 30);
                 const importRes = await authFetch('/api/v1/ai/sessions/import-local', {
@@ -256,9 +434,8 @@ export default function AiAssistantApp({
                 throw new Error('تعداد گفتگوها یا پیام‌های منتقل‌شده با تاریخچه محلی مطابقت ندارد؛ نسخه محلی حفظ شد.');
               }
 
-              // Remove the source only after every batch and the server-side read-back are verified.
               localStorage.removeItem('hsecore_ai_sessions');
-              list = data2.data.map(toEmptyChatSession);
+              rawList = data2.data;
             }
           }
         } catch {
@@ -266,8 +443,8 @@ export default function AiAssistantApp({
         }
       }
 
-      if (list.length === 0 && !autoCreateOnceRef.current) {
-        autoCreateOnceRef.current = true;
+      if (rawList.length === 0 && !aiRuntimeCache.autoCreated) {
+        aiRuntimeCache.autoCreated = true;
         const createRes = await authFetch('/api/v1/ai/sessions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -278,18 +455,53 @@ export default function AiAssistantApp({
         });
         const createData = await createRes.json();
         if (createData.success && createData.data) {
-          list = [toEmptyChatSession(createData.data)];
+          rawList = [createData.data];
         }
-      } else if (list.length > 0) {
-        autoCreateOnceRef.current = true;
+      } else if (rawList.length > 0) {
+        aiRuntimeCache.autoCreated = true;
       }
 
-      setSessions(list);
-      setActiveSessionId(prev => (prev && list.some(s => s.id === prev) ? prev : list[0]?.id || ''));
+      const existingById = new Map(aiRuntimeCache.sessions.map(s => [s.id, s]));
+      const mergedList: ChatSession[] = rawList.map(raw => {
+        const existing = existingById.get(raw.id);
+        return {
+          id: raw.id,
+          title:
+            existing?.title && existing.title !== 'گفت‌وگوی جدید' && raw.title === 'گفت‌وگوی جدید'
+              ? existing.title
+              : raw.title,
+          createdAt: raw.createdAt,
+          messages: existing?.messages || [],
+        };
+      });
+
+      // Preserve any in-memory session that is currently streaming
+      for (const existing of aiRuntimeCache.sessions) {
+        if (!mergedList.some(item => item.id === existing.id) && existing.messages.length > 0) {
+          mergedList.unshift(existing);
+        }
+      }
+
+      setSessions(mergedList);
+
+      let storedActiveId = '';
+      try {
+        storedActiveId = sessionStorage.getItem(`hsecore_ai_active_session_${userKey}`) || '';
+      } catch {
+        // ignore
+      }
+      const preferredId = aiRuntimeCache.activeSessionId || storedActiveId;
+      const resolvedActiveId =
+        preferredId && mergedList.some(s => s.id === preferredId)
+          ? preferredId
+          : mergedList[0]?.id || '';
+
+      setActiveSessionId(resolvedActiveId);
+      if (resolvedActiveId && !aiRuntimeCache.isLoading) {
+        await loadMessagesForSession(resolvedActiveId);
+      }
     } catch (err: any) {
       setSessionsError(err?.message || 'خطا در بارگذاری گفتگوها');
-      // Preserve the last successfully loaded sessions during transient failures.
-
     } finally {
       setSessionsLoading(false);
     }
@@ -315,33 +527,65 @@ export default function AiAssistantApp({
         durationMs: m.durationMs,
         model: m.model,
       }));
-      setSessions(prev => prev.map(s => (s.id === sessionId ? { ...s, messages: msgs } : s)));
+      setSessions(prev =>
+        prev.map(s => {
+          if (s.id !== sessionId) return s;
+          // If currently streaming and local has more messages than DB, keep the in-flight streaming message appended
+          if (aiRuntimeCache.isLoading && s.messages.length > msgs.length) {
+            return s;
+          }
+          return { ...s, messages: msgs };
+        })
+      );
     } catch (err: any) {
-      // Do not replace an existing transcript with an empty one when a fetch fails.
       setSessionsError(err?.message || 'خواندن سابقه گفتگو از پایگاه داده ناموفق بود.');
     }
   };
 
   const refreshInstalledModels = async () => {
     try {
-      const response = await authFetch('/api/v1/ai/models');
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const data = await response.json();
-      const models = Array.isArray(data?.data)
+      const [modelsResponse, statusResponse] = await Promise.all([
+        authFetch('/api/v1/ai/models'),
+        authFetch('/api/v1/ai/status').catch(() => null),
+      ]);
+      if (!modelsResponse.ok) throw new Error(`HTTP ${modelsResponse.status}`);
+      const data = await modelsResponse.json();
+      const statusData = statusResponse && statusResponse.ok ? await statusResponse.json().catch(() => null) : null;
+      const serverDefaultModel = String(statusData?.data?.defaultChatModel || '').trim();
+
+      const models: InstalledModelItem[] = Array.isArray(data?.data)
         ? data.data.filter(
             (model: any) =>
               String(model?.details?.family || '').toLowerCase() !== 'bert' &&
-              !/embed|embedding/i.test(String(model?.name || ''))
+              !/embed|embedding|bge-m3|nomic-embed|mxbai-embed/i.test(String(model?.name || ''))
           )
         : [];
       setInstalledModels(models);
-      // Never auto-select the first installed model; the user must choose explicitly.
-      setSelectedModel(current =>
-        models.some((model: any) => model.name === current) ? current : ''
-      );
+
+      const matchModelName = (candidate?: string): string => {
+        const clean = String(candidate || '').trim().toLowerCase();
+        if (!clean) return '';
+        const found = models.find(
+          (m: any) =>
+            typeof m?.name === 'string' &&
+            (m.name.toLowerCase() === clean ||
+              m.name.toLowerCase() === `${clean}:latest` ||
+              `${m.name.toLowerCase()}:latest` === clean)
+        );
+        return found ? found.name : '';
+      };
+
+      setSelectedModel(current => {
+        const kept =
+          matchModelName(current) ||
+          matchModelName(aiRuntimeCache.selectedModel) ||
+          matchModelName(getStoredSelectedModel()) ||
+          matchModelName(serverDefaultModel) ||
+          (models[0]?.name || '');
+        return kept;
+      });
     } catch {
-      setInstalledModels([]);
-      setSelectedModel('');
+      // Preserve previously known models on transient network error
     }
   };
 
@@ -586,7 +830,7 @@ export default function AiAssistantApp({
 
       const parsedContextTokens = selectedContext === 'auto' ? undefined : Number(selectedContext);
       const requestController = new AbortController();
-      activeRequestRef.current = requestController;
+      aiRuntimeCache.activeAbortController = requestController;
       const res = await authFetch('/api/v1/ai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
@@ -787,12 +1031,22 @@ export default function AiAssistantApp({
         })
       );
     } finally {
-      activeRequestRef.current = null;
+      aiRuntimeCache.activeAbortController = null;
       setIsLoading(false);
     }
   };
 
-  const handleStopGeneration = () => activeRequestRef.current?.abort();
+  const handleStopGeneration = () => {
+    aiRuntimeCache.activeAbortController?.abort();
+    if (activeSessionId) {
+      void authFetch('/api/v1/ai/chat/abort', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: activeSessionId }),
+      }).catch(() => null);
+    }
+    setIsLoading(false);
+  };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -1036,13 +1290,13 @@ export default function AiAssistantApp({
                     className={`w-1.5 h-1.5 rounded-full shrink-0 ${
                       installedModels.length > 0 && selectedModel
                         ? 'bg-emerald-500 animate-pulse'
-                        : 'bg-amber-500'
+                        : 'bg-sky-500 animate-pulse'
                     }`}
                   />
                   <span className="truncate">
                     {installedModels.length > 0 && selectedModel
                       ? `مدل فعال: ${selectedModel}`
-                      : 'مدل نصب نشده'}
+                      : 'موتور تحلیلی داخلی HSE آماده'}
                   </span>
                 </button>
               </div>
@@ -1359,7 +1613,7 @@ export default function AiAssistantApp({
                     <button
                       type="button"
                       onClick={() => handleSendMessage()}
-                      disabled={!inputMessage.trim() || sessionsLoading || !selectedModel}
+                      disabled={!inputMessage.trim() || sessionsLoading}
                       className="w-11 h-11 min-h-[44px] min-w-[44px] rounded-full bg-[#5B4BFF] hover:bg-[#4A3AE8] disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:text-slate-400 text-white flex items-center justify-center shadow-md shadow-[#5B4BFF]/25 disabled:shadow-none transition-all active:scale-95 disabled:cursor-not-allowed cursor-pointer"
                       title="ارسال پیام"
                       aria-label="ارسال پیام"
@@ -1383,7 +1637,7 @@ export default function AiAssistantApp({
                   >
                     <Bot className="w-4 h-4 text-[#5B4BFF] shrink-0" />
                     <span className="max-w-[115px] sm:max-w-[180px] truncate">
-                      {selectedModel || 'انتخاب مدل'}
+                      {selectedModel || installedModels[0]?.name || 'موتور داخلی HSE'}
                     </span>
                     <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                   </button>

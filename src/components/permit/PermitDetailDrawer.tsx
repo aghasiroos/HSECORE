@@ -17,7 +17,8 @@ import {
   GitCommit,
   CheckCircle2,
   XCircle,
-  ShieldCheck
+  ShieldCheck,
+  AlertTriangle
 } from 'lucide-react';
 import { WorkPermit, PermitWorkflowStatus, UserProfile } from '../../types';
 import { PERMIT_CATEGORIES_CONFIG } from './PermitTypes';
@@ -341,6 +342,27 @@ export const PermitDetailDrawer: React.FC<PermitDetailDrawerProps> = ({
                   </div>
                 </div>
               </div>
+
+              {/* Holiday Audit Card if permit was issued on a holiday */}
+              {(permit.holidayAuditTrail || (permit as any).formData?.holidayAuditTrail) && (
+                <div className="bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-800/80 rounded-2xl p-4 space-y-2">
+                  <div className="flex items-center gap-2 font-black text-xs text-amber-900 dark:text-amber-200">
+                    <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                    <span>سوابق ممیزی و تأییدیه صدور پروانه کار گرم در روز تعطیل (کشیک ارشد)</span>
+                  </div>
+                  {(() => {
+                    const audit = permit.holidayAuditTrail || (permit as any).formData?.holidayAuditTrail;
+                    return (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-amber-950 dark:text-amber-100 pt-1 border-t border-amber-200 dark:border-amber-800/60">
+                        <div>مناسبت تعطیل: <strong>{audit.holidayTitle || 'تعطیل رسمی'} ({audit.dateShamsi || '—'})</strong></div>
+                        <div>زمان ثبت تأییدیه: <strong>{audit.timeTehran || '—'} (Asia/Tehran)</strong></div>
+                        <div>نام صادرکننده: <strong>{audit.issuerName || '—'} ({audit.issuerPersonnelCode || '—'})</strong></div>
+                        <div>سمت شغلی استعلام‌شده: <strong className="text-emerald-700 dark:text-emerald-400 font-bold">{audit.issuerVerifiedJobTitle || 'کشیک ارشد'}</strong></div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
 
               {/* 4-Tier Approvals & Signatures (مطابق با فرم رسمی و تصویر پیوست) */}
               {(() => {

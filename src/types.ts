@@ -834,6 +834,18 @@ export interface WorkPermit {
   version: number;
   latitude?: number;
   longitude?: number;
+  holidayWarningConfirmed?: boolean;
+  holidayAuditTrail?: {
+    isHoliday: boolean;
+    holidayTitle?: string;
+    dateShamsi: string;
+    timeTehran: string;
+    issuerName: string;
+    issuerPersonnelCode: string;
+    issuerVerifiedJobTitle: string;
+    warningConfirmedAt: string;
+    warningConfirmedBy: string;
+  };
 }
 
 

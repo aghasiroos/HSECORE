@@ -18,6 +18,7 @@ export interface AppConfig {
     defaultChatModel: string;
     defaultEmbedModel: string;
     maxConcurrency: number;
+    maxLoadedModels: number;
     timeoutMs: number;
     contextTokens: number;
     maxQueueLength: number;
@@ -172,11 +173,12 @@ export const config: AppConfig = {
     url: (process.env.AI_ENGINE_URL || 'http://hse-ai-engine:11434').trim().replace(/\/$/, ''),
     defaultChatModel: (process.env.AI_DEFAULT_CHAT_MODEL || '').trim(),
     defaultEmbedModel: (process.env.AI_DEFAULT_EMBED_MODEL || '').trim(),
-    maxConcurrency: Number(process.env.AI_MAX_CONCURRENCY) || 1,
+    maxConcurrency: Number(process.env.AI_MAX_CONCURRENCY) || 4,
+    maxLoadedModels: Number(process.env.AI_MAX_LOADED_MODELS) || 3,
     // Conservative CPU-only default; deployments may explicitly raise this after memory validation.
     timeoutMs: Math.min(Math.max(Number(process.env.AI_REQUEST_TIMEOUT_MS) || 180000, 30000), 600000),
     contextTokens: Math.min(Math.max(Number(process.env.AI_CONTEXT_TOKENS) || 2048, 1024), 16384),
-    maxQueueLength: Math.min(Math.max(Number(process.env.AI_MAX_QUEUE_LENGTH) || 10, 1), 50),
+    maxQueueLength: Math.min(Math.max(Number(process.env.AI_MAX_QUEUE_LENGTH) || 15, 1), 50),
     modelPullTimeoutMs: Math.min(Math.max(Number(process.env.AI_MODEL_PULL_TIMEOUT_MS) || 30 * 60 * 1000, 60 * 1000), 60 * 60 * 1000),
     // Cloud processing is opt-in; organization data remains local by default.
     allowCloudFallback: process.env.AI_CLOUD_FALLBACK_ENABLED === 'true',

@@ -13,6 +13,8 @@ import { localAIProvider } from './ai.local-provider.ts';
 import { AIMemoryEstimator } from './ai.memory-estimator.ts';
 import { aiModuleRegistry } from './ai.module-registry.ts';
 
+const activeSessionAbortControllers = new Map<string, AbortController>();
+
 export class AIController {
   async getStatus(_req: Request, res: Response) {
     try {
@@ -124,9 +126,18 @@ export class AIController {
     const selectedModules = Array.isArray(body.selectedModules)
       ? body.selectedModules.filter((id: unknown) => typeof id === 'string').slice(0, 40)
       : [];
+    const sessionId = typeof body.sessionId === 'string' ? body.sessionId.trim() : '';
     const startedAt = Date.now();
     const streaming = body.stream === true;
     const abortController = new AbortController();
+
+    if (sessionId) {
+      const existing = activeSessionAbortControllers.get(sessionId);
+      if (existing) {
+        existing.abort();
+      }
+      activeSessionAbortControllers.set(sessionId, abortController);
+    }
 
     if (streaming) {
       res.status(200);
@@ -136,10 +147,16 @@ export class AIController {
       res.setHeader('X-Accel-Buffering', 'no');
       res.flushHeaders?.();
       res.on('close', () => {
-        if (!res.writableEnded) abortController.abort();
+        if (!res.writableEnded) {
+          abortController.abort();
+        }
+        if (sessionId) {
+          activeSessionAbortControllers.delete(sessionId);
+        }
       });
     }
 
+    let streamedAnyToken = false;
     try {
       // All user-facing chat now goes through the HSECORE orchestrator.
       // The orchestrator performs permission-checked, read-only domain retrieval
@@ -151,12 +168,20 @@ export class AIController {
         selectedModules,
         contextTokens: Number.isInteger(body.contextTokens) && body.contextTokens >= 1024 && body.contextTokens <= 32768
           ? body.contextTokens : undefined,
-        signal: streaming ? abortController.signal : undefined,
+        signal: abortController.signal,
+        onToken: streaming
+          ? (token: string) => {
+              if (!res.destroyed && !res.writableEnded) {
+                streamedAnyToken = true;
+                res.write(`data: ${JSON.stringify({ token })}\n\n`);
+                (res as any).flush?.();
+              }
+            }
+          : undefined,
         allowTools: typeof body.allowTools === 'boolean' ? body.allowTools : true,
       }, user);
 
       let historySaved = true;
-      const sessionId = typeof body.sessionId === 'string' ? body.sessionId.trim() : '';
       if (sessionId) {
         try {
           await aiSessionService.appendMessage(sessionId, user, {
@@ -174,7 +199,9 @@ export class AIController {
 
       if (streaming) {
         if (!res.destroyed && !res.writableEnded) {
-          res.write(`data: ${JSON.stringify({ token: result.reply })}\n\n`);
+          if (!streamedAnyToken && result.reply) {
+            res.write(`data: ${JSON.stringify({ token: result.reply })}\n\n`);
+          }
           res.write(`data: ${JSON.stringify({
             done: true,
             historySaved,
@@ -203,6 +230,19 @@ export class AIController {
         historySaved,
       });
     } catch (err: any) {
+      if (
+        abortController.signal.aborted ||
+        err?.name === 'AbortError' ||
+        String(err?.message || '').toLowerCase().includes('aborted')
+      ) {
+        if (streaming && !res.destroyed && !res.writableEnded) {
+          res.write(`data: ${JSON.stringify({ error: 'پردازش هوش مصنوعی توسط کاربر متوقف گردید.', aborted: true })}\n\n`);
+          (res as any).flush?.();
+          res.end();
+        }
+        return;
+      }
+
       const messageText = String(err?.message || 'خطا در اجرای تحلیل هوشمند.');
       aiAuditService.log({
         userId: user.id,
@@ -229,6 +269,28 @@ export class AIController {
       }
       return res.status(messageText.includes('دسترسی') || messageText.includes('قابل‌دسترسی') ? 403 : 503)
         .json({ success: false, message: messageText });
+    } finally {
+      if (sessionId) {
+        activeSessionAbortControllers.delete(sessionId);
+      }
+    }
+  }
+
+  async abortChat(req: Request, res: Response) {
+    try {
+      const sessionId = typeof req.body?.sessionId === 'string' ? req.body.sessionId.trim() : '';
+      if (!sessionId) {
+        return res.status(400).json({ success: false, message: 'شناسه گفتگو الزامی است.' });
+      }
+      const controller = activeSessionAbortControllers.get(sessionId);
+      if (controller) {
+        controller.abort();
+        activeSessionAbortControllers.delete(sessionId);
+        return res.json({ success: true, message: 'پردازش هوش مصنوعی با موفقیت متوقف شد.', aborted: true });
+      }
+      return res.json({ success: true, message: 'درخواست فعالی برای این گفتگو در حال اجرا نیست.', aborted: false });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, message: err.message || 'خطا در متوقف‌سازی درخواست هوش مصنوعی' });
     }
   }
 
@@ -432,6 +494,8 @@ export class AIController {
     return {
       id: req.user.id,
       uid: req.user.uid,
+      username: req.user.username,
+      email: req.user.email,
       name: req.user.name || req.user.username,
       role: req.user.role,
       permissions: req.user.permissions,
