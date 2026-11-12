@@ -13,6 +13,7 @@ import bpmnRoutes from '../modules/bpmn/bpmn.routes.ts';
 import processManagementRoutes from '../modules/process-management/routes.ts';
 import aiRoutes from '../modules/ai/ai.routes.ts';
 import monitoringRoutes from '../modules/monitoring/monitoring.routes.ts';
+import psmRoutes from '../modules/psm/psm.routes.ts';
 import databaseRoutes from './database-routes.ts';
 import { settingsRouter } from './settings.router.ts';
 import { organizationRouter } from './organization.router.ts';
@@ -54,6 +55,7 @@ export function createApiRouter(): Router {
   v1.use('/process-management', processManagementRoutes);
   v1.use('/ai', aiRoutes);
   v1.use('/monitoring', monitoringRoutes);
+  v1.use('/psm', psmRoutes);
   v1.use('/referrals', referralRouter);
   v1.use('/automation', automationRouter);
 
@@ -106,6 +108,7 @@ export function createApiRouter(): Router {
   router.use('/process-management', processManagementRoutes);
   router.use('/workflows', requireAuth, workflowRoutes);
   router.use('/ai', requireAuth, aiRoutes);
+  router.use('/psm', requireAuth, psmRoutes);
 
   // Health and medical legacy routes
   router.use('/medical-exams', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR', 'HSE_MANAGER', 'DOCTOR_OCCUPATIONAL', 'NUTRITIONIST', 'MEDICAL_STAFF', 'کارشناس تغذیه'), healthRoutes);

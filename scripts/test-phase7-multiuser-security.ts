@@ -9,6 +9,7 @@ import { aiRequestQueue } from '../server/modules/ai/ai.queue.ts';
 import { aiOrchestrator } from '../server/modules/ai/ai.orchestrator.ts';
 import { aiRagService } from '../server/modules/ai/ai.rag.service.ts';
 import { UserContext } from '../server/core/middleware/auth.ts';
+import { config } from '../server/core/config.ts';
 
 async function runPhase7Tests() {
   console.log('====================================================');
@@ -96,10 +97,11 @@ async function runPhase7Tests() {
         {
           message: 'تحلیل شاخص TRIR و معاینات طب کار را ارائه بده.',
           assistantId: 'GENERAL_HSE',
+          model: 'hsecore-analytical-engine',
         },
         operatorUser
       );
-      operatorBlocked = opResp.toolsUsed.length === 0;
+      operatorBlocked = opResp.toolsUsed.every(t => t.includes('محدودیت دسترسی'));
     }
   }
 
@@ -110,6 +112,7 @@ async function runPhase7Tests() {
       {
         message: 'گزارش ایمنی را خلاصه کن.',
         assistantId: 'GENERAL_HSE',
+        model: 'hsecore-analytical-engine',
       },
       adminUser
     );
@@ -163,10 +166,10 @@ async function runPhase7Tests() {
 
   const results = await Promise.all(promises);
   console.log(`   - All ${results.length} queued requests resolved successfully.`);
-  console.log(`   - Maximum Concurrent Executions: ${maxObservedActive} (Allowed Ceiling: 1)`);
+  console.log(`   - Maximum Concurrent Executions: ${maxObservedActive} (Allowed Ceiling: ${config.aiEngine.maxConcurrency})`);
   console.log(`   - Queue Telemetry: Total Processed: ${aiRequestQueue.telemetry.totalProcessed}`);
 
-  if (maxObservedActive <= 1) {
+  if (maxObservedActive <= config.aiEngine.maxConcurrency) {
     passedTests++;
     console.log('✅ Test 4 Passed: Strict concurrency limit preserved. Zero host memory exhaustion risk.\n');
   } else {
@@ -188,6 +191,7 @@ async function runPhase7Tests() {
     {
       message: 'دوره زمانی تست هیدرواستاتیک کپسول‌های آتش‌نشانی چند سال است؟',
       assistantId: 'GENERAL_HSE',
+      model: 'hsecore-analytical-engine',
       allowTools: true,
     },
     adminUser

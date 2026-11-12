@@ -136,16 +136,19 @@ function buildSystemNotificationPayload(data) {
       : [300, 100, 300, 100, 400],
     actions: [
       {
+        action: 'open',
+        title: '🔍 مشاهده جزئیات هشدار در HSECORE',
+      },
+      {
         action: 'acknowledge',
         title: '✅ تأیید دریافت هشدار و قطع آژیر',
       },
-      {
-        action: 'open',
-        title: '🔍 مشاهده و دستورالعمل ایمنی',
-      },
     ],
     data: {
-      url: data.actionUrl || '/',
+      url:
+        data.actionUrl && String(data.actionUrl).includes('alertId=')
+          ? data.actionUrl
+          : `/#notifications?alertId=${encodeURIComponent(notifId)}`,
       notifId,
       title: data.title || title,
       body: rawBody,
@@ -199,7 +202,7 @@ async function dispatchSwNotification(rawData, notifyWindowClients) {
   }
 
   // If any HSECORE window is actively visible in foreground, it is already playing the HSE siren;
-  // silence the OS default chime so it never clashes with the emergency siren.
+  // silence the OS default chime so it never clashes with the emergency siren, while still showing the native OS banner.
   const hasVisibleForegroundClient = windowClients.some(
     (c) => c.visibilityState === 'visible' || c.focused === true
   );
@@ -211,7 +214,7 @@ async function dispatchSwNotification(rawData, notifyWindowClients) {
   await self.registration.showNotification(title, options);
 }
 
-// 5. Web Push Event Handler (Receives RFC 8030 encrypted push even when tab is in background or lock screen)
+// 5. Web Push Event Handler (Receives RFC 8030 encrypted push even when tab is closed, in background, or lock screen)
 self.addEventListener('push', (event) => {
   let rawData = {};
   try {
@@ -258,7 +261,7 @@ self.addEventListener('notificationclick', (event) => {
 
   if (action === 'acknowledge' && notifId) {
     // 1. Immediately instruct all open client windows to stop siren and close popup for this user
-    // 2. Persist acknowledgment in PostgreSQL database via public endpoint
+    // 2. Persist view confirmation and acknowledgment in PostgreSQL database via public endpoints
     event.waitUntil(
       Promise.all([
         self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
@@ -270,6 +273,15 @@ self.addEventListener('notificationclick', (event) => {
             });
           }
         }),
+        fetch('/api/v1/notifications/public/view', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            notifId,
+            clientSessionId: 'sw_os_notification',
+            source: 'browser_push_click',
+          }),
+        }).catch(() => {}),
         fetch('/api/v1/notifications/public/acknowledge', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -277,7 +289,7 @@ self.addEventListener('notificationclick', (event) => {
             notifId,
             clientSessionId: 'sw_os_notification',
             acknowledgmentSource: 'os_notification_action',
-            note: 'تأیید دریافت هشدار و توقف آژیر از طریق اعلان سیستمی / صفحه قفل',
+            note: 'تأیید دریافت هشدار و توقف آژیر از طریق اعلان سیستمی مرورگر / صفحه قفل',
           }),
         }).catch(() => {}),
       ])
@@ -285,24 +297,47 @@ self.addEventListener('notificationclick', (event) => {
     return;
   }
 
-  // Default click or 'open' action: Focus existing window or open app and display emergency modal
-  const urlToOpen = notifData.url || '/';
+  // Default click or 'open' action: Record view confirmation, focus existing window or open HSECORE directly to the Alert Details page
+  const deepLinkUrl =
+    notifData.url ||
+    (notifId ? `/#notifications?alertId=${encodeURIComponent(notifId)}` : '/#notifications');
+
   event.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
-      for (const client of windowClients) {
-        client.postMessage({
-          type: 'HSE_SW_EMERGENCY_OPENED',
-          payload: notifData,
-        });
-      }
-      for (const client of windowClients) {
-        if (client.url && 'focus' in client) {
-          return client.focus();
+    Promise.all([
+      notifId
+        ? fetch('/api/v1/notifications/public/view', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              notifId,
+              clientSessionId: 'sw_os_notification',
+              source: 'browser_push_click',
+            }),
+          }).catch(() => {})
+        : Promise.resolve(),
+      self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(async (windowClients) => {
+        for (const client of windowClients) {
+          client.postMessage({
+            type: 'HSE_SW_EMERGENCY_OPENED',
+            payload: notifData,
+            openDetails: true,
+            deepLinkUrl,
+          });
         }
-      }
-      if (self.clients.openWindow) {
-        return self.clients.openWindow(urlToOpen);
-      }
-    })
+        for (const client of windowClients) {
+          if (client.url && 'focus' in client) {
+            try {
+              if ('navigate' in client && deepLinkUrl.startsWith('/#')) {
+                // Hash navigation is handled by HSE_SW_EMERGENCY_OPENED message without full reload
+              }
+            } catch {}
+            return client.focus();
+          }
+        }
+        if (self.clients.openWindow) {
+          return self.clients.openWindow(deepLinkUrl);
+        }
+      }),
+    ])
   );
 });

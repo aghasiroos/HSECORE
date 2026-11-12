@@ -10,6 +10,8 @@ import {
   DEFAULT_NOTIFICATION_PREFERENCES,
   WebPushSubscriptionRecord,
   VapidKeySet,
+  NotificationDeliveryReport,
+  NotificationViewConfirmation,
 } from './notification.types.ts';
 import { logger } from '../../core/logger.ts';
 
@@ -20,6 +22,37 @@ const PUSH_SUBS_SETTING_KEY = 'hse_web_push_subscriptions_v1';
 const inMemoryNotifications: NotificationRecord[] = [];
 let inMemoryVapidKeys: VapidKeySet | null = null;
 let inMemoryPushSubscriptions: WebPushSubscriptionRecord[] = [];
+
+export function detectUnitManagerFromProfile(role?: string, jobTitle?: string): boolean {
+  const r = String(role || '').toUpperCase();
+  const jt = String(jobTitle || '');
+  if (
+    r.includes('SUPERVISOR') ||
+    r.includes('DEPARTMENT_MANAGER') ||
+    r.includes('UNIT_MANAGER') ||
+    r.includes('PROJECT_MANAGER') ||
+    r.includes('EXECUTIVE_MANAGER')
+  ) {
+    return true;
+  }
+  return /(مسئول واحد|مدیر واحد|رئیس واحد|سرپرست|مدیر پروژه|مدیر مجتمع|رئیس اداره)/i.test(jt);
+}
+
+export function detectHseExpertFromProfile(role?: string, jobTitle?: string, deptName?: string): boolean {
+  const r = String(role || '').toUpperCase();
+  const jt = String(jobTitle || '');
+  const dn = String(deptName || '');
+  if (
+    r.includes('HSE') ||
+    r.includes('SAFETY') ||
+    r.includes('MEDICAL') ||
+    r.includes('FIRE') ||
+    r.includes('ENVIRONMENT')
+  ) {
+    return true;
+  }
+  return /(hse|ایمنی|بهداشت|محیط زیست|آتش‌نشانی|آتشنشانی|طب کار|ارگونومی)/i.test(`${jt} ${dn}`);
+}
 
 export class NotificationRepository {
   async getAll(currentUserId?: string): Promise<NotificationRecord[]> {
@@ -35,6 +68,7 @@ export class NotificationRepository {
         const readList = (r.readBy as string[]) || [];
         const isRead = currentUserId ? readList.includes(currentUserId) : readList.length > 0;
         const ackList = (r.acknowledgedBy as any[]) || [];
+        const meta = (r.metadata as Record<string, any>) || {};
 
         return {
           id: r.id,
@@ -52,10 +86,12 @@ export class NotificationRepository {
           sender: r.sender || undefined,
           readBy: readList,
           read: isRead,
+          viewedBy: Array.isArray(meta.viewedBy) ? meta.viewedBy : [],
+          deliveryReport: meta.deliveryReport || undefined,
           requiresAck: !!r.requiresAck,
           acknowledgedBy: ackList,
-          sirenType: (r.metadata as any)?.sirenType || (r.priority === 'critical' || r.category === 'critical_hse' ? 'siren_evacuation' : undefined),
-          metadata: (r.metadata as Record<string, any>) || undefined,
+          sirenType: meta.sirenType || (r.priority === 'critical' || r.category === 'critical_hse' ? 'siren_evacuation' : undefined),
+          metadata: meta,
           createdAt: r.createdAt ? r.createdAt.toISOString() : new Date().toISOString(),
         };
       });
@@ -173,6 +209,7 @@ export class NotificationRepository {
 
       if (!record) return null;
 
+      const meta = (record.metadata as Record<string, any>) || {};
       return {
         id: record.id,
         notifId: record.notifId,
@@ -189,10 +226,12 @@ export class NotificationRepository {
         sender: record.sender || undefined,
         readBy: (record.readBy as string[]) || [],
         read: ((record.readBy as string[]) || []).length > 0,
+        viewedBy: Array.isArray(meta.viewedBy) ? meta.viewedBy : [],
+        deliveryReport: meta.deliveryReport || undefined,
         requiresAck: !!record.requiresAck,
         acknowledgedBy: (record.acknowledgedBy as any[]) || [],
-        sirenType: (record.metadata as any)?.sirenType || (record.priority === 'critical' || record.category === 'critical_hse' ? 'siren_evacuation' : undefined),
-        metadata: (record.metadata as Record<string, any>) || undefined,
+        sirenType: meta.sirenType || (record.priority === 'critical' || record.category === 'critical_hse' ? 'siren_evacuation' : undefined),
+        metadata: meta,
         createdAt: record.createdAt.toISOString(),
       };
     } catch {
@@ -200,6 +239,102 @@ export class NotificationRepository {
         (n) => n.notifId === idStr || String(n.id) === idStr
       );
       return match || null;
+    }
+  }
+
+  async updateDeliveryReport(
+    idOrNotifId: string | number,
+    deliveryReport: NotificationDeliveryReport
+  ): Promise<boolean> {
+    const idStr = String(idOrNotifId);
+    const numId = Number(idOrNotifId);
+
+    for (const item of inMemoryNotifications) {
+      if (item.notifId === idStr || String(item.id) === idStr) {
+        item.deliveryReport = deliveryReport;
+        item.metadata = { ...(item.metadata || {}), deliveryReport };
+      }
+    }
+
+    try {
+      const condition =
+        !isNaN(numId) && Number.isInteger(numId) && numId > 0
+          ? or(eq(schema.notifications.id, numId), eq(schema.notifications.notifId, idStr))
+          : eq(schema.notifications.notifId, idStr);
+
+      const [existing] = await db.select().from(schema.notifications).where(condition!).limit(1);
+      if (existing) {
+        const meta = (existing.metadata as Record<string, any>) || {};
+        meta.deliveryReport = deliveryReport;
+        await db
+          .update(schema.notifications)
+          .set({ metadata: meta })
+          .where(eq(schema.notifications.id, existing.id));
+      }
+      return true;
+    } catch (err) {
+      logger.debug('Error updating notification deliveryReport in DB:', err);
+      return false;
+    }
+  }
+
+  async recordViewConfirmation(
+    idOrNotifId: string | number,
+    viewEntry: NotificationViewConfirmation
+  ): Promise<boolean> {
+    const idStr = String(idOrNotifId);
+    const numId = Number(idOrNotifId);
+    const uid = viewEntry.userId || 'guest';
+
+    for (const item of inMemoryNotifications) {
+      if (item.notifId === idStr || String(item.id) === idStr) {
+        item.read = true;
+        if (!item.readBy?.includes(uid)) {
+          item.readBy = [...(item.readBy || []), uid];
+        }
+        const currViews = Array.isArray(item.viewedBy) ? [...item.viewedBy] : [];
+        const existingIdx = currViews.findIndex((v) => v.userId === uid && v.source === viewEntry.source);
+        if (existingIdx >= 0) {
+          currViews[existingIdx] = { ...currViews[existingIdx], ...viewEntry };
+        } else {
+          currViews.push(viewEntry);
+        }
+        item.viewedBy = currViews;
+        item.metadata = { ...(item.metadata || {}), viewedBy: currViews };
+      }
+    }
+
+    try {
+      const condition =
+        !isNaN(numId) && Number.isInteger(numId) && numId > 0
+          ? or(eq(schema.notifications.id, numId), eq(schema.notifications.notifId, idStr))
+          : eq(schema.notifications.notifId, idStr);
+
+      const [existing] = await db.select().from(schema.notifications).where(condition!).limit(1);
+      if (existing) {
+        const readList = Array.isArray(existing.readBy) ? [...(existing.readBy as string[])] : [];
+        if (!readList.includes(uid)) {
+          readList.push(uid);
+        }
+        const meta = (existing.metadata as Record<string, any>) || {};
+        const currViews: NotificationViewConfirmation[] = Array.isArray(meta.viewedBy) ? [...meta.viewedBy] : [];
+        const existingIdx = currViews.findIndex((v) => v && v.userId === uid && v.source === viewEntry.source);
+        if (existingIdx >= 0) {
+          currViews[existingIdx] = { ...currViews[existingIdx], ...viewEntry };
+        } else {
+          currViews.push(viewEntry);
+        }
+        meta.viewedBy = currViews;
+
+        await db
+          .update(schema.notifications)
+          .set({ readBy: readList, metadata: meta })
+          .where(eq(schema.notifications.id, existing.id));
+      }
+      return true;
+    } catch (err) {
+      logger.debug('Error recording view confirmation in DB:', err);
+      return true;
     }
   }
 
@@ -529,18 +664,61 @@ export class NotificationRepository {
     const nowIso = new Date().toISOString();
     const existingIdx = existingList.findIndex((item) => item.endpoint === sub.endpoint);
 
+    // Enrich with authoritative user profile from DB if userId is provided
+    let enriched = { ...sub };
+    if (sub.userId) {
+      try {
+        const [u] = await db
+          .select()
+          .from(schema.users)
+          .where(or(eq(schema.users.uid, sub.userId), eq(schema.users.username, sub.userId)))
+          .limit(1);
+        if (u) {
+          const pData = (u.profileData as Record<string, any>) || {};
+          const role = enriched.role || u.role || pData.role;
+          const jobTitle = enriched.jobTitle || pData.jobTitle || '';
+          const deptIds =
+            Array.isArray(enriched.departmentIds) && enriched.departmentIds.length > 0
+              ? enriched.departmentIds
+              : Array.isArray(pData.departmentIds)
+              ? pData.departmentIds
+              : pData.departmentId
+              ? [String(pData.departmentId)]
+              : [];
+          const deptName = enriched.departmentName || pData.department || '';
+          enriched = {
+            ...enriched,
+            userId: u.uid || sub.userId,
+            userName: enriched.userName || u.fullName || u.username,
+            role,
+            jobTitle,
+            departmentIds: deptIds,
+            departmentName: deptName,
+            isUnitManager:
+              enriched.isUnitManager !== undefined
+                ? enriched.isUnitManager
+                : detectUnitManagerFromProfile(role, jobTitle),
+            isHseExpert:
+              enriched.isHseExpert !== undefined
+                ? enriched.isHseExpert
+                : detectHseExpertFromProfile(role, jobTitle, deptName),
+          };
+        }
+      } catch {}
+    }
+
     let savedRecord: WebPushSubscriptionRecord;
     if (existingIdx >= 0) {
       savedRecord = {
         ...existingList[existingIdx],
-        ...sub,
+        ...enriched,
         updatedAt: nowIso,
       };
       existingList[existingIdx] = savedRecord;
     } else {
       savedRecord = {
         id: `pushsub_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-        ...sub,
+        ...enriched,
         createdAt: nowIso,
         updatedAt: nowIso,
       };
@@ -557,7 +735,7 @@ export class NotificationRepository {
         .values({
           key: PUSH_SUBS_SETTING_KEY,
           value: trimmed,
-          description: 'فهرست اشتراک‌های فعال Web Push دستگاه‌ها (موبایل و دسکتاپ)',
+          description: 'فهرست اشتراک‌های فعال Web Push دستگاه‌ها (موبایل، لپ‌تاپ و دسکتاپ)',
           updatedAt: new Date(),
         })
         .onConflictDoUpdate({
@@ -574,9 +752,54 @@ export class NotificationRepository {
     return savedRecord;
   }
 
-  async removePushSubscription(endpoint: string): Promise<boolean> {
+  async updatePushSubscriptionStatus(
+    endpoint: string,
+    status: {
+      lastSuccessAt?: string;
+      lastFailureAt?: string;
+      lastError?: string;
+      lastStatusCode?: number;
+    }
+  ): Promise<void> {
     const existingList = await this.getAllPushSubscriptions();
-    const filtered = existingList.filter((item) => item.endpoint !== endpoint);
+    const idx = existingList.findIndex((item) => item.endpoint === endpoint);
+    if (idx < 0) return;
+
+    existingList[idx] = {
+      ...existingList[idx],
+      ...status,
+      updatedAt: new Date().toISOString(),
+    };
+    inMemoryPushSubscriptions = existingList;
+
+    try {
+      await db
+        .insert(schema.systemSettings)
+        .values({
+          key: PUSH_SUBS_SETTING_KEY,
+          value: existingList,
+          description: 'فهرست اشتراک‌های فعال Web Push دستگاه‌ها (موبایل، لپ‌تاپ و دسکتاپ)',
+          updatedAt: new Date(),
+        })
+        .onConflictDoUpdate({
+          target: schema.systemSettings.key,
+          set: {
+            value: existingList,
+            updatedAt: new Date(),
+          },
+        });
+    } catch {}
+  }
+
+  async removePushSubscription(idOrEndpoint: string, requestingUserId?: string, isAdmin = true): Promise<boolean> {
+    const existingList = await this.getAllPushSubscriptions();
+    const filtered = existingList.filter((item) => {
+      const isMatch = item.endpoint === idOrEndpoint || item.id === idOrEndpoint;
+      if (!isMatch) return true;
+      if (isAdmin) return false;
+      if (requestingUserId && item.userId === requestingUserId) return false;
+      return true;
+    });
     inMemoryPushSubscriptions = filtered;
 
     try {
@@ -585,7 +808,7 @@ export class NotificationRepository {
         .values({
           key: PUSH_SUBS_SETTING_KEY,
           value: filtered,
-          description: 'فهرست اشتراک‌های فعال Web Push دستگاه‌ها (موبایل و دسکتاپ)',
+          description: 'فهرست اشتراک‌های فعال Web Push دستگاه‌ها (موبایل، لپ‌تاپ و دسکتاپ)',
           updatedAt: new Date(),
         })
         .onConflictDoUpdate({
@@ -599,6 +822,53 @@ export class NotificationRepository {
       logger.debug('Error removing Web Push subscription from DB:', err);
     }
     return true;
+  }
+
+  async getUsersDirectorySnapshot(): Promise<
+    Map<
+      string,
+      {
+        uid: string;
+        username: string;
+        fullName: string;
+        role: string;
+        jobTitle: string;
+        departmentIds: string[];
+        departmentName: string;
+        isUnitManager: boolean;
+        isHseExpert: boolean;
+      }
+    >
+  > {
+    const map = new Map();
+    try {
+      const rows = await db.select().from(schema.users);
+      for (const u of rows) {
+        const pData = (u.profileData as Record<string, any>) || {};
+        const role = u.role || pData.role || 'User';
+        const jobTitle = pData.jobTitle || '';
+        const deptName = pData.department || '';
+        const deptIds: string[] = Array.isArray(pData.departmentIds)
+          ? pData.departmentIds.map(String)
+          : pData.departmentId
+          ? [String(pData.departmentId)]
+          : [];
+        const entry = {
+          uid: u.uid,
+          username: u.username,
+          fullName: u.fullName || u.username,
+          role,
+          jobTitle,
+          departmentIds: deptIds,
+          departmentName: deptName,
+          isUnitManager: detectUnitManagerFromProfile(role, jobTitle),
+          isHseExpert: detectHseExpertFromProfile(role, jobTitle, deptName),
+        };
+        if (u.uid) map.set(String(u.uid).toLowerCase(), entry);
+        if (u.username) map.set(String(u.username).toLowerCase(), entry);
+      }
+    } catch {}
+    return map;
   }
 
   // --- User & System Preferences Persisted in Database ---

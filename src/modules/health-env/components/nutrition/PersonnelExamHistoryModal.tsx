@@ -127,7 +127,7 @@ export default function PersonnelExamHistoryModal({
             className={`pb-2.5 px-3 border-b-2 transition cursor-pointer flex items-center gap-1.5 ${
               activeTab === 'summary'
                 ? 'border-emerald-600 text-emerald-600 dark:text-emerald-400 font-black'
-                : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white'
             }`}
           >
             <ShieldAlert className="w-4 h-4" />
@@ -140,7 +140,7 @@ export default function PersonnelExamHistoryModal({
             className={`pb-2.5 px-3 border-b-2 transition cursor-pointer flex items-center gap-1.5 ${
               activeTab === 'exams'
                 ? 'border-emerald-600 text-emerald-600 dark:text-emerald-400 font-black'
-                : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white'
             }`}
           >
             <Stethoscope className="w-4 h-4" />
@@ -153,7 +153,7 @@ export default function PersonnelExamHistoryModal({
             className={`pb-2.5 px-3 border-b-2 transition cursor-pointer flex items-center gap-1.5 ${
               activeTab === 'vitals'
                 ? 'border-emerald-600 text-emerald-600 dark:text-emerald-400 font-black'
-                : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white'
             }`}
           >
             <Scale className="w-4 h-4" />
@@ -166,7 +166,7 @@ export default function PersonnelExamHistoryModal({
             className={`pb-2.5 px-3 border-b-2 transition cursor-pointer flex items-center gap-1.5 ${
               activeTab === 'trends'
                 ? 'border-emerald-600 text-emerald-600 dark:text-emerald-400 font-black'
-                : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white'
             }`}
           >
             <TrendingUp className="w-4 h-4" />

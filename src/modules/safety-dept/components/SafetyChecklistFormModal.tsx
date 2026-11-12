@@ -501,7 +501,7 @@ export default function SafetyChecklistFormModal({
             className={`flex items-center gap-2 px-4 py-3 text-xs font-bold border-b-2 transition whitespace-nowrap cursor-pointer ${
               activeTab === 'info'
                 ? 'border-blue-600 text-blue-600 dark:text-blue-400 font-black'
-                : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
+                : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white'
             }`}
           >
             <Clock className="w-4 h-4" />
@@ -514,12 +514,12 @@ export default function SafetyChecklistFormModal({
             className={`flex items-center gap-2 px-4 py-3 text-xs font-bold border-b-2 transition whitespace-nowrap cursor-pointer ${
               activeTab === 'items'
                 ? 'border-blue-600 text-blue-600 dark:text-blue-400 font-black'
-                : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
+                : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white'
             }`}
           >
             <CheckSquare className="w-4 h-4" />
             <span>بندهای کنترلی و مغایرت‌ها</span>
-            <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300">
+            <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 font-bold">
               {totalItemsCount}
             </span>
           </button>
@@ -530,13 +530,13 @@ export default function SafetyChecklistFormModal({
             className={`flex items-center gap-2 px-4 py-3 text-xs font-bold border-b-2 transition whitespace-nowrap cursor-pointer ${
               activeTab === 'photos'
                 ? 'border-blue-600 text-blue-600 dark:text-blue-400 font-black'
-                : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
+                : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white'
             }`}
           >
             <Camera className="w-4 h-4" />
             <span>گالری تصاویر و مستندات</span>
             {formPhotos.length > 0 && (
-              <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300">
+              <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 font-bold">
                 {formPhotos.length}
               </span>
             )}
@@ -548,7 +548,7 @@ export default function SafetyChecklistFormModal({
             className={`flex items-center gap-2 px-4 py-3 text-xs font-bold border-b-2 transition whitespace-nowrap cursor-pointer ${
               activeTab === 'summary'
                 ? 'border-blue-600 text-blue-600 dark:text-blue-400 font-black'
-                : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
+                : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white'
             }`}
           >
             <FileText className="w-4 h-4" />

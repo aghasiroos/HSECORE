@@ -51,7 +51,22 @@ export class NotificationController {
   }
 
   async createNotification(req: Request, res: Response) {
-    const { title, body, priority, category, sourceModule, actionUrl, recordId, targetType, targetValues, requiresAck, sirenType, metadata } = req.body;
+    const {
+      title,
+      body,
+      type,
+      priority,
+      category,
+      sourceModule,
+      actionUrl,
+      recordId,
+      targetType,
+      targetValues,
+      requiresAck,
+      sirenType,
+      actionGuidelines,
+      metadata,
+    } = req.body;
 
     if (!title || !body) {
       return res.status(400).json({ success: false, error: 'عنوان و متن اعلان الزامی است.' });
@@ -65,19 +80,22 @@ export class NotificationController {
     const created = await notificationService.send({
       title,
       body,
+      type: type || 'popup_and_push',
       priority,
       category,
       sourceModule: sourceModule || 'system',
       actionUrl,
       recordId,
       targetType: targetType || 'all',
-      targetValues: targetValues || [],
+      targetValues: Array.isArray(targetValues) ? targetValues : [],
       sender: senderName,
       requiresAck,
       sirenType: finalSiren,
+      actionGuidelines: actionGuidelines || metadata?.actionGuidelines,
       metadata: {
         ...(metadata || {}),
         sirenType: finalSiren,
+        actionGuidelines: actionGuidelines || metadata?.actionGuidelines,
       },
     });
 
@@ -119,6 +137,62 @@ export class NotificationController {
     return res.json({ success: true, message: 'اعلان با موفقیت توسط شما تأیید گردید و آژیر متوقف شد.' });
   }
 
+  async confirmView(req: Request, res: Response) {
+    const id = req.params.id || req.body?.notifId;
+    if (!id) {
+      return res.status(400).json({ success: false, error: 'شناسه هشدار الزامی است.' });
+    }
+    const user = req.user as any;
+    const userId = user?.uid || user?.username || req.body?.userId || 'user';
+    const userName = user?.fullName || user?.username || req.body?.userName || 'کاربر سیستم';
+    const source = req.body?.source || 'alert_details_view';
+    const deviceType = req.body?.deviceType;
+
+    const ok = await notificationService.confirmAlertViewed(String(id), {
+      userId: String(userId),
+      userName: String(userName),
+      source,
+      deviceType,
+    });
+    return res.json({ success: ok });
+  }
+
+  async confirmPublicView(req: Request, res: Response) {
+    const { notifId, userId, userName, clientSessionId, source, deviceType } = req.body || {};
+    if (!notifId) {
+      return res.status(400).json({ success: false, error: 'شناسه هشدار الزامی است.' });
+    }
+    const ok = await notificationService.confirmAlertViewed(String(notifId), {
+      userId: userId ? String(userId) : undefined,
+      userName: userName ? String(userName) : undefined,
+      clientSessionId: clientSessionId ? String(clientSessionId) : undefined,
+      source: source || 'browser_push_click',
+      deviceType,
+    });
+    return res.json({ success: ok });
+  }
+
+  async getDeliveryReport(req: Request, res: Response) {
+    const id = req.params.id;
+    const notif = await notificationService.getById(id);
+    if (!notif) {
+      return res.status(404).json({ success: false, error: 'اعلان مورد نظر یافت نشد.' });
+    }
+    return res.json({
+      success: true,
+      data: {
+        notifId: notif.notifId,
+        title: notif.title,
+        targetType: notif.targetType,
+        targetValues: notif.targetValues,
+        deliveryReport: notif.deliveryReport || notif.metadata?.deliveryReport || null,
+        viewedBy: notif.viewedBy || notif.metadata?.viewedBy || [],
+        acknowledgedBy: notif.acknowledgedBy || [],
+        readBy: notif.readBy || [],
+      },
+    });
+  }
+
   async deleteNotification(req: Request, res: Response) {
     const id = req.params.id;
     if (!id) {
@@ -149,22 +223,24 @@ export class NotificationController {
   }
 
   async triggerTestAlert(req: Request, res: Response) {
-    const { type, category, priority, sirenType, title, body, actionGuidelines } = req.body;
+    const { type, category, priority, sirenType, title, body, actionGuidelines, targetType, targetValues } = req.body;
     const testCategory = category || 'critical_hse';
     const testPriority = priority || 'critical';
     const chosenSiren = sirenType || 'siren_evacuation';
     const user = req.user as any;
 
     const testAlert = await notificationService.send({
-      title: title || 'آزمایش هشدار فوری HSE (اعلان صفحه قفل و پخش خودکار آژیر)',
+      title: title || 'آزمایش هشدار فوری HSE (پنجره هشدار داخلی + اعلان سیستمی مرورگر)',
       body:
         body ||
-        'این یک هشدار فوری آزمایشی جهت بررسی اعلان بومی سیستم‌عامل (Web Push / Lock Screen)، پخش خودکار آژیر بدون نیاز به ورود به سامانه و ثبت مستقل تأییدیه دریافت است.',
+        'این یک هشدار فوری آزمایشی جهت بررسی ارسال همزمان پنجره هشدار داخلی (Popup) و اعلان بومی سیستم‌عامل (Browser Push) حتی در زمان بسته بودن صفحه HSECORE است.',
+      type: type || 'popup_and_push',
       category: testCategory,
       priority: testPriority,
       sourceModule: 'safety-unit',
-      actionUrl: '#dashboard',
-      targetType: 'all',
+      actionUrl: undefined,
+      targetType: targetType || 'all',
+      targetValues: Array.isArray(targetValues) ? targetValues : [],
       sender: user?.fullName || user?.username || 'مرکز فرماندهی HSE',
       requiresAck: testCategory === 'critical_hse' || testPriority === 'critical',
       sirenType: chosenSiren,
@@ -196,11 +272,32 @@ export class NotificationController {
       publicKey: info.publicKey,
       pushEnabled: info.pushEnabled,
       activeSubscriptions: info.activeSubscriptions,
+      data: {
+        publicKey: info.publicKey,
+        pushEnabled: info.pushEnabled,
+        activeSubscriptions: info.activeSubscriptions,
+      },
     });
   }
 
   async subscribeWebPush(req: Request, res: Response) {
-    const { subscription, userId, userName, role, departmentIds, guestSessionId, platform } = req.body || {};
+    const {
+      subscription,
+      userId,
+      userName,
+      username,
+      role,
+      jobTitle,
+      departmentIds,
+      departmentName,
+      guestSessionId,
+      clientSessionId,
+      platform,
+      deviceType,
+      deviceName,
+      browserName,
+      osName,
+    } = req.body || {};
     const endpoint = subscription?.endpoint || req.body?.endpoint;
     const keys = subscription?.keys || req.body?.keys;
 
@@ -218,28 +315,74 @@ export class NotificationController {
         auth: String(keys.auth),
       },
       userId: req.user?.uid || (userId ? String(userId) : undefined),
-      userName: (req.user as any)?.fullName || req.user?.username || (userName ? String(userName) : undefined),
+      userName:
+        (req.user as any)?.fullName ||
+        req.user?.username ||
+        (userName ? String(userName) : username ? String(username) : undefined),
       role: req.user?.role || (role ? String(role) : undefined),
+      jobTitle: jobTitle ? String(jobTitle) : undefined,
       departmentIds: Array.isArray(departmentIds) ? departmentIds.map(String) : undefined,
-      guestSessionId: guestSessionId ? String(guestSessionId) : undefined,
+      departmentName: departmentName ? String(departmentName) : undefined,
+      deviceType: deviceType || undefined,
+      deviceName: deviceName ? String(deviceName).slice(0, 100) : undefined,
+      browserName: browserName ? String(browserName).slice(0, 60) : undefined,
+      osName: osName ? String(osName).slice(0, 60) : undefined,
+      guestSessionId: guestSessionId
+        ? String(guestSessionId)
+        : clientSessionId
+        ? String(clientSessionId)
+        : undefined,
       userAgent: String(req.headers['user-agent'] || '').slice(0, 300),
       platform: platform ? String(platform).slice(0, 80) : undefined,
     });
 
     return res.json({
       success: true,
-      data: { id: saved.id, endpoint: saved.endpoint, updatedAt: saved.updatedAt },
-      message: 'اشتراک اعلان سیستمی و صفحه قفل (Web Push) با موفقیت در سرور ثبت گردید.',
+      data: saved,
+      message: 'اشتراک اعلان سیستمی مرورگر (Web Push) برای این دستگاه با موفقیت ثبت گردید.',
     });
   }
 
   async unsubscribeWebPush(req: Request, res: Response) {
-    const endpoint = req.body?.endpoint || req.body?.subscription?.endpoint;
+    const endpoint = req.body?.endpoint || req.body?.subscription?.endpoint || req.body?.id;
     if (!endpoint) {
-      return res.status(400).json({ success: false, error: 'آدرس endpoint اشتراک الزامی است.' });
+      return res.status(400).json({ success: false, error: 'آدرس endpoint یا شناسه اشتراک الزامی است.' });
     }
-    await notificationService.unregisterPushSubscription(String(endpoint));
-    return res.json({ success: true, message: 'اشتراک Web Push لغو شد.' });
+    const user = req.user as any;
+    const isAdmin = ['ADMIN', 'ADMINISTRATOR', 'HSE_MANAGER', 'SAFETY_OFFICER'].includes(
+      String(user?.role || '').toUpperCase()
+    );
+    await notificationService.unregisterPushSubscription(String(endpoint), user?.uid, isAdmin);
+    return res.json({ success: true, message: 'اشتراک Web Push دستگاه لغو شد.' });
+  }
+
+  async getPushSubscriptions(req: Request, res: Response) {
+    const user = req.user as any;
+    const userId = user?.uid || user?.username;
+    const isAdmin =
+      req.query.all === 'true' &&
+      ['ADMIN', 'ADMINISTRATOR', 'HSE_MANAGER', 'SAFETY_OFFICER', 'EXECUTIVE_MANAGER'].includes(
+        String(user?.role || '').toUpperCase()
+      );
+    const list = await notificationService.getPushSubscriptions(userId, isAdmin);
+    return res.json({
+      success: true,
+      data: list,
+      count: list.length,
+    });
+  }
+
+  async deletePushSubscription(req: Request, res: Response) {
+    const id = req.params.id;
+    if (!id) {
+      return res.status(400).json({ success: false, error: 'شناسه دستگاه الزامی است.' });
+    }
+    const user = req.user as any;
+    const isAdmin = ['ADMIN', 'ADMINISTRATOR', 'HSE_MANAGER', 'SAFETY_OFFICER'].includes(
+      String(user?.role || '').toUpperCase()
+    );
+    await notificationService.unregisterPushSubscription(id, user?.uid, isAdmin);
+    return res.json({ success: true, message: 'دستگاه ثبت‌شده با موفقیت حذف گردید.' });
   }
 
   async streamCustomSiren(req: Request, res: Response) {

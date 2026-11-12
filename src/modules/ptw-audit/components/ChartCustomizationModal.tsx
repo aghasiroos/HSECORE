@@ -193,7 +193,7 @@ export default function ChartCustomizationModal({
             className={`pb-3 px-3 text-xs font-black transition-all flex items-center gap-1.5 border-b-2 cursor-pointer ${
               activeTab === 'types'
                 ? 'border-amber-500 text-amber-600 dark:text-amber-400'
-                : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
+                : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white'
             }`}
           >
             <BarChart2 className="w-4 h-4" />
@@ -204,7 +204,7 @@ export default function ChartCustomizationModal({
             className={`pb-3 px-3 text-xs font-black transition-all flex items-center gap-1.5 border-b-2 cursor-pointer ${
               activeTab === 'appearance'
                 ? 'border-amber-500 text-amber-600 dark:text-amber-400'
-                : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
+                : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white'
             }`}
           >
             <Palette className="w-4 h-4" />

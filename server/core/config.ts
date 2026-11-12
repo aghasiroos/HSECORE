@@ -5,6 +5,7 @@
 import path from 'path';
 import crypto from 'crypto';
 import fs from 'fs';
+import os from 'os';
 
 export interface AppConfig {
   env: 'development' | 'production' | 'test';
@@ -67,7 +68,7 @@ const isProd = env === 'production';
 const rawJwtSecret = process.env.JWT_SECRET?.trim() || '';
 
 function getDevJwtSecret(): string {
-  const secretFile = path.resolve(process.cwd(), '.dev-jwt-secret');
+  const secretFile = path.join(os.tmpdir(), '.hsecore-dev-jwt-secret');
   try {
     if (fs.existsSync(secretFile)) {
       const saved = fs.readFileSync(secretFile, 'utf-8').trim();
@@ -75,12 +76,10 @@ function getDevJwtSecret(): string {
     }
     const newSecret = crypto.randomBytes(32).toString('hex');
     try {
-      fs.writeFileSync(secretFile, newSecret, 'utf-8');
+      fs.writeFileSync(secretFile, newSecret, { encoding: 'utf-8', mode: 0o600 });
     } catch {}
     return newSecret;
   } catch {
-    // Never fall back to a repository-wide fixed signing key, even in development.
-    // A fresh process-local secret is safer than a predictable shared fallback.
     return crypto.randomBytes(32).toString('hex');
   }
 }
@@ -175,13 +174,13 @@ export const config: AppConfig = {
     defaultEmbedModel: (process.env.AI_DEFAULT_EMBED_MODEL || '').trim(),
     maxConcurrency: Number(process.env.AI_MAX_CONCURRENCY) || 4,
     maxLoadedModels: Number(process.env.AI_MAX_LOADED_MODELS) || 3,
-    // Conservative CPU-only default; deployments may explicitly raise this after memory validation.
-    timeoutMs: Math.min(Math.max(Number(process.env.AI_REQUEST_TIMEOUT_MS) || 180000, 30000), 600000),
+    // CPU-resilient default (300s) to accommodate 7B model cold load + prompt evaluation on VPS; configurable up to 600s.
+    timeoutMs: Math.min(Math.max(Number(process.env.AI_REQUEST_TIMEOUT_MS) || 300000, 30000), 600000),
     contextTokens: Math.min(Math.max(Number(process.env.AI_CONTEXT_TOKENS) || 2048, 1024), 16384),
     maxQueueLength: Math.min(Math.max(Number(process.env.AI_MAX_QUEUE_LENGTH) || 15, 1), 50),
     modelPullTimeoutMs: Math.min(Math.max(Number(process.env.AI_MODEL_PULL_TIMEOUT_MS) || 30 * 60 * 1000, 60 * 1000), 60 * 60 * 1000),
-    // Cloud processing is opt-in; organization data remains local by default.
-    allowCloudFallback: process.env.AI_CLOUD_FALLBACK_ENABLED === 'true',
+    // Strictly offline local AI architecture: Cloud fallback is permanently disabled.
+    allowCloudFallback: false,
   },
   database: {
     host: process.env.SQL_HOST || undefined,

@@ -291,9 +291,10 @@ async function run() {
       server.close(error => error ? reject(error) : resolve());
     });
   }
+  process.exit(0);
 }
 
 run().catch(error => {
   console.error('AI HTTP route authorization tests failed:', error);
-  process.exitCode = 1;
+  process.exit(1);
 });

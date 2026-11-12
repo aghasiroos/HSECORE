@@ -372,3 +372,102 @@ export function sortRecordsByYearAndMonth<T extends { year?: number | string; mo
     return ascending ? monthA - monthB : monthB - monthA;
   });
 }
+
+/**
+ * Cleans and normalizes a personnel code.
+ * Returns an empty string ('') if the person does not have a valid personnel code
+ * (e.g., empty, '-', '—', 'ندارد', 'نامشخص', or auto-generated placeholders like 'EMP-...' / 'NO-PCODE-...').
+ */
+export function cleanPersonnelCode(rawCode?: unknown, hasNoPersonnelCodeFlag?: boolean): string {
+  if (hasNoPersonnelCodeFlag) return '';
+  if (rawCode === null || rawCode === undefined) return '';
+  const str = normalizeDigits(String(rawCode)).trim();
+  if (!str) return '';
+  if (/^([-—–_]+|ندارد|نامشخص|فاقد|بدون|null|undefined|n\/a|na|none)$/i.test(str)) {
+    return '';
+  }
+  if (/^(EMP-|NO-PCODE-)/i.test(str)) {
+    return '';
+  }
+  return str;
+}
+
+/**
+ * Compares two personnel codes in ascending (or descending) numerical/natural order,
+ * ALWAYS placing missing/empty personnel codes at the very end of the list.
+ */
+export function compareByPersonnelCodeAsc(
+  codeA?: unknown,
+  codeB?: unknown,
+  direction: 'asc' | 'desc' = 'asc',
+  tieBreakerA?: string,
+  tieBreakerB?: string
+): number {
+  const cleanA = cleanPersonnelCode(codeA);
+  const cleanB = cleanPersonnelCode(codeB);
+
+  // Personnel without a personnel number always go to the end of the list
+  if (!cleanA && !cleanB) {
+    if (tieBreakerA !== undefined && tieBreakerB !== undefined) {
+      return tieBreakerA.localeCompare(tieBreakerB, 'fa');
+    }
+    return 0;
+  }
+  if (!cleanA) return 1;
+  if (!cleanB) return -1;
+
+  // Numeric comparison when both codes are pure numbers
+  if (/^\d+$/.test(cleanA) && /^\d+$/.test(cleanB)) {
+    const numA = Number(cleanA);
+    const numB = Number(cleanB);
+    if (Number.isFinite(numA) && Number.isFinite(numB) && numA !== numB) {
+      return direction === 'asc' ? numA - numB : numB - numA;
+    }
+  }
+
+  const cmp = cleanA.localeCompare(cleanB, undefined, { numeric: true, sensitivity: 'base' });
+  if (cmp !== 0) {
+    return direction === 'asc' ? cmp : -cmp;
+  }
+
+  if (tieBreakerA !== undefined && tieBreakerB !== undefined) {
+    return tieBreakerA.localeCompare(tieBreakerB, 'fa');
+  }
+  return 0;
+}
+
+/**
+ * Sorts an array of personnel records (or import rows) by personnel code from smallest to largest,
+ * moving records without a personnel code to the end of the list.
+ */
+export function sortPersonnelByCodeAsc<T>(
+  list: T[],
+  getCode: (item: T) => unknown = (item: any) => item?.personnelCode ?? item?.rawPersonnelCode,
+  getTieBreaker: (item: T) => string = (item: any) =>
+    item?.fullName || `${item?.firstName || ''} ${item?.lastName || ''}`.trim()
+): T[] {
+  if (!Array.isArray(list)) return [];
+  return [...list].sort((a, b) =>
+    compareByPersonnelCodeAsc(getCode(a), getCode(b), 'asc', getTieBreaker(a), getTieBreaker(b))
+  );
+}
+
+const PG_INT32_MAX = 2147483647;
+
+/**
+ * Safely parses a value as a valid PostgreSQL 32-bit SERIAL (integer) ID (1 .. 2,147,483,647).
+ * Returns null for 10-digit national codes (e.g., 6619530486), 13-digit Date.now() timestamps,
+ * non-positive numbers, or non-numeric strings so PostgreSQL never throws "out of range for type integer".
+ */
+export function parseValidPgSerialId(val: unknown): number | null {
+  if (val === null || val === undefined) return null;
+  if (typeof val === 'number') {
+    return Number.isSafeInteger(val) && val > 0 && val <= PG_INT32_MAX ? val : null;
+  }
+  const str = normalizeDigits(String(val)).trim();
+  if (!/^\d+$/.test(str)) return null;
+  const num = parseInt(str, 10);
+  return Number.isSafeInteger(num) && num > 0 && num <= PG_INT32_MAX ? num : null;
+}
+
+

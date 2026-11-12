@@ -39,14 +39,11 @@ async function runPhase5Tests() {
     console.error('❌ Test 1 Failed:', err.message);
   }
 
-  // Test 2: Database Schema & Migration for Knowledge Base
+  // Test 2: Database Schema & Migration for Knowledge Base (Non-Destructive)
   console.log('👉 [Test 2/5] Verifying Knowledge Base DB Tables...');
   try {
-    await db.execute(sql`DROP TABLE IF EXISTS ai_knowledge_chunks CASCADE;`);
-    await db.execute(sql`DROP TABLE IF EXISTS ai_knowledge_docs CASCADE;`);
-
     await db.execute(sql`
-      CREATE TABLE ai_knowledge_docs (
+      CREATE TABLE IF NOT EXISTS ai_knowledge_docs (
         id SERIAL PRIMARY KEY,
         title TEXT NOT NULL,
         doc_type TEXT DEFAULT 'REGULATION' NOT NULL,
@@ -64,7 +61,7 @@ async function runPhase5Tests() {
     `);
 
     await db.execute(sql`
-      CREATE TABLE ai_knowledge_chunks (
+      CREATE TABLE IF NOT EXISTS ai_knowledge_chunks (
         id SERIAL PRIMARY KEY,
         doc_id INTEGER NOT NULL REFERENCES ai_knowledge_docs(id) ON DELETE CASCADE,
         chunk_index INTEGER NOT NULL,
@@ -76,7 +73,7 @@ async function runPhase5Tests() {
       );
     `);
 
-    console.log('   - Database tables `ai_knowledge_docs` & `ai_knowledge_chunks` created cleanly.');
+    console.log('   - Database tables `ai_knowledge_docs` & `ai_knowledge_chunks` verified cleanly (non-destructive).');
     passedTests++;
     console.log('✅ Test 2 Passed: DB tables ready.\n');
   } catch (err: any) {
@@ -137,6 +134,7 @@ async function runPhase5Tests() {
       {
         message: 'الزامات استفاده از طناب نجات و کمربند کار در ارتفاع در استانداردهای شرکت چیست؟',
         assistantId: 'GENERAL_HSE',
+        model: 'hsecore-analytical-engine',
         allowTools: true,
       },
       { uid: 'test-admin-uid', name: 'test_admin', role: 'ADMIN', permissions: ['*'] }

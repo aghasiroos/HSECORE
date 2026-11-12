@@ -31,6 +31,7 @@ const MODULE_LOADERS: Record<string, DynamicModuleFactory> = {
   documents: () => import('../components/InstructionsDocumentsModule'),
   notifications: () => import('../components/system-settings/SystemNotificationsTab'),
   'ai-assistant': () => import('../modules/ai/AiAssistantApp'),
+  psm: () => import('../modules/psm/PsmManagementModule'),
 };
 
 const prefetchedModules = new Set<string>();

@@ -184,10 +184,10 @@ export const DocumentWorkflowTrackerModal: React.FC<DocumentWorkflowTrackerModal
         <div className="px-5 pt-3 border-b border-slate-200 dark:border-slate-800 flex gap-4 text-xs font-bold">
           <button
             onClick={() => setActiveSubTab('flow')}
-            className={`pb-2.5 border-b-2 transition cursor-pointer flex items-center gap-1.5 ${
+            className={`pb-2.5 border-b-2 transition cursor-pointer flex items-center gap-1.5 font-bold ${
               activeSubTab === 'flow'
-                ? 'border-blue-600 text-blue-600 dark:text-blue-400'
-                : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                ? 'border-blue-600 text-blue-600 dark:text-blue-400 font-black'
+                : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white'
             }`}
           >
             <GitCommit className="w-4 h-4" />
@@ -195,10 +195,10 @@ export const DocumentWorkflowTrackerModal: React.FC<DocumentWorkflowTrackerModal
           </button>
           <button
             onClick={() => setActiveSubTab('history')}
-            className={`pb-2.5 border-b-2 transition cursor-pointer flex items-center gap-1.5 ${
+            className={`pb-2.5 border-b-2 transition cursor-pointer flex items-center gap-1.5 font-bold ${
               activeSubTab === 'history'
-                ? 'border-blue-600 text-blue-600 dark:text-blue-400'
-                : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                ? 'border-blue-600 text-blue-600 dark:text-blue-400 font-black'
+                : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white'
             }`}
           >
             <History className="w-4 h-4" />

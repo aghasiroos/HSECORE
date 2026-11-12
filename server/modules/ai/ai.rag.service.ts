@@ -7,6 +7,7 @@ import { db, schema } from '../../core/db.ts';
 import { desc, eq, and, inArray } from 'drizzle-orm';
 import { textChunker } from './ai.chunker.ts';
 import { localAIProvider } from './ai.local-provider.ts';
+import { config } from '../../core/config.ts';
 import { logger } from '../../core/logger.ts';
 import { isGlobalAdminUser, type UserContext } from '../../core/middleware/auth.ts';
 import { canAccessKnowledgeDocument, type KnowledgeDocumentAccessControl } from './ai.acl.ts';
@@ -179,7 +180,14 @@ export class AIRagService {
    */
   async queryRelevantChunks(
     query: string,
-    options?: { topK?: number; minScore?: number; category?: string; allowedCategories?: string[]; userContext?: UserContext }
+    options?: {
+      topK?: number;
+      minScore?: number;
+      category?: string;
+      allowedCategories?: string[];
+      userContext?: UserContext;
+      skipLiveEmbedding?: boolean;
+    }
   ): Promise<RelevantChunkResult[]> {
     const topK = options?.topK || 4;
     const minScore = options?.minScore ?? 0.45;
@@ -237,14 +245,30 @@ export class AIRagService {
       ))
       .limit(200);
 
-    // 2. Try generating query embedding vector
+    if (chunkRows.length === 0) return [];
+
+    // 2. Try generating query embedding vector ONLY when not skipped (skipLiveEmbedding avoids
+    // forcing Ollama to context-switch between bge-m3 and the chat LLM right before chatStream).
     let queryEmbedding: number[] | null = null;
-    try {
-      const qRes = await localAIProvider.generateEmbedding(query);
-      if (qRes && qRes.embedding && qRes.embedding.length > 0) {
-        queryEmbedding = qRes.embedding;
+    if (!options?.skipLiveEmbedding) {
+      const hasVectorChunks = chunkRows.some(row => Array.isArray(row.embedding) && row.embedding.length > 0);
+      if (hasVectorChunks && config.aiEngine.defaultEmbedModel) {
+        try {
+          const loaded = await localAIProvider.getLoadedModels();
+          const embedModel = config.aiEngine.defaultEmbedModel.trim().toLowerCase();
+          const isEmbedLoaded = loaded.some(m => {
+            const n = String(m.name || '').toLowerCase();
+            return n === embedModel || n === `${embedModel}:latest` || `${n}:latest` === embedModel;
+          });
+          if (isEmbedLoaded) {
+            const qRes = await localAIProvider.generateEmbedding(query, undefined, 2500);
+            if (qRes && qRes.embedding && qRes.embedding.length > 0) {
+              queryEmbedding = qRes.embedding;
+            }
+          }
+        } catch {}
       }
-    } catch {}
+    }
 
     // 3. Score chunks
     const scoredChunks: RelevantChunkResult[] = [];

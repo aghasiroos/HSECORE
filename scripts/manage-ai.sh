@@ -164,8 +164,9 @@ cmd_restart() {
   ensure_env_file
   ensure_compose_file
   verify_container_compose_owner || return 1
-  echo -e "${BLUE}[*] Restarting Local AI Engine container...${NC}"
-  docker compose -f "${PROJECT_DIR}/${COMPOSE_FILE}" --env-file "${ENV_FILE}" restart hse-ai-engine
+  apply_ai_resource_budget "${ENV_FILE}"
+  echo -e "${BLUE}[*] Restarting Local AI Engine container with updated environment...${NC}"
+  docker compose -f "${PROJECT_DIR}/${COMPOSE_FILE}" --env-file "${ENV_FILE}" up -d --force-recreate --no-deps hse-ai-engine
   echo -e "${GREEN}[✓] Engine restarted.${NC}"
 }
 

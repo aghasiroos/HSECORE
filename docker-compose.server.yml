@@ -86,8 +86,8 @@ services:
       - "OLLAMA_NUM_PARALLEL=${AI_NUM_PARALLEL:-4}"
       - "OLLAMA_MAX_LOADED_MODELS=${AI_MAX_LOADED_MODELS:-3}"
       - "OLLAMA_KEEP_ALIVE=${AI_KEEP_ALIVE:-15m}"
-      - "OLLAMA_FLASH_ATTENTION=${AI_FLASH_ATTENTION:-0}"
-      - "OLLAMA_KV_CACHE_TYPE=${AI_KV_CACHE_TYPE:-q8_0}"
+      - "OLLAMA_FLASH_ATTENTION=${AI_FLASH_ATTENTION:-1}"
+      - "OLLAMA_KV_CACHE_TYPE=${AI_KV_CACHE_TYPE:-f16}"
       - "OLLAMA_ORIGINS="
       # Keep Ollama HTTP API private to the Docker network; wildcard CORS is not needed.
       - "OMP_NUM_THREADS=${AI_CPU_THREADS:-4}"

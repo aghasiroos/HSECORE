@@ -467,15 +467,24 @@ function InstructionsDocumentsModuleComponent({
 
   // Validate selected file client-side before upload
   const validateSelectedFile = (file: File): boolean => {
-    const allowedMimes = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'];
+    const allowedMimes = [
+      'application/pdf',
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-excel',
+    ];
     const ext = file.name.split('.').pop()?.toLowerCase() || '';
-    const allowedExts = ['pdf', 'jpg', 'jpeg', 'png', 'webp'];
+    const allowedExts = ['pdf', 'jpg', 'jpeg', 'png', 'webp', 'docx', 'doc', 'xlsx', 'xls'];
 
     if (!allowedMimes.includes(file.type) && !allowedExts.includes(ext)) {
       toast.error(
         isFa
-          ? 'فرمت فایل مجاز نیست. تنها فایل‌های PDF، JPG، PNG و WEBP مجاز می‌باشند.'
-          : 'Invalid file format. Only PDF, JPG, PNG, and WEBP are allowed.'
+          ? 'فرمت فایل مجاز نیست. تنها فایل‌های PDF، JPG، PNG، WEBP، Word و Excel مجاز می‌باشند.'
+          : 'Invalid file format. Only PDF, JPG, PNG, WEBP, Word, and Excel are allowed.'
       );
       return false;
     }
@@ -562,12 +571,19 @@ function InstructionsDocumentsModuleComponent({
           return;
         }
 
-        addAuditLog(
-          currentUser.username,
-          `ویرایش اطلاعات مستند «${formTitle.trim()}» (شماره مدرک: ${formDocNumber.trim()})`,
-          'موفق',
-          { module: 'دستورالعمل‌ها و مستندات', recordId: editingDoc.documentId }
-        );
+        if (res.data) {
+          setDocuments((prev) =>
+            prev.map((d) => (d.documentId === editingDoc.documentId ? res.data : d))
+          );
+        }
+        try {
+          addAuditLog(
+            currentUser.username,
+            `ویرایش اطلاعات مستند «${formTitle.trim()}» (شماره مدرک: ${formDocNumber.trim()})`,
+            'موفق',
+            { module: 'دستورالعمل‌ها و مستندات', recordId: editingDoc.documentId }
+          );
+        } catch {}
         toast.success(isFa ? 'اطلاعات مستند با موفقیت بروزرسانی شد.' : 'Document updated.');
         setIsFormModalOpen(false);
         await fetchDocuments();
@@ -576,7 +592,7 @@ function InstructionsDocumentsModuleComponent({
         if (!selectedFile) {
           toast.error(
             isFa
-              ? 'لطفاً فایل مستند (PDF یا تصویر JPG/PNG/WEBP) را انتخاب نمایید.'
+              ? 'لطفاً فایل مستند را انتخاب نمایید.'
               : 'Please select a file to upload.'
           );
           setSubmitting(false);
@@ -599,18 +615,38 @@ function InstructionsDocumentsModuleComponent({
           return;
         }
 
-        addAuditLog(
-          currentUser.username,
-          `بارگذاری مستند جدید «${formTitle.trim()}» (شماره مدرک: ${formDocNumber.trim()})`,
-          'موفق',
-          { module: 'دستورالعمل‌ها و مستندات', recordId: res.data?.documentId }
-        );
+        if (res.data) {
+          setDocuments((prev) => [
+            res.data,
+            ...prev.filter((d) => d.documentId !== res.data.documentId),
+          ]);
+        }
+        if (statusFilter !== 'ACTIVE' && statusFilter !== 'ALL') {
+          setStatusFilter('ACTIVE');
+        }
+        if (selectedCategory !== 'ALL' && selectedCategory !== formCategory) {
+          setSelectedCategory('ALL');
+        }
+        if (selectedUnit !== 'ALL' && selectedUnit !== (formUnitName.trim() || 'عمومی مجتمع')) {
+          setSelectedUnit('ALL');
+        }
+
+        try {
+          addAuditLog(
+            currentUser.username,
+            `بارگذاری مستند جدید «${formTitle.trim()}» (شماره مدرک: ${formDocNumber.trim()})`,
+            'موفق',
+            { module: 'دستورالعمل‌ها و مستندات', recordId: res.data?.documentId }
+          );
+        } catch {}
         toast.success(
           isFa ? 'مستند جدید با موفقیت در سرور ذخیره و ثبت گردید.' : 'Document uploaded successfully.'
         );
         setIsFormModalOpen(false);
         await fetchDocuments();
       }
+    } catch (err: any) {
+      toast.error(err?.message || (isFa ? 'خطا در ثبت و بارگذاری مستند' : 'Upload error'));
     } finally {
       setSubmitting(false);
     }
@@ -655,12 +691,20 @@ function InstructionsDocumentsModuleComponent({
         return;
       }
 
-      addAuditLog(
-        currentUser.username,
-        `جایگزینی فایل و ثبت نسخه ${(replaceTargetDoc.version || 1) + 1} برای مستند «${replaceTargetDoc.title}»`,
-        'موفق',
-        { module: 'دستورالعمل‌ها و مستندات', recordId: replaceTargetDoc.documentId }
-      );
+      if (res.data) {
+        setDocuments((prev) =>
+          prev.map((d) => (d.documentId === replaceTargetDoc.documentId ? res.data : d))
+        );
+      }
+
+      try {
+        addAuditLog(
+          currentUser.username,
+          `جایگزینی فایل و ثبت نسخه ${(replaceTargetDoc.version || 1) + 1} برای مستند «${replaceTargetDoc.title}»`,
+          'موفق',
+          { module: 'دستورالعمل‌ها و مستندات', recordId: replaceTargetDoc.documentId }
+        );
+      } catch {}
       toast.success(
         isFa
           ? `نسخه جدید (ویرایش ${(replaceTargetDoc.version || 1) + 1}) با موفقیت جایگزین و ثبت گردید.`
@@ -668,6 +712,8 @@ function InstructionsDocumentsModuleComponent({
       );
       setReplaceTargetDoc(null);
       await fetchDocuments();
+    } catch (err: any) {
+      toast.error(err?.message || (isFa ? 'خطا در جایگزینی فایل مستند' : 'Replace error'));
     } finally {
       setSubmitting(false);
     }
@@ -1146,9 +1192,6 @@ function InstructionsDocumentsModuleComponent({
                                 {doc.description}
                               </p>
                             )}
-                            <div className="text-[10px] text-slate-400 mt-0.5 font-mono truncate">
-                              {doc.originalName} ({formatFileSize(doc.fileSize)})
-                            </div>
                           </div>
                         </div>
                       </td>
@@ -1483,12 +1526,12 @@ function InstructionsDocumentsModuleComponent({
                 {!editingDoc && (
                   <div className="sm:col-span-2">
                     <label className="block text-xs font-black text-slate-700 dark:text-slate-200 mb-1.5">
-                      {isFa ? 'فایل مستند (PDF، JPG، PNG، WEBP) *' : 'Document File *'}
+                      {isFa ? 'فایل مستند (PDF، Word، Excel، JPG، PNG، WEBP) *' : 'Document File *'}
                     </label>
                     <input
                       ref={fileInputRef}
                       type="file"
-                      accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp"
+                      accept=".pdf,.jpg,.jpeg,.png,.webp,.docx,.doc,.xlsx,.xls,application/pdf,image/jpeg,image/png,image/webp,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
                       onChange={(e) => {
                         const f = e.target.files?.[0];
                         if (f && validateSelectedFile(f)) {
@@ -1608,12 +1651,12 @@ function InstructionsDocumentsModuleComponent({
             <form onSubmit={handleReplaceSubmit} className="space-y-4">
               <div>
                 <label className="block text-xs font-black text-slate-700 dark:text-slate-200 mb-1.5">
-                  {isFa ? 'فایل نسخه جدید (PDF، JPG، PNG، WEBP) *' : 'New Version File *'}
+                  {isFa ? 'فایل نسخه جدید (PDF، Word، Excel، JPG، PNG، WEBP) *' : 'New Version File *'}
                 </label>
                 <input
                   ref={replaceFileInputRef}
                   type="file"
-                  accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp"
+                  accept=".pdf,.jpg,.jpeg,.png,.webp,.docx,.doc,.xlsx,.xls,application/pdf,image/jpeg,image/png,image/webp,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
                   onChange={(e) => {
                     const f = e.target.files?.[0];
                     if (f && validateSelectedFile(f)) {
@@ -1837,7 +1880,7 @@ function InstructionsDocumentsModuleComponent({
                   <div className="text-[11px] text-slate-500 font-bold truncate">
                     {isFa ? 'شماره مدرک: ' : 'Code: '}
                     <span className="font-mono">{previewDoc.doc.documentNumber}</span> •{' '}
-                    {previewDoc.doc.unitName} • {previewDoc.versionItem.originalName}
+                    {previewDoc.doc.unitName}
                   </div>
                 </div>
               </div>
@@ -1855,7 +1898,7 @@ function InstructionsDocumentsModuleComponent({
                   >
                     {previewDoc.doc.versions.map((v) => (
                       <option key={v.fileId} value={v.fileId}>
-                        {isFa ? `نسخه v${v.version} (${v.originalName})` : `v${v.version}`}
+                        {isFa ? `نسخه v${v.version}` : `v${v.version}`}
                       </option>
                     ))}
                   </select>

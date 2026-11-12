@@ -30,6 +30,9 @@ export class AIService {
       localAIProvider.listInstalledModels(),
       localAIProvider.getLoadedModels(),
     ]);
+    if (models.length > 0 && loaded.length === 0) {
+      localAIProvider.warmUpModel();
+    }
     const loadedSet = new Set(loaded.map(l => (l.name || '').toLowerCase()));
     return models.map(m => {
       const name = m.name || m.model || '';

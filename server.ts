@@ -9,7 +9,7 @@ import { securityHeadersMiddleware, corsMiddleware } from './server/core/middlew
 import { standardRateLimiter } from './server/core/middleware/rateLimiter.ts';
 import { errorHandlerMiddleware } from './server/core/middleware/errorHandler.ts';
 import { createApiRouter } from './server/routes/api.router.ts';
-import processManagementRoutes from './server/modules/process-management/routes.ts';
+import { requireAuth, requireRole } from './server/core/middleware/auth.ts';
 import { startWorkers } from './server/modules/process-management/worker.ts';
 import { startAutomationWorker } from './server/services/automation/automationWorker.ts';
 import { weatherService } from './server/weather/service.ts';
@@ -171,7 +171,7 @@ async function startServer() {
     });
   });
 
-  app.get('/openapi.json', (req, res) => {
+  app.get('/openapi.json', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR', 'HSE_MANAGER'), (req, res) => {
     res.json(openApiSpec);
   });
 
@@ -244,7 +244,7 @@ async function startServer() {
     }
   });
 
-  app.post('/api/weather/cache/clear', (req, res) => {
+  app.post('/api/weather/cache/clear', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR', 'HSE_MANAGER'), (req, res) => {
     weatherService.clearCache();
     res.json({ status: 'ok', message: 'Weather cache cleared' });
   });
@@ -400,10 +400,7 @@ async function startServer() {
     }
   });
 
-  // 5. Secondary Process Management Route Module
-  app.use('/api/v1/process-management', processManagementRoutes);
-
-  // 6. Master Unified Modular Monolith API Router
+  // 5. Master Unified Modular Monolith API Router
   app.use('/api', createApiRouter());
 
   // 6.5. Explicit 404 JSON Handler for API requests (Prevents HTML index.html fallback for broken/unmatched API calls)
@@ -419,10 +416,19 @@ async function startServer() {
 
   // 7. Serve uploads and pdfjs assets securely
   const uploadsDir = config.security.uploadDir;
-  if (!fs.existsSync(uploadsDir)) {
-    fs.mkdirSync(uploadsDir, { recursive: true });
+  try {
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+    }
+    app.use('/uploads', express.static(uploadsDir, { maxAge: '7d', dotfiles: 'ignore' }));
+  } catch {
+    // Fallback if host mount is restricted
   }
-  app.use('/uploads', express.static(uploadsDir, { maxAge: '7d', dotfiles: 'ignore' }));
+  const { resolveWritableUploadDir } = await import('./server/modules/files/file.service.ts');
+  const activeUploadsDir = resolveWritableUploadDir();
+  if (activeUploadsDir !== uploadsDir) {
+    app.use('/uploads', express.static(activeUploadsDir, { maxAge: '7d', dotfiles: 'ignore' }));
+  }
   
   const publicDir = path.resolve(process.cwd(), 'public');
   if (fs.existsSync(publicDir)) {

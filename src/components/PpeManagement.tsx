@@ -602,29 +602,29 @@ export default function PpeManagement({ isFa, currentUser }: PpeManagementProps)
         <div className="flex items-center gap-2 mt-6 pt-4 border-t border-white/10 overflow-x-auto">
           <button
             onClick={() => setActiveSubTab('issuance')}
-            className={`px-4 py-2 rounded-xl text-xs font-black transition flex items-center gap-2 whitespace-nowrap ${
+            className={`px-4 py-2 rounded-xl text-xs font-black transition flex items-center gap-2 whitespace-nowrap cursor-pointer ${
               activeSubTab === 'issuance' 
-                ? 'bg-white text-slate-900 shadow-md' 
-                : 'text-slate-300 hover:text-white hover:bg-white/5'
+                ? 'bg-indigo-600 text-white shadow-md' 
+                : 'text-slate-300 hover:text-white hover:bg-white/10'
             }`}
           >
-            <UserCheck className="w-4 h-4 text-indigo-600" />
-            {isFa ? 'دفتر تحویل و تحول پرسنل' : 'Worker Issuance Ledger'}
-            <span className="bg-indigo-100 text-indigo-800 text-[10px] font-black px-1.5 py-0.5 rounded-full">
+            <UserCheck className={`w-4 h-4 ${activeSubTab === 'issuance' ? 'text-white' : 'text-indigo-400'}`} />
+            <span>{isFa ? 'دفتر تحویل و تحول پرسنل' : 'Worker Issuance Ledger'}</span>
+            <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-full ${activeSubTab === 'issuance' ? 'bg-white/20 text-white' : 'bg-indigo-100 text-indigo-800'}`}>
               {issuanceRecords.length}
             </span>
           </button>
 
           <button
             onClick={() => setActiveSubTab('osha_guide')}
-            className={`px-4 py-2 rounded-xl text-xs font-black transition flex items-center gap-2 whitespace-nowrap ${
+            className={`px-4 py-2 rounded-xl text-xs font-black transition flex items-center gap-2 whitespace-nowrap cursor-pointer ${
               activeSubTab === 'osha_guide' 
-                ? 'bg-white text-slate-900 shadow-md' 
-                : 'text-slate-300 hover:text-white hover:bg-white/5'
+                ? 'bg-indigo-600 text-white shadow-md' 
+                : 'text-slate-300 hover:text-white hover:bg-white/10'
             }`}
           >
-            <ShieldCheck className="w-4 h-4 text-amber-500" />
-            {isFa ? 'راهنما و الزامات استاندارد OSHA' : 'OSHA Standard Guidelines'}
+            <ShieldCheck className={`w-4 h-4 ${activeSubTab === 'osha_guide' ? 'text-white' : 'text-amber-400'}`} />
+            <span>{isFa ? 'راهنما و الزامات استاندارد OSHA' : 'OSHA Standard Guidelines'}</span>
           </button>
         </div>
       </div>

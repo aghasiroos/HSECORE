@@ -696,8 +696,8 @@ export const PermissionsMatrixTab: React.FC<PermissionsMatrixTabProps> = ({
               onClick={() => setScopeFilter('ALL')}
               className={`px-2.5 py-1.5 rounded-xl text-[11px] font-black transition cursor-pointer ${
                 scopeFilter === 'ALL'
-                  ? 'bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900 shadow-xs'
-                  : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-100'
+                  ? 'bg-blue-600 text-white font-black shadow-xs'
+                  : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800'
               }`}
             >
               {isFa ? 'همه قابلیت‌ها' : 'All Features'}

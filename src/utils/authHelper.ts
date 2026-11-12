@@ -134,6 +134,16 @@ export const PERMISSION_MODULES_REGISTRY: PermissionModuleMeta[] = [
 
   // 3. Safety Operations, Permits & Risk
   {
+    id: 'PSM',
+    titleFa: 'مدیریت استقرار ایمنی فرایند (PSM)',
+    titleEn: 'Process Safety Management (PSM)',
+    category: 'safety',
+    categoryTitleFa: 'عملیات ایمنی، پروانه‌های کار و ریسک',
+    categoryTitleEn: 'Safety Operations & Risk',
+    iconName: 'Layers',
+    descriptionFa: 'مدیریت جامع پروژه استقرار و بلوغ ایمنی فرایند (۲۰ عنصر CCPS RBPS و ۱۴ الزام OSHA 1910.119) ویژه پتروشیمی رجال'
+  },
+  {
     id: 'Permit To Work',
     titleFa: 'پروانه کار ایمن (PTW)',
     titleEn: 'Permit To Work (PTW System)',

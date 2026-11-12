@@ -26,11 +26,19 @@ import {
   Shield,
   Radio,
   Users,
+  Monitor,
+  Laptop,
+  Smartphone,
+  Activity,
+  Eye,
+  Server,
 } from 'lucide-react';
 import { useNotification } from '../../context/NotificationContext';
 import {
   AppNotification,
   CentralNotificationService,
+  DevicePlatformType,
+  detectClientDeviceInfo,
   getPublicAcknowledgedAlertIds,
 } from '../../services/notificationService';
 import {
@@ -45,6 +53,9 @@ import {
 export const NotificationPopupModal: React.FC = () => {
   const {
     activePopupAlert,
+    selectedAlertDetails,
+    openAlertDetails,
+    closeAlertDetails,
     popupQueue,
     closePopup,
     acknowledgeAlert,
@@ -60,6 +71,10 @@ export const NotificationPopupModal: React.FC = () => {
   const [audioBlocked, setAudioBlocked] = useState(false);
   const [isSirenActive, setIsSirenActive] = useState(false);
   const [isConfirmingReadiness, setIsConfirmingReadiness] = useState(false);
+
+  const detectedDevice = detectClientDeviceInfo();
+  const [selectedDeviceType, setSelectedDeviceType] = useState<DevicePlatformType>(detectedDevice.deviceType);
+  const [customDeviceName, setCustomDeviceName] = useState<string>(detectedDevice.defaultDeviceName);
 
   const notif = activePopupAlert;
 
@@ -78,18 +93,16 @@ export const NotificationPopupModal: React.FC = () => {
             a.userName === currentUser.username ||
             a.userName === currentUser.fullName
         )
-      : (notif?.notifId && getPublicAcknowledgedAlertIds().has(notif.notifId))
+      : notif?.notifId && getPublicAcknowledgedAlertIds().has(notif.notifId)
   );
 
   // Siren configuration
-  const sirenType =
-    (notif?.sirenType ||
-      notif?.metadata?.sirenType ||
-      (isCritical ? 'siren_evacuation' : undefined)) as HseSirenType | undefined;
+  const sirenType = (notif?.sirenType ||
+    notif?.metadata?.sirenType ||
+    (isCritical ? 'siren_evacuation' : undefined)) as HseSirenType | undefined;
 
   const sirenDef =
-    HSE_SIREN_CATALOG.find((s) => s.id === sirenType) ||
-    (isCritical ? HSE_SIREN_CATALOG[0] : null);
+    HSE_SIREN_CATALOG.find((s) => s.id === sirenType) || (isCritical ? HSE_SIREN_CATALOG[0] : null);
 
   const hasSiren = Boolean(sirenDef) && (isCritical || notif?.requiresAck || Boolean(notif?.sirenType));
 
@@ -175,13 +188,340 @@ export const NotificationPopupModal: React.FC = () => {
     setIsConfirmingReadiness(true);
     try {
       await resumeAudioContext();
-      await CentralNotificationService.confirmLockScreenSiren(currentUser);
+      await CentralNotificationService.confirmLockScreenSiren(
+        currentUser as any,
+        currentUser?.username,
+        {
+          deviceType: selectedDeviceType,
+          deviceName: customDeviceName.trim() || detectedDevice.defaultDeviceName,
+        }
+      );
     } finally {
       setIsConfirmingReadiness(false);
     }
   };
 
+  const formatPersianDateTime = (isoString?: string) => {
+    if (!isoString) return '—';
+    try {
+      const d = new Date(isoString);
+      return d.toLocaleString('fa-IR', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      });
+    } catch {
+      return isoString;
+    }
+  };
+
+  const formatPersianTime = (isoString: string) => {
+    try {
+      const d = new Date(isoString);
+      return d.toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    } catch {
+      return '';
+    }
+  };
+
+  const getTargetLabelFa = (targetType?: string, values?: string[]) => {
+    switch (targetType) {
+      case 'all':
+        return 'همه کاربران سامانه';
+      case 'departments':
+        return `واحدهای مشخص (${values?.length || 0} واحد)`;
+      case 'unit_managers':
+        return 'مسئولان واحدها و سرپرستان';
+      case 'hse_experts':
+        return 'کارشناسان و افسران HSE';
+      case 'users':
+      case 'single':
+      case 'user':
+        return `اشخاص انتخابی (${values?.length || 1} نفر)`;
+      case 'roles':
+        return `نقش‌های سازمانی (${values?.join('، ') || ''})`;
+      default:
+        return 'همه کاربران';
+    }
+  };
+
+  // Render Alert Details & Delivery Report Modal (Deep-linked from Browser Push click or opened in-app)
+  const renderAlertDetailsModal = () => {
+    if (!selectedAlertDetails) return null;
+    const dNotif = selectedAlertDetails;
+    const dCrit = dNotif.category === 'critical_hse' || dNotif.priority === 'critical';
+    const report = dNotif.deliveryReport || (dNotif.metadata as any)?.deliveryReport;
+    const viewedList = dNotif.viewedBy || (dNotif.metadata as any)?.viewedBy || [];
+    const ackList = dNotif.acknowledgedBy || [];
+
+    return (
+      <div
+        className="fixed inset-0 z-[100000] flex items-center justify-center p-3 sm:p-5 overflow-y-auto"
+        style={{ direction: 'rtl' }}
+        role="dialog"
+        aria-modal="true"
+      >
+        <div
+          className="fixed inset-0 bg-slate-950/80 backdrop-blur-md transition-opacity animate-in fade-in duration-200"
+          onClick={closeAlertDetails}
+        />
+        <div className="relative w-full max-w-3xl max-h-[92vh] flex flex-col bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden z-10 animate-in zoom-in-95">
+          {/* Header */}
+          <div
+            className={`px-5 py-4 flex items-center justify-between border-b ${
+              dCrit
+                ? 'bg-rose-600 text-white border-rose-700'
+                : 'bg-slate-900 text-white border-slate-800'
+            }`}
+          >
+            <div className="flex items-center gap-2.5">
+              <ShieldAlert className="w-5 h-5 shrink-0" />
+              <div>
+                <h3 className="text-sm sm:text-base font-black">
+                  پرونده کامل هشدار و گزارش تحویل (Popup + Browser Push)
+                </h3>
+                <p className="text-[11px] opacity-85 font-mono">شناسه هشدار: {dNotif.notifId}</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={closeAlertDetails}
+              className="p-1.5 rounded-xl bg-white/15 hover:bg-white/25 text-white transition cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Body */}
+          <div className="overflow-y-auto flex-1 p-5 sm:p-6 space-y-5 text-xs">
+            {/* Alert Summary */}
+            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="px-2.5 py-0.5 rounded-lg font-black text-[11px] bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300">
+                  {dNotif.type === 'popup_and_push' || !dNotif.type
+                    ? 'ارسال همزمان: پنجره داخلی (Popup) + اعلان سیستمی مرورگر (Web Push)'
+                    : dNotif.type === 'push'
+                    ? 'اعلان سیستمی مرورگر (Browser Push)'
+                    : 'پنجره هشدار داخلی (Popup)'}
+                </span>
+                <span className="font-mono text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                  زمان انتشار: {formatPersianDateTime(dNotif.createdAt)}
+                </span>
+              </div>
+              <h4 className="text-sm sm:text-base font-black text-slate-900 dark:text-white">
+                {dNotif.title}
+              </h4>
+              <p className="text-xs text-slate-700 dark:text-slate-200 leading-relaxed whitespace-pre-line font-medium">
+                {dNotif.body}
+              </p>
+              {(dNotif.actionGuidelines || dNotif.metadata?.actionGuidelines) && (
+                <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-900 dark:text-amber-200">
+                  <strong className="block mb-1">🛡️ دستورالعمل و اقدام ضروری ایمنی:</strong>
+                  <span>{dNotif.actionGuidelines || dNotif.metadata?.actionGuidelines}</span>
+                </div>
+              )}
+              <div className="pt-2 border-t border-slate-200/70 dark:border-slate-700/70 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500">
+                <span>فرستنده: {dNotif.sender || 'مرکز فرماندهی HSE'}</span>
+                <span>مخاطبین هدف: {getTargetLabelFa(dNotif.targetType, dNotif.targetValues)}</span>
+              </div>
+            </div>
+
+            {/* Delivery Report KPI Cards */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h5 className="text-xs sm:text-sm font-black text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+                  <Activity className="w-4 h-4 text-emerald-600" />
+                  <span>گزارش تحویل سرویس Push و وضعیت دریافت کاربران (Delivery Report)</span>
+                </h5>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                <div className="p-3 rounded-2xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/60 text-center">
+                  <div className="text-base sm:text-lg font-black font-mono text-emerald-700 dark:text-emerald-300">
+                    {report ? report.pushSentCount : 0} / {report ? report.totalTargetedDevices : 0}
+                  </div>
+                  <div className="text-[10px] font-bold text-emerald-800 dark:text-emerald-400">
+                    تحویل موفق به سرویس Push مرورگر
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-2xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/60 text-center">
+                  <div className="text-base sm:text-lg font-black font-mono text-rose-700 dark:text-rose-300">
+                    {report ? (report.pushFailedCount || 0) + (report.pushExpiredRemovedCount || 0) : 0}
+                  </div>
+                  <div className="text-[10px] font-bold text-rose-800 dark:text-rose-400">
+                    خطای ارسال / اشتراک منقضی
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-2xl bg-sky-50 dark:bg-sky-950/30 border border-sky-200 dark:border-sky-900/60 text-center">
+                  <div className="text-base sm:text-lg font-black font-mono text-sky-700 dark:text-sky-300">
+                    {viewedList.length} نفر
+                  </div>
+                  <div className="text-[10px] font-bold text-sky-800 dark:text-sky-400">
+                    مشاهده هشدار (کلیک اعلان / پاپ‌آپ)
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-2xl bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-900/60 text-center">
+                  <div className="text-base sm:text-lg font-black font-mono text-indigo-700 dark:text-indigo-300">
+                    {ackList.length} نفر
+                  </div>
+                  <div className="text-[10px] font-bold text-indigo-800 dark:text-indigo-400">
+                    تأیید رسمی دریافت و توقف آژیر
+                  </div>
+                </div>
+              </div>
+
+              {/* Per-Device Push Service Response Logs */}
+              {report && Array.isArray(report.deviceLogs) && report.deviceLogs.length > 0 && (
+                <div className="p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 space-y-2">
+                  <div className="font-black text-slate-700 dark:text-slate-200 flex items-center gap-1.5 text-[11px]">
+                    <Server className="w-3.5 h-3.5 text-blue-500" />
+                    <span>پاسخ سرویس Push مرورگر به تفکیک هر دستگاه (Push API Endpoints):</span>
+                  </div>
+                  <div className="max-h-40 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+                    {report.deviceLogs.map((log: any, idx: number) => (
+                      <div key={idx} className="py-2 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                        <div className="flex items-center gap-2">
+                          {log.deviceType === 'mobile' ? (
+                            <Smartphone className="w-3.5 h-3.5 text-slate-500" />
+                          ) : log.deviceType === 'laptop' ? (
+                            <Laptop className="w-3.5 h-3.5 text-slate-500" />
+                          ) : (
+                            <Monitor className="w-3.5 h-3.5 text-slate-500" />
+                          )}
+                          <span className="font-bold text-slate-800 dark:text-slate-200">
+                            {log.userName || log.userId || 'کاربر'} — {log.deviceName || 'دستگاه'}
+                          </span>
+                          {log.endpointDomain && (
+                            <span className="font-mono text-[10px] text-slate-400">({log.endpointDomain})</span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`px-2 py-0.5 rounded-md font-bold text-[10px] ${
+                              log.status === 'delivered'
+                                ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                                : 'bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300'
+                            }`}
+                          >
+                            {log.status === 'delivered'
+                              ? `ارسال موفق (HTTP ${log.statusCode || 201})`
+                              : log.status === 'expired'
+                              ? `منقضی و حذف شد (HTTP ${log.statusCode || 410})`
+                              : `خطا: ${log.errorMessage || log.statusCode || 'نامشخص'}`}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* User View & Acknowledgment Confirmations */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 space-y-2">
+                  <div className="font-black text-slate-700 dark:text-slate-200 flex items-center gap-1.5 text-[11px]">
+                    <Eye className="w-3.5 h-3.5 text-sky-600" />
+                    <span>تأیید مشاهده هشدار توسط کاربر ({viewedList.length}):</span>
+                  </div>
+                  {viewedList.length === 0 ? (
+                    <p className="text-[11px] text-slate-400">هنوز موردی ثبت نشده است.</p>
+                  ) : (
+                    <div className="max-h-36 overflow-y-auto space-y-1.5">
+                      {viewedList.map((v: any, i: number) => (
+                        <div
+                          key={i}
+                          className="p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/70 dark:border-slate-700 flex items-center justify-between text-[10px]"
+                        >
+                          <div>
+                            <strong className="text-slate-800 dark:text-slate-200">
+                              {v.userName || v.userId}
+                            </strong>
+                            <span className="block text-slate-400">
+                              {v.source === 'browser_push_click'
+                                ? 'کلیک روی اعلان سیستمی مرورگر (Browser Push)'
+                                : v.source === 'in_app_popup'
+                                ? 'نمایش پنجره هشدار داخلی (Popup)'
+                                : 'مشاهده صفحه جزئیات هشدار'}
+                            </span>
+                          </div>
+                          <span className="font-mono text-slate-500">
+                            {formatPersianTime(v.timestamp)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 space-y-2">
+                  <div className="font-black text-slate-700 dark:text-slate-200 flex items-center gap-1.5 text-[11px]">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>تأیید دریافت و قطع آژیر ({ackList.length}):</span>
+                  </div>
+                  {ackList.length === 0 ? (
+                    <p className="text-[11px] text-slate-400">هنوز تأییدیه‌ای ثبت نشده است.</p>
+                  ) : (
+                    <div className="max-h-36 overflow-y-auto space-y-1.5">
+                      {ackList.map((a: any, i: number) => (
+                        <div
+                          key={i}
+                          className="p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/70 dark:border-slate-700 flex items-center justify-between text-[10px]"
+                        >
+                          <div>
+                            <strong className="text-slate-800 dark:text-slate-200">
+                              {a.userName || a.userId}
+                            </strong>
+                            {a.note && <span className="block text-slate-500">{a.note}</span>}
+                          </div>
+                          <span className="font-mono text-emerald-600 dark:text-emerald-400 font-bold">
+                            {formatPersianTime(a.timestamp)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Footer */}
+          <div className="px-5 py-3.5 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 flex items-center justify-between gap-3">
+            {dNotif.requiresAck && (
+              <button
+                type="button"
+                onClick={async () => {
+                  await acknowledgeAlert(dNotif.notifId, 'تأیید دریافت از صفحه جزئیات هشدار');
+                }}
+                className="px-4 py-2 rounded-xl text-xs font-black bg-emerald-600 hover:bg-emerald-700 text-white transition cursor-pointer flex items-center gap-1.5"
+              >
+                <Check className="w-4 h-4" />
+                <span>ثبت تأیید دریافت هشدار و قطع آژیر</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={closeAlertDetails}
+              className="px-5 py-2 rounded-xl text-xs font-bold bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 transition cursor-pointer mr-auto"
+            >
+              بستن پنجره جزئیات
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   if (!activePopupAlert) {
+    if (selectedAlertDetails) {
+      return renderAlertDetailsModal();
+    }
     if (!needsPostLoginConfirmation) return null;
 
     return (
@@ -192,22 +532,68 @@ export const NotificationPopupModal: React.FC = () => {
         aria-modal="true"
       >
         <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm transition-opacity animate-in fade-in duration-200" />
-        <div className="relative w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-rose-200 dark:border-rose-900/60 p-6 space-y-5 z-10 animate-in zoom-in-95">
+        <div className="relative w-full max-w-lg bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-rose-200 dark:border-rose-900/60 p-6 space-y-5 z-10 animate-in zoom-in-95">
           <div className="flex items-start gap-3.5">
             <div className="w-12 h-12 rounded-2xl bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
               <Bell className="w-6 h-6" />
             </div>
             <div className="space-y-1">
               <h3 className="text-sm sm:text-base font-black text-slate-900 dark:text-slate-100">
-                تأیید فعال‌سازی اعلان صفحه قفل و آژیر اضطراری HSE
+                فعال‌سازی اعلان‌های سیستمی مرورگر (Browser Push) و ثبت اشتراک این دستگاه
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed font-medium">
-                جهت دریافت بلادرنگ هشدارهای فوری HSE بر روی صفحه قفل (Lock Screen) و پخش خودکار آژیر ایمنی در مواقع بحرانی، لطفاً فعال‌سازی را برای این حساب و دستگاه تأیید فرمایید. این تأییدیه ذخیره شده و مجدداً سؤال نخواهد شد.
+                برای اینکه هشدارهای فوری HSECORE علاوه بر پنجره داخلی (Popup)، حتی در زمان بسته بودن مرورگر نیز از طریق{' '}
+                <strong>Service Worker + Push API + Notifications API</strong> روی این دستگاه نمایش داده شوند، نوع دستگاه خود را انتخاب و فعال‌سازی را تأیید نمایید:
               </p>
             </div>
           </div>
 
-          <div className="flex items-center justify-end pt-2 border-t border-slate-100 dark:border-slate-800">
+          {/* Device Type Selection */}
+          <div className="space-y-3 bg-slate-50 dark:bg-slate-800/60 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-700">
+            <label className="text-xs font-black text-slate-700 dark:text-slate-200 block">
+              ۱. انتخاب نوع دستگاه فعلی برای ثبت اشتراک Push:
+            </label>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { id: 'desktop' as DevicePlatformType, label: 'کامپیوتر رومیزی', icon: Monitor },
+                { id: 'laptop' as DevicePlatformType, label: 'لپ‌تاپ', icon: Laptop },
+                { id: 'mobile' as DevicePlatformType, label: 'تلفن همراه', icon: Smartphone },
+              ].map((item) => {
+                const IconComp = item.icon;
+                const active = selectedDeviceType === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setSelectedDeviceType(item.id)}
+                    className={`p-2.5 rounded-xl border text-xs font-bold flex flex-col items-center gap-1.5 transition cursor-pointer ${
+                      active
+                        ? 'bg-rose-600 text-white border-rose-600 shadow-xs'
+                        : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-rose-400'
+                    }`}
+                  >
+                    <IconComp className="w-4 h-4" />
+                    <span>{item.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="space-y-1 pt-1">
+              <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block">
+                ۲. عنوان دلخواه دستگاه (در گزارش تحویل نمایش داده می‌شود):
+              </label>
+              <input
+                type="text"
+                value={customDeviceName}
+                onChange={(e) => setCustomDeviceName(e.target.value)}
+                placeholder="مثال: لپ‌تاپ اتاق کنترل / موبایل سرپرست ایمنی"
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold text-slate-800 dark:text-slate-100"
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center justify-end pt-1 border-t border-slate-100 dark:border-slate-800">
             <button
               type="button"
               disabled={isConfirmingReadiness}
@@ -217,8 +603,8 @@ export const NotificationPopupModal: React.FC = () => {
               <Bell className="w-4 h-4" />
               <span>
                 {isConfirmingReadiness
-                  ? 'در حال ثبت و فعال‌سازی...'
-                  : 'تأیید و فعال‌سازی اعلان صفحه قفل و آژیر'}
+                  ? 'در حال ثبت اشتراک دستگاه و فعال‌سازی...'
+                  : 'تأیید مجوز اعلان و ثبت اشتراک این دستگاه'}
               </span>
             </button>
           </div>
@@ -294,14 +680,8 @@ export const NotificationPopupModal: React.FC = () => {
   const handleNavigate = () => {
     stopSirenLoop();
     markAsRead(notif.notifId);
+    openAlertDetails(notif);
     closePopup();
-    if (notif.actionUrl) {
-      if (notif.actionUrl.startsWith('#')) {
-        window.location.hash = notif.actionUrl;
-      } else {
-        window.location.href = notif.actionUrl;
-      }
-    }
   };
 
   const handleAcknowledge = async () => {
@@ -327,367 +707,357 @@ export const NotificationPopupModal: React.FC = () => {
     closePopup();
   };
 
-  const formatPersianTime = (isoString: string) => {
-    try {
-      const d = new Date(isoString);
-      return d.toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    } catch {
-      return '';
-    }
-  };
-
   const ackCount = notif.acknowledgedBy?.length || 0;
+  const viewCount = notif.viewedBy?.length || 0;
 
   return (
-    <div
-      className="fixed inset-0 z-[99999] flex items-center justify-center p-3 sm:p-5 overflow-y-auto"
-      style={{ direction: 'rtl' }}
-      role="dialog"
-      aria-modal="true"
-    >
-      {/* Backdrop */}
+    <>
+      {selectedAlertDetails && renderAlertDetailsModal()}
       <div
-        className="fixed inset-0 bg-slate-950/80 backdrop-blur-md transition-opacity animate-in fade-in duration-300"
-        onClick={notif.requiresAck ? undefined : handleSimpleDismiss}
-      />
-
-      {/* Central Modal Card */}
-      <div
-        className={`relative w-full max-w-lg sm:max-w-xl md:max-w-2xl max-h-[92vh] flex flex-col bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border-2 transition-all duration-300 overflow-hidden z-10 animate-in zoom-in-95 ${
-          isCritical
-            ? 'border-rose-500 ring-4 ring-rose-500/30 shadow-[0_0_50px_rgba(244,63,94,0.35)]'
-            : isWarning
-            ? 'border-amber-500 ring-4 ring-amber-500/20 shadow-[0_0_35px_rgba(245,158,11,0.25)]'
-            : isError
-            ? 'border-red-500 ring-4 ring-red-500/20 shadow-[0_0_35px_rgba(239,68,68,0.25)]'
-            : isSuccess
-            ? 'border-emerald-500 ring-4 ring-emerald-500/20'
-            : 'border-blue-500 ring-4 ring-blue-500/20'
-        }`}
-        onClick={() => {
-          if (isAudioContextSuspended()) {
-            resumeAudioContext().catch(() => {});
-          }
-        }}
+        className="fixed inset-0 z-[99999] flex items-center justify-center p-3 sm:p-5 overflow-y-auto"
+        style={{ direction: 'rtl' }}
+        role="dialog"
+        aria-modal="true"
       >
-        {/* Top Emergency Visual Flasher Banner for Critical Alerts */}
-        {isCritical && (
-          <div className="shrink-0 bg-gradient-to-r from-rose-600 via-red-600 to-rose-700 text-white px-4 py-2.5 text-xs font-black flex items-center justify-between shadow-inner animate-pulse">
-            <div className="flex items-center gap-2">
-              <ShieldAlert className="w-4 h-4 shrink-0 animate-bounce" />
-              <span>هشدار بحرانی و وضعیت اضطراری HSE (HSE CRITICAL ALERT)</span>
-            </div>
-            {hasSiren && (
-              <div className="flex items-center gap-1.5 font-mono text-[10px] bg-rose-950/60 px-2.5 py-0.5 rounded-full border border-rose-400/30">
-                <Radio className="w-3 h-3 text-rose-300 animate-pulse" />
-                <span>پخش پیوسته آژیر</span>
+        {/* Backdrop */}
+        <div
+          className="fixed inset-0 bg-slate-950/80 backdrop-blur-md transition-opacity animate-in fade-in duration-300"
+          onClick={notif.requiresAck ? undefined : handleSimpleDismiss}
+        />
+
+        {/* Central Modal Card */}
+        <div
+          className={`relative w-full max-w-lg sm:max-w-xl md:max-w-2xl max-h-[92vh] flex flex-col bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border-2 transition-all duration-300 overflow-hidden z-10 animate-in zoom-in-95 ${
+            isCritical
+              ? 'border-rose-500 ring-4 ring-rose-500/30 shadow-[0_0_50px_rgba(244,63,94,0.35)]'
+              : isWarning
+              ? 'border-amber-500 ring-4 ring-amber-500/20 shadow-[0_0_35px_rgba(245,158,11,0.25)]'
+              : isError
+              ? 'border-red-500 ring-4 ring-red-500/20 shadow-[0_0_35px_rgba(239,68,68,0.25)]'
+              : isSuccess
+              ? 'border-emerald-500 ring-4 ring-emerald-500/20'
+              : 'border-blue-500 ring-4 ring-blue-500/20'
+          }`}
+          onClick={() => {
+            if (isAudioContextSuspended()) {
+              resumeAudioContext().catch(() => {});
+            }
+          }}
+        >
+          {/* Top Emergency Visual Flasher Banner for Critical Alerts */}
+          {isCritical && (
+            <div className="shrink-0 bg-gradient-to-r from-rose-600 via-red-600 to-rose-700 text-white px-4 py-2.5 text-xs font-black flex items-center justify-between shadow-inner animate-pulse">
+              <div className="flex items-center gap-2">
+                <ShieldAlert className="w-4 h-4 shrink-0 animate-bounce" />
+                <span>هشدار فوری HSE (ارسال همزمان پنجره داخلی Popup + اعلان مرورگر Web Push)</span>
               </div>
-            )}
-          </div>
-        )}
-
-        <div className="overflow-y-auto flex-1 p-5 sm:p-7 space-y-4">
-          {/* Header row */}
-          <div className="flex items-start justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-4">
-            <div className="flex items-start gap-3.5">
-              <div
-                className={`p-3 rounded-2xl shrink-0 shadow-sm ${
-                  isCritical
-                    ? 'bg-rose-100 dark:bg-rose-950/80 text-rose-600 dark:text-rose-400 ring-2 ring-rose-400'
-                    : isWarning
-                    ? 'bg-amber-100 dark:bg-amber-950/80 text-amber-600 dark:text-amber-400 ring-2 ring-amber-400'
-                    : isError
-                    ? 'bg-red-100 dark:bg-red-950/80 text-red-600 dark:text-red-400'
-                    : isSuccess
-                    ? 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-600 dark:text-emerald-400'
-                    : 'bg-blue-100 dark:bg-blue-950/80 text-blue-600 dark:text-blue-400'
-                }`}
-              >
-                {isCritical ? (
-                  <ShieldAlert className="w-7 h-7" />
-                ) : isWarning ? (
-                  <AlertTriangle className="w-7 h-7" />
-                ) : isError ? (
-                  <XCircle className="w-7 h-7" />
-                ) : isSuccess ? (
-                  <CheckCircle2 className="w-7 h-7" />
-                ) : (
-                  <Info className="w-7 h-7" />
-                )}
-              </div>
-
-              <div>
-                <div className="flex flex-wrap items-center gap-2 mb-1.5">
-                  <span
-                    className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black border ${moduleMeta.color}`}
-                  >
-                    <ModuleIcon className="w-3 h-3" />
-                    <span>{moduleMeta.label}</span>
-                  </span>
-
-                  <span
-                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                      isCritical
-                        ? 'bg-rose-500 text-white'
-                        : isWarning
-                        ? 'bg-amber-500 text-white'
-                        : isError
-                        ? 'bg-red-500 text-white'
-                        : isSuccess
-                        ? 'bg-emerald-500 text-white'
-                        : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
-                    }`}
-                  >
-                    {isCritical
-                      ? 'اولویت: بحرانی'
-                      : notif.priority === 'high'
-                      ? 'اولویت: بالا'
-                      : notif.priority === 'low'
-                      ? 'اولویت: عادی'
-                      : 'اولویت: متوسط'}
-                  </span>
-
-                  {popupQueue.length > 1 && (
-                    <span className="text-[10px] font-mono text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full font-bold">
-                      اعلان ۱ از {popupQueue.length}
-                    </span>
-                  )}
+              {hasSiren && (
+                <div className="flex items-center gap-1.5 font-mono text-[10px] bg-rose-950/60 px-2.5 py-0.5 rounded-full border border-rose-400/30">
+                  <Radio className="w-3 h-3 text-rose-300 animate-pulse" />
+                  <span>پخش پیوسته آژیر</span>
                 </div>
-
-                <h3 className="text-base sm:text-lg md:text-xl font-black text-slate-900 dark:text-slate-100 leading-snug">
-                  {notif.title}
-                </h3>
-              </div>
-            </div>
-
-            {/* Close button if not strictly requiring ack */}
-            {!notif.requiresAck && (
-              <button
-                onClick={handleSimpleDismiss}
-                className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
-                title="بستن"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            )}
-          </div>
-
-          {/* Real-time Siren Indicator (Clean, without blocking banner on login screen) */}
-          {hasSiren && (
-            <div className="space-y-2">
-              {audioBlocked && currentUser ? (
-                <button
-                  type="button"
-                  onClick={handleUnlockAudio}
-                  className="w-full p-3 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs rounded-2xl flex items-center justify-between transition shadow-md cursor-pointer animate-pulse"
-                >
-                  <div className="flex items-center gap-2">
-                    <VolumeX className="w-4 h-4 text-slate-950 shrink-0" />
-                    <span>مرورگر پخش خودکار صدا را مسدود کرده است؛ برای فعال‌سازی فوری آژیر کلیک نمایید.</span>
-                  </div>
-                  <span className="px-2 py-1 bg-slate-950 text-amber-400 rounded-lg text-[10px] font-bold shrink-0">
-                    فعال‌سازی آژیر
-                  </span>
-                </button>
-              ) : isSirenActive ? (
-                <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-2xl flex items-center justify-between text-xs text-rose-700 dark:text-rose-300 font-bold">
-                  <div className="flex items-center gap-2.5">
-                    <span className="relative flex h-3 w-3">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-3 w-3 bg-rose-600"></span>
-                    </span>
-                    <div>
-                      <span className="font-black text-rose-800 dark:text-rose-200">
-                        {sirenDef ? sirenDef.titleFa : 'آژیر اضطراری'}
-                      </span>
-                      <span className="text-[11px] text-slate-500 dark:text-slate-400 block font-normal">
-                        صدا تا زمان کلیک روی دکمه «تأیید هشدار و قطع آژیر» ادامه دارد.
-                      </span>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1 font-mono text-[10px] bg-rose-500/20 px-2 py-0.5 rounded-full text-rose-700 dark:text-rose-300">
-                    <Volume2 className="w-3.5 h-3.5 animate-pulse" />
-                    <span>آژیر زنده</span>
-                  </div>
-                </div>
-              ) : null}
+              )}
             </div>
           )}
 
-          {/* Body Content */}
-          <div className="space-y-3.5">
-            {/* Structured Emergency Metadata Bar (Risk Level & Publish Time) */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              <div className={`p-3 rounded-2xl border flex items-center justify-between ${
-                isCritical
-                  ? 'bg-rose-500/10 border-rose-500/30 text-rose-900 dark:text-rose-200'
-                  : 'bg-amber-500/10 border-amber-500/30 text-amber-900 dark:text-amber-200'
-              }`}>
-                <span className="text-[11px] font-bold opacity-80">سطح خطر:</span>
-                <span className="text-xs font-black">
-                  {(notif as any).riskLevelFa ||
-                    notif.metadata?.riskLevelFa ||
-                    (isCritical
-                      ? 'بحرانی و اضطراری (سطح ۱)'
-                      : notif.priority === 'high'
-                      ? 'فوری و پرخطر (سطح ۲)'
-                      : 'هشدار ایمنی و عملیاتی')}
-                </span>
-              </div>
-
-              <div className="p-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 flex items-center justify-between">
-                <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">زمان انتشار:</span>
-                <span className="text-xs font-mono font-black text-slate-800 dark:text-slate-200">
-                  {formatPersianTime(notif.createdAt)}
-                </span>
-              </div>
-            </div>
-
-            <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-100 dark:border-slate-800/80 leading-relaxed text-sm text-slate-700 dark:text-slate-200">
-              <p className="whitespace-pre-line font-medium leading-relaxed">{notif.body}</p>
-            </div>
-
-            {/* Action Guidelines / Protective Instructions */}
-            {(notif.actionGuidelines || notif.metadata?.actionGuidelines || isCritical) && (
-              <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl space-y-1.5 animate-in fade-in">
-                <div className="flex items-center gap-2 text-xs font-black text-amber-800 dark:text-amber-300">
-                  <ShieldAlert className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400" />
-                  <span>اقدام ضروری و الزامات ایمنی:</span>
+          <div className="overflow-y-auto flex-1 p-5 sm:p-7 space-y-4">
+            {/* Header row */}
+            <div className="flex items-start justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-4">
+              <div className="flex items-start gap-3.5">
+                <div
+                  className={`p-3 rounded-2xl shrink-0 shadow-sm ${
+                    isCritical
+                      ? 'bg-rose-100 dark:bg-rose-950/80 text-rose-600 dark:text-rose-400 ring-2 ring-rose-400'
+                      : isWarning
+                      ? 'bg-amber-100 dark:bg-amber-950/80 text-amber-600 dark:text-amber-400 ring-2 ring-amber-400'
+                      : isError
+                      ? 'bg-red-100 dark:bg-red-950/80 text-red-600 dark:text-red-400'
+                      : isSuccess
+                      ? 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-600 dark:text-emerald-400'
+                      : 'bg-blue-100 dark:bg-blue-950/80 text-blue-600 dark:text-blue-400'
+                  }`}
+                >
+                  {isCritical ? (
+                    <ShieldAlert className="w-7 h-7" />
+                  ) : isWarning ? (
+                    <AlertTriangle className="w-7 h-7" />
+                  ) : isError ? (
+                    <XCircle className="w-7 h-7" />
+                  ) : isSuccess ? (
+                    <CheckCircle2 className="w-7 h-7" />
+                  ) : (
+                    <Info className="w-7 h-7" />
+                  )}
                 </div>
-                <p className="text-xs text-amber-950 dark:text-amber-100 leading-relaxed font-semibold whitespace-pre-line">
-                  {notif.actionGuidelines ||
-                    notif.metadata?.actionGuidelines ||
-                    'حفظ خونسردی، توقف فوری عملیات پرخطر، رعایت پروتکل واکنش در شرایط اضطراری (ERP) و ثبت تأیید دریافت هشدار.'}
-                </p>
+
+                <div>
+                  <div className="flex flex-wrap items-center gap-2 mb-1.5">
+                    <span
+                      className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black border ${moduleMeta.color}`}
+                    >
+                      <ModuleIcon className="w-3 h-3" />
+                      <span>{moduleMeta.label}</span>
+                    </span>
+
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        isCritical
+                          ? 'bg-rose-500 text-white'
+                          : isWarning
+                          ? 'bg-amber-500 text-white'
+                          : isError
+                          ? 'bg-red-500 text-white'
+                          : isSuccess
+                          ? 'bg-emerald-500 text-white'
+                          : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                      }`}
+                    >
+                      {isCritical
+                        ? 'اولویت: بحرانی'
+                        : notif.priority === 'high'
+                        ? 'اولویت: بالا'
+                        : notif.priority === 'low'
+                        ? 'اولویت: عادی'
+                        : 'اولویت: متوسط'}
+                    </span>
+
+                    {popupQueue.length > 1 && (
+                      <span className="text-[10px] font-mono text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full font-bold">
+                        اعلان ۱ از {popupQueue.length}
+                      </span>
+                    )}
+                  </div>
+
+                  <h3 className="text-base sm:text-lg md:text-xl font-black text-slate-900 dark:text-slate-100 leading-snug">
+                    {notif.title}
+                  </h3>
+                </div>
+              </div>
+
+              {/* Close button if not strictly requiring ack */}
+              {!notif.requiresAck && (
+                <button
+                  onClick={handleSimpleDismiss}
+                  className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                  title="بستن"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              )}
+            </div>
+
+            {/* Real-time Siren Indicator */}
+            {hasSiren && (
+              <div className="space-y-2">
+                {audioBlocked && currentUser ? (
+                  <button
+                    type="button"
+                    onClick={handleUnlockAudio}
+                    className="w-full p-3 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs rounded-2xl flex items-center justify-between transition shadow-md cursor-pointer animate-pulse"
+                  >
+                    <div className="flex items-center gap-2">
+                      <VolumeX className="w-4 h-4 text-slate-950 shrink-0" />
+                      <span>مرورگر پخش خودکار صدا را مسدود کرده است؛ برای فعال‌سازی فوری آژیر کلیک نمایید.</span>
+                    </div>
+                    <span className="px-2 py-1 bg-slate-950 text-amber-400 rounded-lg text-[10px] font-bold shrink-0">
+                      فعال‌سازی آژیر
+                    </span>
+                  </button>
+                ) : isSirenActive ? (
+                  <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-2xl flex items-center justify-between text-xs text-rose-700 dark:text-rose-300 font-bold">
+                    <div className="flex items-center gap-2.5">
+                      <span className="relative flex h-3 w-3">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-3 w-3 bg-rose-600"></span>
+                      </span>
+                      <div>
+                        <span className="font-black text-rose-800 dark:text-rose-200">
+                          {sirenDef ? sirenDef.titleFa : 'آژیر اضطراری'}
+                        </span>
+                        <span className="text-[11px] text-slate-500 dark:text-slate-400 block font-normal">
+                          صدا تا زمان کلیک روی دکمه «تأیید هشدار و قطع آژیر» ادامه دارد.
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 font-mono text-[10px] bg-rose-500/20 px-2 py-0.5 rounded-full text-rose-700 dark:text-rose-300">
+                      <Volume2 className="w-3.5 h-3.5 animate-pulse" />
+                      <span>آژیر زنده</span>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             )}
 
-            {/* Optional Metadata Images / Details */}
-            {notif.metadata?.images && Array.isArray(notif.metadata.images) && notif.metadata.images.length > 0 && (
-              <div className="flex flex-wrap gap-2 pt-1">
-                {notif.metadata.images.map((img: string, idx: number) => (
-                  <img
-                    key={idx}
-                    src={img}
-                    alt="پیوست هشدار"
-                    className="h-24 w-auto rounded-xl object-cover border border-slate-200 dark:border-slate-700 shadow-xs"
+            {/* Body Content */}
+            <div className="space-y-3.5">
+              {/* Structured Emergency Metadata Bar (Risk Level & Publish Time) */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div
+                  className={`p-3 rounded-2xl border flex items-center justify-between ${
+                    isCritical
+                      ? 'bg-rose-500/10 border-rose-500/30 text-rose-900 dark:text-rose-200'
+                      : 'bg-amber-500/10 border-amber-500/30 text-amber-900 dark:text-amber-200'
+                  }`}
+                >
+                  <span className="text-[11px] font-bold opacity-80">سطح خطر:</span>
+                  <span className="text-xs font-black">
+                    {(notif as any).riskLevelFa ||
+                      notif.metadata?.riskLevelFa ||
+                      (isCritical
+                        ? 'بحرانی و اضطراری (سطح ۱)'
+                        : notif.priority === 'high'
+                        ? 'فوری و پرخطر (سطح ۲)'
+                        : 'هشدار ایمنی و عملیاتی')}
+                  </span>
+                </div>
+
+                <div className="p-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">مخاطبین هدف:</span>
+                  <span className="text-xs font-black text-slate-800 dark:text-slate-200">
+                    {getTargetLabelFa(notif.targetType, notif.targetValues)}
+                  </span>
+                </div>
+              </div>
+
+              <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-100 dark:border-slate-800/80 leading-relaxed text-sm text-slate-700 dark:text-slate-200">
+                <p className="whitespace-pre-line font-medium leading-relaxed">{notif.body}</p>
+              </div>
+
+              {/* Action Guidelines / Protective Instructions */}
+              {(notif.actionGuidelines || notif.metadata?.actionGuidelines || isCritical) && (
+                <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl space-y-1.5 animate-in fade-in">
+                  <div className="flex items-center gap-2 text-xs font-black text-amber-800 dark:text-amber-300">
+                    <ShieldAlert className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                    <span>اقدام ضروری و الزامات ایمنی:</span>
+                  </div>
+                  <p className="text-xs text-amber-950 dark:text-amber-100 leading-relaxed font-semibold whitespace-pre-line">
+                    {notif.actionGuidelines ||
+                      notif.metadata?.actionGuidelines ||
+                      'حفظ خونسردی، توقف فوری عملیات پرخطر، رعایت پروتکل واکنش در شرایط اضطراری (ERP) و ثبت تأیید دریافت هشدار.'}
+                  </p>
+                </div>
+              )}
+
+              {/* Optional Metadata Images / Details */}
+              {notif.metadata?.images && Array.isArray(notif.metadata.images) && notif.metadata.images.length > 0 && (
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {notif.metadata.images.map((img: string, idx: number) => (
+                    <img
+                      key={idx}
+                      src={img}
+                      alt="پیوست هشدار"
+                      className="h-24 w-auto rounded-xl object-cover border border-slate-200 dark:border-slate-700 shadow-xs"
+                    />
+                  ))}
+                </div>
+              )}
+
+              {/* Time & Sender info & Multi-user Delivery info */}
+              <div className="flex flex-wrap items-center justify-between text-xs text-slate-400 pt-1 border-t border-slate-100 dark:border-slate-800/60">
+                <div className="flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 text-slate-400" />
+                  <span>زمان انتشار:</span>
+                  <span className="font-mono font-bold text-slate-600 dark:text-slate-300">
+                    {formatPersianTime(notif.createdAt)}
+                  </span>
+                </div>
+
+                {notif.sender && (
+                  <div className="text-[11px]">
+                    <span>مخابره‌شده توسط: </span>
+                    <span className="font-bold text-slate-700 dark:text-slate-200">{notif.sender}</span>
+                  </div>
+                )}
+
+                <div className="w-full flex flex-wrap items-center justify-between gap-2 text-[11px] mt-1.5">
+                  {ackCount > 0 && (
+                    <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
+                      <Users className="w-3.5 h-3.5" />
+                      <span>تأیید دریافت: {ackCount} نفر</span>
+                    </div>
+                  )}
+                  {viewCount > 0 && (
+                    <div className="flex items-center gap-1.5 text-sky-600 dark:text-sky-400">
+                      <Eye className="w-3.5 h-3.5" />
+                      <span>مشاهده‌شده: {viewCount} نفر</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Optional Acknowledgment Note Field */}
+              {notif.requiresAck && showNoteField && (
+                <div className="space-y-1.5 pt-1 animate-in fade-in">
+                  <label className="text-xs font-bold text-slate-600 dark:text-slate-300">
+                    توضیحات یا اقدام کنترلی انجام‌شده (اختیاری جهت ثبت در گزارش تحویل):
+                  </label>
+                  <textarea
+                    value={ackNote}
+                    onChange={(e) => setAckNote(e.target.value)}
+                    placeholder="مثال: آژیر شنیده شد، پرسنل کارگاه به سمت نقطه امن Muster Point هدایت شدند..."
+                    rows={2}
+                    className="w-full text-xs p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-rose-500 focus:outline-none"
                   />
-                ))}
-              </div>
-            )}
-
-            {/* Time & Sender info & Multi-user Delivery info */}
-            <div className="flex flex-wrap items-center justify-between text-xs text-slate-400 pt-1 border-t border-slate-100 dark:border-slate-800/60">
-              <div className="flex items-center gap-1.5">
-                <Clock className="w-3.5 h-3.5 text-slate-400" />
-                <span>زمان انتشار:</span>
-                <span className="font-mono font-bold text-slate-600 dark:text-slate-300">
-                  {formatPersianTime(notif.createdAt)}
-                </span>
-              </div>
-
-              {notif.sender && (
-                <div className="text-[11px]">
-                  <span>مخابره‌شده توسط: </span>
-                  <span className="font-bold text-slate-700 dark:text-slate-200">{notif.sender}</span>
-                </div>
-              )}
-
-              {ackCount > 0 && (
-                <div className="w-full flex items-center gap-1.5 text-[11px] text-emerald-600 dark:text-emerald-400 mt-1">
-                  <Users className="w-3.5 h-3.5" />
-                  <span>تعداد تأییدیه‌های ثبت‌شده تاکنون:</span>
-                  <span className="font-bold font-mono">{ackCount} نفر</span>
                 </div>
               )}
             </div>
-
-            {/* Optional Acknowledgment Note Field */}
-            {notif.requiresAck && showNoteField && (
-              <div className="space-y-1.5 pt-1 animate-in fade-in">
-                <label className="text-xs font-bold text-slate-600 dark:text-slate-300">
-                  توضیحات یا اقدام کنترلی انجام‌شده (اختیاری جهت ثبت در پایگاه داده):
-                </label>
-                <textarea
-                  value={ackNote}
-                  onChange={(e) => setAckNote(e.target.value)}
-                  placeholder="مثال: آژیر شنیده شد، پرسنل کارگاه به سمت نقطه امن Muster Point هدایت شدند..."
-                  rows={2}
-                  className="w-full text-xs p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-rose-500 focus:outline-none"
-                />
-              </div>
-            )}
           </div>
-        </div>
 
-        {/* Sticky Responsive Action Footer */}
-        <div className="shrink-0 p-4 sm:p-5 border-t border-slate-100 dark:border-slate-800 bg-slate-50/90 dark:bg-slate-900/95 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-          {/* Action Link button */}
-          {notif.actionUrl ? (
+          {/* Sticky Responsive Action Footer */}
+          <div className="shrink-0 p-4 sm:p-5 border-t border-slate-100 dark:border-slate-800 bg-slate-50/90 dark:bg-slate-900/95 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+            {/* Open Alert Details & Delivery Report button */}
             <button
               type="button"
               onClick={handleNavigate}
               className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:hover:bg-blue-900/60 dark:text-blue-300 transition-colors cursor-pointer border border-blue-200 dark:border-blue-800 shadow-xs order-2 sm:order-1"
             >
               <ExternalLink className="w-4 h-4 shrink-0" />
-              <span>
-                {notif.sourceModule === 'referral' || notif.sourceModule === 'signature' || notif.sourceModule === 'workflow'
-                  ? 'مشاهده سند در کارتابل و اقدام'
-                  : notif.sourceModule === 'ptw'
-                  ? 'مشاهده پروانه کار'
-                  : notif.sourceModule === 'warnings'
-                  ? 'مشاهده اخطار کتبی'
-                  : notif.sourceModule === 'incidents'
-                  ? 'مشاهده گزارش حادثه'
-                  : 'انتقال مستقیم به رکورد و ماژول'}
-              </span>
+              <span>مشاهده جزئیات هشدار و گزارش تحویل</span>
             </button>
-          ) : (
-            <div className="hidden sm:block" />
-          )}
 
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 order-1 sm:order-2">
-            {/* Mandatory or Optional Acknowledge Button */}
-            {notif.requiresAck ? (
-              <>
-                {!showNoteField && (
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 order-1 sm:order-2">
+              {/* Mandatory or Optional Acknowledge Button */}
+              {notif.requiresAck ? (
+                <>
+                  {!showNoteField && (
+                    <button
+                      type="button"
+                      onClick={() => setShowNoteField(true)}
+                      className="text-xs text-center text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 underline cursor-pointer py-1"
+                    >
+                      افزودن یادداشت اقدام
+                    </button>
+                  )}
                   <button
                     type="button"
-                    onClick={() => setShowNoteField(true)}
-                    className="text-xs text-center text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 underline cursor-pointer py-1"
+                    onClick={handleAcknowledge}
+                    disabled={isSubmittingAck}
+                    className="inline-flex items-center justify-center gap-2 px-6 py-3 sm:py-2.5 rounded-xl text-xs sm:text-sm font-black text-white bg-gradient-to-r from-rose-600 via-red-600 to-rose-700 hover:from-rose-700 hover:to-red-800 shadow-lg shadow-rose-600/25 hover:shadow-rose-600/40 transition-all cursor-pointer disabled:opacity-50 active:scale-[0.99]"
                   >
-                    افزودن یادداشت اقدام
+                    <Check className="w-4 h-4 stroke-[3] shrink-0" />
+                    <span>
+                      {isSubmittingAck
+                        ? 'در حال ثبت تأییدیه...'
+                        : hasSiren
+                        ? 'تأیید دریافت هشدار و قطع آژیر'
+                        : 'تأیید دریافت هشدار'}
+                    </span>
                   </button>
-                )}
+                </>
+              ) : (
                 <button
                   type="button"
-                  onClick={handleAcknowledge}
-                  disabled={isSubmittingAck}
-                  className="inline-flex items-center justify-center gap-2 px-6 py-3 sm:py-2.5 rounded-xl text-xs sm:text-sm font-black text-white bg-gradient-to-r from-rose-600 via-red-600 to-rose-700 hover:from-rose-700 hover:to-red-800 shadow-lg shadow-rose-600/25 hover:shadow-rose-600/40 transition-all cursor-pointer disabled:opacity-50 active:scale-[0.99]"
+                  onClick={handleSimpleDismiss}
+                  className="inline-flex items-center justify-center gap-1.5 px-6 py-2.5 rounded-xl text-xs font-black text-white bg-slate-800 hover:bg-slate-900 dark:bg-slate-700 dark:hover:bg-slate-600 transition-colors cursor-pointer shadow-sm"
                 >
-                  <Check className="w-4 h-4 stroke-[3] shrink-0" />
-                  <span>
-                    {isSubmittingAck
-                      ? 'در حال ثبت تأییدیه...'
-                      : hasSiren
-                      ? 'تأیید دریافت هشدار و قطع آژیر'
-                      : 'تأیید دریافت هشدار'}
-                  </span>
+                  <Check className="w-4 h-4 shrink-0" />
+                  <span>متوجه شدم</span>
                 </button>
-              </>
-            ) : (
-              <button
-                type="button"
-                onClick={handleSimpleDismiss}
-                className="inline-flex items-center justify-center gap-1.5 px-6 py-2.5 rounded-xl text-xs font-black text-white bg-slate-800 hover:bg-slate-900 dark:bg-slate-700 dark:hover:bg-slate-600 transition-colors cursor-pointer shadow-sm"
-              >
-                <Check className="w-4 h-4 shrink-0" />
-                <span>متوجه شدم</span>
-              </button>
-            )}
+              )}
+            </div>
           </div>
         </div>
       </div>
-    </div>
+    </>
   );
 };

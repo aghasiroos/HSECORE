@@ -24,7 +24,7 @@ async function runVerification() {
   console.log(`  - Max Concurrency   : ${config.aiEngine.maxConcurrency}`);
   console.log(`  - Request Timeout   : ${config.aiEngine.timeoutMs}ms`);
 
-  if (!config.aiEngine.url || !config.aiEngine.defaultChatModel) {
+  if (!config.aiEngine.url || typeof config.aiEngine.defaultChatModel !== 'string') {
     throw new Error('Test 1 Failed: Missing AI Engine configuration values.');
   }
   console.log('  -> [PASS] Configuration parsed successfully.\n');

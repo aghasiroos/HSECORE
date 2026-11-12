@@ -22,6 +22,56 @@ export type NotificationType =
   | 'in-app'
   | 'popup';
 
+export type TargetAudienceType =
+  | 'all'
+  | 'departments'
+  | 'unit_managers'
+  | 'hse_experts'
+  | 'users'
+  | 'roles'
+  | 'user'
+  | 'single';
+
+export type DevicePlatformType = 'desktop' | 'laptop' | 'mobile' | 'tablet';
+
+export interface PushDeliveryDeviceLog {
+  subscriptionId: string;
+  userId?: string;
+  userName?: string;
+  role?: string;
+  department?: string;
+  deviceType?: DevicePlatformType;
+  deviceName?: string;
+  endpointDomain: string;
+  status: 'delivered' | 'failed' | 'expired_removed';
+  statusCode?: number;
+  pushServiceResponse?: string;
+  errorMessage?: string;
+  timestamp: string;
+}
+
+export interface NotificationViewConfirmation {
+  userId: string;
+  userName?: string;
+  clientSessionId?: string;
+  source: 'browser_push_click' | 'in_app_popup' | 'alert_details_view' | string;
+  deviceType?: DevicePlatformType;
+  deviceInfo?: string;
+  clientIp?: string;
+  timestamp: string;
+}
+
+export interface NotificationDeliveryReport {
+  dispatchedAt: string;
+  simultaneousPopupAndPush: boolean;
+  inAppBroadcasted: boolean;
+  totalTargetedDevices: number;
+  pushDeliveredCount: number;
+  pushFailedCount: number;
+  expiredRemovedCount: number;
+  deviceLogs: PushDeliveryDeviceLog[];
+}
+
 export interface NotificationRecord {
   id?: number;
   notifId: string;
@@ -33,11 +83,13 @@ export interface NotificationRecord {
   sourceModule: string;
   actionUrl?: string;
   recordId?: string;
-  targetType?: 'all' | 'roles' | 'departments' | 'user' | 'single';
+  targetType?: TargetAudienceType;
   targetValues?: string[];
   sender?: string;
   read?: boolean;
   readBy?: string[];
+  viewedBy?: NotificationViewConfirmation[];
+  deliveryReport?: NotificationDeliveryReport;
   requiresAck?: boolean;
   acknowledgedBy?: Array<{
     userId: string;
@@ -66,13 +118,24 @@ export interface WebPushSubscriptionRecord {
   userId?: string;
   userName?: string;
   role?: string;
+  jobTitle?: string;
   departmentIds?: string[];
+  departmentName?: string;
+  isUnitManager?: boolean;
+  isHseExpert?: boolean;
+  deviceType?: DevicePlatformType;
+  deviceName?: string;
+  browserName?: string;
+  osName?: string;
   guestSessionId?: string;
   userAgent?: string;
   platform?: string;
   createdAt: string;
   updatedAt: string;
   lastSuccessAt?: string;
+  lastFailureAt?: string;
+  lastError?: string;
+  lastStatusCode?: number;
 }
 
 export interface VapidKeySet {

@@ -945,10 +945,10 @@ export default function IncidentReporting({ isFa, currentUser }: IncidentReporti
         <div className="flex items-center gap-2 mt-6 pt-4 border-t border-white/10 overflow-x-auto">
           <button
             onClick={() => setActiveTab('reports')}
-            className={`px-4 py-2 rounded-xl text-xs font-black transition flex items-center gap-2 whitespace-nowrap ${
+            className={`px-4 py-2 rounded-xl text-xs font-black transition flex items-center gap-2 whitespace-nowrap cursor-pointer ${
               activeTab === 'reports' 
-                ? 'bg-white text-slate-900 shadow-md' 
-                : 'text-slate-300 hover:text-white hover:bg-white/5'
+                ? 'bg-rose-600 text-white shadow-md' 
+                : 'text-slate-300 hover:text-white hover:bg-white/10'
             }`}
           >
             <FileText className="w-4 h-4 text-rose-600" />
@@ -960,10 +960,10 @@ export default function IncidentReporting({ isFa, currentUser }: IncidentReporti
 
           <button
             onClick={() => setActiveTab('pyramid')}
-            className={`px-4 py-2 rounded-xl text-xs font-black transition flex items-center gap-2 whitespace-nowrap ${
+            className={`px-4 py-2 rounded-xl text-xs font-black transition flex items-center gap-2 whitespace-nowrap cursor-pointer ${
               activeTab === 'pyramid' 
-                ? 'bg-white text-slate-900 shadow-md' 
-                : 'text-slate-300 hover:text-white hover:bg-white/5'
+                ? 'bg-rose-600 text-white shadow-md' 
+                : 'text-slate-300 hover:text-white hover:bg-white/10'
             }`}
           >
             <Layers className="w-4 h-4 text-amber-500" />
@@ -972,10 +972,10 @@ export default function IncidentReporting({ isFa, currentUser }: IncidentReporti
 
           <button
             onClick={() => setActiveTab('stats')}
-            className={`px-4 py-2 rounded-xl text-xs font-black transition flex items-center gap-2 whitespace-nowrap ${
+            className={`px-4 py-2 rounded-xl text-xs font-black transition flex items-center gap-2 whitespace-nowrap cursor-pointer ${
               activeTab === 'stats' 
-                ? 'bg-white text-slate-900 shadow-md' 
-                : 'text-slate-300 hover:text-white hover:bg-white/5'
+                ? 'bg-rose-600 text-white shadow-md' 
+                : 'text-slate-300 hover:text-white hover:bg-white/10'
             }`}
           >
             <BarChart3 className="w-4 h-4 text-indigo-500" />

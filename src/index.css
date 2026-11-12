@@ -217,32 +217,32 @@ html.dark .sidebar-active {
 }
 
 /* 2. Layer 2 Cards & Modules */
-html.dark .bg-white {
+html.dark .bg-white:not([class*="dark:bg-"]) {
   background-color: #151e2e !important;
 }
 
-html.dark .border-slate-200,
-html.dark .border-slate-100 {
+html.dark .border-slate-200:not([class*="dark:border-"]),
+html.dark .border-slate-100:not([class*="dark:border-"]) {
   border-color: #243047 !important;
 }
 
-html.dark .border-slate-800 {
+html.dark .border-slate-800:not([class*="dark:border-"]) {
   border-color: #243047 !important;
 }
 
-html.dark .bg-slate-50 {
+html.dark .bg-slate-50:not([class*="dark:bg-"]) {
   background-color: #1a2438 !important;
 }
 
-html.dark .bg-slate-100 {
+html.dark .bg-slate-100:not([class*="dark:bg-"]) {
   background-color: #1e293b !important;
 }
 
-html.dark .bg-slate-900 {
+html.dark .bg-slate-900:not([class*="dark:bg-"]) {
   background-color: #151e2e !important;
 }
 
-html.dark .bg-slate-950 {
+html.dark .bg-slate-950:not([class*="dark:bg-"]) {
   background-color: #0b0f19 !important;
 }
 
@@ -320,24 +320,24 @@ html.dark .modal-body {
 }
 
 /* 6. Typography Contrast Refinement */
-html.dark .text-slate-800,
-html.dark .text-slate-900 {
+html.dark .text-slate-800:not([class*="dark:text-"]),
+html.dark .text-slate-900:not([class*="dark:text-"]) {
   color: #f8fafc !important;
 }
 
-html.dark .text-slate-700 {
+html.dark .text-slate-700:not([class*="dark:text-"]) {
   color: #e2e8f0 !important;
 }
 
-html.dark .text-slate-600 {
+html.dark .text-slate-600:not([class*="dark:text-"]) {
   color: #cbd5e1 !important;
 }
 
-html.dark .text-slate-500 {
+html.dark .text-slate-500:not([class*="dark:text-"]) {
   color: #94a3b8 !important;
 }
 
-html.dark .text-slate-400 {
+html.dark .text-slate-400:not([class*="dark:text-"]) {
   color: #94a3b8 !important;
 }
 

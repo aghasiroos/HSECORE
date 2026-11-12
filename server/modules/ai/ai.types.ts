@@ -31,6 +31,15 @@ export interface AIAssistantMetadata {
 export interface AIModuleCoverage {
   moduleId: string;
   moduleNameFa: string;
+  moduleNameEn?: string;
+  mainModuleNameFa?: string;
+  subModuleNameFa?: string;
+  groupId?: string;
+  groupTitleFa?: string;
+  iconName?: string;
+  accessPath?: string;
+  routePath?: string;
+  aliases?: string[];
   connected: boolean;
   tools: string[];
   assistantIds: AIAssistantId[];
@@ -57,6 +66,9 @@ export interface AIChatRequest {
   /** Explicit module IDs selected from the server-provided AI coverage catalog. */
   selectedModules?: string[];
   contextTokens?: number;
+  maxTokens?: number;
+  /** Optional partial assistant text to continue generating from without repeating prior content. */
+  continueFromText?: string;
   /** Internal-only cancellation signal supplied by the authenticated HTTP controller. */
   signal?: AbortSignal;
   /** Real-time token streaming callback to push tokens directly to the client as they are generated. */
@@ -74,6 +86,8 @@ export interface AIChatResponse {
   durationMs: number;
   model: string;
   queueWaitMs?: number;
+  completed?: boolean;
+  incompleteReason?: string;
 }
 
 export interface AIToolResult {

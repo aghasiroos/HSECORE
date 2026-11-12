@@ -4,7 +4,12 @@ import { eq, and, inArray, isNull, or, sql, desc } from 'drizzle-orm';
 import { ForbiddenError, ValidationError, NotFoundError } from './errors.ts';
 import { broadcastDataMutation } from './socket.ts';
 import { normalizeRoleToCanonical } from './middleware/auth.ts';
-import { normalizePersianArabicText, normalizeDigits as sharedNormalizeDigits } from '../../src/utils/textNormalization.ts';
+import {
+  normalizePersianArabicText,
+  normalizeDigits as sharedNormalizeDigits,
+  parseValidPgSerialId,
+  cleanPersonnelCode,
+} from '../../src/utils/textNormalization.ts';
 
 export type PersonnelAccessScope = 'ALL' | 'ASSIGNED';
 
@@ -137,14 +142,14 @@ export class PersonnelAccessService {
     const raw = String(identifier).trim();
     if (!raw) return null;
 
-    const numericId = /^\d+$/.test(raw) ? parseInt(raw, 10) : null;
+    const numericId = parseValidPgSerialId(raw);
     const conditions: any[] = [
       eq(schema.users.uid, raw),
       eq(schema.users.username, raw),
       eq(schema.users.email, raw),
       eq(schema.users.personnelNumber, raw),
     ];
-    if (numericId !== null && Number.isSafeInteger(numericId)) {
+    if (numericId !== null) {
       conditions.unshift(eq(schema.users.id, numericId));
     }
 
@@ -206,7 +211,7 @@ export class PersonnelAccessService {
         const summary: AssignedPersonnelSummary = {
           id: String(person.id),
           personnelId: person.id,
-          personnelCode: normalizeCode(person.personnelCode),
+          personnelCode: normalizeCode(cleanPersonnelCode(person.personnelCode, Boolean(extra.hasNoPersonnelCode))),
           nationalCode: normalizeCode(person.nationalCode),
           firstName,
           lastName,
@@ -304,7 +309,7 @@ export class PersonnelAccessService {
       const firstName = normalizeText(person.firstName);
       const lastName = normalizeText(person.lastName);
       const fullName = normalizeText(extra.fullName || `${firstName} ${lastName}`);
-      const pCode = normalizeCode(person.personnelCode);
+      const pCode = normalizeCode(cleanPersonnelCode(person.personnelCode, Boolean(extra.hasNoPersonnelCode)));
       const nCode = normalizeCode(person.nationalCode);
       const unitName = normalizeText(
         extra.unit || (person.unitId ? unitMap.get(person.unitId) : '') || 'نامشخص'
@@ -390,9 +395,8 @@ export class PersonnelAccessService {
 
     if (rawInputs.length > 0) {
       const numericIds = rawInputs
-        .filter((v) => /^\d+$/.test(v))
-        .map((v) => parseInt(v, 10))
-        .filter((n) => Number.isSafeInteger(n));
+        .map((v) => parseValidPgSerialId(v))
+        .filter((n): n is number => n !== null);
 
       const candidateRecords = await db
         .select()
@@ -421,7 +425,7 @@ export class PersonnelAccessService {
       const inactiveIdentifiers: string[] = [];
 
       for (const rawItem of rawInputs) {
-        const asNum = /^\d+$/.test(rawItem) ? parseInt(rawItem, 10) : null;
+        const asNum = parseValidPgSerialId(rawItem);
         const normCode = normalizeCode(rawItem);
         const matched =
           (asNum !== null ? byId.get(asNum) : undefined) ||
@@ -599,8 +603,8 @@ export class PersonnelAccessService {
     actor?: { uid?: string; username?: string; fullName?: string }
   ): Promise<void> {
     await this.ensureSchema();
-    const numericId = typeof personnelId === 'number' ? personnelId : parseInt(String(personnelId), 10);
-    if (!Number.isFinite(numericId)) return;
+    const numericId = parseValidPgSerialId(personnelId);
+    if (numericId === null) return;
 
     try {
       const existingAssignments = await db

@@ -1,13 +1,33 @@
-import { Router } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import { fileController } from './file.controller.ts';
 import { requireAuth, requireRole, requirePermission } from '../../core/middleware/auth.ts';
+import { ValidationError } from '../../core/errors.ts';
 
 const router = Router();
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 25 * 1024 * 1024 }, // 25MB strict upload limit
 });
+
+function parseSingleFileUpload(req: Request, res: Response, next: NextFunction) {
+  const contentType = String(req.headers['content-type'] || '').toLowerCase();
+  if (contentType.includes('application/json')) {
+    return next();
+  }
+  upload.single('file')(req, res, (err: any) => {
+    if (err) {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return next(new ValidationError('حجم فایل ارسالی بیش از حد مجاز (۲۵ مگابایت) است.'));
+      }
+      if (req.body && req.body.fileData) {
+        return next();
+      }
+      return next(new ValidationError(`خطا در دریافت فایل ارسالی: ${err.message || 'فرمت ارسال نامعتبر است.'}`));
+    }
+    return next();
+  });
+}
 
 // ============================================================================
 // 1. HSE Instructions & Documents Routes (/api/v1/files/documents/*)
@@ -20,7 +40,7 @@ router.post(
   '/documents',
   requireAuth,
   requirePermission('documents:create'),
-  upload.single('file'),
+  parseSingleFileUpload,
   (req, res, next) => {
     fileController.createDocument(req, res).catch(next);
   }
@@ -39,7 +59,7 @@ router.post(
   '/documents/:documentId/replace',
   requireAuth,
   requirePermission('documents:update'),
-  upload.single('file'),
+  parseSingleFileUpload,
   (req, res, next) => {
     fileController.replaceDocumentFile(req, res).catch(next);
   }
@@ -57,7 +77,7 @@ router.delete(
 // ============================================================================
 // 2. General System File Operations
 // ============================================================================
-router.post('/upload', requireAuth, upload.single('file'), (req, res, next) => {
+router.post('/upload', requireAuth, parseSingleFileUpload, (req, res, next) => {
   fileController.uploadFile(req, res).catch(next);
 });
 

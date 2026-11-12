@@ -26,9 +26,41 @@ import {
   Settings,
   AlertCircle,
   CheckCircle2,
+  BarChart3,
+  ThermometerSun,
+  Activity,
+  PieChart,
+  ShieldCheck,
+  Flame,
+  HeartPulse,
+  FileCheck2,
+  ClipboardCheck,
+  ShieldAlert,
+  HardHat,
+  AlertOctagon,
+  AlertTriangle,
+  Users,
+  GraduationCap,
+  FileText,
+  Inbox,
+  ClipboardList,
+  Workflow,
+  Bell,
+  UserCog,
+  User,
+  Stethoscope,
+  Leaf,
+  CornerDownLeft,
 } from 'lucide-react';
 import { UserProfile } from '../../types';
 import { authFetch } from '../../services/apiDatabaseClient';
+import {
+  parseSlashQueryFromInput,
+  stripSlashTokenFromInput,
+  searchAndRankModules,
+  SlashModuleCatalogItem,
+  RankedSlashModuleItem,
+} from '../../utils/aiModuleSlashSearch';
 
 export interface ChatMessage {
   id: string;
@@ -39,6 +71,24 @@ export interface ChatMessage {
   citations?: string[];
   durationMs?: number;
   model?: string;
+  completed?: boolean;
+  incompleteReason?: string;
+  originalPrompt?: string;
+  streaming?: boolean;
+}
+
+function isClientMessageIncomplete(content: string): boolean {
+  const trimmed = String(content || '').trim();
+  if (!trimmed) return false;
+  if (trimmed.startsWith('⏹') || trimmed.startsWith('خطا در')) return false;
+  if (/(\*{1,3}|#{1,4})\s*[\u0600-\u06FFa-zA-Z0-9]{0,6}$/.test(trimmed)) return true;
+  const lastLine = trimmed.split('\n').pop()?.trim() || '';
+  const boldCount = (lastLine.match(/\*\*/g) || []).length;
+  if (boldCount % 2 === 1 && lastLine.length < 45) return true;
+  if (/([:،؛\-–—(«]|(?:\s+(?:و|یا|در|به|از|که|برای|با|بر|تا|چون|زیرا|شامل|مانند|عبارتند از)))$/u.test(trimmed)) {
+    return true;
+  }
+  return false;
 }
 
 export interface ChatSession {
@@ -119,6 +169,9 @@ function toEmptyChatSession(raw: { id: string; title: string; createdAt: string 
 }
 
 const AI_SELECTED_MODEL_STORAGE_KEY = 'hsecore_ai_selected_model';
+const HSECORE_ANALYTICAL_ENGINE_ID = 'hsecore-analytical-engine';
+const HSECORE_ANALYTICAL_ENGINE_LABEL = 'موتور تحلیلی سریع HSECORE (مستقل و بدون LLM)';
+const HSECORE_ANALYTICAL_ENGINE_SHORT_LABEL = 'موتور تحلیلی سریع HSECORE';
 
 interface InstalledModelItem {
   name: string;
@@ -138,6 +191,7 @@ interface AiRuntimeCache {
   selectedModules: string[];
   installedModels: InstalledModelItem[];
   isLoading: boolean;
+  activeStreamingSessionId: string;
   migrated: boolean;
   autoCreated: boolean;
   activeAbortController: AbortController | null;
@@ -152,6 +206,7 @@ const aiRuntimeCache: AiRuntimeCache = {
   selectedModules: [],
   installedModels: [],
   isLoading: false,
+  activeStreamingSessionId: '',
   migrated: false,
   autoCreated: false,
   activeAbortController: null,
@@ -196,6 +251,7 @@ function ensureRuntimeCacheForUser(userKey: string) {
     aiRuntimeCache.selectedModules = [];
     aiRuntimeCache.installedModels = [];
     aiRuntimeCache.isLoading = false;
+    aiRuntimeCache.activeStreamingSessionId = '';
     aiRuntimeCache.migrated = false;
     aiRuntimeCache.autoCreated = false;
     aiRuntimeCache.activeAbortController = null;
@@ -241,22 +297,15 @@ export default function AiAssistantApp({
   );
   const [searchSessionQuery, setSearchSessionQuery] = useState<string>('');
   const [moduleSearchQuery, setModuleSearchQuery] = useState<string>('');
-  const [moduleCatalog, setModuleCatalog] = useState<
-    Array<{
-      moduleId: string;
-      moduleNameFa: string;
-      connected: boolean;
-      tools?: string[];
-      notes?: string;
-      parentModuleId?: string;
-      level?: number;
-      internal?: boolean;
-    }>
-  >([]);
+  const [moduleCatalog, setModuleCatalog] = useState<SlashModuleCatalogItem[]>([]);
   const [selectedModules, setSelectedModulesState] = useState<string[]>(
     () => aiRuntimeCache.selectedModules
   );
   const [showSlashModulePicker, setShowSlashModulePicker] = useState(false);
+  const [slashActiveIndex, setSlashActiveIndex] = useState<number>(0);
+  const [slashDismissedForInput, setSlashDismissedForInput] = useState<string | null>(null);
+  const [debouncedSlashQuery, setDebouncedSlashQuery] = useState<string>('');
+  const slashDropdownListRef = useRef<HTMLDivElement>(null);
 
   const setSessions: React.Dispatch<React.SetStateAction<ChatSession[]>> = updater => {
     const next = typeof updater === 'function' ? updater(aiRuntimeCache.sessions) : updater;
@@ -498,7 +547,10 @@ export default function AiAssistantApp({
           : mergedList[0]?.id || '';
 
       setActiveSessionId(resolvedActiveId);
-      if (resolvedActiveId && !aiRuntimeCache.isLoading) {
+      if (
+        resolvedActiveId &&
+        !(aiRuntimeCache.isLoading && aiRuntimeCache.activeStreamingSessionId === resolvedActiveId)
+      ) {
         await loadMessagesForSession(resolvedActiveId);
       }
     } catch (err: any) {
@@ -510,29 +562,51 @@ export default function AiAssistantApp({
 
   const loadMessagesForSession = async (sessionId: string) => {
     if (!sessionId) return;
+    // Never overwrite a session while it is actively streaming a response
+    if (aiRuntimeCache.isLoading && aiRuntimeCache.activeStreamingSessionId === sessionId) {
+      return;
+    }
     try {
       const res = await authFetch(`/api/v1/ai/sessions/${sessionId}/messages`);
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success || !Array.isArray(data.data)) {
         throw new Error(data.message || `دریافت پیام‌های گفتگو ناموفق بود (HTTP ${res.status})`);
       }
-      const msgs: ChatMessage[] = data.data.map((m: any) => ({
-        id: m.id,
-        role: m.role === 'assistant' ? 'assistant' : 'user',
-        content: m.content,
-        timestamp: m.createdAt
-          ? new Date(m.createdAt).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })
-          : '',
-        toolsUsed: m.toolsUsed,
-        citations: m.citations,
-        durationMs: m.durationMs,
-        model: m.model,
-      }));
+      const msgs: ChatMessage[] = data.data.map((m: any, idx: number, arr: any[]) => {
+        const isAssistant = m.role === 'assistant';
+        const contentStr = String(m.content || '');
+        const structurallyCut = isAssistant && isClientMessageIncomplete(contentStr);
+        let prevUserPrompt = '';
+        if (isAssistant) {
+          for (let i = idx - 1; i >= 0; i--) {
+            if (arr[i]?.role === 'user' && arr[i]?.content) {
+              prevUserPrompt = String(arr[i].content);
+              break;
+            }
+          }
+        }
+        return {
+          id: m.id,
+          role: isAssistant ? 'assistant' : 'user',
+          content: contentStr,
+          timestamp: m.createdAt
+            ? new Date(m.createdAt).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })
+            : '',
+          toolsUsed: m.toolsUsed,
+          citations: m.citations,
+          durationMs: m.durationMs,
+          model: m.model,
+          completed: isAssistant ? !structurallyCut : true,
+          incompleteReason: structurallyCut
+            ? 'این پاسخ در میانه جمله متوقف شده است. می‌توانید ادامه آن را تولید کنید.'
+            : undefined,
+          originalPrompt: prevUserPrompt || undefined,
+        };
+      });
       setSessions(prev =>
         prev.map(s => {
           if (s.id !== sessionId) return s;
-          // If currently streaming and local has more messages than DB, keep the in-flight streaming message appended
-          if (aiRuntimeCache.isLoading && s.messages.length > msgs.length) {
+          if (aiRuntimeCache.isLoading && aiRuntimeCache.activeStreamingSessionId === sessionId) {
             return s;
           }
           return { ...s, messages: msgs };
@@ -566,6 +640,7 @@ export default function AiAssistantApp({
       const matchModelName = (candidate?: string): string => {
         const clean = String(candidate || '').trim().toLowerCase();
         if (!clean) return '';
+        if (clean === HSECORE_ANALYTICAL_ENGINE_ID) return HSECORE_ANALYTICAL_ENGINE_ID;
         const found = models.find(
           (m: any) =>
             typeof m?.name === 'string' &&
@@ -582,7 +657,8 @@ export default function AiAssistantApp({
           matchModelName(aiRuntimeCache.selectedModel) ||
           matchModelName(getStoredSelectedModel()) ||
           matchModelName(serverDefaultModel) ||
-          (models[0]?.name || '');
+          models[0]?.name ||
+          HSECORE_ANALYTICAL_ENGINE_ID;
         return kept;
       });
     } catch {
@@ -618,11 +694,11 @@ export default function AiAssistantApp({
     window.addEventListener('fire_dept_config_updated', onModuleConfigUpdated);
     window.addEventListener('safety_dept_config_updated', onModuleConfigUpdated);
     const refreshTimer = window.setInterval(() => {
-      void refreshInstalledModels();
-    }, 30000);
+      if (!aiRuntimeCache.isLoading) {
+        void refreshInstalledModels();
+      }
+    }, 45000);
     return () => {
-      // Keep an in-flight request alive while navigating between application modules.
-      // The server persists its answer using the sessionId before completing the response.
       window.clearInterval(refreshTimer);
       window.removeEventListener('hse_ui_config_updated', onModuleConfigUpdated);
       window.removeEventListener('health_env_config_updated', onModuleConfigUpdated);
@@ -632,13 +708,16 @@ export default function AiAssistantApp({
   }, []);
 
   useEffect(() => {
-    if (activeSessionId) {
+    if (
+      activeSessionId &&
+      !(aiRuntimeCache.isLoading && aiRuntimeCache.activeStreamingSessionId === activeSessionId)
+    ) {
       loadMessagesForSession(activeSessionId);
     }
   }, [activeSessionId]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    messagesEndRef.current?.scrollIntoView({ behavior: isLoading ? 'auto' : 'smooth' });
   }, [activeSession?.messages, isLoading]);
 
   const handleExportSession = () => {
@@ -652,12 +731,7 @@ export default function AiAssistantApp({
     activeSession.messages.forEach((m, idx) => {
       const sender = m.role === 'user' ? 'شما' : GENERAL_AI_ASSISTANT.nameFa;
       report += `[${idx + 1}] ${sender} - ${m.timestamp}\n`;
-      if (m.toolsUsed && m.toolsUsed.length > 0) {
-        report += `ابزارها و منابع داده: ${m.toolsUsed.join('، ')}\n`;
-      }
-      if (m.citations && m.citations.length > 0) {
-        report += `منابع و ارجاعات: ${m.citations.join('، ')}\n`;
-      }
+
       report += `${m.content}\n\n--------------------------------------------------------\n\n`;
     });
 
@@ -732,14 +806,144 @@ export default function AiAssistantApp({
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  const getSelectedModuleScope = (): string[] => {
-    const scope = new Set(selectedModules);
-    for (const selectedId of selectedModules) {
+  const renderModuleIcon = (iconName?: string, className = 'w-4 h-4') => {
+    switch (iconName) {
+      case 'Sparkles':
+        return <Sparkles className={className} />;
+      case 'BarChart3':
+        return <BarChart3 className={className} />;
+      case 'ThermometerSun':
+        return <ThermometerSun className={className} />;
+      case 'Activity':
+        return <Activity className={className} />;
+      case 'PieChart':
+        return <PieChart className={className} />;
+      case 'ShieldCheck':
+        return <ShieldCheck className={className} />;
+      case 'Flame':
+        return <Flame className={className} />;
+      case 'HeartPulse':
+        return <HeartPulse className={className} />;
+      case 'FileCheck2':
+        return <FileCheck2 className={className} />;
+      case 'ClipboardCheck':
+        return <ClipboardCheck className={className} />;
+      case 'ShieldAlert':
+        return <ShieldAlert className={className} />;
+      case 'HardHat':
+        return <HardHat className={className} />;
+      case 'AlertOctagon':
+        return <AlertOctagon className={className} />;
+      case 'AlertTriangle':
+        return <AlertTriangle className={className} />;
+      case 'Users':
+        return <Users className={className} />;
+      case 'GraduationCap':
+        return <GraduationCap className={className} />;
+      case 'FileText':
+        return <FileText className={className} />;
+      case 'Inbox':
+        return <Inbox className={className} />;
+      case 'ClipboardList':
+        return <ClipboardList className={className} />;
+      case 'Workflow':
+        return <Workflow className={className} />;
+      case 'Bell':
+        return <Bell className={className} />;
+      case 'UserCog':
+        return <UserCog className={className} />;
+      case 'User':
+        return <User className={className} />;
+      case 'Stethoscope':
+        return <Stethoscope className={className} />;
+      case 'Leaf':
+        return <Leaf className={className} />;
+      case 'Bot':
+        return <Bot className={className} />;
+      case 'Settings':
+        return <Settings className={className} />;
+      default:
+        return <Layers className={className} />;
+    }
+  };
+
+  const parsedSlash = useMemo(() => parseSlashQueryFromInput(inputMessage), [inputMessage]);
+
+  useEffect(() => {
+    if (!parsedSlash.isActive) {
+      setDebouncedSlashQuery('');
+      return;
+    }
+    if (!parsedSlash.query) {
+      setDebouncedSlashQuery('');
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setDebouncedSlashQuery(parsedSlash.query);
+    }, 45);
+    return () => window.clearTimeout(timer);
+  }, [parsedSlash.isActive, parsedSlash.query]);
+
+  const slashSearchResults = useMemo<RankedSlashModuleItem[]>(() => {
+    if (!parsedSlash.isActive) return [];
+    return searchAndRankModules(moduleCatalog, debouncedSlashQuery, {
+      selectedModuleIds: selectedModules,
+      onlyConnected: false,
+    });
+  }, [moduleCatalog, parsedSlash.isActive, debouncedSlashQuery, selectedModules]);
+
+  const isSlashAutocompleteOpen =
+    showSlashModulePicker &&
+    parsedSlash.isActive &&
+    slashDismissedForInput !== inputMessage;
+
+  useEffect(() => {
+    setSlashActiveIndex(0);
+  }, [debouncedSlashQuery, parsedSlash.isActive]);
+
+  useEffect(() => {
+    if (!isSlashAutocompleteOpen || !slashDropdownListRef.current) return;
+    const activeEl = slashDropdownListRef.current.querySelector(
+      `[data-slash-index="${slashActiveIndex}"]`
+    ) as HTMLElement | null;
+    if (activeEl && typeof activeEl.scrollIntoView === 'function') {
+      activeEl.scrollIntoView({ block: 'nearest' });
+    }
+  }, [slashActiveIndex, isSlashAutocompleteOpen]);
+
+  const handleSelectSlashModule = (item: RankedSlashModuleItem) => {
+    if (!item.connected && !item.isAllCommand) return;
+    if (item.isAllCommand || item.moduleId === 'all') {
+      setSelectedModules(current => (current.includes('all') ? [] : ['all']));
+    } else {
+      setSelectedModules(current => {
+        const exists = current.includes(item.moduleId);
+        return exists
+          ? current.filter(id => id !== item.moduleId)
+          : [...current.filter(id => id !== 'all'), item.moduleId];
+      });
+    }
+    const nextInput = stripSlashTokenFromInput(inputMessage, parsedSlash);
+    setInputMessage(nextInput);
+    setShowSlashModulePicker(false);
+    setSlashDismissedForInput(null);
+    window.setTimeout(() => {
+      textareaRef.current?.focus();
+    }, 0);
+  };
+
+  const getSelectedModuleScope = (explicitModules?: string[]): string[] => {
+    const baseModules = explicitModules ?? selectedModules;
+    const scope = new Set(baseModules);
+    for (const selectedId of baseModules) {
       let parentId = moduleCatalog.find(item => item.moduleId === selectedId)?.parentModuleId;
       let depth = 0;
       while (parentId && depth < 8) {
-        scope.add(parentId);
-        parentId = moduleCatalog.find(item => item.moduleId === parentId)?.parentModuleId;
+        const parentItem = moduleCatalog.find(item => item.moduleId === parentId);
+        if (parentItem?.connected) {
+          scope.add(parentId);
+        }
+        parentId = parentItem?.parentModuleId;
         depth++;
       }
     }
@@ -747,10 +951,62 @@ export default function AiAssistantApp({
   };
 
   const handleSendMessage = async (textToSend?: string) => {
-    const text = (textToSend || inputMessage).trim();
-    if (!text || isLoading) return;
+    const rawText = (textToSend !== undefined ? textToSend : inputMessage).trim();
+    if (isLoading) return;
 
-    if (installedModels.length === 0 && !selectedModel && text !== '/') {
+    let effectiveSelectedModules = [...selectedModules];
+    let text = rawText;
+
+    // Support direct '/ALL' or '/نام ماژول' submission
+    if (rawText.toUpperCase() === '/ALL') {
+      effectiveSelectedModules = ['all'];
+      setSelectedModules(['all']);
+    } else if (rawText.startsWith('/') && rawText.length > 1 && rawText !== '/') {
+      const directSlashParsed = parseSlashQueryFromInput(rawText);
+      if (directSlashParsed.isActive && directSlashParsed.query) {
+        const directMatches = searchAndRankModules(moduleCatalog, directSlashParsed.query, {
+          selectedModuleIds: effectiveSelectedModules,
+          onlyConnected: true,
+        });
+        const bestMatch = directMatches.find(m => !m.isAllCommand);
+        if (
+          bestMatch &&
+          (bestMatch.matchTier === 'exact' || bestMatch.matchTier === 'prefix')
+        ) {
+          if (!effectiveSelectedModules.includes(bestMatch.moduleId)) {
+            effectiveSelectedModules = [
+              ...effectiveSelectedModules.filter(id => id !== 'all'),
+              bestMatch.moduleId,
+            ];
+            setSelectedModules(effectiveSelectedModules);
+          }
+          const remainder = stripSlashTokenFromInput(rawText, directSlashParsed);
+          text =
+            remainder ||
+            `تحلیل جامع ساختار، زیرماژول‌ها و داده‌های ماژول ${bestMatch.moduleNameFa}`;
+        }
+      }
+    }
+
+    // Allow sending when modules are selected via Chips even if message input is empty
+    if (!text && effectiveSelectedModules.length > 0) {
+      if (effectiveSelectedModules.includes('all')) {
+        text = 'تحلیل جامع و یکپارچه تمام ماژول‌ها و زیرماژول‌های فعال سامانه (/ALL)';
+      } else {
+        const moduleTitles = effectiveSelectedModules.map(id => {
+          const found = moduleCatalog.find(item => item.moduleId === id);
+          if (!found) return id;
+          return found.subModuleNameFa
+            ? `${found.mainModuleNameFa} (${found.subModuleNameFa})`
+            : found.moduleNameFa;
+        });
+        text = `تحلیل جامع ساختار، زیرماژول‌ها و داده‌های ${moduleTitles.length > 1 ? 'ماژول‌های' : 'ماژول'} ${moduleTitles.join(' و ')}`;
+      }
+    }
+
+    if (!text) return;
+
+    if (installedModels.length === 0 && !selectedModel) {
       setActiveSheet('model');
       setSessionsError('هیچ مدل زبانی برای پاسخگویی هوش مصنوعی نصب نشده است. لطفاً از بخش مدیریت هوش مصنوعی یک مدل نصب فرمایید.');
       return;
@@ -779,6 +1035,7 @@ export default function AiAssistantApp({
 
     setInputMessage('');
     setShowSlashModulePicker(false);
+    setSlashDismissedForInput(null);
     setActiveSheet('none');
 
     const userMsg: ChatMessage = {
@@ -818,13 +1075,64 @@ export default function AiAssistantApp({
       return;
     }
 
+    const assistantId = createMessageId('msg-a');
+    const timestamp = new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
+    const streamingMessage: ChatMessage = {
+      id: assistantId,
+      role: 'assistant',
+      content: '',
+      timestamp,
+      model: selectedModel,
+      streaming: true,
+      completed: undefined,
+      originalPrompt: text,
+    };
+
+    aiRuntimeCache.activeStreamingSessionId = sessionId;
     setIsLoading(true);
+    setSessions(prev =>
+      prev.map(s =>
+        s.id === sessionId ? { ...s, messages: [...updatedMessages, streamingMessage] } : s
+      )
+    );
+
     let partialAssistantText = '';
-    let partialAssistantId = '';
+    const partialAssistantId = assistantId;
     let partialResponseModel = selectedModel;
     let partialDurationMs: number | undefined;
     let responseToolsUsed: string[] = [];
     let responseCitations: string[] = [];
+    let serverHistorySaved = false;
+    let responseCompleted = true;
+    let responseIncompleteReason: string | undefined;
+    let rafHandle: number | null = null;
+
+    const flushStreamingTextToState = (latestText: string) => {
+      setSessions(prev =>
+        prev.map(s =>
+          s.id === sessionId
+            ? {
+                ...s,
+                messages: s.messages.map(m =>
+                  m.id === assistantId ? { ...m, content: latestText, streaming: true } : m
+                ),
+              }
+            : s
+        )
+      );
+    };
+
+    const scheduleStreamingFlush = (latestText: string) => {
+      if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
+        flushStreamingTextToState(latestText);
+        return;
+      }
+      if (rafHandle !== null) return;
+      rafHandle = window.requestAnimationFrame(() => {
+        rafHandle = null;
+        flushStreamingTextToState(partialAssistantText);
+      });
+    };
 
     try {
       const historyPayload = updatedMessages
@@ -844,10 +1152,11 @@ export default function AiAssistantApp({
         body: JSON.stringify({
           message: text,
           sessionId,
+          messageId: assistantId,
           assistantId: 'GENERAL_HSE',
           history: historyPayload,
           model: selectedModel,
-          selectedModules: getSelectedModuleScope(),
+          selectedModules: getSelectedModuleScope(effectiveSelectedModules),
           allowTools: getAiAllowToolsSetting(),
           stream: true,
           num_ctx: parsedContextTokens,
@@ -857,33 +1166,20 @@ export default function AiAssistantApp({
       });
       if (!res.ok || !res.body) {
         const failure = await res.json().catch(() => ({}));
+        if (failure?.historySaved === true) serverHistorySaved = true;
         throw new Error(failure.message || `خطای سرور هوش مصنوعی: HTTP ${res.status}`);
       }
 
-      const assistantId = createMessageId('msg-a');
-      partialAssistantId = assistantId;
-      const timestamp = new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
       let assistantText = '';
       let responseModel = selectedModel;
       let durationMs: number | undefined;
-      const streamingMessage: ChatMessage = {
-        id: assistantId,
-        role: 'assistant',
-        content: '',
-        timestamp,
-        model: selectedModel,
-      };
-      setSessions(prev =>
-        prev.map(s =>
-          s.id === sessionId ? { ...s, messages: [...updatedMessages, streamingMessage] } : s
-        )
-      );
+      let receivedDoneSignal = false;
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let pending = '';
       let streamError = '';
-      let serverHistorySaved = false;
+      let streamAborted = false;
       const applyEvent = (line: string) => {
         if (!line.startsWith('data:')) return;
         let payload: any;
@@ -895,18 +1191,22 @@ export default function AiAssistantApp({
         if (payload.token) {
           assistantText += payload.token;
           partialAssistantText = assistantText;
-          setSessions(prev =>
-            prev.map(s =>
-              s.id === sessionId
-                ? {
-                    ...s,
-                    messages: s.messages.map(m =>
-                      m.id === assistantId ? { ...m, content: assistantText } : m
-                    ),
-                  }
-                : s
-            )
-          );
+          scheduleStreamingFlush(assistantText);
+        }
+        if (payload.done === true) {
+          receivedDoneSignal = true;
+          if (payload.completed === false) {
+            responseCompleted = false;
+            responseIncompleteReason =
+              payload.incompleteReason ||
+              'پاسخ به سقف توکن رسید و پیش از تکمیل کامل متوقف شد.';
+          }
+        }
+        if (payload.incomplete === true || payload.completed === false) {
+          responseCompleted = false;
+          if (payload.incompleteReason) {
+            responseIncompleteReason = payload.incompleteReason;
+          }
         }
         if (payload.model) {
           responseModel = payload.model;
@@ -919,9 +1219,10 @@ export default function AiAssistantApp({
         if (Array.isArray(payload.toolsUsed)) responseToolsUsed = payload.toolsUsed;
         if (Array.isArray(payload.citations)) responseCitations = payload.citations;
         if (payload.historySaved === true) serverHistorySaved = true;
-        if (payload.historySaved === false) {
+        if (payload.historySaved === false && !payload.error) {
           setSessionsError('پاسخ تولید شد اما ذخیره سمت سرور ناموفق بود؛ لطفاً پایگاه داده را بررسی کنید.');
         }
+        if (payload.aborted === true) streamAborted = true;
         if (payload.error) streamError = payload.error;
       };
       while (true) {
@@ -934,8 +1235,24 @@ export default function AiAssistantApp({
       }
       pending += decoder.decode();
       if (pending.trim()) applyEvent(pending.trim());
+
+      if (rafHandle !== null && typeof window !== 'undefined') {
+        window.cancelAnimationFrame(rafHandle);
+        rafHandle = null;
+      }
+
+      if (streamAborted) {
+        throw new DOMException('The user aborted a request.', 'AbortError');
+      }
       if (streamError) throw new Error(streamError);
       if (!assistantText.trim()) throw new Error('پاسخی از موتور هوش مصنوعی دریافت نشد.');
+
+      const finalIsComplete =
+        receivedDoneSignal && responseCompleted && !isClientMessageIncomplete(assistantText);
+      const finalIncompleteReason = !finalIsComplete
+        ? responseIncompleteReason ||
+          'پاسخ در میانه جمله متوقف شد. برای تکمیل ادامه متن، دکمه «ادامه تولید پاسخ از محل توقف» را انتخاب کنید.'
+        : undefined;
 
       setSessions(prev =>
         prev.map(s =>
@@ -944,7 +1261,18 @@ export default function AiAssistantApp({
                 ...s,
                 messages: s.messages.map(m =>
                   m.id === assistantId
-                    ? { ...m, toolsUsed: responseToolsUsed, citations: responseCitations, durationMs, model: responseModel }
+                    ? {
+                        ...m,
+                        content: assistantText,
+                        streaming: false,
+                        completed: finalIsComplete,
+                        incompleteReason: finalIncompleteReason,
+                        originalPrompt: text,
+                        toolsUsed: responseToolsUsed,
+                        citations: responseCitations,
+                        durationMs,
+                        model: responseModel,
+                      }
                     : m
                 ),
               }
@@ -958,6 +1286,7 @@ export default function AiAssistantApp({
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
+              id: assistantId,
               role: 'assistant',
               content: assistantText,
               toolsUsed: responseToolsUsed,
@@ -975,29 +1304,63 @@ export default function AiAssistantApp({
         }
       }
     } catch (requestError: any) {
+      if (rafHandle !== null && typeof window !== 'undefined') {
+        window.cancelAnimationFrame(rafHandle);
+        rafHandle = null;
+      }
       const nowTime = new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
+      const isAborted =
+        requestError?.name === 'AbortError' ||
+        String(requestError?.message || '').toLowerCase().includes('aborted');
       const hasPartial = Boolean(partialAssistantText.trim() && partialAssistantId);
-      const partialMessage: ChatMessage | null = hasPartial
-        ? {
-            id: partialAssistantId,
-            role: 'assistant',
-            content: partialAssistantText,
-            timestamp: nowTime,
-            model: partialResponseModel,
-            durationMs: partialDurationMs,
-            toolsUsed: responseToolsUsed.length > 0 ? responseToolsUsed : undefined,
-            citations: responseCitations.length > 0 ? responseCitations : undefined,
-          }
-        : null;
 
-      if (partialMessage) {
+      const finalFallbackText = hasPartial
+        ? partialAssistantText
+        : isAborted
+          ? '⏹ پردازش درخواست توسط کاربر متوقف گردید.'
+          : requestError?.message || 'خطا در ارتباط با سرور هوش مصنوعی سامانه. لطفاً اتصال شبکه را بررسی فرمایید.';
+
+      const finalAssistantMsg: ChatMessage = {
+        id: hasPartial ? partialAssistantId : createMessageId('msg-err'),
+        role: 'assistant',
+        content: finalFallbackText,
+        timestamp: nowTime,
+        model: partialResponseModel,
+        durationMs: partialDurationMs,
+        toolsUsed: responseToolsUsed.length > 0 ? responseToolsUsed : undefined,
+        citations: responseCitations.length > 0 ? responseCitations : undefined,
+        streaming: false,
+        completed: hasPartial ? false : undefined,
+        incompleteReason: hasPartial
+          ? isAborted
+            ? 'تولید پاسخ توسط کاربر متوقف شد. در صورت تمایل می‌توانید ادامه پاسخ را از همین نقطه تولید کنید.'
+            : requestError?.message || 'ارتباط استریم پیش از پایان کامل قطع شد. می‌توانید ادامه پاسخ را از محل توقف دریافت کنید.'
+          : undefined,
+        originalPrompt: text,
+      };
+
+      setSessions(prev =>
+        prev.map(s => {
+          if (s.id !== sessionId) return s;
+          const baseMessages = s.messages.filter(m => m.id !== partialAssistantId);
+          return {
+            ...s,
+            messages: [...baseMessages, finalAssistantMsg],
+          };
+        })
+      );
+
+      // Persist the partial/aborted/error reply if the server hasn't already saved it,
+      // so switching modules and returning never wipes the assistant bubble!
+      if (!serverHistorySaved) {
         try {
           await authFetch(`/api/v1/ai/sessions/${sessionId}/messages`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
+              id: finalAssistantMsg.id,
               role: 'assistant',
-              content: partialAssistantText,
+              content: finalFallbackText,
               toolsUsed: responseToolsUsed,
               citations: responseCitations,
               durationMs: partialDurationMs,
@@ -1005,57 +1368,293 @@ export default function AiAssistantApp({
             }),
           });
         } catch {
-          // keep partial response visible
+          // keep local message visible
         }
       }
+    } finally {
+      aiRuntimeCache.activeAbortController = null;
+      aiRuntimeCache.activeStreamingSessionId = '';
+      setIsLoading(false);
+    }
+  };
 
-      const isAborted = requestError?.name === 'AbortError';
-      const networkErrorMsg: ChatMessage | null = isAborted
-        ? null
-        : {
-            id: createMessageId('msg-err'),
-            role: 'assistant',
-            content:
-              requestError?.message ||
-              'خطا در ارتباط با سرور هوش مصنوعی سامانه. لطفاً اتصال شبکه را بررسی فرمایید.',
-            timestamp: nowTime,
-          };
+  const handleContinueGeneration = async (targetMsg: ChatMessage) => {
+    if (isLoading || !activeSession) return;
+    const sessionId = activeSession.id;
+    const existingText = String(targetMsg.content || '');
+    if (!existingText.trim()) return;
+
+    // Find original user prompt preceding this assistant message
+    const msgs = activeSession.messages || [];
+    const targetIdx = msgs.findIndex(m => m.id === targetMsg.id);
+    let promptToContinue = targetMsg.originalPrompt || '';
+    if (!promptToContinue && targetIdx > 0) {
+      for (let i = targetIdx - 1; i >= 0; i--) {
+        if (msgs[i].role === 'user' && msgs[i].content.trim()) {
+          promptToContinue = msgs[i].content.trim();
+          break;
+        }
+      }
+    }
+    if (!promptToContinue) {
+      promptToContinue = 'ادامه تحلیل تخصصی و تکمیل بخش‌های باقی‌مانده پاسخ';
+    }
+
+    aiRuntimeCache.activeStreamingSessionId = sessionId;
+    setIsLoading(true);
+    setSessions(prev =>
+      prev.map(s =>
+        s.id === sessionId
+          ? {
+              ...s,
+              messages: s.messages.map(m =>
+                m.id === targetMsg.id
+                  ? { ...m, streaming: true, incompleteReason: undefined }
+                  : m
+              ),
+            }
+          : s
+      )
+    );
+
+    let appendedText = '';
+    let combinedText = existingText;
+    let responseModel = targetMsg.model || selectedModel;
+    let durationMs = targetMsg.durationMs;
+    let responseCompleted = true;
+    let responseIncompleteReason: string | undefined;
+    let receivedDoneSignal = false;
+    let serverHistorySaved = false;
+
+    try {
+      const historyPayload = (targetIdx > 0 ? msgs.slice(0, targetIdx) : msgs)
+        .slice(-6)
+        .map(m => ({ role: m.role, content: m.content }));
+      const parsedContextTokens = selectedContext === 'auto' ? undefined : Number(selectedContext);
+      const requestController = new AbortController();
+      aiRuntimeCache.activeAbortController = requestController;
+
+      const res = await authFetch('/api/v1/ai/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+        body: JSON.stringify({
+          message: promptToContinue,
+          continueFromText: existingText,
+          messageId: targetMsg.id,
+          sessionId,
+          assistantId: 'GENERAL_HSE',
+          history: historyPayload,
+          model: selectedModel,
+          selectedModules: getSelectedModuleScope(selectedModules),
+          allowTools: getAiAllowToolsSetting(),
+          stream: true,
+          num_ctx: parsedContextTokens,
+          contextTokens: parsedContextTokens,
+        }),
+        signal: requestController.signal,
+      });
+
+      if (!res.ok || !res.body) {
+        const failure = await res.json().catch(() => ({}));
+        throw new Error(failure.message || `خطای سرور در ادامه تولید پاسخ: HTTP ${res.status}`);
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let pending = '';
+      let streamError = '';
+      let streamAborted = false;
+
+      const joinContinuation = (base: string, addition: string): string => {
+        if (!addition) return base;
+        const needsSpace =
+          !base.endsWith(' ') &&
+          !base.endsWith('\n') &&
+          !addition.startsWith(' ') &&
+          !addition.startsWith('\n') &&
+          !/(\*{1,3}|[\u0600-\u06FF])$/.test(base.slice(-2));
+        return `${base}${needsSpace ? ' ' : ''}${addition}`;
+      };
+
+      const applyEvent = (line: string) => {
+        if (!line.startsWith('data:')) return;
+        let payload: any;
+        try {
+          payload = JSON.parse(line.slice(5).trim());
+        } catch {
+          return;
+        }
+        if (payload.token) {
+          appendedText += payload.token;
+          combinedText = joinContinuation(existingText, appendedText);
+          setSessions(prev =>
+            prev.map(s =>
+              s.id === sessionId
+                ? {
+                    ...s,
+                    messages: s.messages.map(m =>
+                      m.id === targetMsg.id ? { ...m, content: combinedText, streaming: true } : m
+                    ),
+                  }
+                : s
+            )
+          );
+        }
+        if (payload.done === true) {
+          receivedDoneSignal = true;
+          if (payload.completed === false) {
+            responseCompleted = false;
+            responseIncompleteReason = payload.incompleteReason;
+          }
+        }
+        if (payload.completed === false || payload.incomplete === true) {
+          responseCompleted = false;
+          if (payload.incompleteReason) responseIncompleteReason = payload.incompleteReason;
+        }
+        if (payload.model) responseModel = payload.model;
+        if (payload.durationMs) durationMs = (targetMsg.durationMs || 0) + Number(payload.durationMs);
+        if (payload.historySaved === true) serverHistorySaved = true;
+        if (payload.aborted === true) streamAborted = true;
+        if (payload.error) streamError = payload.error;
+      };
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        pending += decoder.decode(value, { stream: true });
+        const lines = pending.split('\n');
+        pending = lines.pop() || '';
+        for (const line of lines) if (line.trim()) applyEvent(line);
+      }
+      pending += decoder.decode();
+      if (pending.trim()) applyEvent(pending.trim());
+
+      if (streamAborted) {
+        throw new DOMException('The user aborted a request.', 'AbortError');
+      }
+      if (streamError) throw new Error(streamError);
+
+      const finalIsComplete =
+        receivedDoneSignal && responseCompleted && !isClientMessageIncomplete(combinedText);
 
       setSessions(prev =>
-        prev.map(s => {
-          if (s.id !== sessionId) return s;
-          const baseMessages = partialAssistantId
-            ? s.messages.filter(m => m.id !== partialAssistantId)
-            : s.messages;
-          return {
-            ...s,
-            messages: [
-              ...baseMessages,
-              ...(partialMessage ? [partialMessage] : []),
-              ...(networkErrorMsg ? [networkErrorMsg] : []),
-            ],
-          };
-        })
+        prev.map(s =>
+          s.id === sessionId
+            ? {
+                ...s,
+                messages: s.messages.map(m =>
+                  m.id === targetMsg.id
+                    ? {
+                        ...m,
+                        content: combinedText,
+                        streaming: false,
+                        completed: finalIsComplete,
+                        incompleteReason: finalIsComplete
+                          ? undefined
+                          : responseIncompleteReason ||
+                            'بخش دیگری از پاسخ باقی مانده است؛ می‌توانید مجدداً ادامه تولید را بزنید.',
+                        model: responseModel,
+                        durationMs,
+                      }
+                    : m
+                ),
+              }
+            : s
+        )
+      );
+
+      if (!serverHistorySaved) {
+        await authFetch(`/api/v1/ai/sessions/${sessionId}/messages`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: targetMsg.id,
+            role: 'assistant',
+            content: combinedText,
+            toolsUsed: targetMsg.toolsUsed,
+            citations: targetMsg.citations,
+            durationMs,
+            model: responseModel,
+          }),
+        }).catch(() => null);
+      }
+    } catch (err: any) {
+      setSessions(prev =>
+        prev.map(s =>
+          s.id === sessionId
+            ? {
+                ...s,
+                messages: s.messages.map(m =>
+                  m.id === targetMsg.id
+                    ? {
+                        ...m,
+                        content: combinedText,
+                        streaming: false,
+                        completed: false,
+                        incompleteReason:
+                          err?.name === 'AbortError'
+                            ? 'ادامه تولید پاسخ توسط کاربر متوقف شد.'
+                            : err?.message || 'خطا در ادامه تولید پاسخ؛ می‌توانید مجدداً تلاش کنید.',
+                      }
+                    : m
+                ),
+              }
+            : s
+        )
       );
     } finally {
       aiRuntimeCache.activeAbortController = null;
+      aiRuntimeCache.activeStreamingSessionId = '';
       setIsLoading(false);
     }
   };
 
   const handleStopGeneration = () => {
+    const targetSessionId = aiRuntimeCache.activeStreamingSessionId || activeSessionId;
     aiRuntimeCache.activeAbortController?.abort();
-    if (activeSessionId) {
-      void authFetch('/api/v1/ai/chat/abort', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId: activeSessionId }),
-      }).catch(() => null);
-    }
+    void authFetch('/api/v1/ai/chat/abort', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: targetSessionId }),
+    }).catch(() => null);
     setIsLoading(false);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (isSlashAutocompleteOpen) {
+      if (e.key === 'ArrowDown' && slashSearchResults.length > 0) {
+        e.preventDefault();
+        setSlashActiveIndex(prev => (prev + 1) % slashSearchResults.length);
+        return;
+      }
+      if (e.key === 'ArrowUp' && slashSearchResults.length > 0) {
+        e.preventDefault();
+        setSlashActiveIndex(
+          prev => (prev - 1 + slashSearchResults.length) % slashSearchResults.length
+        );
+        return;
+      }
+      if (e.key === 'Enter' && !e.shiftKey && slashSearchResults.length > 0) {
+        e.preventDefault();
+        const targetItem = slashSearchResults[slashActiveIndex] || slashSearchResults[0];
+        if (targetItem) {
+          handleSelectSlashModule(targetItem);
+        }
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setShowSlashModulePicker(false);
+        setSlashDismissedForInput(inputMessage);
+        return;
+      }
+    }
+
+    if (e.key === 'Backspace' && !inputMessage && selectedModules.length > 0) {
+      setSelectedModules(current => current.slice(0, -1));
+      return;
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSendMessage();
@@ -1070,14 +1669,13 @@ export default function AiAssistantApp({
   };
 
   const filteredModules = useMemo(() => {
-    const q = moduleSearchQuery.trim().toLowerCase();
-    if (!q) return moduleCatalog;
-    return moduleCatalog.filter(
-      m =>
-        m.moduleNameFa.toLowerCase().includes(q) ||
-        m.moduleId.toLowerCase().includes(q)
-    );
-  }, [moduleCatalog, moduleSearchQuery]);
+    if (!moduleSearchQuery.trim()) return moduleCatalog;
+    return searchAndRankModules(moduleCatalog, moduleSearchQuery, {
+      selectedModuleIds: selectedModules,
+      includeAllCommand: false,
+      onlyConnected: false,
+    });
+  }, [moduleCatalog, moduleSearchQuery, selectedModules]);
 
   const activeContextOption =
     CONTEXT_OPTIONS.find(c => c.value === selectedContext) || CONTEXT_OPTIONS[0];
@@ -1416,36 +2014,65 @@ export default function AiAssistantApp({
                     className={`relative max-w-[86%] sm:max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-7 transition-all ${
                       isUser
                         ? 'bg-[#ECEAFE] dark:bg-[#5B4BFF]/25 text-slate-900 dark:text-slate-100 border border-[#5B4BFF]/20 rounded-tr-xs shadow-2xs'
-                        : 'bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 text-slate-800 dark:text-slate-100 rounded-tl-xs shadow-sm'
+                        : msg.completed === false
+                          ? 'bg-white dark:bg-slate-900 border border-amber-300/90 dark:border-amber-700/80 text-slate-800 dark:text-slate-100 rounded-tl-xs shadow-sm'
+                          : 'bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 text-slate-800 dark:text-slate-100 rounded-tl-xs shadow-sm'
                     }`}
                   >
-                    <div className="whitespace-pre-wrap break-words">{msg.content}</div>
+                    <div className="whitespace-pre-wrap break-words">
+                      {msg.content}
+                      {!isUser && msg.streaming && (
+                        <span
+                          className="inline-block w-2 h-4 ms-1 align-middle bg-[#5B4BFF] animate-pulse rounded-xs"
+                          aria-hidden="true"
+                        />
+                      )}
+                    </div>
 
-                    {/* Data Sources & Citations */}
-                    {(msg.toolsUsed?.length || msg.citations?.length) ? (
-                      <div className="mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-800/80 space-y-1.5">
-                        {msg.toolsUsed && msg.toolsUsed.length > 0 && (
-                          <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-start gap-1.5">
-                            <Database className="w-3.5 h-3.5 text-[#5B4BFF] shrink-0 mt-0.5" />
-                            <span>منابع داده: {msg.toolsUsed.join('، ')}</span>
-                          </div>
-                        )}
-                        {msg.citations && msg.citations.length > 0 && (
-                          <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-start gap-1.5">
-                            <BookOpen className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
-                            <span>مراجع: {msg.citations.join('، ')}</span>
-                          </div>
-                        )}
+                    {/* Incomplete Warning & Seamless Continue Generation Button */}
+                    {!isUser && msg.completed === false && !msg.streaming && (
+                      <div className="mt-3 pt-2.5 border-t border-amber-200/80 dark:border-amber-800/60 flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5 text-xs font-bold text-amber-700 dark:text-amber-400">
+                          <AlertCircle className="w-4 h-4 shrink-0" />
+                          <span>
+                            {msg.incompleteReason ||
+                              'پاسخ پیش از پایان کامل متوقف شد.'}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={isLoading}
+                          onClick={() => handleContinueGeneration(msg)}
+                          className="min-h-[34px] px-3 py-1.5 rounded-xl bg-[#5B4BFF] hover:bg-[#4A3AE8] disabled:opacity-50 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition cursor-pointer"
+                        >
+                          <RefreshCw className="w-3.5 h-3.5" />
+                          <span>ادامه تولید پاسخ از محل توقف</span>
+                        </button>
                       </div>
-                    ) : null}
+                    )}
 
-                    {/* Timestamp, Model tag & Copy action */}
+                    {/* Timestamp, Status badge, Model tag & Copy action */}
                     <div className="mt-2 flex items-center justify-between gap-3 text-[10px] text-slate-400 dark:text-slate-500">
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <span>{msg.timestamp}</span>
                         {!isUser && msg.model && (
                           <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 font-mono">
                             {msg.model}
+                          </span>
+                        )}
+                        {!isUser && msg.streaming && (
+                          <span className="px-1.5 py-0.5 rounded bg-[#5B4BFF]/10 text-[#5B4BFF] dark:text-[#ACA2FF] font-bold">
+                            در حال تولید...
+                          </span>
+                        )}
+                        {!isUser && !msg.streaming && msg.completed === false && (
+                          <span className="px-1.5 py-0.5 rounded bg-amber-100/80 dark:bg-amber-950/50 text-amber-700 dark:text-amber-400 font-bold">
+                            ناتمام
+                          </span>
+                        )}
+                        {!isUser && !msg.streaming && msg.completed === true && (
+                          <span className="px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 font-bold">
+                            تکمیل‌شده
                           </span>
                         )}
                       </div>
@@ -1493,71 +2120,184 @@ export default function AiAssistantApp({
         {/* ۳. ناحیه ورودی پیام در پایین (Fixed Bottom Message Composer) */}
         <div className="shrink-0 z-20 px-3 sm:px-6 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-gradient-to-t from-[#F8FAFC] via-[#F8FAFC]/95 to-transparent dark:from-slate-950 dark:via-slate-950/95">
           <div className="max-w-3xl mx-auto">
-            {/* Quick Slash Command Inline Picker when typing '/' */}
-            {showSlashModulePicker && (
-              <div className="mb-2 rounded-2xl border border-[#5B4BFF]/30 bg-white dark:bg-slate-900 p-3 shadow-lg max-h-60 overflow-y-auto custom-scrollbar animate-in fade-in slide-in-from-bottom-2 duration-150">
-                <div className="flex items-center justify-between gap-2 mb-2 pb-2 border-b border-slate-100 dark:border-slate-800">
-                  <p className="text-xs font-black text-slate-800 dark:text-slate-100">
-                    انتخاب سریع محدوده تحلیل ماژول‌ها
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => setShowSlashModulePicker(false)}
-                    className="p-1 text-slate-400 hover:text-slate-600"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedModules(['all']);
-                    setInputMessage('');
-                    setShowSlashModulePicker(false);
-                  }}
-                  className="w-full min-h-[44px] text-right px-3 py-2 mb-1 rounded-xl text-xs font-bold bg-[#5B4BFF]/10 text-[#5B4BFF] dark:text-[#9D93FF] hover:bg-[#5B4BFF]/15 transition flex items-center justify-between"
-                >
-                  <span>/ALL — تحلیل یکپارچه همه ماژول‌های سامانه</span>
-                  <span className="text-[10px] px-2 py-0.5 rounded bg-[#5B4BFF] text-white">ALL</span>
-                </button>
-                {moduleCatalog.map(item => {
-                  const hasVisibleParent = Boolean(
-                    item.parentModuleId &&
-                      moduleCatalog.some(parent => parent.moduleId === item.parentModuleId)
-                  );
-                  return (
+            {/* Smart Slash Command Autocomplete Dropdown ('/') */}
+            {isSlashAutocompleteOpen && (
+              <div
+                dir="rtl"
+                role="listbox"
+                aria-label="فهرست هوشمند ماژول‌های سامانه"
+                className="mb-2.5 rounded-2xl border border-[#5B4BFF]/35 bg-white/98 dark:bg-slate-900/98 backdrop-blur-md p-2.5 sm:p-3 shadow-xl shadow-slate-900/10 animate-in fade-in slide-in-from-bottom-2 duration-150"
+              >
+                {/* Autocomplete Header */}
+                <div className="flex flex-wrap items-center justify-between gap-2 pb-2 mb-2 border-b border-slate-100 dark:border-slate-800">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="w-6 h-6 rounded-lg bg-[#5B4BFF]/10 text-[#5B4BFF] dark:text-[#ACA2FF] flex items-center justify-center text-xs font-black shrink-0">
+                      /
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-xs font-black text-slate-800 dark:text-slate-100 truncate">
+                        {parsedSlash.query
+                          ? `جست‌وجوی هوشمند ماژول: «${parsedSlash.query}»`
+                          : 'انتخاب هوشمند ماژول‌ها و زیرماژول‌های فعال سامانه'}
+                      </p>
+                    </div>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 shrink-0">
+                      {slashSearchResults.filter(item => !item.isAllCommand).length} مورد
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    <span className="hidden sm:inline-flex items-center gap-1 text-[10px] text-slate-400 dark:text-slate-500 bg-slate-50 dark:bg-slate-800/70 px-2 py-0.5 rounded-md border border-slate-200/60 dark:border-slate-700/60">
+                      <span>↑↓ پیمایش</span>
+                      <span>•</span>
+                      <span>Enter انتخاب</span>
+                      <span>•</span>
+                      <span>Esc بستن</span>
+                    </span>
                     <button
-                      key={item.moduleId}
                       type="button"
-                      disabled={!item.connected}
                       onClick={() => {
-                        setSelectedModules(current => {
-                          const next = current.includes(item.moduleId)
-                            ? current.filter(id => id !== item.moduleId)
-                            : [...current.filter(id => id !== 'all'), item.moduleId];
-                          return next;
-                        });
-                        setInputMessage('');
                         setShowSlashModulePicker(false);
+                        setSlashDismissedForInput(inputMessage);
                       }}
-                      className="w-full min-h-[44px] flex items-center justify-between gap-2 text-right px-3 py-2 rounded-xl text-xs hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                      className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                      title="بستن فهرست (Esc)"
+                      aria-label="بستن فهرست"
                     >
-                      <span
-                        style={{
-                          paddingRight: hasVisibleParent
-                            ? `${Math.min(item.level || 1, 4) * 12}px`
-                            : '0px',
-                        }}
-                      >
-                        {hasVisibleParent ? '↳ ' : ''}
-                        {item.moduleNameFa}
-                      </span>
-                      <span className="text-[10px] text-slate-400">
-                        {item.connected ? 'متصل' : 'غیرفعال'}
-                      </span>
+                      <X className="w-4 h-4" />
                     </button>
-                  );
-                })}
+                  </div>
+                </div>
+
+                {/* Results List */}
+                <div
+                  ref={slashDropdownListRef}
+                  className="max-h-64 overflow-y-auto custom-scrollbar space-y-1 pl-0.5"
+                >
+                  {slashSearchResults.length === 0 ? (
+                    <div className="py-6 px-4 text-center space-y-2">
+                      <p className="text-xs font-bold text-slate-600 dark:text-slate-300">
+                        ماژول یا زیرماژولی متناسب با عبارت «{parsedSlash.query}» یافت نشد.
+                      </p>
+                      <p className="text-[11px] text-slate-400 dark:text-slate-500">
+                        می‌توانید نام فارسی، نام انگلیسی (مانند permit، fire، health) یا کلیدواژه مرتبط را وارد کنید.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setInputMessage('/');
+                          setDebouncedSlashQuery('');
+                          textareaRef.current?.focus();
+                        }}
+                        className="mt-1 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-[#5B4BFF]/10 text-[#5B4BFF] dark:text-[#ACA2FF] hover:bg-[#5B4BFF]/20 transition cursor-pointer"
+                      >
+                        نمایش تمام ماژول‌های مجاز (/)
+                      </button>
+                    </div>
+                  ) : (
+                    slashSearchResults.map((item, idx) => {
+                      const isHighlighted = idx === slashActiveIndex;
+                      const isSelected = Boolean(item.isSelected);
+                      const isSubmodule = Boolean(item.subModuleNameFa);
+
+                      return (
+                        <button
+                          key={item.moduleId}
+                          type="button"
+                          role="option"
+                          aria-selected={isHighlighted}
+                          data-slash-index={idx}
+                          disabled={!item.connected && !item.isAllCommand}
+                          onMouseEnter={() => setSlashActiveIndex(idx)}
+                          onClick={() => handleSelectSlashModule(item)}
+                          className={`w-full min-h-[52px] text-right px-3 py-2 rounded-xl transition flex items-center justify-between gap-2.5 cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed border ${
+                            item.isAllCommand
+                              ? isHighlighted || isSelected
+                                ? 'bg-[#5B4BFF]/15 border-[#5B4BFF] text-[#5B4BFF] dark:text-[#B8B0FF]'
+                                : 'bg-[#5B4BFF]/5 border-[#5B4BFF]/25 text-[#5B4BFF] dark:text-[#ACA2FF] hover:bg-[#5B4BFF]/10'
+                              : isHighlighted
+                                ? 'bg-slate-100/90 dark:bg-slate-800/90 border-[#5B4BFF]/50 text-slate-900 dark:text-slate-100'
+                                : isSelected
+                                  ? 'bg-[#5B4BFF]/10 border-[#5B4BFF]/40 text-slate-900 dark:text-slate-100'
+                                  : 'bg-transparent border-transparent hover:bg-slate-50 dark:hover:bg-slate-800/60 text-slate-700 dark:text-slate-200'
+                          }`}
+                        >
+                          {/* Right side: Icon + Module/Submodule Name + Access Path */}
+                          <div className="flex items-start gap-2.5 min-w-0 flex-1">
+                            <div
+                              className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${
+                                item.isAllCommand || isSelected
+                                  ? 'bg-[#5B4BFF] text-white shadow-sm shadow-[#5B4BFF]/25'
+                                  : 'bg-slate-100 dark:bg-slate-800 text-[#5B4BFF] dark:text-[#ACA2FF]'
+                              }`}
+                            >
+                              {renderModuleIcon(item.iconName, 'w-4 h-4')}
+                            </div>
+
+                            <div className="min-w-0 flex-1 space-y-0.5">
+                              {/* 1. Module Name & 2. Submodule Name (if applicable) */}
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="text-xs font-black text-slate-800 dark:text-slate-100 truncate">
+                                  {item.isAllCommand
+                                    ? '/ALL — تحلیل جامع تمام ماژول‌ها و زیرماژول‌های سامانه'
+                                    : item.mainModuleNameFa || item.moduleNameFa}
+                                </span>
+                                {isSubmodule && !item.isAllCommand && (
+                                  <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-lg bg-[#5B4BFF]/10 text-[#5B4BFF] dark:bg-[#5B4BFF]/20 dark:text-[#B8B0FF]">
+                                    <span>زیرماژول:</span>
+                                    <span>{item.subModuleNameFa}</span>
+                                  </span>
+                                )}
+                                {!item.isAllCommand && item.moduleNameEn && (
+                                  <span
+                                    dir="ltr"
+                                    className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400"
+                                  >
+                                    /{item.moduleId}
+                                  </span>
+                                )}
+                              </div>
+
+                              {/* 4. Access Path (مسیر دسترسی ماژول) */}
+                              <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+                                <span className="truncate">
+                                  مسیر دسترسی: {item.accessPath}
+                                </span>
+                                {item.routePath && !item.isAllCommand && (
+                                  <span
+                                    dir="ltr"
+                                    className="text-[10px] font-mono text-slate-400 dark:text-slate-500"
+                                  >
+                                    ({item.routePath})
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Left side: 5. Selection Status (وضعیت انتخاب) */}
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {isSelected ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-black px-2.5 py-1 rounded-lg bg-[#5B4BFF] text-white">
+                                <Check className="w-3 h-3 stroke-[3]" />
+                                <span>انتخاب‌شده</span>
+                              </span>
+                            ) : item.connected ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                                <span>{isHighlighted ? 'انتخاب (Enter)' : 'قابل انتخاب'}</span>
+                                {isHighlighted && <CornerDownLeft className="w-3 h-3" />}
+                              </span>
+                            ) : (
+                              <span className="text-[10px] px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-400">
+                                غیرفعال
+                              </span>
+                            )}
+                          </div>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
               </div>
             )}
 
@@ -1565,25 +2305,61 @@ export default function AiAssistantApp({
             <div className="rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-md shadow-slate-900/5 focus-within:border-[#5B4BFF] focus-within:ring-2 focus-within:ring-[#5B4BFF]/20 transition-all p-2 sm:p-3">
               {/* Selected Module Scope Chips */}
               {selectedModules.length > 0 && (
-                <div className="flex flex-wrap items-center gap-1.5 px-2 pb-2 mb-1 border-b border-slate-100 dark:border-slate-800/80">
-                  <span className="text-[10px] font-bold text-slate-400">محدوده تحلیل:</span>
-                  {selectedModules.map(id => (
+                <div className="flex flex-wrap items-center justify-between gap-2 px-2 pb-2 mb-1 border-b border-slate-100 dark:border-slate-800/80">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-[10px] font-bold text-slate-400">
+                      ماژول‌های انتخاب‌شده برای تحلیل:
+                    </span>
+                    {selectedModules.map(id => {
+                      const catalogItem = moduleCatalog.find(item => item.moduleId === id);
+                      const chipLabel =
+                        id === 'all'
+                          ? 'همه ماژول‌ها (/ALL)'
+                          : catalogItem
+                            ? catalogItem.subModuleNameFa
+                              ? `${catalogItem.mainModuleNameFa} ◂ ${catalogItem.subModuleNameFa}`
+                              : catalogItem.moduleNameFa
+                            : id;
+                      const chipAccessPath =
+                        id === 'all'
+                          ? 'تمامی ماژول‌ها و زیرماژول‌های فعال سامانه'
+                          : catalogItem?.accessPath || chipLabel;
+
+                      return (
+                        <span
+                          key={id}
+                          title={`مسیر دسترسی: ${chipAccessPath}`}
+                          className="min-h-[28px] text-[11px] font-bold rounded-xl px-2.5 py-1 bg-[#5B4BFF]/10 text-[#5B4BFF] dark:bg-[#5B4BFF]/20 dark:text-[#ACA2FF] border border-[#5B4BFF]/25 flex items-center gap-1.5 transition"
+                        >
+                          {renderModuleIcon(
+                            id === 'all' ? 'Sparkles' : catalogItem?.iconName,
+                            'w-3.5 h-3.5 shrink-0'
+                          )}
+                          <span>{chipLabel}</span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setSelectedModules(current => current.filter(item => item !== id))
+                            }
+                            className="p-0.5 rounded-md hover:bg-[#5B4BFF]/20 text-[#5B4BFF] dark:text-[#ACA2FF] transition cursor-pointer"
+                            title={`حذف ماژول ${chipLabel}`}
+                            aria-label={`حذف ماژول ${chipLabel}`}
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </span>
+                      );
+                    })}
+                  </div>
+                  {selectedModules.length > 1 && (
                     <button
-                      key={id}
                       type="button"
-                      onClick={() =>
-                        setSelectedModules(current => current.filter(item => item !== id))
-                      }
-                      className="min-h-[28px] text-[11px] font-bold rounded-xl px-2.5 py-1 bg-[#5B4BFF]/10 text-[#5B4BFF] dark:bg-[#5B4BFF]/20 dark:text-[#ACA2FF] flex items-center gap-1 hover:bg-[#5B4BFF]/20 transition cursor-pointer"
+                      onClick={() => setSelectedModules([])}
+                      className="text-[10px] font-bold text-rose-500 hover:text-rose-600 px-2 py-0.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer shrink-0"
                     >
-                      <span>
-                        {id === 'all'
-                          ? 'همه ماژول‌ها (ALL)'
-                          : moduleCatalog.find(item => item.moduleId === id)?.moduleNameFa || id}
-                      </span>
-                      <X className="w-3 h-3" />
+                      حذف همه ({selectedModules.length})
                     </button>
-                  ))}
+                  )}
                 </div>
               )}
 
@@ -1595,11 +2371,19 @@ export default function AiAssistantApp({
                   onChange={e => {
                     const value = e.target.value;
                     setInputMessage(value);
-                    setShowSlashModulePicker(value.trimStart().startsWith('/'));
+                    const slashState = parseSlashQueryFromInput(value, e.target.selectionStart ?? value.length);
+                    setShowSlashModulePicker(slashState.isActive);
+                    if (slashDismissedForInput && slashDismissedForInput !== value) {
+                      setSlashDismissedForInput(null);
+                    }
                   }}
                   onKeyDown={handleKeyDown}
                   rows={1}
-                  placeholder="پیام یا دستور خود را بنویسید..."
+                  placeholder={
+                    selectedModules.length > 0
+                      ? 'سوال تحلیلی خود را درباره ماژول انتخاب‌شده بنویسید یا مستقیم ارسال کنید (برای افزودن ماژول دیگر / بزنید)...'
+                      : 'پیام خود را بنویسید یا برای جست‌وجوی هوشمند ماژول‌ها کاراکتر / را تایپ کنید...'
+                  }
                   className="flex-1 min-h-[44px] max-h-36 resize-none bg-transparent border-0 px-2.5 py-2.5 text-sm leading-relaxed outline-none text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500"
                   disabled={isLoading || sessionsLoading}
                 />
@@ -1620,7 +2404,9 @@ export default function AiAssistantApp({
                     <button
                       type="button"
                       onClick={() => handleSendMessage()}
-                      disabled={!inputMessage.trim() || sessionsLoading}
+                      disabled={
+                        (!inputMessage.trim() && selectedModules.length === 0) || sessionsLoading
+                      }
                       className="w-11 h-11 min-h-[44px] min-w-[44px] rounded-full bg-[#5B4BFF] hover:bg-[#4A3AE8] disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:text-slate-400 text-white flex items-center justify-center shadow-md shadow-[#5B4BFF]/25 disabled:shadow-none transition-all active:scale-95 disabled:cursor-not-allowed cursor-pointer"
                       title="ارسال پیام"
                       aria-label="ارسال پیام"
@@ -1640,11 +2426,13 @@ export default function AiAssistantApp({
                     onClick={() => setActiveSheet('model')}
                     disabled={isLoading}
                     className="min-h-[44px] px-3 py-1.5 rounded-2xl bg-slate-50 hover:bg-slate-100 dark:bg-slate-800/90 dark:hover:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center gap-1.5 shrink-0 transition cursor-pointer"
-                    title="انتخاب مدل هوش مصنوعی"
+                    title="انتخاب موتور تحلیلی یا مدل هوش مصنوعی"
                   >
                     <Bot className="w-4 h-4 text-[#5B4BFF] shrink-0" />
-                    <span className="max-w-[115px] sm:max-w-[180px] truncate">
-                      {selectedModel || installedModels[0]?.name || 'انتخاب مدل هوش مصنوعی'}
+                    <span className="max-w-[135px] sm:max-w-[210px] truncate">
+                      {selectedModel === HSECORE_ANALYTICAL_ENGINE_ID
+                        ? HSECORE_ANALYTICAL_ENGINE_SHORT_LABEL
+                        : selectedModel || installedModels[0]?.name || HSECORE_ANALYTICAL_ENGINE_SHORT_LABEL}
                     </span>
                     <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                   </button>
@@ -1734,7 +2522,7 @@ export default function AiAssistantApp({
                       {activeSheet === 'modules' && 'انتخاب محدوده ماژول‌های سامانه'}
                     </h3>
                     <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                      {activeSheet === 'model' && 'مدل‌های محلی آماده پاسخ‌گویی در موتور Ollama'}
+                      {activeSheet === 'model' && 'انتخاب آگاهانه بین موتور تحلیلی سریع HSECORE و مدل‌های مستقل Ollama'}
                       {activeSheet === 'context' && 'مدیریت پویا و ایمن RAM سرور جهت جلوگیری از خطای OOM'}
                       {activeSheet === 'modules' && 'تعیین دامنه دسترسی هوش مصنوعی به داده‌های برخط'}
                     </p>
@@ -1754,89 +2542,131 @@ export default function AiAssistantApp({
               <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
                 {/* SHEET 1: MODEL SELECTION */}
                 {activeSheet === 'model' && (
-                  <>
-                    {installedModels.length === 0 ? (
-                      <div className="p-5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-800 text-center space-y-3">
-                        <AlertCircle className="w-10 h-10 text-amber-500 mx-auto" />
-                        <div className="space-y-1">
-                          <p className="text-sm font-black text-slate-900 dark:text-slate-100">
-                            هیچ مدل گفت‌وگویی نصب نشده است
-                          </p>
-                          <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-                            برای استفاده از دستیار هوشمند، ابتدا یک مدل مولد را از بخش مدیریت هوش مصنوعی نصب نمایید.
-                          </p>
+                  <div className="space-y-4">
+                    {/* Section A: Independent HSECORE Fast Analytical Engine (No LLM) */}
+                    <div className="space-y-1.5">
+                      <p className="text-[11px] font-black text-slate-500 dark:text-slate-400 px-1">
+                        موتور هوشمند مستقل سامانه (پاسخ آنی و بدون نیاز به LLM)
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedModel(HSECORE_ANALYTICAL_ENGINE_ID);
+                          setActiveSheet('none');
+                        }}
+                        className={`w-full min-h-[60px] p-3.5 rounded-2xl border text-right flex items-center justify-between gap-3 transition cursor-pointer ${
+                          selectedModel === HSECORE_ANALYTICAL_ENGINE_ID
+                            ? 'bg-emerald-500/10 border-emerald-500 text-slate-900 dark:text-white'
+                            : 'bg-slate-50/70 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-800 text-slate-700 dark:text-slate-200 hover:border-slate-300'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div
+                            className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+                              selectedModel === HSECORE_ANALYTICAL_ENGINE_ID
+                                ? 'bg-emerald-600 text-white'
+                                : 'bg-white dark:bg-slate-800 text-emerald-600 border border-slate-200 dark:border-slate-700'
+                            }`}
+                          >
+                            <Database className="w-4 h-4" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-xs sm:text-sm font-black truncate">
+                              {HSECORE_ANALYTICAL_ENGINE_LABEL}
+                            </p>
+                            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                              پاسخ فوری زیر ۱۰۰ms • تحلیل ساختاریافته و قطعی داده‌های برخط بدون درگیر کردن Ollama
+                            </p>
+                          </div>
                         </div>
-                        <button
-                          type="button"
-                          onClick={handleNavigateToAiSettings}
-                          className="w-full min-h-[48px] px-4 py-2.5 rounded-xl bg-[#5B4BFF] hover:bg-[#4A3AE8] text-white text-xs font-bold flex items-center justify-center gap-2 shadow-md shadow-[#5B4BFF]/20 transition cursor-pointer"
-                        >
-                          <Settings className="w-4 h-4" />
-                          <span>نصب مدل از مدیریت هوش مصنوعی</span>
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="space-y-2">
-                        {installedModels.map(model => {
-                          const isSelected = selectedModel === model.name;
-                          return (
-                            <button
-                              key={model.name}
-                              type="button"
-                              onClick={() => {
-                                setSelectedModel(model.name);
-                                setActiveSheet('none');
-                              }}
-                              className={`w-full min-h-[56px] p-3.5 rounded-2xl border text-right flex items-center justify-between gap-3 transition cursor-pointer ${
-                                isSelected
-                                  ? 'bg-[#5B4BFF]/10 border-[#5B4BFF] text-slate-900 dark:text-white'
-                                  : 'bg-slate-50/70 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-800 text-slate-700 dark:text-slate-200 hover:border-slate-300'
-                              }`}
-                            >
-                              <div className="flex items-center gap-3 min-w-0">
-                                <div
-                                  className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
-                                    isSelected
-                                      ? 'bg-[#5B4BFF] text-white'
-                                      : 'bg-white dark:bg-slate-800 text-slate-500 border border-slate-200 dark:border-slate-700'
-                                  }`}
-                                >
-                                  <Bot className="w-4 h-4" />
-                                </div>
-                                <div className="min-w-0">
-                                  <p className="text-xs sm:text-sm font-black truncate">
-                                    {model.name}
-                                  </p>
-                                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                                    {model.details?.parameter_size
-                                      ? `ظرفیت: ${model.details.parameter_size}`
-                                      : 'مدل زبانی محلی آماده'}
-                                    {model.details?.quantization_level
-                                      ? ` • کوانتیزاسیون: ${model.details.quantization_level}`
-                                      : ''}
-                                  </p>
-                                </div>
-                              </div>
-                              {isSelected && (
-                                <CheckCircle2 className="w-5 h-5 text-[#5B4BFF] shrink-0" />
-                              )}
-                            </button>
-                          );
-                        })}
+                        {selectedModel === HSECORE_ANALYTICAL_ENGINE_ID && (
+                          <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                        )}
+                      </button>
+                    </div>
 
-                        <div className="pt-2">
+                    {/* Section B: Installed Ollama Generative LLM Models (Strictly Independent) */}
+                    <div className="space-y-1.5">
+                      <p className="text-[11px] font-black text-slate-500 dark:text-slate-400 px-1">
+                        مدل‌های هوش مصنوعی مولد (Ollama LLM — مستقل و بدون سوییچ خودکار)
+                      </p>
+                      {installedModels.length === 0 ? (
+                        <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-800 text-center space-y-2.5">
+                          <p className="text-xs font-bold text-slate-700 dark:text-slate-200">
+                            هیچ مدل زبانی (LLM) در موتور Ollama نصب نشده است
+                          </p>
                           <button
                             type="button"
                             onClick={handleNavigateToAiSettings}
-                            className="w-full min-h-[44px] px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-800 text-xs font-bold text-[#5B4BFF] dark:text-[#9D93FF] hover:bg-[#5B4BFF]/5 flex items-center justify-center gap-2 transition cursor-pointer"
+                            className="w-full min-h-[44px] px-4 py-2 rounded-xl bg-[#5B4BFF] hover:bg-[#4A3AE8] text-white text-xs font-bold flex items-center justify-center gap-2 shadow-sm transition cursor-pointer"
                           >
                             <Settings className="w-4 h-4" />
-                            <span>مدیریت و نصب مدل‌های بیشتر</span>
+                            <span>نصب مدل هوش مصنوعی از مدیریت AI</span>
                           </button>
                         </div>
-                      </div>
-                    )}
-                  </>
+                      ) : (
+                        <div className="space-y-2">
+                          {installedModels.map(model => {
+                            const isSelected = selectedModel === model.name;
+                            return (
+                              <button
+                                key={model.name}
+                                type="button"
+                                onClick={() => {
+                                  setSelectedModel(model.name);
+                                  setActiveSheet('none');
+                                }}
+                                className={`w-full min-h-[56px] p-3.5 rounded-2xl border text-right flex items-center justify-between gap-3 transition cursor-pointer ${
+                                  isSelected
+                                    ? 'bg-[#5B4BFF]/10 border-[#5B4BFF] text-slate-900 dark:text-white'
+                                    : 'bg-slate-50/70 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-800 text-slate-700 dark:text-slate-200 hover:border-slate-300'
+                                }`}
+                              >
+                                <div className="flex items-center gap-3 min-w-0">
+                                  <div
+                                    className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+                                      isSelected
+                                        ? 'bg-[#5B4BFF] text-white'
+                                        : 'bg-white dark:bg-slate-800 text-slate-500 border border-slate-200 dark:border-slate-700'
+                                    }`}
+                                  >
+                                    <Bot className="w-4 h-4" />
+                                  </div>
+                                  <div className="min-w-0">
+                                    <p className="text-xs sm:text-sm font-black truncate">
+                                      {model.name}
+                                    </p>
+                                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                                      {model.details?.parameter_size
+                                        ? `ظرفیت: ${model.details.parameter_size}`
+                                        : 'مدل زبانی محلی آماده'}
+                                      {model.details?.quantization_level
+                                        ? ` • کوانتیزاسیون: ${model.details.quantization_level}`
+                                        : ''}
+                                    </p>
+                                  </div>
+                                </div>
+                                {isSelected && (
+                                  <CheckCircle2 className="w-5 h-5 text-[#5B4BFF] shrink-0" />
+                                )}
+                              </button>
+                            );
+                          })}
+
+                          <div className="pt-1">
+                            <button
+                              type="button"
+                              onClick={handleNavigateToAiSettings}
+                              className="w-full min-h-[44px] px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-800 text-xs font-bold text-[#5B4BFF] dark:text-[#9D93FF] hover:bg-[#5B4BFF]/5 flex items-center justify-center gap-2 transition cursor-pointer"
+                            >
+                              <Settings className="w-4 h-4" />
+                              <span>مدیریت و نصب مدل‌های بیشتر</span>
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 )}
 
                 {/* SHEET 2: CONTEXT & ANTI-OOM MEMORY SETTINGS */}

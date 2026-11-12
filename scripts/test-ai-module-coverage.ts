@@ -6,6 +6,11 @@ import { aiModuleRegistry } from '../server/modules/ai/ai.module-registry.ts';
 import { aiToolsRegistry } from '../server/modules/ai/ai.tools.ts';
 import { aiOrchestrator } from '../server/modules/ai/ai.orchestrator.ts';
 import { aiSessionService } from '../server/modules/ai/ai.sessions.ts';
+import {
+  parseSlashQueryFromInput,
+  stripSlashTokenFromInput,
+  searchAndRankModules,
+} from '../src/utils/aiModuleSlashSearch.ts';
 import type { UserContext } from '../server/core/middleware/auth.ts';
 
 const adminUser: UserContext = {
@@ -131,7 +136,6 @@ async function runTests() {
     durationMs: 425,
     model: 'qwen2.5:1.5b',
   });
-  // Idempotent duplicate call with same ID must not create duplicate message
   await aiSessionService.appendMessage(createdSession.id, adminUser, {
     id: 'test-msg-a-1',
     role: 'assistant',
@@ -142,7 +146,6 @@ async function runTests() {
     model: 'qwen2.5:1.5b',
   });
 
-  // Simulate re-login with username/uid and fetch messages
   const reLoginAdmin: UserContext = {
     uid: 'admin-uid',
     username: 'admin',
@@ -159,7 +162,130 @@ async function runTests() {
   await aiSessionService.deleteSession(createdSession.id, adminUser);
   console.log('PASS AI Chat Session & Assistant Reply persistence across module switch, refresh & re-login verified');
 
-  console.log('All 10 module coverage, session persistence, and orchestrator pipeline tests PASSED!');
+  // ============================================================================
+  // 10 MANDATORY ACCEPTANCE TESTS FOR '/' SMART MODULE SEARCH & SELECTION
+  // ============================================================================
+  console.log('\n--- Running 10 Mandatory Acceptance Tests for / Smart Module Search ---');
+  const visibleCatalog = coverage.filter(item => !item.internal);
+
+  // Acceptance Test 1: تایپ `/` و نمایش تمام ماژول‌های مجاز
+  const slashRootParsed = parseSlashQueryFromInput('/');
+  assert.equal(slashRootParsed.isActive, true, 'Typing / must activate slash search immediately');
+  assert.equal(slashRootParsed.query, '', 'Root / query must be empty string');
+  const allPermittedResults = searchAndRankModules(visibleCatalog, slashRootParsed.query);
+  assert.ok(allPermittedResults.length > 30, 'Typing / must list all permitted modules + /ALL');
+  assert.equal(allPermittedResults[0].moduleId, 'all', 'First item on / must be /ALL command');
+  // Verify each item has required UI metadata (name, icon, accessPath, selection state)
+  for (const item of allPermittedResults.slice(1, 10)) {
+    assert.ok(item.mainModuleNameFa, `Item ${item.moduleId} must have mainModuleNameFa`);
+    assert.ok(item.iconName, `Item ${item.moduleId} must have dedicated iconName`);
+    assert.ok(item.accessPath, `Item ${item.moduleId} must have accessPath`);
+    assert.equal(typeof item.isSelected, 'boolean', `Item ${item.moduleId} must have selection status`);
+  }
+  console.log(`PASS [1/10] Typing '/' displays all ${allPermittedResults.length - 1} permitted modules with rich metadata`);
+
+  // Acceptance Test 2: تایپ `/پروانه` و نمایش ماژول‌های مرتبط
+  const permitParsed = parseSlashQueryFromInput('/پروانه');
+  assert.equal(permitParsed.isActive, true);
+  assert.equal(permitParsed.query, 'پروانه');
+  const permitResults = searchAndRankModules(visibleCatalog, permitParsed.query);
+  assert.ok(permitResults.length > 0, 'Searching /پروانه must return related modules');
+  assert.equal(permitResults[0].moduleId, 'permit', 'Top result for /پروانه must be permit module');
+  console.log('PASS [2/10] Typing "/پروانه" ranks permit module first');
+
+  // Acceptance Test 3: تایپ نام انگلیسی ماژول
+  const englishPermitResults = searchAndRankModules(visibleCatalog, 'permit');
+  assert.ok(englishPermitResults.some(r => r.moduleId === 'permit'), 'English search "permit" must find permit');
+  const englishFireResults = searchAndRankModules(visibleCatalog, 'fire');
+  assert.ok(englishFireResults.some(r => r.moduleId === 'fire-dept' || r.parentModuleId === 'fire'), 'English search "fire" must find fire-dept modules');
+  const englishMedicalResults = searchAndRankModules(visibleCatalog, 'periodic-exams');
+  assert.equal(englishMedicalResults[0]?.moduleId, 'periodic-exams', 'English search "periodic-exams" must rank periodic-exams first');
+  console.log('PASS [3/10] English module name search ("permit", "fire", "periodic-exams") works accurately');
+
+  // Acceptance Test 4: جست‌وجوی نام ناقص ماژول + غلط املایی و حروف عربی ی/ک
+  const partialResults = searchAndRankModules(visibleCatalog, 'معاین');
+  assert.ok(partialResults.some(r => r.moduleId === 'periodic-exams'), 'Partial search "معاین" must match periodic-exams');
+  const arabicCharResults = searchAndRankModules(visibleCatalog, 'معاينات طب كار'); // Arabic ي and ك
+  assert.ok(arabicCharResults.some(r => r.moduleId === 'periodic-exams'), 'Arabic ي/ك search "معاينات طب كار" must match periodic-exams');
+  const typoResults = searchAndRankModules(visibleCatalog, 'پروانه کا');
+  assert.ok(typoResults.some(r => r.moduleId === 'permit'), 'Typo/incomplete search "پروانه کا" must match permit');
+  console.log('PASS [4/10] Partial name, Arabic ی/ک normalization, and typo-tolerant search verified');
+
+  // Acceptance Test 5 & 6: انتخاب چند ماژول هم‌زمان و حذف ماژول انتخاب‌شده
+  let selectedChipIds: string[] = [];
+  const selectModule = (id: string) => {
+    selectedChipIds = selectedChipIds.includes(id)
+      ? selectedChipIds.filter(x => x !== id)
+      : [...selectedChipIds.filter(x => x !== 'all'), id];
+  };
+  selectModule('permit');
+  selectModule('periodic-exams');
+  selectModule('risks-main');
+  assert.deepEqual(selectedChipIds, ['permit', 'periodic-exams', 'risks-main'], 'Multi-module selection must store all 3 modules');
+  const rankedWithSelection = searchAndRankModules(visibleCatalog, '', {
+    selectedModuleIds: selectedChipIds,
+  });
+  assert.equal(
+    rankedWithSelection.find(r => r.moduleId === 'permit')?.isSelected,
+    true,
+    'Selected module must be marked isSelected=true'
+  );
+  // Remove 'periodic-exams'
+  selectModule('periodic-exams');
+  assert.deepEqual(selectedChipIds, ['permit', 'risks-main'], 'Removing a selected module must keep remaining modules intact');
+  console.log('PASS [5/10 & 6/10] Simultaneous multi-module selection and chip removal verified');
+
+  // Acceptance Test 7: انتخاب با کیبورد (مدیریت نشانگر، انتخاب و پاک‌سازی توکن اسلش از متن)
+  const inlineInput = 'وضعیت کلی /پروانه را بررسی کن';
+  const parsedInline = parseSlashQueryFromInput(inlineInput, 17); // cursor right after '/پروانه'
+  assert.equal(parsedInline.isActive, true, 'Inline slash command must be detected at cursor');
+  assert.equal(parsedInline.query, 'پروانه');
+  const strippedInput = stripSlashTokenFromInput(inlineInput, parsedInline);
+  assert.equal(strippedInput, 'وضعیت کلی را بررسی کن', 'Selecting a module via Enter must cleanly strip the /query token and preserve surrounding text');
+  console.log('PASS [7/10] Keyboard navigation state & slash token stripping verified');
+
+  // Acceptance Test 8: اجرای تحلیل واقعی ماژول انتخاب‌شده
+  const moduleAnalysisResponse = await aiOrchestrator.processChat(
+    {
+      message: 'تحلیل جامع ساختار، زیرماژول‌ها و داده‌های ماژول معاینات طب کار',
+      model: 'hsecore-analytical-engine',
+      selectedModules: ['periodic-exams'],
+      allowTools: true,
+    },
+    adminUser
+  );
+  assert.ok(
+    moduleAnalysisResponse.reply.includes('معاینات ادواری') &&
+      moduleAnalysisResponse.reply.includes('ساختار ماژول‌های انتخاب‌شده'),
+    'Selected module analysis must inspect real structure and data of periodic-exams'
+  );
+  console.log('PASS [8/10] Real analysis execution of selected module verified');
+
+  // Acceptance Test 9: اجرای دستور `/ALL` و بررسی کامل ساختار سامانه
+  const allCommandRanked = searchAndRankModules(visibleCatalog, 'ALL');
+  assert.equal(allCommandRanked[0].moduleId, 'all', 'Searching /ALL must prioritize the /ALL special command first');
+  assert.equal(allCommandRanked[0].isAllCommand, true);
+  assert.ok(
+    allPlan.toolResults.length > 0 &&
+      allPlan.toolResults[0].summary.includes('تحلیل یکپارچه مقطعی کلیه ماژول‌های سامانه'),
+    '/ALL execution must analyze all active system modules'
+  );
+  console.log('PASS [9/10] /ALL special command search and full-system analysis verified');
+
+  // Acceptance Test 10: افزودن ماژول جدید و تشخیص خودکار آن در جست‌وجوی `/`
+  const dynamicDroneSearch = searchAndRankModules(visibleCatalog, 'پهپادی');
+  assert.ok(
+    dynamicDroneSearch.some(r => r.moduleId === dynamicTestKey),
+    'Newly registered dynamic module (test_drone_inspection) must automatically appear in / search by Persian name'
+  );
+  const dynamicDroneEnSearch = searchAndRankModules(visibleCatalog, 'drone');
+  assert.ok(
+    dynamicDroneEnSearch.some(r => r.moduleId === dynamicTestKey),
+    'Newly registered dynamic module must automatically appear in / search by English name'
+  );
+  console.log('PASS [10/10] Newly registered dynamic module automatically discovered in / search without manual list changes');
+
+  console.log('\nAll 20 module coverage, session persistence, and / smart module search tests PASSED!');
   process.exit(0);
 }
 
@@ -167,3 +293,4 @@ runTests().catch(err => {
   console.error('Test failed:', err);
   process.exit(1);
 });
+

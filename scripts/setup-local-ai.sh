@@ -47,9 +47,12 @@ ensure_env_key "OLLAMA_IMAGE" "ollama/ollama:0.40.13"
 ensure_env_key "AI_BIND_IP" "127.0.0.1"
 ensure_env_key "AI_HOST_PORT" "11434"
 # The shared resource-budget helper initializes automatic context defaults safely.
-ensure_env_key "AI_NUM_PARALLEL" "1"
-ensure_env_key "AI_MAX_LOADED_MODELS" "1"
-ensure_env_key "AI_KEEP_ALIVE" "5m"
+ensure_env_key "AI_NUM_PARALLEL" "4"
+ensure_env_key "AI_MAX_LOADED_MODELS" "3"
+ensure_env_key "AI_MAX_CONCURRENCY" "4"
+ensure_env_key "AI_KEEP_ALIVE" "15m"
+ensure_env_key "AI_FLASH_ATTENTION" "1"
+ensure_env_key "AI_KV_CACHE_TYPE" "f16"
 
 AI_ENABLED="$(get_env_value AI_ENGINE_ENABLED | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]\"')"
 if [[ "${AI_ENABLED}" != "true" ]]; then

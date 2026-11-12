@@ -78,7 +78,8 @@ export type MainTabKey =
   | 'non-conformances'
   | 'documents'
   | 'notifications'
-  | 'ai-assistant';
+  | 'ai-assistant'
+  | 'psm';
 
 export interface TabItemConfig {
   key: MainTabKey;
@@ -265,6 +266,7 @@ const MODULE_META: Record<MainTabKey, { icon: any; tone: ToneKey }> = {
   'safety-unit': { icon: ShieldCheck, tone: 'blue' },
   'fire-dept': { icon: Flame, tone: 'rose' },
   'health-env': { icon: Leaf, tone: 'emerald' },
+  psm: { icon: Layers, tone: 'amber' },
   permit: { icon: FileText, tone: 'amber' },
   'ptw-audit': { icon: ClipboardCheck, tone: 'orange' },
   risk: { icon: BrainCircuit, tone: 'purple' },
@@ -291,6 +293,7 @@ const GROUP_META: Record<string, { icon: any; tone: ToneKey }> = {
   incidents_compliance: { icon: AlertOctagon, tone: 'red' },
   human_capital: { icon: GraduationCap, tone: 'emerald' },
   workflows: { icon: Workflow, tone: 'indigo' },
+  intelligent_analytics: { icon: BrainCircuit, tone: 'violet' },
   system: { icon: SlidersHorizontal, tone: 'slate' }
 };
 
@@ -457,7 +460,9 @@ export default function AppSidebar({
       const saved = sessionStorage.getItem(OPEN_GROUPS_STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (typeof parsed === 'object' && parsed !== null) return parsed;
+        if (typeof parsed === 'object' && parsed !== null) {
+          return { intelligent_analytics: true, ...parsed };
+        }
       }
     } catch {}
     return {
@@ -467,6 +472,7 @@ export default function AppSidebar({
       incidents_compliance: true,
       human_capital: true,
       workflows: true,
+      intelligent_analytics: true,
       system: true
     };
   });
@@ -474,7 +480,7 @@ export default function AppSidebar({
   // Auto-expand active group when activeTab changes
   useEffect(() => {
     const activeGroup = structuredGroups.find(g => g.tabs.some(t => t.key === activeTab));
-    if (activeGroup && !openGroupIds[activeGroup.id]) {
+    if (activeGroup && !(openGroupIds[activeGroup.id] ?? true)) {
       setOpenGroupIds(prev => ({ ...prev, [activeGroup.id]: true }));
     }
   }, [activeTab, structuredGroups]);
@@ -486,11 +492,11 @@ export default function AppSidebar({
   }, [openGroupIds]);
 
   const toggleGroup = (groupId: string) => {
-    setOpenGroupIds(prev => ({ ...prev, [groupId]: !prev[groupId] }));
+    setOpenGroupIds(prev => ({ ...prev, [groupId]: !(prev[groupId] ?? true) }));
   };
 
   const areAllGroupsOpen = useMemo(() => {
-    return structuredGroups.every(g => openGroupIds[g.id]);
+    return structuredGroups.every(g => openGroupIds[g.id] ?? true);
   }, [structuredGroups, openGroupIds]);
 
   const toggleAllGroups = () => {
@@ -806,7 +812,7 @@ export default function AppSidebar({
                 </div>
               ) : (
                 visibleGroups.map(group => {
-                  const isGroupOpen = normalizedQuery ? true : !!openGroupIds[group.id];
+                  const isGroupOpen = normalizedQuery ? true : (openGroupIds[group.id] ?? true);
                   const isGroupActive = group.tabs.some(t => t.key === activeTab);
                   const GroupIcon = group.icon;
 
@@ -945,6 +951,7 @@ export default function AppSidebar({
                     <button
                       type="button"
                       onClick={() => {
+                        setOpenGroupIds(prev => ({ ...prev, [group.id]: true }));
                         if (activeModuleInGroup) {
                           handleSelectTab(activeModuleInGroup.key);
                         } else if (group.tabs.length > 0) {

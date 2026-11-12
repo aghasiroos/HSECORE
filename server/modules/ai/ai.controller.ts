@@ -14,6 +14,12 @@ import { AIMemoryEstimator } from './ai.memory-estimator.ts';
 import { aiModuleRegistry } from './ai.module-registry.ts';
 
 const activeSessionAbortControllers = new Map<string, AbortController>();
+const activeUserAbortControllers = new Map<string, Set<AbortController>>();
+
+function getUserAbortKey(user?: UserContext): string {
+  if (!user) return '';
+  return String(user.uid || user.id || user.username || '').trim();
+}
 
 export class AIController {
   async getStatus(_req: Request, res: Response) {
@@ -130,6 +136,7 @@ export class AIController {
     const startedAt = Date.now();
     const streaming = body.stream === true;
     const abortController = new AbortController();
+    const userAbortKey = getUserAbortKey(user);
 
     if (sessionId) {
       const existing = activeSessionAbortControllers.get(sessionId);
@@ -138,7 +145,29 @@ export class AIController {
       }
       activeSessionAbortControllers.set(sessionId, abortController);
     }
+    if (userAbortKey) {
+      let userSet = activeUserAbortControllers.get(userAbortKey);
+      if (!userSet) {
+        userSet = new Set();
+        activeUserAbortControllers.set(userAbortKey, userSet);
+      }
+      userSet.add(abortController);
+    }
 
+    const cleanupControllers = () => {
+      if (sessionId && activeSessionAbortControllers.get(sessionId) === abortController) {
+        activeSessionAbortControllers.delete(sessionId);
+      }
+      if (userAbortKey) {
+        const userSet = activeUserAbortControllers.get(userAbortKey);
+        if (userSet) {
+          userSet.delete(abortController);
+          if (userSet.size === 0) activeUserAbortControllers.delete(userAbortKey);
+        }
+      }
+    };
+
+    let keepAliveTimer: ReturnType<typeof setInterval> | null = null;
     if (streaming) {
       res.status(200);
       res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
@@ -146,21 +175,38 @@ export class AIController {
       res.setHeader('Connection', 'keep-alive');
       res.setHeader('X-Accel-Buffering', 'no');
       res.flushHeaders?.();
+      keepAliveTimer = setInterval(() => {
+        if (!res.destroyed && !res.writableEnded) {
+          res.write(': keepalive\n\n');
+          (res as any).flush?.();
+        }
+      }, 8000);
       res.on('close', () => {
+        if (keepAliveTimer) {
+          clearInterval(keepAliveTimer);
+          keepAliveTimer = null;
+        }
         if (!res.writableEnded) {
           abortController.abort();
         }
-        if (sessionId) {
-          activeSessionAbortControllers.delete(sessionId);
-        }
+        cleanupControllers();
       });
     }
 
+    const continueFromText =
+      typeof body.continueFromText === 'string' &&
+      body.continueFromText.trim().length > 0 &&
+      body.continueFromText.length <= 36000
+        ? body.continueFromText
+        : undefined;
+    const clientMessageId =
+      typeof body.messageId === 'string' && body.messageId.trim().length > 0
+        ? body.messageId.trim().slice(0, 180)
+        : undefined;
+
     let streamedAnyToken = false;
+    let streamedAccumulated = '';
     try {
-      // All user-facing chat now goes through the HSECORE orchestrator.
-      // The orchestrator performs permission-checked, read-only domain retrieval
-      // before asking the selected local model to interpret the resulting evidence.
       const result = await aiOrchestrator.processChat({
         message: message.trim(),
         history,
@@ -168,11 +214,15 @@ export class AIController {
         selectedModules,
         contextTokens: Number.isInteger(body.contextTokens) && body.contextTokens >= 1024 && body.contextTokens <= 32768
           ? body.contextTokens : undefined,
+        maxTokens: Number.isInteger(body.maxTokens) && body.maxTokens >= 256 && body.maxTokens <= 4096
+          ? body.maxTokens : undefined,
+        continueFromText,
         signal: abortController.signal,
         onToken: streaming
           ? (token: string) => {
               if (!res.destroyed && !res.writableEnded) {
                 streamedAnyToken = true;
+                streamedAccumulated += token;
                 res.write(`data: ${JSON.stringify({ token })}\n\n`);
                 (res as any).flush?.();
               }
@@ -181,12 +231,17 @@ export class AIController {
         allowTools: typeof body.allowTools === 'boolean' ? body.allowTools : true,
       }, user);
 
+      const combinedPersistedContent = continueFromText
+        ? `${continueFromText}${result.reply.startsWith(' ') || continueFromText.endsWith(' ') || continueFromText.endsWith('\n') ? '' : ' '}${result.reply}`
+        : result.reply;
+
       let historySaved = true;
       if (sessionId) {
         try {
           await aiSessionService.appendMessage(sessionId, user, {
+            id: clientMessageId,
             role: 'assistant',
-            content: result.reply,
+            content: combinedPersistedContent,
             toolsUsed: result.toolsUsed,
             citations: result.citations,
             durationMs: result.durationMs,
@@ -204,6 +259,8 @@ export class AIController {
           }
           res.write(`data: ${JSON.stringify({
             done: true,
+            completed: result.completed !== false,
+            incompleteReason: result.incompleteReason,
             historySaved,
             model: result.model,
             durationMs: result.durationMs,
@@ -221,6 +278,8 @@ export class AIController {
       return res.json({
         success: true,
         reply: result.reply,
+        completed: result.completed !== false,
+        incompleteReason: result.incompleteReason,
         assistantId: result.assistantId,
         toolsUsed: result.toolsUsed,
         citations: result.citations,
@@ -236,7 +295,7 @@ export class AIController {
         String(err?.message || '').toLowerCase().includes('aborted')
       ) {
         if (streaming && !res.destroyed && !res.writableEnded) {
-          res.write(`data: ${JSON.stringify({ error: 'پردازش هوش مصنوعی توسط کاربر متوقف گردید.', aborted: true })}\n\n`);
+          res.write(`data: ${JSON.stringify({ error: 'پردازش هوش مصنوعی توسط کاربر متوقف گردید.', aborted: true, incomplete: true })}\n\n`);
           (res as any).flush?.();
           res.end();
         }
@@ -244,6 +303,25 @@ export class AIController {
       }
 
       const messageText = String(err?.message || 'خطا در اجرای تحلیل هوشمند.');
+      let errorHistorySaved = false;
+      const partialToSave = streamedAnyToken && streamedAccumulated.trim()
+        ? (continueFromText ? `${continueFromText} ${streamedAccumulated}` : streamedAccumulated)
+        : messageText;
+      if (sessionId) {
+        try {
+          await aiSessionService.appendMessage(sessionId, user, {
+            id: clientMessageId,
+            role: 'assistant',
+            content: partialToSave,
+            model: typeof body.model === 'string' ? body.model : config.aiEngine.defaultChatModel,
+            durationMs: Date.now() - startedAt,
+          });
+          errorHistorySaved = true;
+        } catch {
+          errorHistorySaved = false;
+        }
+      }
+
       aiAuditService.log({
         userId: user.id,
         userUid: user.uid,
@@ -251,7 +329,7 @@ export class AIController {
         role: user.role,
         assistantId: 'GENERAL_HSE',
         promptLength: message.length,
-        responseLength: 0,
+        responseLength: streamedAccumulated.length,
         toolsUsed: selectedModules,
         durationMs: Date.now() - startedAt,
         model: typeof body.model === 'string' ? body.model : config.aiEngine.defaultChatModel,
@@ -261,34 +339,70 @@ export class AIController {
       });
       if (streaming) {
         if (!res.destroyed && !res.writableEnded) {
-          res.write(`data: ${JSON.stringify({ error: messageText })}\n\n`);
+          res.write(`data: ${JSON.stringify({
+            error: messageText,
+            incomplete: true,
+            completed: false,
+            incompleteReason: messageText,
+            historySaved: errorHistorySaved,
+          })}\n\n`);
           (res as any).flush?.();
           res.end();
         }
         return;
       }
       return res.status(messageText.includes('دسترسی') || messageText.includes('قابل‌دسترسی') ? 403 : 503)
-        .json({ success: false, message: messageText });
+        .json({ success: false, message: messageText, historySaved: errorHistorySaved });
     } finally {
-      if (sessionId) {
-        activeSessionAbortControllers.delete(sessionId);
+      if (keepAliveTimer) {
+        clearInterval(keepAliveTimer);
+        keepAliveTimer = null;
       }
+      cleanupControllers();
     }
   }
 
   async abortChat(req: Request, res: Response) {
     try {
       const sessionId = typeof req.body?.sessionId === 'string' ? req.body.sessionId.trim() : '';
-      if (!sessionId) {
-        return res.status(400).json({ success: false, message: 'شناسه گفتگو الزامی است.' });
+      const userAbortKey = getUserAbortKey(req.user);
+      let abortedAny = false;
+
+      if (sessionId) {
+        const controller = activeSessionAbortControllers.get(sessionId);
+        if (controller) {
+          controller.abort();
+          activeSessionAbortControllers.delete(sessionId);
+          abortedAny = true;
+        }
       }
-      const controller = activeSessionAbortControllers.get(sessionId);
-      if (controller) {
-        controller.abort();
-        activeSessionAbortControllers.delete(sessionId);
-        return res.json({ success: true, message: 'پردازش هوش مصنوعی با موفقیت متوقف شد.', aborted: true });
+
+      if (userAbortKey) {
+        const userControllers = activeUserAbortControllers.get(userAbortKey);
+        if (userControllers && userControllers.size > 0) {
+          for (const ctrl of userControllers) {
+            ctrl.abort();
+            abortedAny = true;
+          }
+          activeUserAbortControllers.delete(userAbortKey);
+        }
       }
-      return res.json({ success: true, message: 'درخواست فعالی برای این گفتگو در حال اجرا نیست.', aborted: false });
+
+      const cancelledQueued = aiRequestQueue.cancelTasks({
+        sessionId: sessionId || undefined,
+        userId: req.user?.id,
+      });
+      if (cancelledQueued > 0) {
+        abortedAny = true;
+      }
+
+      return res.json({
+        success: true,
+        message: abortedAny
+          ? 'پردازش هوش مصنوعی در تمام بخش‌ها با موفقیت متوقف شد.'
+          : 'درخواست فعالی برای توقف یافت نشد.',
+        aborted: abortedAny,
+      });
     } catch (err: any) {
       return res.status(500).json({ success: false, message: err.message || 'خطا در متوقف‌سازی درخواست هوش مصنوعی' });
     }

@@ -1555,14 +1555,7 @@ export class MedicalExamService {
 
     try {
       ['hse_medical_exams_v2', 'hse_medical_records_v2'].forEach(k => {
-        const item = localStorage.getItem(k);
-        if (item) {
-          const parsed = JSON.parse(item);
-          if (Array.isArray(parsed)) {
-            const filtered = parsed.filter((x: any) => !associatedExamIds.has(x.id) && x.importBatchId !== auditLogId);
-            localStorage.setItem(k, JSON.stringify(filtered));
-          }
-        }
+        localStorage.removeItem(k);
       });
     } catch (_) {}
 

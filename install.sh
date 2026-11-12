@@ -2250,9 +2250,12 @@ EOF
   # exactly the same limits. Existing explicit/manual limits remain untouched.
   source "${PROJECT_DIR}/scripts/ai-resource-budget.sh"
   apply_ai_resource_budget "${ENV_FILE}"
-  set_env_param "AI_KEEP_ALIVE" "5m"
-  set_env_param "AI_MAX_LOADED_MODELS" "1"
-  set_env_param "AI_NUM_PARALLEL" "1"
+  set_env_param "AI_KEEP_ALIVE" "15m"
+  set_env_param "AI_MAX_LOADED_MODELS" "3"
+  set_env_param "AI_NUM_PARALLEL" "4"
+  set_env_param "AI_MAX_CONCURRENCY" "4"
+  set_env_param "AI_FLASH_ATTENTION" "1"
+  set_env_param "AI_KV_CACHE_TYPE" "f16"
 
   tui_print_completed_task "Synchronized production runtime & database keys in .env" "$(( $(date +%s) - t0 ))" "75%"
 
@@ -3198,8 +3201,11 @@ prepare_uploads_storage() {
   fi
   if [[ -L "${UPLOADS_HOST_DIR}" ]]; then log_error "Uploads path must not be a symlink."; return 1; fi
   if [[ ! -d "${UPLOADS_HOST_DIR}" ]]; then
-    mkdir -p "${UPLOADS_HOST_DIR}" && chmod 700 "${UPLOADS_HOST_DIR}" || return 1
+    mkdir -p "${UPLOADS_HOST_DIR}" || return 1
   fi
+  chmod 755 "$(dirname "${UPLOADS_HOST_DIR}")" 2>/dev/null || true
+  chmod 775 "${UPLOADS_HOST_DIR}" 2>/dev/null || true
+  chown -R 1000:1000 "${UPLOADS_HOST_DIR}" 2>/dev/null || true
   if [[ -n "${legacy}" ]]; then
     while IFS= read -r -d '' filename; do
       local relative="${filename#"${legacy}/"}" dest="${UPLOADS_HOST_DIR}/${filename#"${legacy}/"}"
@@ -3217,6 +3223,7 @@ prepare_uploads_storage() {
       log_error "Upload migration verification failed; legacy files preserved in ${legacy}."
       return 1
     fi
+    chown -R 1000:1000 "${UPLOADS_HOST_DIR}" 2>/dev/null || true
     log_info "Legacy uploads copied to ${UPLOADS_HOST_DIR}. A recovery copy is kept in ${legacy}; remove it manually after verifying."
   fi
   return 0

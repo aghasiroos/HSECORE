@@ -3,7 +3,14 @@ import { Department, UserProfile, PtwQualificationData, PtwValidityDuration, Ptw
 import { OrgNode, SEED_ORG_NODES, getRawMemorySystemUsers, getCurrentUser, isUserAdmin } from './authHelper';
 import { apiDb } from '../services/apiDatabaseClient';
 import { getOrgUnitsStructure } from './orgHelper';
-import { normalizeForMatching, normalizeDigits } from './textNormalization';
+import {
+  normalizeForMatching,
+  normalizeDigits,
+  cleanPersonnelCode,
+  compareByPersonnelCodeAsc,
+  sortPersonnelByCodeAsc
+} from './textNormalization';
+export { cleanPersonnelCode, compareByPersonnelCodeAsc, sortPersonnelByCodeAsc };
 import moment from 'moment-jalaali';
 
 // Pure in-memory runtime caches (Zero Browser Storage / Zero localStorage)
@@ -163,7 +170,7 @@ function normalizeRawPersonnelRecord(p: any, idx: number): ComplexPersonnel {
   const subUnit = p.subUnit || '';
   const jobTitle = p.jobTitle || p.position || 'کارشناس';
   const nationalCode = p.nationalCode || p.nationalId || '';
-  const personnelCode = String(p.personnelCode || p.effectiveCode || `${1000 + idx}`);
+  const personnelCode = p.extraData?.hasNoPersonnelCode ? '' : cleanPersonnelCode(p.personnelCode ?? p.effectiveCode);
 
   const rawStatus = String(p.status || p.extraData?.status || 'active').trim().toLowerCase();
   const normalizedStatus: 'active' | 'inactive' =
@@ -386,8 +393,8 @@ export function filterQualifiedPtwPersonnel(
  */
 export function setInMemoryPersonnelList(rawList: any[]): ComplexPersonnel[] {
   purgeLegacyBrowserCache();
-  const normalized = (Array.isArray(rawList) ? rawList : []).map((p, idx) =>
-    normalizeRawPersonnelRecord(p, idx)
+  const normalized = sortPersonnelByCodeAsc(
+    (Array.isArray(rawList) ? rawList : []).map((p, idx) => normalizeRawPersonnelRecord(p, idx))
   );
   inMemoryPersonnelCache = normalized;
   hasSyncedPersonnel = true;

@@ -46,7 +46,8 @@ import {
   Inbox,
   BookOpen,
   Workflow,
-  Bot
+  Bot,
+  Layers
 } from 'lucide-react';
 import LoginScreen from './components/LoginScreen';
 import { HseLogo } from './components/HseLogo';
@@ -245,6 +246,7 @@ const ComprehensiveNonConformanceModule = lazyWithRetry(() => import('./componen
 const InstructionsDocumentsModule = lazyWithRetry(() => import('./components/InstructionsDocumentsModule'), 'documents');
 const SystemNotificationsTab = lazyWithRetry(() => import('./components/system-settings/SystemNotificationsTab'), 'notifications');
 const AiAssistantApp = lazyWithRetry(() => import('./modules/ai/AiAssistantApp'), 'ai-assistant');
+const PsmManagementModule = lazyWithRetry(() => import('./modules/psm/PsmManagementModule'), 'psm');
 
 function ModuleLoadingFallback({ isFa }: { isFa: boolean }) {
   return (
@@ -635,9 +637,6 @@ export default function App() {
     if (isAdmin || hasPermission(currentUser, 'TRIR Incident Rate', 'view') || hasPermission(currentUser, 'Statistics', 'view') || hasPermission(currentUser, 'Reports', 'view')) {
       tabs.push({ key: 'hse-ms', icon: ShieldAlert, titleFa: 'پایش نرخ رویدادها (TRIR)', titleEn: 'TRIR Incident Rate' });
     }
-    if (isAdmin || hasPermission(currentUser, 'HSECORE AI', 'view') || hasPermission(currentUser, 'Dashboard', 'view')) {
-      tabs.push({ key: 'ai-assistant', icon: Bot, titleFa: 'هوش مصنوعی HSECORE', titleEn: 'HSECORE AI Assistant' });
-    }
 
     // 2. Specialized HSE Departments
     if (isAdmin || hasPermission(currentUser, 'Safety Unit', 'view')) {
@@ -651,6 +650,9 @@ export default function App() {
     }
 
     // 3. Safety Operations & Risk
+    if (isAdmin || hasPermission(currentUser, 'PSM', 'view') || hasPermission(currentUser, 'Safety Unit', 'view') || hasPermission(currentUser, 'Risk Assessment', 'view') || hasPermission(currentUser, 'Permit To Work', 'view')) {
+      tabs.push({ key: 'psm', icon: Layers, titleFa: 'مدیریت استقرار ایمنی فرایند (PSM)', titleEn: 'Process Safety Management (PSM)' });
+    }
     if (isAdmin || hasPermission(currentUser, 'Permit To Work', 'view')) {
       tabs.push({ key: 'permit', icon: FileText, titleFa: 'پروانه کار ایمن (PTW)', titleEn: 'Permit to Work (PTW)' });
     }
@@ -667,10 +669,7 @@ export default function App() {
       tabs.push({ key: 'risk', icon: ShieldAlert, titleFa: 'ارزیابی ریسک', titleEn: 'AI Risk Assessment' });
     }
 
-    // 4. Personnel History, Training & BPMN
-    if (isAdmin || hasPermission(currentUser, 'Personnel 360', 'view')) {
-      tabs.push({ key: 'personnel-history', icon: UserSearch, titleFa: 'سوابق و پرونده جامع پرسنل', titleEn: 'Personnel 360° History & Records' });
-    }
+    // 4. Training, Warnings & Workflows
     if (isAdmin || hasPermission(currentUser, 'Training', 'view')) {
       tabs.push({ key: 'training', icon: GraduationCap, titleFa: 'مدیریت و آمار آموزش', titleEn: 'Training Management & Stats' });
     }
@@ -680,14 +679,22 @@ export default function App() {
     if (isAdmin || hasPermission(currentUser, 'Non-Conformances', 'view') || hasPermission(currentUser, 'Incidents', 'view') || hasPermission(currentUser, 'Safety Unit', 'view')) {
       tabs.push({ key: 'non-conformances', icon: ShieldAlert, titleFa: 'مدیریت عدم انطباق‌ها (CAPA)', titleEn: 'Non-Conformities & CAPA' });
     }
-    if (isAdmin || hasPermission(currentUser, 'Reports', 'view') || hasPermission(currentUser, 'Statistics', 'view')) {
-      tabs.push({ key: 'reports', icon: BarChart3, titleFa: 'گزارشات و آمار', titleEn: 'Statistical Reports' });
-    }
     if (isAdmin || hasPermission(currentUser, 'Documents', 'view')) {
       tabs.push({ key: 'documents', icon: BookOpen, titleFa: 'دستورالعمل‌ها و مستندات', titleEn: 'Instructions & Documents' });
     }
     if (isAdmin || hasPermission(currentUser, 'Permit To Work', 'approve') || hasPermission(currentUser, 'Process Management', 'view') || hasPermission(currentUser, 'Safety Unit', 'approve') || hasPermission(currentUser, 'Incidents', 'approve')) {
       tabs.push({ key: 'pending-documents', icon: Inbox, titleFa: 'اسناد در انتظار اقدام و امضا', titleEn: 'Documents Awaiting Action & Sign' });
+    }
+
+    // 5. Intelligent HSE Management & Analytics Center (مرکز هوشمند مدیریت و تحلیل HSE)
+    if (isAdmin || hasPermission(currentUser, 'Reports', 'view') || hasPermission(currentUser, 'Statistics', 'view')) {
+      tabs.push({ key: 'reports', icon: BarChart3, titleFa: 'گزارشات تحلیلی و آماری', titleEn: 'Analytical & Statistical Reports' });
+    }
+    if (isAdmin || hasPermission(currentUser, 'Personnel 360', 'view')) {
+      tabs.push({ key: 'personnel-history', icon: UserSearch, titleFa: 'پرونده ۳۶۰ درجه پرسنل', titleEn: 'Personnel 360° Dossier' });
+    }
+    if (isAdmin || hasPermission(currentUser, 'HSECORE AI', 'view') || hasPermission(currentUser, 'Dashboard', 'view')) {
+      tabs.push({ key: 'ai-assistant', icon: Bot, titleFa: 'هوش مصنوعی HSECORE', titleEn: 'HSECORE AI Assistant' });
     }
 
     // 5. System Administration & RBAC (مدیریت و پیکربندی سامانه)
@@ -1282,6 +1289,13 @@ export default function App() {
  )}
 
  
+            {activeTab === 'psm' && (
+              <PsmManagementModule
+                language={language}
+                currentUser={currentUser}
+              />
+            )}
+
                         {activeTab === 'risk' && (
               <RiskAssessment currentUser={currentUser} isFa={isFa} />
             )}

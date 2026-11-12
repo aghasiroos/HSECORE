@@ -3,20 +3,86 @@ import { playNotificationSound, SoundType, HseSirenType } from '../utils/notific
 
 export type NotificationCategory = 'info' | 'success' | 'warning' | 'error' | 'critical_hse';
 export type NotificationPriority = 'low' | 'medium' | 'high' | 'critical';
+export type TargetAudienceType =
+  | 'all'
+  | 'departments'
+  | 'unit_managers'
+  | 'hse_experts'
+  | 'users'
+  | 'roles'
+  | 'user'
+  | 'single';
+
+export type DevicePlatformType = 'desktop' | 'laptop' | 'mobile' | 'tablet';
+
+export interface PushDeliveryDeviceLog {
+  subscriptionId: string;
+  userId?: string;
+  userName?: string;
+  deviceType?: DevicePlatformType;
+  deviceName?: string;
+  endpointDomain?: string;
+  status: 'delivered' | 'failed' | 'expired';
+  statusCode?: number;
+  errorMessage?: string;
+  timestamp: string;
+}
+
+export interface NotificationViewConfirmation {
+  userId: string;
+  userName?: string;
+  timestamp: string;
+  source: 'browser_push_click' | 'in_app_popup' | 'alert_details_view' | 'os_notification';
+  deviceType?: string;
+}
+
+export interface NotificationDeliveryReport {
+  dispatchedAt: string;
+  inAppPopupDelivered: boolean;
+  webPushAttempted: boolean;
+  totalTargetedDevices: number;
+  pushSentCount: number;
+  pushFailedCount: number;
+  pushExpiredRemovedCount: number;
+  deviceLogs: PushDeliveryDeviceLog[];
+}
+
+export interface RegisteredPushDevice {
+  id: string;
+  endpoint: string;
+  userId?: string;
+  userName?: string;
+  role?: string;
+  jobTitle?: string;
+  departmentIds?: string[];
+  departmentName?: string;
+  isUnitManager?: boolean;
+  isHseExpert?: boolean;
+  deviceType?: DevicePlatformType;
+  deviceName?: string;
+  browserName?: string;
+  osName?: string;
+  createdAt: string;
+  updatedAt: string;
+  lastSuccessAt?: string;
+  lastFailureAt?: string;
+  lastError?: string;
+  lastStatusCode?: number;
+}
 
 export interface AppNotification {
   id?: number;
   notifId: string;
   title: string;
   body: string;
-  type?: string;
+  type?: 'in-app' | 'popup' | 'push' | 'popup_and_push' | string;
   category: NotificationCategory;
   priority: NotificationPriority;
   riskLevelFa?: string;
   sourceModule: string;
   actionUrl?: string;
   recordId?: string;
-  targetType?: 'all' | 'roles' | 'departments' | 'user' | 'users' | 'single';
+  targetType?: TargetAudienceType;
   targetValues?: string[];
   sender?: string;
   read?: boolean;
@@ -30,6 +96,8 @@ export interface AppNotification {
     acknowledgmentSource?: string;
     status?: string;
   }>;
+  viewedBy?: NotificationViewConfirmation[];
+  deliveryReport?: NotificationDeliveryReport;
   sirenType?: HseSirenType | string;
   actionGuidelines?: string;
   metadata?: Record<string, any>;
@@ -75,14 +143,14 @@ export const DEFAULT_PREFERENCES: NotificationPreferences = {
 export interface SendNotificationOptions {
   title: string;
   body: string;
-  type?: 'in-app' | 'popup' | 'push';
+  type?: 'in-app' | 'popup' | 'push' | 'popup_and_push';
   category?: NotificationCategory;
   priority?: NotificationPriority;
   sourceModule?: string;
   actionUrl?: string;
   recordId?: string;
   requiresAck?: boolean;
-  targetType?: 'all' | 'roles' | 'departments' | 'user' | 'users' | 'single';
+  targetType?: TargetAudienceType;
   targetValues?: string[];
   sender?: string;
   sirenType?: HseSirenType | string;
@@ -90,6 +158,63 @@ export interface SendNotificationOptions {
   metadata?: Record<string, any>;
   playSound?: boolean;
   triggerPopup?: boolean;
+}
+
+export function detectClientDeviceInfo(): {
+  deviceType: DevicePlatformType;
+  browserName: string;
+  osName: string;
+  defaultDeviceName: string;
+} {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') {
+    return {
+      deviceType: 'desktop',
+      browserName: 'Browser',
+      osName: 'OS',
+      defaultDeviceName: 'کامپیوتر رومیزی',
+    };
+  }
+  const ua = navigator.userAgent || '';
+  const isMobile = /Android|iPhone|iPod|IEMobile|Opera Mini|Mobile/i.test(ua);
+  const isTablet = /iPad|Tablet|PlayBook|Silk/i.test(ua);
+  const isMac = /Macintosh|Mac OS X/i.test(ua);
+
+  let osName = 'Windows';
+  if (/Android/i.test(ua)) osName = 'Android';
+  else if (/iPhone|iPad|iPod/i.test(ua)) osName = 'iOS';
+  else if (isMac) osName = 'macOS';
+  else if (/Linux/i.test(ua)) osName = 'Linux';
+
+  let browserName = 'Chrome';
+  if (/Edg\//i.test(ua)) browserName = 'Edge';
+  else if (/Firefox\//i.test(ua)) browserName = 'Firefox';
+  else if (/Safari\//i.test(ua) && !/Chrome\//i.test(ua)) browserName = 'Safari';
+
+  // Detect laptop vs desktop heuristic (battery API or screen dimensions/MacBook)
+  let deviceType: DevicePlatformType = 'desktop';
+  if (isTablet) {
+    deviceType = 'tablet';
+  } else if (isMobile) {
+    deviceType = 'mobile';
+  } else if (isMac || (window.screen && window.screen.width <= 1600 && window.screen.height <= 1050)) {
+    deviceType = 'laptop';
+  }
+
+  const labelFa =
+    deviceType === 'mobile'
+      ? 'تلفن همراه (موبایل)'
+      : deviceType === 'tablet'
+      ? 'تبلت'
+      : deviceType === 'laptop'
+      ? 'لپ‌تاپ'
+      : 'کامپیوتر رومیزی';
+
+  return {
+    deviceType,
+    browserName,
+    osName,
+    defaultDeviceName: `${labelFa} (${browserName} - ${osName})`,
+  };
 }
 
 const PREFS_STORAGE_KEY = 'hse_notification_preferences_v1';
@@ -212,8 +337,20 @@ export const CentralNotificationService = {
    * Mark lock-screen & siren readiness as permanently confirmed so it is never requested again on page refresh
    */
   async confirmLockScreenSiren(
-    userOrId?: { id?: string; username?: string } | string | null,
-    usernameArg?: string
+    userOrId?: {
+      id?: string;
+      username?: string;
+      fullName?: string;
+      role?: string;
+      jobTitle?: string;
+      departmentId?: string;
+      departmentName?: string;
+    } | string | null,
+    usernameArg?: string,
+    deviceMeta?: {
+      deviceType?: DevicePlatformType;
+      deviceName?: string;
+    }
   ): Promise<void> {
     const uid = typeof userOrId === 'string' ? userOrId : userOrId?.id || userOrId?.username;
     if (typeof window !== 'undefined') {
@@ -230,7 +367,7 @@ export const CentralNotificationService = {
     };
     saveCachedPrefsToStorage(cachedPreferences);
     try {
-      await this.subscribeToWebPush(userOrId, usernameArg);
+      await this.subscribeToWebPush(userOrId, usernameArg, deviceMeta);
     } catch {}
     try {
       await apiDb.saveNotificationPreferences(cachedPreferences);
@@ -322,25 +459,50 @@ export const CentralNotificationService = {
   },
 
   /**
-   * Subscribe the current browser/device to RFC 8030 Web Push for Lock Screen & Background Native Alerts
+   * Subscribe the current browser/device (Desktop, Laptop, Mobile) to RFC 8030 Web Push for Background & Lock Screen Native Alerts
    */
   async subscribeToWebPush(
-    userOrId?: { id?: string; username?: string } | string | null,
-    usernameArg?: string
+    userOrId?: {
+      id?: string;
+      username?: string;
+      fullName?: string;
+      role?: string;
+      jobTitle?: string;
+      departmentId?: string;
+      departmentName?: string;
+    } | string | null,
+    usernameArg?: string,
+    deviceMeta?: {
+      deviceType?: DevicePlatformType;
+      deviceName?: string;
+      role?: string;
+      jobTitle?: string;
+      departmentIds?: string[];
+      departmentName?: string;
+    }
   ): Promise<{
     supported: boolean;
     permission: NotificationPermission;
     subscribed: boolean;
+    device?: RegisteredPushDevice;
     error?: string;
     reason?: string;
   }> {
     if (typeof window === 'undefined' || !('Notification' in window) || !('serviceWorker' in navigator)) {
-      const msg = 'مرورگر از اعلان سیستمی پشتیبانی نمی‌کند';
+      const msg = 'مرورگر از اعلان سیستمی (Web Push) پشتیبانی نمی‌کند';
       return { supported: false, permission: 'denied', subscribed: false, error: msg, reason: msg };
     }
 
-    const resolvedUserId = typeof userOrId === 'string' ? userOrId : userOrId?.id;
-    const resolvedUsername = typeof userOrId === 'string' ? usernameArg : userOrId?.username;
+    const userObj = typeof userOrId === 'object' && userOrId !== null ? userOrId : undefined;
+    const resolvedUserId = typeof userOrId === 'string' ? userOrId : userObj?.id || userObj?.username;
+    const resolvedUsername =
+      typeof userOrId === 'string'
+        ? usernameArg
+        : userObj?.fullName || userObj?.username || usernameArg;
+
+    const detected = detectClientDeviceInfo();
+    const chosenDeviceType = deviceMeta?.deviceType || detected.deviceType;
+    const chosenDeviceName = deviceMeta?.deviceName?.trim() || detected.defaultDeviceName;
 
     try {
       let permission = Notification.permission;
@@ -348,13 +510,13 @@ export const CentralNotificationService = {
         permission = await Notification.requestPermission();
       }
       if (permission !== 'granted') {
-        const msg = 'مجوز نمایش اعلان سیستمی توسط کاربر رد شده است';
+        const msg = 'مجوز نمایش اعلان سیستمی (Notification Permission) توسط کاربر رد شده است';
         return { supported: true, permission, subscribed: false, error: msg, reason: msg };
       }
 
       const reg = await navigator.serviceWorker.ready;
       if (!('pushManager' in reg)) {
-        const msg = 'PushManager در این مرورگر فعال نیست';
+        const msg = 'Push API در این مرورگر فعال نیست';
         return { supported: true, permission, subscribed: false, error: msg, reason: msg };
       }
 
@@ -373,16 +535,38 @@ export const CentralNotificationService = {
       }
 
       const clientSessionId = getOrInitGuestSessionId();
-      const ok = await apiDb.subscribeWebPush({
+      const deptIds =
+        deviceMeta?.departmentIds ||
+        (userObj?.departmentId ? [String(userObj.departmentId)] : undefined);
+
+      const saved = await apiDb.subscribeWebPush({
         subscription: subscription.toJSON(),
         userId: resolvedUserId,
         username: resolvedUsername,
+        userName: resolvedUsername,
+        role: deviceMeta?.role || userObj?.role,
+        jobTitle: deviceMeta?.jobTitle || userObj?.jobTitle,
+        departmentIds: deptIds,
+        departmentName: deviceMeta?.departmentName || userObj?.departmentName,
+        deviceType: chosenDeviceType,
+        deviceName: chosenDeviceName,
+        browserName: detected.browserName,
+        osName: detected.osName,
         clientSessionId,
       });
 
-      return { supported: true, permission, subscribed: ok };
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('hse_push_devices_updated'));
+      }
+
+      return {
+        supported: true,
+        permission,
+        subscribed: Boolean(saved),
+        device: typeof saved === 'object' ? saved : undefined,
+      };
     } catch (err: any) {
-      const msg = err?.message || 'خطا در ثبت اشتراک Web Push';
+      const msg = err?.message || 'خطا در ثبت اشتراک Web Push دستگاه';
       return {
         supported: true,
         permission: Notification.permission,
@@ -391,6 +575,28 @@ export const CentralNotificationService = {
         reason: msg,
       };
     }
+  },
+
+  async getRegisteredDevices(all?: boolean): Promise<RegisteredPushDevice[]> {
+    return apiDb.getPushSubscriptions(all);
+  },
+
+  async removeRegisteredDevice(idOrEndpoint: string): Promise<boolean> {
+    const ok = await apiDb.deletePushSubscription(idOrEndpoint);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('hse_push_devices_updated'));
+    }
+    return ok;
+  },
+
+  async confirmAlertViewed(
+    notifId: string,
+    source: 'browser_push_click' | 'in_app_popup' | 'alert_details_view',
+    userId?: string,
+    userName?: string
+  ): Promise<boolean> {
+    const detected = detectClientDeviceInfo();
+    return apiDb.confirmNotificationViewed(notifId, source, userId, userName, detected.deviceType);
   },
 
   /**
@@ -411,6 +617,10 @@ export const CentralNotificationService = {
         : 'هشدار ایمنی (سطح ۳)');
 
     const actionGuidelines = notif.actionGuidelines || notif.metadata?.actionGuidelines || notif.body;
+    const deepLinkUrl =
+      notif.actionUrl && notif.actionUrl.includes('alertId=')
+        ? notif.actionUrl
+        : `/#notifications?alertId=${encodeURIComponent(notif.notifId)}`;
 
     try {
       if ('serviceWorker' in navigator) {
@@ -427,7 +637,7 @@ export const CentralNotificationService = {
               riskLevelFa,
               sirenType: notif.sirenType || notif.metadata?.sirenType || 'siren_evacuation',
               actionGuidelines,
-              actionUrl: notif.actionUrl || '/',
+              actionUrl: deepLinkUrl,
               requiresAck: notif.requiresAck !== false,
               createdAt: notif.createdAt || new Date().toISOString(),
             },
@@ -445,12 +655,20 @@ export const CentralNotificationService = {
         });
       } catch {}
 
-      new Notification(isCritical && !notif.title.includes('🚨') ? `🚨 ${notif.title}` : notif.title, {
-        body: `⚠️ سطح خطر: ${riskLevelFa}${formattedTime ? ` | 🕒 ${formattedTime}` : ''}\n📋 ${notif.body}\n🛡️ اقدام ضروری: ${actionGuidelines}`,
-        icon: '/assets/hsecore-icon-192.png',
-        tag: notif.notifId,
-        requireInteraction: true,
-      });
+      const osNotif = new Notification(
+        isCritical && !notif.title.includes('🚨') ? `🚨 ${notif.title}` : notif.title,
+        {
+          body: `⚠️ سطح خطر: ${riskLevelFa}${formattedTime ? ` | 🕒 ${formattedTime}` : ''}\n📋 ${notif.body}\n🛡️ اقدام ضروری: ${actionGuidelines}`,
+          icon: '/assets/hsecore-icon-192.png',
+          tag: notif.notifId,
+          requireInteraction: true,
+        }
+      );
+      osNotif.onclick = () => {
+        window.focus();
+        window.location.hash = `#notifications?alertId=${encodeURIComponent(notif.notifId)}`;
+        this.confirmAlertViewed(notif.notifId, 'browser_push_click');
+      };
       return true;
     } catch {
       return false;
@@ -487,7 +705,7 @@ export const CentralNotificationService = {
       notifId: item.notifId || item.id || `notif-${Date.now()}`,
       title: item.title,
       body: item.body,
-      type: item.type || 'in-app',
+      type: item.type || 'popup_and_push',
       category: item.category || 'info',
       priority: item.priority || 'medium',
       riskLevelFa: item.riskLevelFa || item.metadata?.riskLevelFa,
@@ -501,6 +719,8 @@ export const CentralNotificationService = {
       readBy: item.readBy || [],
       requiresAck: !!item.requiresAck,
       acknowledgedBy: item.acknowledgedBy || [],
+      viewedBy: item.viewedBy || item.metadata?.viewedBy || [],
+      deliveryReport: item.deliveryReport || item.metadata?.deliveryReport || undefined,
       sirenType: item.sirenType || item.metadata?.sirenType,
       actionGuidelines: item.actionGuidelines || item.metadata?.actionGuidelines,
       metadata: item.metadata,
@@ -509,7 +729,7 @@ export const CentralNotificationService = {
   },
 
   /**
-   * Main send notification method callable from any module
+   * Main send notification method callable from any module (Simultaneous Popup + Browser Push by default)
    */
   async sendNotification(options: SendNotificationOptions): Promise<AppNotification | null> {
     const category = options.category || 'info';
@@ -534,13 +754,14 @@ export const CentralNotificationService = {
     const shouldPopup =
       options.triggerPopup ||
       options.type === 'popup' ||
+      options.type === 'popup_and_push' ||
       requiresAck ||
       isCritical ||
       popupPref === 'all' ||
       (popupPref === 'important_and_critical' && (isCritical || isImportantOrWorkflow)) ||
       (popupPref === 'critical_only' && isCritical);
 
-    const notifType = options.type || (shouldPopup ? 'popup' : 'in-app');
+    const notifType = options.type || (shouldPopup ? 'popup_and_push' : 'in-app');
     const sirenType = options.sirenType || (isCritical ? 'siren_evacuation' : undefined);
     const actionGuidelines = options.actionGuidelines || options.metadata?.actionGuidelines || options.body;
 
@@ -555,7 +776,7 @@ export const CentralNotificationService = {
       recordId: options.recordId,
       requiresAck,
       targetType: options.targetType || 'all',
-      targetValues: options.targetValues,
+      targetValues: options.targetValues || [],
       sender: options.sender,
       sirenType,
       actionGuidelines,
@@ -572,6 +793,8 @@ export const CentralNotificationService = {
         ...(saved || payload),
         notifId: String((saved as any)?.notifId || (saved as any)?.id || `notif-${Date.now()}`),
         createdAt: (saved as any)?.createdAt || new Date().toISOString(),
+        viewedBy: (saved as any)?.viewedBy || (saved as any)?.metadata?.viewedBy || [],
+        deliveryReport: (saved as any)?.deliveryReport || (saved as any)?.metadata?.deliveryReport,
         metadata: {
           ...((saved as any)?.metadata || payload.metadata || {}),
           playSound: options.playSound ?? true,
@@ -590,7 +813,7 @@ export const CentralNotificationService = {
   },
 
   /**
-   * Trigger a real Lock Screen / Native OS & Siren test notification
+   * Trigger a real Simultaneous Popup + Browser Push (Lock Screen & Siren) test notification
    */
   async triggerTestNotification(
     category: NotificationCategory = 'critical_hse',
@@ -598,17 +821,17 @@ export const CentralNotificationService = {
   ): Promise<AppNotification | null> {
     const isCritical = category === 'critical_hse';
     const title = isCritical
-      ? 'آزمایش هشدار بحرانی HSE (صفحه قفل و آژیر خودکار)'
-      : 'آزمایش اعلان سیستمی HSECORE';
+      ? 'آزمایش هشدار فوری HSE (ارسال همزمان پنجره داخلی + اعلان مرورگر)'
+      : 'آزمایش اعلان سیستمی HSECORE (Popup + Browser Push)';
     const body = isCritical
-      ? 'این یک هشدار آزمایشی جهت بررسی نمایش اعلان روی صفحه قفل (Lock Screen) و پخش خودکار آژیر اضطراری بدون نیاز به کلیک است.'
+      ? 'این یک هشدار آزمایشی جهت بررسی نمایش همزمان پنجره هشدار داخلی (Popup) و اعلان سیستمی مرورگر (Browser Push) حتی در زمان بسته بودن صفحه HSECORE است.'
       : 'این یک اعلان آزمایشی سیستمی در سامانه HSECORE است.';
-    const actionGuidelines = 'لطفاً روی دکمه «تأیید دریافت و قطع آژیر» کلیک نمایید.';
+    const actionGuidelines = 'لطفاً روی اعلان سیستمی مرورگر یا دکمه «تأیید دریافت و قطع آژیر» کلیک نمایید.';
 
     return this.sendNotification({
       title,
       body,
-      type: 'popup',
+      type: 'popup_and_push',
       category,
       priority: isCritical ? 'critical' : 'high',
       sourceModule: 'safety',

@@ -17,6 +17,7 @@ backups
 .installer-answers
 .installer-state*
 .docker-base-image
+.dev-jwt-secret
 .backup-config
 .backup-config.*
 .backup-status

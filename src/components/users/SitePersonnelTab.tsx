@@ -377,7 +377,7 @@ export const SitePersonnelTab: React.FC<SitePersonnelTabProps> = ({
           onClick={() => setHseCategoryFilter('ALL')}
           className={`px-3 py-1.5 rounded-xl font-bold transition-all shrink-0 cursor-pointer text-[11px] ${
             hseCategoryFilter === 'ALL'
-              ? 'bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900 shadow-2xs'
+              ? 'bg-blue-600 text-white font-black shadow-2xs'
               : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800'
           }`}
         >
@@ -561,8 +561,8 @@ export const SitePersonnelTab: React.FC<SitePersonnelTabProps> = ({
               }}
               className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
                 roleFilter === 'ALL' && statusFilter === 'ALL' && deptFilter === 'ALL' && expiryFilter === 'ALL' && hseCategoryFilter === 'ALL' && !userSearch
-                  ? 'bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900' 
-                  : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800'
+                  ? 'bg-blue-600 text-white font-black shadow-2xs' 
+                  : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800'
               }`}
             >
               {isFa ? 'همه پرسنل' : 'All'}

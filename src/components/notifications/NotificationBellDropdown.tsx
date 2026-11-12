@@ -36,6 +36,7 @@ export const NotificationBellDropdown: React.FC<NotificationBellDropdownProps> =
     markAsRead,
     markAllAsRead,
     deleteNotification,
+    openAlertDetails,
   } = useNotification();
 
   const [isOpen, setIsOpen] = useState(false);
@@ -170,19 +171,14 @@ export const NotificationBellDropdown: React.FC<NotificationBellDropdownProps> =
 
   const handleItemClick = (notif: AppNotification) => {
     markAsRead(notif.notifId);
+    setIsOpen(false);
 
-    // If critical or requires acknowledgment and not yet acknowledged, trigger popup
+    // Open full Alert Details & Delivery Report modal
+    openAlertDetails(notif);
+
+    // If critical or requires acknowledgment and not yet acknowledged, also trigger popup if needed
     if (notif.requiresAck && (!notif.acknowledgedBy || notif.acknowledgedBy.length === 0)) {
       window.dispatchEvent(new CustomEvent('hse_popup_alert_requested', { detail: notif }));
-    }
-
-    if (notif.actionUrl) {
-      setIsOpen(false);
-      if (notif.actionUrl.startsWith('#')) {
-        window.location.hash = notif.actionUrl;
-      } else {
-        window.location.href = notif.actionUrl;
-      }
     }
   };
 

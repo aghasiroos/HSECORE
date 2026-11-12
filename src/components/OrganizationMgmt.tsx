@@ -27,7 +27,6 @@ import {
   Filter
 } from 'lucide-react';
 import {
-  UNITS as defaultUnits,
   getJobTitles,
   OrgUnitsDataMap,
   getOrgUnitsStructure,
@@ -931,27 +930,6 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
     setEditingJobItem(null);
   };
 
-  const handleResetToDefaults = () => {
-    if (!canManageOrg) {
-      alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی بازیابی پیش‌فرض را دارد.' : 'Only the main Administrator is authorized to reset defaults.');
-      return;
-    }
-    setDeleteConfirm({
-      title: isFa ? 'بازیابی پیش‌فرض‌های ساختار واحدها و سمت‌ها؟' : 'Reset Units & Positions to Defaults?',
-      description: isFa 
-        ? 'این عملیات تمام واحدهای استاندارد را با زیرمجموعه و سمت‌های خالی تنظیم می‌کند تا توسط مدیر سیستم به صورت سفارشی وارد شوند.' 
-        : 'This will restore standard units with empty sub-units and positions, ready to be populated by the Administrator.',
-      onConfirm: async () => {
-        const defaultStruct: OrgUnitsDataMap = {};
-        defaultUnits.forEach(u => {
-          defaultStruct[u] = { jobs: [], subUnits: {} };
-        });
-        await persistOrgStructure(defaultStruct, isFa ? 'ساختار واحدها به حالت اولیه بازنشانی شد.' : 'Reset to defaults.');
-        setDeleteConfirm(null);
-      }
-    });
-  };
-
   const addJob = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canManageOrg) {
@@ -1243,40 +1221,40 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
           <button
             onClick={() => setActiveTab('org_hierarchy')}
             className={`px-4 py-2 text-xs font-black rounded-xl transition cursor-pointer flex items-center gap-1.5 ${
-              activeTab === 'org_hierarchy' ? 'bg-amber-500 text-slate-950 shadow-md scale-[1.02]' : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+              activeTab === 'org_hierarchy' ? 'bg-amber-500 text-slate-950 shadow-md scale-[1.02]' : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-700/50'
             }`}
           >
-            <FolderTree className="w-4 h-4 text-slate-950" />
+            <FolderTree className={`w-4 h-4 ${activeTab === 'org_hierarchy' ? 'text-slate-950' : 'text-amber-500'}`} />
             <span>{isFa ? 'ساختار و چارت سازمانی' : 'Org Hierarchy & Chart'}</span>
           </button>
 
           <button
             onClick={() => setActiveTab('units_jobs')}
             className={`px-3.5 py-2 text-xs font-black rounded-xl transition cursor-pointer flex items-center gap-1.5 ${
-              activeTab === 'units_jobs' ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 shadow-sm' : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+              activeTab === 'units_jobs' ? 'bg-amber-500 text-slate-950 shadow-md scale-[1.02]' : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-700/50'
             }`}
           >
-            <Building2 className="w-3.5 h-3.5 text-amber-500" />
+            <Building2 className={`w-3.5 h-3.5 ${activeTab === 'units_jobs' ? 'text-slate-950' : 'text-amber-500'}`} />
             <span>{isFa ? 'واحدها و مشاغل عملیاتی' : 'Units & Jobs'}</span>
           </button>
 
           <button
             onClick={() => setActiveTab('incident_types')}
             className={`px-3.5 py-2 text-xs font-black rounded-xl transition cursor-pointer flex items-center gap-1.5 ${
-              activeTab === 'incident_types' ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 shadow-sm' : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+              activeTab === 'incident_types' ? 'bg-amber-500 text-slate-950 shadow-md scale-[1.02]' : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-700/50'
             }`}
           >
-            <AlertTriangle className="w-3.5 h-3.5 text-rose-500" />
+            <AlertTriangle className={`w-3.5 h-3.5 ${activeTab === 'incident_types' ? 'text-slate-950' : 'text-rose-500'}`} />
             <span>{isFa ? 'دسته‌بندی انواع حوادث' : 'Incident Category Types'}</span>
           </button>
 
           <button
             onClick={() => setActiveTab('ppe_equipment')}
             className={`px-3.5 py-2 text-xs font-black rounded-xl transition cursor-pointer flex items-center gap-1.5 ${
-              activeTab === 'ppe_equipment' ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 shadow-sm' : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+              activeTab === 'ppe_equipment' ? 'bg-amber-500 text-slate-950 shadow-md scale-[1.02]' : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-700/50'
             }`}
           >
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
+            <ShieldCheck className={`w-3.5 h-3.5 ${activeTab === 'ppe_equipment' ? 'text-slate-950' : 'text-emerald-500'}`} />
             <span>{isFa ? 'نام تجهیزات PPE' : 'PPE Equipment Names'}</span>
           </button>
 

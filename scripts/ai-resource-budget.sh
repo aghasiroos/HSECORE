@@ -77,6 +77,36 @@ apply_ai_resource_budget() {
   else
     echo "[AI] Manual AI_CONTEXT_TOKENS preserved: ${context:-compose default}."
   fi
+
+  # Prevent llama.cpp crash: "quantized V cache requires flash_attn to be enabled"
+  local kv_cache flash_attn
+  kv_cache="$(ai_env_get AI_KV_CACHE_TYPE "$file")"
+  flash_attn="$(ai_env_get AI_FLASH_ATTENTION "$file")"
+  if [[ -z "$kv_cache" || "$kv_cache" == "q8_0" || "$kv_cache" == "q4_0" ]]; then
+    ai_env_set AI_KV_CACHE_TYPE "f16" "$file"
+  fi
+  if [[ -z "$flash_attn" || "$flash_attn" == "0" ]]; then
+    ai_env_set AI_FLASH_ATTENTION "1" "$file"
+  fi
+
+  # Ensure multi-user and multi-model concurrency defaults are active
+  local num_parallel max_loaded max_conc keep_alive
+  num_parallel="$(ai_env_get AI_NUM_PARALLEL "$file")"
+  max_loaded="$(ai_env_get AI_MAX_LOADED_MODELS "$file")"
+  max_conc="$(ai_env_get AI_MAX_CONCURRENCY "$file")"
+  keep_alive="$(ai_env_get AI_KEEP_ALIVE "$file")"
+  if [[ -z "$num_parallel" || "$num_parallel" == "1" ]]; then
+    ai_env_set AI_NUM_PARALLEL "4" "$file"
+  fi
+  if [[ -z "$max_loaded" || "$max_loaded" == "1" ]]; then
+    ai_env_set AI_MAX_LOADED_MODELS "3" "$file"
+  fi
+  if [[ -z "$max_conc" || "$max_conc" == "1" ]]; then
+    ai_env_set AI_MAX_CONCURRENCY "4" "$file"
+  fi
+  if [[ -z "$keep_alive" || "$keep_alive" == "5m" ]]; then
+    ai_env_set AI_KEEP_ALIVE "15m" "$file"
+  fi
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

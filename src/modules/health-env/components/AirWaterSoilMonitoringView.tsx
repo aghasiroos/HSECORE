@@ -80,11 +80,13 @@ export default function AirWaterSoilMonitoringView({ language }: Props) {
       </div>
 
       {/* Tabs */}
-      <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-2xl text-xs font-bold border border-slate-200 dark:border-slate-700">
+      <div className="flex bg-slate-100 dark:bg-slate-800/90 p-1 rounded-2xl text-xs font-bold border border-slate-200 dark:border-slate-700">
         <button
           onClick={() => setActiveSubTab('stacks')}
           className={`flex-1 py-2.5 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 ${
-            activeSubTab === 'stacks' ? 'bg-white dark:bg-slate-700 text-teal-600 dark:text-teal-400 shadow-xs' : 'text-slate-600 dark:text-slate-400'
+            activeSubTab === 'stacks' 
+              ? 'bg-teal-600 text-white shadow-xs font-black' 
+              : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-700/50'
           }`}
         >
           <Flame className="w-4 h-4" />
@@ -93,7 +95,9 @@ export default function AirWaterSoilMonitoringView({ language }: Props) {
         <button
           onClick={() => setActiveSubTab('soil')}
           className={`flex-1 py-2.5 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 ${
-            activeSubTab === 'soil' ? 'bg-white dark:bg-slate-700 text-teal-600 dark:text-teal-400 shadow-xs' : 'text-slate-600 dark:text-slate-400'
+            activeSubTab === 'soil' 
+              ? 'bg-teal-600 text-white shadow-xs font-black' 
+              : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-700/50'
           }`}
         >
           <Activity className="w-4 h-4" />
@@ -102,7 +106,9 @@ export default function AirWaterSoilMonitoringView({ language }: Props) {
         <button
           onClick={() => setActiveSubTab('water')}
           className={`flex-1 py-2.5 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 ${
-            activeSubTab === 'water' ? 'bg-white dark:bg-slate-700 text-teal-600 dark:text-teal-400 shadow-xs' : 'text-slate-600 dark:text-slate-400'
+            activeSubTab === 'water' 
+              ? 'bg-teal-600 text-white shadow-xs font-black' 
+              : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-700/50'
           }`}
         >
           <Droplets className="w-4 h-4" />

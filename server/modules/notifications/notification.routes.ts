@@ -13,6 +13,10 @@ router.post('/public/acknowledge', (req, res, next) => {
   notificationController.acknowledgePublic(req, res).catch(next);
 });
 
+router.post('/public/view', (req, res, next) => {
+  notificationController.confirmPublicView(req, res).catch(next);
+});
+
 router.get('/public/vapid-public-key', (req, res, next) => {
   notificationController.getVapidPublicKey(req, res).catch(next);
 });
@@ -34,13 +38,21 @@ router.get('/', requireAuth, (req, res, next) => {
   notificationController.getNotifications(req, res).catch(next);
 });
 
-// 2. User Preferences
+// 2. User Preferences & Registered Push Devices
 router.get('/preferences', requireAuth, (req, res, next) => {
   notificationController.getUserPreferences(req, res).catch(next);
 });
 
 router.put('/preferences', requireAuth, (req, res, next) => {
   notificationController.updateUserPreferences(req, res).catch(next);
+});
+
+router.get('/push-subscriptions', requireAuth, (req, res, next) => {
+  notificationController.getPushSubscriptions(req, res).catch(next);
+});
+
+router.delete('/push-subscriptions/:id', requireAuth, (req, res, next) => {
+  notificationController.deletePushSubscription(req, res).catch(next);
 });
 
 // Custom HSE Siren Stream & Upload (high-performance binary audio handling)
@@ -71,17 +83,30 @@ router.patch('/:id/read', requireAuth, (req, res, next) => {
   notificationController.markSingleRead(req, res).catch(next);
 });
 
-// 6. Acknowledge notification (especially critical HSE alerts)
+// 6. Acknowledge notification & Confirm View & Delivery Report
 router.post('/:id/acknowledge', requireAuth, (req, res, next) => {
   notificationController.acknowledgeNotification(req, res).catch(next);
 });
 
-// 7. Get notification by ID
+router.post('/:id/view', requireAuth, (req, res, next) => {
+  notificationController.confirmView(req, res).catch(next);
+});
+
+router.get('/:id/delivery-report', requireAuth, (req, res, next) => {
+  notificationController.getDeliveryReport(req, res).catch(next);
+});
+
+// 7. SSE stream (placed before /:id so it is never shadowed)
+router.get('/stream', requireAuth, (req, res) => {
+  notificationController.streamEvents(req, res);
+});
+
+// 8. Get notification by ID
 router.get('/:id', requireAuth, (req, res, next) => {
   notificationController.getNotificationById(req, res).catch(next);
 });
 
-// 8. Create new notification (Restricted by role)
+// 9. Create new notification (Restricted by role)
 router.post(
   '/',
   requireAuth,
@@ -91,7 +116,7 @@ router.post(
   }
 );
 
-// 9. Clear all notifications (Admin/HSE Manager only)
+// 10. Clear all notifications (Admin/HSE Manager only)
 router.post(
   '/clear',
   requireAuth,
@@ -101,7 +126,7 @@ router.post(
   }
 );
 
-// 10. Delete notification
+// 11. Delete notification
 router.delete(
   '/:id',
   requireAuth,
@@ -110,10 +135,5 @@ router.delete(
     notificationController.deleteNotification(req, res).catch(next);
   }
 );
-
-// 11. SSE stream
-router.get('/stream', requireAuth, (req, res) => {
-  notificationController.streamEvents(req, res);
-});
 
 export default router;

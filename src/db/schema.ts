@@ -1194,3 +1194,410 @@ export const aiDeploymentJobs = pgTable(
     index('idx_ai_jobs_created').on(table.createdAt),
   ]
 );
+
+// ==========================================
+// 17. PSM Implementation & Maturity Management System (پتروشیمی رجال)
+// Based on CCPS RBPS (4 Pillars, 20 Elements) & OSHA 29 CFR 1910.119 (14 Elements)
+// ==========================================
+export const psmProjects = pgTable(
+  'psm_projects',
+  {
+    id: serial('id').primaryKey(),
+    projectCode: text('project_code').notNull().unique(),
+    title: text('title').notNull(),
+    scopeDescription: text('scope_description').notNull(),
+    startDate: text('start_date').notNull(),
+    endDate: text('end_date').notNull(),
+    projectManagerId: integer('project_manager_id').references(() => personnel.id, { onDelete: 'set null' }),
+    projectManagerName: text('project_manager_name').notNull(),
+    projectSponsorId: integer('project_sponsor_id').references(() => personnel.id, { onDelete: 'set null' }),
+    projectSponsorName: text('project_sponsor_name').notNull(),
+    teamMembers: jsonb('team_members').default([]).notNull(),
+    coveredUnits: jsonb('covered_units').default([]).notNull(),
+    coveredAreas: jsonb('covered_areas').default([]).notNull(),
+    quantitativeGoals: jsonb('quantitative_goals').default([]).notNull(),
+    qualitativeGoals: jsonb('qualitative_goals').default([]).notNull(),
+    budgetAllocated: doublePrecision('budget_allocated').default(0).notNull(),
+    budgetSpent: doublePrecision('budget_spent').default(0).notNull(),
+    resourcesSummary: text('resources_summary'),
+    milestones: jsonb('milestones').default([]).notNull(),
+    overallStatus: text('overall_status').default('INITIATION').notNull(),
+    overallProgress: doublePrecision('overall_progress').default(0).notNull(),
+    handoverData: jsonb('handover_data').default({}).notNull(),
+    createdBy: text('created_by'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_psm_projects_code').on(table.projectCode),
+    index('idx_psm_projects_status').on(table.overallStatus),
+  ]
+);
+
+export const psmProcessAssets = pgTable(
+  'psm_process_assets',
+  {
+    id: serial('id').primaryKey(),
+    projectId: integer('project_id').references(() => psmProjects.id, { onDelete: 'cascade' }),
+    companyName: text('company_name').default('مجتمع پتروشیمی رجال').notNull(),
+    siteName: text('site_name'),
+    processUnitId: integer('process_unit_id'),
+    processUnitName: text('process_unit_name').notNull(),
+    operationalArea: text('operational_area').notNull(),
+    equipmentTag: text('equipment_tag').notNull(),
+    equipmentName: text('equipment_name').notNull(),
+    equipmentClass: text('equipment_class').default('REACTOR').notNull(),
+    safetyCriticality: text('safety_criticality').default('HIGH').notNull(),
+    hazardousSubstances: text('hazardous_substances'),
+    designParameters: text('design_parameters'),
+    responsiblePersonId: integer('responsible_person_id').references(() => personnel.id, { onDelete: 'set null' }),
+    responsiblePersonName: text('responsible_person_name').notNull(),
+    responsibleRole: text('responsible_role'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_psm_assets_project').on(table.projectId),
+    index('idx_psm_assets_unit').on(table.processUnitName),
+    index('idx_psm_assets_tag').on(table.equipmentTag),
+  ]
+);
+
+export const psmAssessments = pgTable(
+  'psm_assessments',
+  {
+    id: serial('id').primaryKey(),
+    projectId: integer('project_id')
+      .references(() => psmProjects.id, { onDelete: 'cascade' })
+      .notNull(),
+    framework: text('framework').notNull(), // CCPS_RBPS | OSHA_1910_119 | NATIONAL_REJAL
+    elementCode: text('element_code').notNull(),
+    elementTitleFa: text('element_title_fa').notNull(),
+    elementTitleEn: text('element_title_en').notNull(),
+    pillar: text('pillar'),
+    unitName: text('unit_name').default('کل مجتمع').notNull(),
+    evaluationCriteria: text('evaluation_criteria').notNull(),
+    isInScope: boolean('is_in_scope').default(true).notNull(),
+    outOfScopeJustification: text('out_of_scope_justification'),
+    outOfScopeApprovedBy: text('out_of_scope_approved_by'),
+    outOfScopeApprovedAt: timestamp('out_of_scope_approved_at'),
+    currentStatusDesc: text('current_status_desc').notNull(),
+    evidenceList: jsonb('evidence_list').default([]).notNull(),
+    assessorId: integer('assessor_id').references(() => personnel.id, { onDelete: 'set null' }),
+    assessorName: text('assessor_name').notNull(),
+    assessmentDate: text('assessment_date').notNull(),
+    strengths: text('strengths'),
+    deficiencies: text('deficiencies'),
+    complianceScore: doublePrecision('compliance_score').default(0).notNull(),
+    complianceStatus: text('compliance_status').default('PARTIAL').notNull(), // COMPLIANT | PARTIAL | NON_COMPLIANT | OUT_OF_SCOPE
+    actionPriority: text('action_priority').default('HIGH').notNull(), // CRITICAL | HIGH | MEDIUM | LOW
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_psm_assessments_project').on(table.projectId),
+    index('idx_psm_assessments_element').on(table.framework, table.elementCode),
+  ]
+);
+
+export const psmGaps = pgTable(
+  'psm_gaps',
+  {
+    id: serial('id').primaryKey(),
+    projectId: integer('project_id')
+      .references(() => psmProjects.id, { onDelete: 'cascade' })
+      .notNull(),
+    assessmentId: integer('assessment_id').references(() => psmAssessments.id, { onDelete: 'set null' }),
+    gapCode: text('gap_code').notNull().unique(),
+    title: text('title').notNull(),
+    description: text('description').notNull(),
+    standardReference: text('standard_reference').notNull(),
+    ccpsElementCode: text('ccps_element_code'),
+    oshaClauseCodes: jsonb('osha_clause_codes').default([]).notNull(),
+    unitName: text('unit_name').notNull(),
+    riskLevel: text('risk_level').default('HIGH').notNull(), // CRITICAL | HIGH | MEDIUM | LOW
+    requiredDocument: text('required_document'),
+    responsiblePersonId: integer('responsible_person_id').references(() => personnel.id, { onDelete: 'set null' }),
+    responsiblePersonName: text('responsible_person_name').notNull(),
+    proposedDueDate: text('proposed_due_date').notNull(),
+    isOutOfScope: boolean('is_out_of_scope').default(false).notNull(),
+    technicalJustification: text('technical_justification'),
+    justificationApprovedBy: text('justification_approved_by'),
+    justificationApprovedAt: timestamp('justification_approved_at'),
+    status: text('status').default('OPEN').notNull(), // OPEN | CONVERTED_TO_WBS | IN_CAPA | CLOSED | OUT_OF_SCOPE_PENDING | OUT_OF_SCOPE_APPROVED
+    linkedWbsId: integer('linked_wbs_id'),
+    linkedCapaId: integer('linked_capa_id'),
+    createdBy: text('created_by'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_psm_gaps_project').on(table.projectId),
+    index('idx_psm_gaps_status').on(table.status),
+    index('idx_psm_gaps_risk').on(table.riskLevel),
+  ]
+);
+
+export const psmWbsTasks = pgTable(
+  'psm_wbs_tasks',
+  {
+    id: serial('id').primaryKey(),
+    projectId: integer('project_id')
+      .references(() => psmProjects.id, { onDelete: 'cascade' })
+      .notNull(),
+    gapId: integer('gap_id').references(() => psmGaps.id, { onDelete: 'set null' }),
+    wbsCode: text('wbs_code').notNull(),
+    parentId: integer('parent_id'),
+    title: text('title').notNull(),
+    elementCode: text('element_code'),
+    unitName: text('unit_name'),
+    ownerName: text('owner_name').notNull(),
+    executorName: text('executor_name').notNull(),
+    plannedStart: text('planned_start').notNull(),
+    plannedEnd: text('planned_end').notNull(),
+    actualStart: text('actual_start'),
+    actualEnd: text('actual_end'),
+    plannedProgress: doublePrecision('planned_progress').default(0).notNull(),
+    actualProgress: doublePrecision('actual_progress').default(0).notNull(),
+    weight: doublePrecision('weight').default(1).notNull(),
+    dependencies: jsonb('dependencies').default([]).notNull(),
+    allocatedBudget: doublePrecision('allocated_budget').default(0).notNull(),
+    actualCost: doublePrecision('actual_cost').default(0).notNull(),
+    resources: text('resources'),
+    isMilestone: boolean('is_milestone').default(false).notNull(),
+    isCritical: boolean('is_critical').default(false).notNull(),
+    delayDays: integer('delay_days').default(0).notNull(),
+    scheduleVariancePct: doublePrecision('schedule_variance_pct').default(0).notNull(),
+    status: text('status').default('NOT_STARTED').notNull(), // NOT_STARTED | IN_PROGRESS | DELAYED | COMPLETED | BLOCKED
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_psm_wbs_project').on(table.projectId),
+    index('idx_psm_wbs_code').on(table.wbsCode),
+  ]
+);
+
+export const psmDocuments = pgTable(
+  'psm_documents',
+  {
+    id: serial('id').primaryKey(),
+    projectId: integer('project_id')
+      .references(() => psmProjects.id, { onDelete: 'cascade' })
+      .notNull(),
+    docCode: text('doc_code').notNull().unique(),
+    title: text('title').notNull(),
+    docType: text('doc_type').default('PROCEDURE').notNull(),
+    ccpsElementCode: text('ccps_element_code').notNull(),
+    oshaClauseCode: text('osha_clause_code'),
+    unitName: text('unit_name'),
+    equipmentTag: text('equipment_tag'),
+    linkedStudyId: integer('linked_study_id'),
+    linkedCapaId: integer('linked_capa_id'),
+    version: text('version').default('1.0').notNull(),
+    revisionNumber: integer('revision_number').default(1).notNull(),
+    authorName: text('author_name').notNull(),
+    reviewerName: text('reviewer_name').notNull(),
+    approverName: text('approver_name').notNull(),
+    issueDate: text('issue_date'),
+    validityExpiryDate: text('validity_expiry_date'),
+    reviewCycleMonths: integer('review_cycle_months').default(24).notNull(),
+    status: text('status').default('DRAFT').notNull(), // DRAFT | UNDER_REVIEW | APPROVED | EXPIRED | SUPERSEDED | REJECTED
+    fileId: text('file_id'),
+    fileUrl: text('file_url'),
+    fileName: text('file_name'),
+    evidenceSummary: text('evidence_summary'),
+    evidenceAttachments: jsonb('evidence_attachments').default([]).notNull(),
+    changeHistory: jsonb('change_history').default([]).notNull(),
+    approvedAt: timestamp('approved_at'),
+    approvedBy: text('approved_by'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_psm_docs_project').on(table.projectId),
+    index('idx_psm_docs_element').on(table.ccpsElementCode),
+    index('idx_psm_docs_status').on(table.status),
+  ]
+);
+
+export const psmCapaItems = pgTable(
+  'psm_capa_items',
+  {
+    id: serial('id').primaryKey(),
+    projectId: integer('project_id')
+      .references(() => psmProjects.id, { onDelete: 'cascade' })
+      .notNull(),
+    capaCode: text('capa_code').notNull().unique(),
+    sourceType: text('source_type').default('GAP_ANALYSIS').notNull(),
+    sourceRefId: text('source_ref_id'),
+    ccpsElementCode: text('ccps_element_code'),
+    oshaClauseCode: text('osha_clause_code'),
+    unitName: text('unit_name').notNull(),
+    equipmentTag: text('equipment_tag'),
+    title: text('title').notNull(),
+    deficiencyDescription: text('deficiency_description').notNull(),
+    riskSeverity: integer('risk_severity').default(3).notNull(),
+    riskLikelihood: integer('risk_likelihood').default(3).notNull(),
+    riskLevel: text('risk_level').default('HIGH').notNull(), // CRITICAL | HIGH | MEDIUM | LOW
+    rootCause: text('root_cause'),
+    correctiveAction: text('corrective_action'),
+    preventiveAction: text('preventive_action'),
+    responsiblePersonName: text('responsible_person_name'),
+    dueDate: text('due_date'),
+    completionDate: text('completion_date'),
+    evidenceDescription: text('evidence_description'),
+    evidenceFiles: jsonb('evidence_files').default([]).notNull(),
+    reviewerName: text('reviewer_name'),
+    reviewNotes: text('review_notes'),
+    reviewedAt: timestamp('reviewed_at'),
+    effectivenessVerifierName: text('effectiveness_verifier_name'),
+    effectivenessVerificationDate: text('effectiveness_verification_date'),
+    effectivenessCriteriaMet: boolean('effectiveness_criteria_met').default(false).notNull(),
+    effectivenessReport: text('effectiveness_report'),
+    closedBy: text('closed_by'),
+    closedAt: timestamp('closed_at'),
+    stage: text('stage').default('REGISTERED').notNull(), // REGISTERED | RISK_ASSESSED | ASSIGNED | ACTION_IN_PROGRESS | EVIDENCE_SUBMITTED | UNDER_REVIEW | EFFECTIVENESS_VERIFIED | CLOSED
+    workflowLogs: jsonb('workflow_logs').default([]).notNull(),
+    followupPlan: text('followup_plan'),
+    managementApprovalForResidual: boolean('management_approval_for_residual').default(false).notNull(),
+    createdBy: text('created_by'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_psm_capa_project').on(table.projectId),
+    index('idx_psm_capa_stage').on(table.stage),
+    index('idx_psm_capa_risk').on(table.riskLevel),
+  ]
+);
+
+export const psmSpecializedStudies = pgTable(
+  'psm_specialized_studies',
+  {
+    id: serial('id').primaryKey(),
+    projectId: integer('project_id')
+      .references(() => psmProjects.id, { onDelete: 'cascade' })
+      .notNull(),
+    studyCode: text('study_code').notNull().unique(),
+    subsystemType: text('subsystem_type').notNull(), // PSI | PHA | HAZOP | HAZID | LOPA | BOW_TIE | OPERATING_PROCEDURES | MI | MOC | PSSR | CONTRACTORS | TRAINING | INCIDENT_INVESTIGATION | EMERGENCY_PLANNING
+    title: text('title').notNull(),
+    unitName: text('unit_name').notNull(),
+    equipmentTag: text('equipment_tag'),
+    nodeOrSection: text('node_or_section'),
+    ownerName: text('owner_name').notNull(),
+    teamLeader: text('team_leader'),
+    studyDate: text('study_date').notNull(),
+    revalidationDueDate: text('revalidation_due_date'),
+    status: text('status').default('IN_PROGRESS').notNull(), // PLANNED | IN_PROGRESS | UNDER_REVIEW | APPROVED | REQUIRES_ACTION | CLOSED
+    technicalSummary: text('technical_summary').notNull(),
+    methodologyDetails: jsonb('methodology_details').default({}).notNull(),
+    recommendations: jsonb('recommendations').default([]).notNull(), // [{ id, title, riskLevel, ownerName, dueDate, status, evidence, trackingPath, linkedCapaCode }]
+    evidenceSummary: text('evidence_summary'),
+    trackingPath: text('tracking_path'),
+    createdBy: text('created_by'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_psm_studies_project').on(table.projectId),
+    index('idx_psm_studies_subsystem').on(table.subsystemType),
+  ]
+);
+
+export const psmMaturityAssessments = pgTable(
+  'psm_maturity_assessments',
+  {
+    id: serial('id').primaryKey(),
+    projectId: integer('project_id')
+      .references(() => psmProjects.id, { onDelete: 'cascade' })
+      .notNull(),
+    assessmentCode: text('assessment_code').notNull().unique(),
+    assessmentDate: text('assessment_date').notNull(),
+    assessorName: text('assessor_name').notNull(),
+    unitScope: text('unit_scope').default('کل مجتمع پتروشیمی رجال').notNull(),
+    overallMaturityLevel: integer('overall_maturity_level').default(1).notNull(), // 1 to 5
+    overallMaturityScore: doublePrecision('overall_maturity_score').default(1).notNull(), // 1.00 to 5.00
+    pillarScores: jsonb('pillar_scores').default({}).notNull(),
+    elementMaturityData: jsonb('element_maturity_data').default([]).notNull(), // Array of 20 CCPS elements with independent 5-level evaluation (design, execution, culture, sustainability)
+    strengthsSummary: text('strengths_summary'),
+    improvementRoadmap: text('improvement_roadmap'),
+    verifiedBy: text('verified_by'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_psm_maturity_project').on(table.projectId),
+  ]
+);
+
+export const psmStageGates = pgTable(
+  'psm_stage_gates',
+  {
+    id: serial('id').primaryKey(),
+    projectId: integer('project_id')
+      .references(() => psmProjects.id, { onDelete: 'cascade' })
+      .notNull(),
+    gateKey: text('gate_key').notNull(), // G1 | G2 | G3 | G4 | G5 | G6
+    gateNumber: integer('gate_number').notNull(), // 1 to 6
+    titleFa: text('title_fa').notNull(),
+    titleEn: text('title_en').notNull(),
+    descriptionFa: text('description_fa').notNull(),
+    entryCriteria: jsonb('entry_criteria').default([]).notNull(),
+    exitCriteria: jsonb('exit_criteria').default([]).notNull(),
+    mandatoryChecklist: jsonb('mandatory_checklist').default([]).notNull(),
+    requiredEvidenceList: jsonb('required_evidence_list').default([]).notNull(),
+    preparedByName: text('prepared_by_name').default('').notNull(),
+    evaluatorName: text('evaluator_name').default('').notNull(),
+    approverName: text('approver_name').default('').notNull(),
+    status: text('status').default('PENDING').notNull(), // PENDING | IN_REVIEW | APPROVED | REJECTED | SUSPENDED
+    decisionDate: text('decision_date'),
+    meetingMinutes: text('meeting_minutes'),
+    comments: text('comments'),
+    blockingIssues: jsonb('blocking_issues').default([]).notNull(),
+    changeHistory: jsonb('change_history').default([]).notNull(),
+    approvedAt: timestamp('approved_at'),
+    approvedBy: text('approved_by'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_psm_stage_gates_project').on(table.projectId),
+    index('idx_psm_stage_gates_key').on(table.gateKey),
+    index('idx_psm_stage_gates_status').on(table.status),
+  ]
+);
+
+export const psmGateDeviations = pgTable(
+  'psm_gate_deviations',
+  {
+    id: serial('id').primaryKey(),
+    projectId: integer('project_id')
+      .references(() => psmProjects.id, { onDelete: 'cascade' })
+      .notNull(),
+    gateKey: text('gate_key').notNull(),
+    deviationCode: text('deviation_code').notNull().unique(),
+    title: text('title').notNull(),
+    requirementDescription: text('requirement_description').notNull(),
+    technicalJustification: text('technical_justification').notNull(),
+    riskAssessmentSummary: text('risk_assessment_summary').notNull(),
+    compensatoryMeasures: text('compensatory_measures').notNull(),
+    isLegalRequirement: boolean('is_legal_requirement').default(false).notNull(),
+    requestedByName: text('requested_by_name').notNull(),
+    approvedByName: text('approved_by_name'),
+    approvalRole: text('approval_role'),
+    validUntilDate: text('valid_until_date').notNull(),
+    status: text('status').default('PENDING').notNull(), // PENDING | APPROVED | REJECTED | EXPIRED
+    decisionNotes: text('decision_notes'),
+    decidedAt: timestamp('decided_at'),
+    changeHistory: jsonb('change_history').default([]).notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_psm_gate_deviations_project').on(table.projectId),
+    index('idx_psm_gate_deviations_gate').on(table.gateKey),
+    index('idx_psm_gate_deviations_status').on(table.status),
+  ]
+);
+

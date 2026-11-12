@@ -10,7 +10,7 @@
  * - RBAC permission integration
  */
 
-import { SYSTEM_MODULE_GROUPS, ALL_SYSTEM_MODULES, ALL_HEALTH_ENV_SUBITEMS, ALL_FIRE_DEPT_SUBITEMS, ALL_SAFETY_DEPT_SUBITEMS, ALL_DOCUMENTS_SUBITEMS } from '../../../src/config/modulesConfig.ts';
+import { SYSTEM_MODULE_GROUPS, ALL_SYSTEM_MODULES, ALL_HEALTH_ENV_SUBITEMS, ALL_FIRE_DEPT_SUBITEMS, ALL_SAFETY_DEPT_SUBITEMS, ALL_DOCUMENTS_SUBITEMS, ALL_PSM_SUBITEMS } from '../../../src/config/modulesConfig.ts';
 import { UserContext, checkUserHasPermission, isGlobalAdminUser } from '../../core/middleware/auth.ts';
 
 export type AIModuleStatus = 'IDENTIFIED' | 'HAS_API' | 'HAS_ADAPTER' | 'HAS_READ_TOOL' | 'HAS_RBAC_GUARD' | 'TESTED' | 'AI_READY';
@@ -105,6 +105,15 @@ export class AIModuleRegistry {
       aiStatus: 'AI_READY',
     }));
 
+    // PSM Subitems mapping
+    const psmSubitems: AIModuleSubitem[] = ALL_PSM_SUBITEMS.map(sub => ({
+      key: sub.key,
+      titleFa: sub.titleFa,
+      titleEn: sub.titleEn,
+      descriptionFa: sub.descriptionFa,
+      aiStatus: 'AI_READY',
+    }));
+
     const toolsByModule: Record<string, { tools: string[]; perm?: string; tables: string[]; isMedical?: boolean }> = {
       dashboard: { tools: ['kpi_management_summary'], perm: 'reports:read', tables: ['trir_monthly_records', 'incidents'] },
       heat: { tools: ['heat_weather_summary'], perm: '', tables: ['system_settings'] },
@@ -114,6 +123,7 @@ export class AIModuleRegistry {
       'safety-unit': { tools: ['five_s_inspections_summary'], perm: 'safety:read', tables: ['safety_inspections', 'safety_templates'] },
       'fire-dept': { tools: ['fire_safety_summary'], perm: 'fire:read', tables: ['fire_equipment', 'system_settings'] },
       'health-env': { tools: ['health_medical_summary', 'nutrition_high_risk_summary', 'environment_summary'], perm: 'health:read', tables: ['periodic_medical_exams', 'lab_results', 'audiometry_records', 'spirometry_records', 'optometry_records', 'environmental_logs'], isMedical: true },
+      psm: { tools: ['psm_summary', 'risk_assessment_summary', 'non_conformances_summary'], perm: 'safety:read', tables: ['psm_projects', 'psm_process_assets', 'psm_assessments', 'psm_gaps', 'psm_wbs_tasks', 'psm_documents', 'psm_capa_items', 'psm_specialized_studies', 'psm_maturity_assessments'] },
       permit: { tools: ['ptw_summary'], perm: 'ptw:read', tables: ['work_permits', 'permit_signatures'] },
       'ptw-audit': { tools: ['ptw_summary'], perm: 'ptw:read', tables: ['work_permits', 'system_settings'] },
       risk: { tools: ['risk_assessment_summary'], perm: 'risks:read', tables: ['risk_assessments'] },
@@ -139,6 +149,7 @@ export class AIModuleRegistry {
       else if (mod.key === 'fire-dept') subitems = fireSubitems;
       else if (mod.key === 'safety-unit') subitems = safetySubitems;
       else if (mod.key === 'documents') subitems = docsSubitems;
+      else if (mod.key === 'psm') subitems = psmSubitems;
 
       this.dynamicModules.set(mod.key, {
         key: mod.key,

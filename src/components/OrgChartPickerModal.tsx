@@ -269,8 +269,8 @@ export const OrgChartPickerModal: React.FC<OrgChartPickerModalProps> = ({
                 onClick={() => setActiveTab('hierarchy')}
                 className={`px-3.5 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition cursor-pointer ${
                   activeTab === 'hierarchy' 
-                    ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs' 
-                    : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                    ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-300 shadow-xs' 
+                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
                 <FolderTree className="w-3.5 h-3.5" />
@@ -282,8 +282,8 @@ export const OrgChartPickerModal: React.FC<OrgChartPickerModalProps> = ({
                 onClick={() => setActiveTab('units_jobs')}
                 className={`px-3.5 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition cursor-pointer ${
                   activeTab === 'units_jobs' 
-                    ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs' 
-                    : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                    ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-300 shadow-xs' 
+                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
                 <Layers className="w-3.5 h-3.5" />

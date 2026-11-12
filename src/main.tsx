@@ -50,8 +50,16 @@ if (typeof window !== 'undefined') {
 
 import App from './App.tsx';
 import './index.css';
-import { KeycloakProvider } from './auth/KeycloakContext';
 import { FinalSubmitProvider } from './context/FinalSubmitContext';
+
+if (typeof window !== 'undefined') {
+  try {
+    localStorage.removeItem('mock_kc_role');
+    localStorage.removeItem('mock_kc_user');
+  } catch {
+    // Ignore storage access errors
+  }
+}
 
 interface ErrorBoundaryProps {
   children: React.ReactNode;
@@ -124,12 +132,10 @@ import { WebSocketProvider } from './providers/WebSocketProvider';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <KeycloakProvider>
-      <WebSocketProvider>
-        <FinalSubmitProvider>
-          <ErrorBoundary><App /></ErrorBoundary>
-        </FinalSubmitProvider>
-      </WebSocketProvider>
-    </KeycloakProvider>
+    <WebSocketProvider>
+      <FinalSubmitProvider>
+        <ErrorBoundary><App /></ErrorBoundary>
+      </FinalSubmitProvider>
+    </WebSocketProvider>
   </StrictMode>,
 );

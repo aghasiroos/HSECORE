@@ -6,11 +6,15 @@ import moment from 'moment-jalaali';
 import { db, schema } from '../../core/db.ts';
 import { ValidationError, NotFoundError, UnauthorizedError, ForbiddenError } from '../../core/errors.ts';
 import { auditService } from '../audit/audit.service.ts';
-import { ROLE_PERMISSIONS, normalizeRoleToCanonical } from '../../core/middleware/auth.ts';
+import { ROLE_PERMISSIONS, normalizeRoleToCanonical, checkUserHasPermission } from '../../core/middleware/auth.ts';
 import { config } from '../../core/config.ts';
 import { logger } from '../../core/logger.ts';
 import { personnelAccessService, isAdminRole } from '../../core/personnelAccess.service.ts';
-import { normalizePersianArabicText, normalizeDigits as sharedNormalizeDigits } from '../../../src/utils/textNormalization.ts';
+import {
+  normalizePersianArabicText,
+  normalizeDigits as sharedNormalizeDigits,
+  parseValidPgSerialId,
+} from '../../../src/utils/textNormalization.ts';
 import { toPersianDigits as sharedToPersianDigits } from '../../../src/utils/jalaliDate.ts';
 
 /**
@@ -441,12 +445,33 @@ export class AuthService {
 
     // Compact token permissions strictly formatted as a lightweight scopes array
     // Prevents exceeding Nginx proxy_buffer_size and RFC 6265 browser cookie limit (4096 bytes)
-    // which caused Nginx "upstream sent too big header" and 502 Bad Gateway on VPS
-    const tokenScopes: string[] = canonicalKey === 'ADMINISTRATOR' || roleKey === 'ADMIN'
-      ? ['*']
-      : Array.isArray(user.permissions)
-      ? (user.permissions as string[]).slice(0, 30)
-      : (ROLE_PERMISSIONS[canonicalKey] || ['dashboard:view', 'user:read']);
+    let tokenScopes: string[];
+    if (canonicalKey === 'ADMINISTRATOR' || roleKey === 'ADMIN') {
+      tokenScopes = ['*'];
+    } else if (Array.isArray(user.permissions)) {
+      tokenScopes = (user.permissions as string[]).slice(0, 35);
+    } else {
+      const scopeSet = new Set<string>(ROLE_PERMISSIONS[canonicalKey] || ['dashboard:view', 'user:read']);
+      if (user.permissions && typeof user.permissions === 'object') {
+        const probeUser = { uid: user.uid, role, permissions: user.permissions as any };
+        const candidateScopes = [
+          'documents:read', 'documents:create', 'documents:update', 'documents:delete',
+          'ptw:read', 'ptw:create', 'ptw:sign',
+          'incidents:read', 'incidents:create', 'incidents:update',
+          'health:read', 'health:create', 'health:update',
+          'warnings:read', 'warnings:create', 'warnings:update',
+          'reports:read', 'notifications:read', 'notifications:create',
+          'fire_equipment:read', 'fire_equipment:update', 'five_s:read', 'five_s:create',
+          'orgstructure:read', 'orgstructure:update', 'workflow:action', 'audit:read',
+        ];
+        for (const sc of candidateScopes) {
+          if (checkUserHasPermission(probeUser, sc)) {
+            scopeSet.add(sc);
+          }
+        }
+      }
+      tokenScopes = Array.from(scopeSet).slice(0, 35);
+    }
 
     // 6. Check for mustResetPassword flag in user profile
     const profileData = (user.profileData as Record<string, any>) || {};
@@ -841,8 +866,9 @@ export class AuthService {
     let existingUser: any = null;
     if (data.id !== undefined && data.id !== null && String(data.id).trim() !== '') {
       const idStr = String(data.id).trim();
-      if (!isNaN(Number(idStr))) {
-        const byId = await db.select().from(schema.users).where(and(eq(schema.users.id, Number(idStr)), isNull(schema.users.deletedAt))).limit(1);
+      const validId = parseValidPgSerialId(idStr);
+      if (validId !== null) {
+        const byId = await db.select().from(schema.users).where(and(eq(schema.users.id, validId), isNull(schema.users.deletedAt))).limit(1);
         if (byId.length > 0) existingUser = byId[0];
       }
       if (!existingUser) {
@@ -853,8 +879,9 @@ export class AuthService {
     if (!existingUser && targetUid) {
       const byUid = await db.select().from(schema.users).where(and(eq(schema.users.uid, targetUid), isNull(schema.users.deletedAt))).limit(1);
       if (byUid.length > 0) existingUser = byUid[0];
-      if (!existingUser && !isNaN(Number(targetUid))) {
-        const byUidAsId = await db.select().from(schema.users).where(and(eq(schema.users.id, Number(targetUid)), isNull(schema.users.deletedAt))).limit(1);
+      const validTargetId = parseValidPgSerialId(targetUid);
+      if (!existingUser && validTargetId !== null) {
+        const byUidAsId = await db.select().from(schema.users).where(and(eq(schema.users.id, validTargetId), isNull(schema.users.deletedAt))).limit(1);
         if (byUidAsId.length > 0) existingUser = byUidAsId[0];
       }
     }
@@ -1176,13 +1203,13 @@ export class AuthService {
       throw new ValidationError('شناسه کاربر نامعتبر است.');
     }
 
-    const isNum = !isNaN(Number(cleanId)) && Number(cleanId) > 0;
+    const numId = parseValidPgSerialId(cleanId);
     const conditions = [
       eq(schema.users.uid, cleanId),
       eq(schema.users.username, cleanId)
     ];
-    if (isNum) {
-      conditions.push(eq(schema.users.id, Number(cleanId)));
+    if (numId !== null) {
+      conditions.push(eq(schema.users.id, numId));
     }
 
     const existing = await db

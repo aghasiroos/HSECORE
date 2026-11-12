@@ -5,6 +5,7 @@ import * as schema from '../src/db/schema.ts';
 import { authService } from './modules/auth/auth.service.ts';
 import { generateNextPermitNumber, ensurePermitTablesExist } from './services/permitNumberService.ts';
 import { dispatchDomainWebhookEvent } from './services/webhookDispatcher.ts';
+import { cleanPersonnelCode, sortPersonnelByCodeAsc, parseValidPgSerialId } from '../src/utils/textNormalization.ts';
 
 // ============================================================================
 // 1. ORGANIZATIONAL HIERARCHY
@@ -64,11 +65,13 @@ export async function getAllPersonnel(filters?: { companyId?: number; unitId?: n
       list = await db.select().from(schema.personnel).orderBy(desc(schema.personnel.createdAt));
     }
 
-    return list.map((r: any) => {
+    const mapped = list.map((r: any) => {
       const extra = (r.extraData && typeof r.extraData === 'object') ? r.extraData : {};
+      const resolvedPCode = cleanPersonnelCode(r.personnelCode, Boolean(extra.hasNoPersonnelCode));
       return {
         ...extra,
         ...r,
+        personnelCode: resolvedPCode,
         phone: r.mobile || extra.phone || '',
         mobile: r.mobile || extra.phone || '',
         unit: extra.unit || r.unit || '',
@@ -83,6 +86,8 @@ export async function getAllPersonnel(filters?: { companyId?: number; unitId?: n
         signatureImage: extra.signatureImage || extra.digitalSignature || '',
       };
     });
+
+    return sortPersonnelByCodeAsc(mapped);
   } catch (error) {
     console.error('Failed to fetch personnel:', error);
     throw new Error('Database query failed for personnel.', { cause: error });
@@ -91,22 +96,22 @@ export async function getAllPersonnel(filters?: { companyId?: number; unitId?: n
 
 export async function getPersonnelByCodeOrNationalId(identifier: string) {
   try {
-    const isNum = /^\d+$/.test(identifier);
-    let condition;
-    if (isNum) {
-      const numId = parseInt(identifier, 10);
-      condition = sql`${schema.personnel.id} = ${numId} OR ${schema.personnel.personnelCode} = ${identifier} OR ${schema.personnel.nationalCode} = ${identifier}`;
-    } else {
-      condition = sql`${schema.personnel.personnelCode} = ${identifier} OR ${schema.personnel.nationalCode} = ${identifier}`;
-    }
+    const cleanIdentifier = String(identifier || '').trim();
+    const numId = parseValidPgSerialId(cleanIdentifier);
+    const condition =
+      numId !== null
+        ? sql`${schema.personnel.id} = ${numId} OR ${schema.personnel.personnelCode} = ${cleanIdentifier} OR ${schema.personnel.nationalCode} = ${cleanIdentifier}`
+        : sql`${schema.personnel.personnelCode} = ${cleanIdentifier} OR ${schema.personnel.nationalCode} = ${cleanIdentifier}`;
 
     const result = await db.select().from(schema.personnel).where(condition);
     const r = result[0];
     if (!r) return null;
     const extra = (r.extraData && typeof r.extraData === 'object') ? (r.extraData as Record<string, any>) : {};
+    const resolvedPCode = cleanPersonnelCode(r.personnelCode, Boolean(extra.hasNoPersonnelCode));
     return {
       ...extra,
       ...r,
+      personnelCode: resolvedPCode,
       phone: r.mobile || extra.phone || '',
       mobile: r.mobile || extra.phone || '',
       unit: extra.unit || '',
@@ -128,14 +133,12 @@ export async function getPersonnelByCodeOrNationalId(identifier: string) {
 
 export async function deletePersonnel(identifier: string, deleteAssociatedUser = false) {
   try {
-    const isNum = /^\d+$/.test(identifier);
-    let condition;
-    if (isNum) {
-      const numId = parseInt(identifier, 10);
-      condition = sql`${schema.personnel.id} = ${numId} OR ${schema.personnel.personnelCode} = ${identifier} OR ${schema.personnel.nationalCode} = ${identifier}`;
-    } else {
-      condition = sql`${schema.personnel.personnelCode} = ${identifier} OR ${schema.personnel.nationalCode} = ${identifier}`;
-    }
+    const cleanIdentifier = String(identifier || '').trim();
+    const numId = parseValidPgSerialId(cleanIdentifier);
+    const condition =
+      numId !== null
+        ? sql`${schema.personnel.id} = ${numId} OR ${schema.personnel.personnelCode} = ${cleanIdentifier} OR ${schema.personnel.nationalCode} = ${cleanIdentifier}`
+        : sql`${schema.personnel.personnelCode} = ${cleanIdentifier} OR ${schema.personnel.nationalCode} = ${cleanIdentifier}`;
 
     const targetRecords = await db.select().from(schema.personnel).where(condition);
     const target = targetRecords[0];
@@ -164,76 +167,97 @@ export async function deletePersonnel(identifier: string, deleteAssociatedUser =
   }
 }
 
-export async function upsertPersonnel(data: {
-  id?: string | number;
-  personnelCode: string;
-  nationalCode?: string;
-  firstName: string;
-  lastName: string;
-  fatherName?: string;
-  gender?: string;
-  birthDate?: string;
-  hireDate?: string;
-  jobTitle?: string;
-  companyId?: number;
-  siteId?: number;
-  departmentId?: number;
-  unitId?: number;
-  positionId?: number;
-  mobile?: string;
-  phone?: string;
-  unit?: string;
-  subUnit?: string;
-  department?: string;
-  workplace?: string;
-  education?: string;
-  childrenCount?: string | number;
-  maritalStatus?: string;
-  militaryStatus?: string;
-  notes?: string;
-  profilePhoto?: string;
-  signatureImage?: string;
-  age?: number;
-  bloodGroup?: string;
-  status?: string;
-  extraData?: any;
-}) {
-  try {
-    const cleanPCode = String(data.personnelCode || '').trim();
-    if (!cleanPCode) {
-      throw new Error('Personnel code is required');
-    }
+export interface PersonnelBatchLookupContext {
+  byId: Map<number, any>;
+  byCode: Map<string, any>;
+  byNational: Map<string, any>;
+  skipUserSync?: boolean;
+}
 
+export async function upsertPersonnel(
+  data: {
+    id?: string | number;
+    personnelCode?: string;
+    nationalCode?: string;
+    firstName: string;
+    lastName: string;
+    fatherName?: string;
+    gender?: string;
+    birthDate?: string;
+    hireDate?: string;
+    jobTitle?: string;
+    companyId?: number;
+    siteId?: number;
+    departmentId?: number;
+    unitId?: number;
+    positionId?: number;
+    mobile?: string;
+    phone?: string;
+    unit?: string;
+    subUnit?: string;
+    department?: string;
+    workplace?: string;
+    education?: string;
+    childrenCount?: string | number;
+    maritalStatus?: string;
+    militaryStatus?: string;
+    notes?: string;
+    profilePhoto?: string;
+    signatureImage?: string;
+    age?: number;
+    bloodGroup?: string;
+    status?: string;
+    extraData?: any;
+  },
+  lookupCtx?: PersonnelBatchLookupContext
+) {
+  try {
+    const cleanPCode = cleanPersonnelCode(data.personnelCode);
+    const hasNoPersonnelCode = !cleanPCode;
     const rawNCode = String(data.nationalCode || (data as any).nationalId || '').trim();
+    const validId = parseValidPgSerialId(data.id);
 
     // 1. Find existing personnel record by ID, personnelCode, or nationalCode
     let existingRecord: any = null;
-    if (data.id !== undefined && data.id !== null && /^\d+$/.test(String(data.id).trim())) {
-      const byId = await db
-        .select()
-        .from(schema.personnel)
-        .where(eq(schema.personnel.id, parseInt(String(data.id).trim(), 10)))
-        .limit(1);
-      if (byId.length > 0) existingRecord = byId[0];
+    if (lookupCtx) {
+      if (validId !== null) existingRecord = lookupCtx.byId.get(validId) || null;
+      if (!existingRecord && cleanPCode) existingRecord = lookupCtx.byCode.get(cleanPCode) || null;
+      if (!existingRecord && rawNCode) existingRecord = lookupCtx.byNational.get(rawNCode) || null;
+    } else {
+      if (validId !== null) {
+        const byId = await db
+          .select()
+          .from(schema.personnel)
+          .where(eq(schema.personnel.id, validId))
+          .limit(1);
+        if (byId.length > 0) existingRecord = byId[0];
+      }
+
+      if (!existingRecord && cleanPCode) {
+        const byCode = await db
+          .select()
+          .from(schema.personnel)
+          .where(eq(schema.personnel.personnelCode, cleanPCode))
+          .limit(1);
+        if (byCode.length > 0) existingRecord = byCode[0];
+      }
+
+      if (!existingRecord && rawNCode) {
+        const byNational = await db
+          .select()
+          .from(schema.personnel)
+          .where(eq(schema.personnel.nationalCode, rawNCode))
+          .limit(1);
+        if (byNational.length > 0) existingRecord = byNational[0];
+      }
     }
 
-    if (!existingRecord) {
-      const byCode = await db
-        .select()
-        .from(schema.personnel)
-        .where(eq(schema.personnel.personnelCode, cleanPCode))
-        .limit(1);
-      if (byCode.length > 0) existingRecord = byCode[0];
-    }
-
-    if (!existingRecord && rawNCode) {
-      const byNational = await db
-        .select()
-        .from(schema.personnel)
-        .where(eq(schema.personnel.nationalCode, rawNCode))
-        .limit(1);
-      if (byNational.length > 0) existingRecord = byNational[0];
-    }
+    // Internal DB key for personnel_code (since column is NOT NULL UNIQUE in PostgreSQL)
+    const dbPCode = cleanPCode
+      ? cleanPCode
+      : existingRecord?.personnelCode?.startsWith('NO-PCODE-')
+      ? existingRecord.personnelCode
+      : `NO-PCODE-${rawNCode || Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
 
     const prevExtra =
       existingRecord?.extraData && typeof existingRecord.extraData === 'object'
@@ -252,6 +276,7 @@ export async function upsertPersonnel(data: {
     const extraData = {
       ...prevExtra,
       ...(data.extraData || {}),
+      hasNoPersonnelCode,
       unit: data.unit !== undefined ? data.unit : (data.department || data.extraData?.unit || prevExtra.unit || ''),
       subUnit: data.subUnit !== undefined ? data.subUnit : (data.extraData?.subUnit || prevExtra.subUnit || ''),
       department: data.department !== undefined ? data.department : (data.unit || data.extraData?.department || prevExtra.department || ''),
@@ -268,14 +293,21 @@ export async function upsertPersonnel(data: {
     };
 
     // Determine safe unique nationalCode
-    let nCode = rawNCode || existingRecord?.nationalCode || cleanPCode;
-    const conflictingNational = await db
-      .select()
-      .from(schema.personnel)
-      .where(eq(schema.personnel.nationalCode, nCode))
-      .limit(1);
-    if (conflictingNational.length > 0 && (!existingRecord || conflictingNational[0].id !== existingRecord.id)) {
-      nCode = `${cleanPCode}-${Date.now().toString().slice(-4)}`;
+    let nCode = rawNCode || existingRecord?.nationalCode || dbPCode;
+    if (lookupCtx) {
+      const conflicting = lookupCtx.byNational.get(nCode);
+      if (conflicting && (!existingRecord || conflicting.id !== existingRecord.id)) {
+        nCode = `${dbPCode}-${Date.now().toString().slice(-4)}-${Math.random().toString(36).substring(2, 5)}`;
+      }
+    } else {
+      const conflictingNational = await db
+        .select()
+        .from(schema.personnel)
+        .where(eq(schema.personnel.nationalCode, nCode))
+        .limit(1);
+      if (conflictingNational.length > 0 && (!existingRecord || conflictingNational[0].id !== existingRecord.id)) {
+        nCode = `${dbPCode}-${Date.now().toString().slice(-4)}`;
+      }
     }
 
     let saved: any;
@@ -283,7 +315,7 @@ export async function upsertPersonnel(data: {
       const updatedRows = await db
         .update(schema.personnel)
         .set({
-          personnelCode: cleanPCode,
+          personnelCode: dbPCode,
           nationalCode: nCode,
           firstName: data.firstName ?? existingRecord.firstName,
           lastName: data.lastName ?? existingRecord.lastName,
@@ -310,7 +342,7 @@ export async function upsertPersonnel(data: {
       const insertedRows = await db
         .insert(schema.personnel)
         .values({
-          personnelCode: cleanPCode,
+          personnelCode: dbPCode,
           nationalCode: nCode,
           firstName: data.firstName || '',
           lastName: data.lastName || '',
@@ -334,8 +366,14 @@ export async function upsertPersonnel(data: {
       saved = insertedRows[0];
     }
 
+    if (lookupCtx && saved) {
+      lookupCtx.byId.set(saved.id, saved);
+      if (cleanPCode) lookupCtx.byCode.set(cleanPCode, saved);
+      if (nCode) lookupCtx.byNational.set(nCode, saved);
+    }
+
     // Also synchronize signatureImage and key profile fields to linked user account if one exists
-    if (cleanPCode) {
+    if (cleanPCode && !lookupCtx?.skipUserSync) {
       try {
         const linkedUsers = await db
           .select()
@@ -373,6 +411,7 @@ export async function upsertPersonnel(data: {
       ...extraData,
       ...saved,
       id: String(saved.id),
+      personnelCode: cleanPCode,
       phone: saved.mobile || extraData.phone || '',
       mobile: saved.mobile || extraData.phone || '',
       signatureImage: extraData.signatureImage || '',
@@ -385,20 +424,39 @@ export async function upsertPersonnel(data: {
 
 export async function batchUpsertPersonnel(records: Array<any>) {
   try {
-    const valid = records.filter(r => (r.personnelCode || r.nationalCode) && (r.firstName || r.lastName || r.fullName));
+    const valid = records.filter(r => r.personnelCode || r.rawPersonnelCode || r.nationalCode || r.rawNationalCode || r.firstName || r.lastName || r.fullName);
+    if (valid.length === 0) {
+      return { count: 0, success: true };
+    }
+
+    // Preload all existing personnel in 1 query to avoid N+1 SELECTs during batch import
+    const existingRows = await db.select().from(schema.personnel);
+    const lookupCtx: PersonnelBatchLookupContext = {
+      byId: new Map(),
+      byCode: new Map(),
+      byNational: new Map(),
+      skipUserSync: true,
+    };
+    for (const row of existingRows) {
+      lookupCtx.byId.set(row.id, row);
+      const cCode = cleanPersonnelCode(row.personnelCode, Boolean((row.extraData as any)?.hasNoPersonnelCode));
+      if (cCode) lookupCtx.byCode.set(cCode, row);
+      if (row.nationalCode) lookupCtx.byNational.set(String(row.nationalCode).trim(), row);
+    }
+
     const results = [];
-    const chunkSize = 15;
+    const chunkSize = 25;
     for (let i = 0; i < valid.length; i += chunkSize) {
       const chunk = valid.slice(i, i + chunkSize);
-      const chunkResults = await Promise.all(chunk.map((r, idx) => {
+      const chunkResults = await Promise.all(chunk.map((r) => {
         const fn = r.firstName || (r.fullName ? r.fullName.split(' ')[0] : 'پرسنل');
         const ln = r.lastName || (r.fullName ? r.fullName.split(' ').slice(1).join(' ') : 'نامشخص');
-        const pCode = r.personnelCode || r.rawPersonnelCode || r.nationalCode || `EMP-${Date.now()}-${idx}`;
-        const nCode = r.nationalCode || r.rawNationalCode || pCode;
+        const cleanPCode = cleanPersonnelCode(r.personnelCode ?? r.rawPersonnelCode);
+        const nCode = String(r.nationalCode || r.rawNationalCode || '').trim();
         const payload = {
           ...r,
-          personnelCode: String(pCode).trim(),
-          nationalCode: String(nCode).trim(),
+          personnelCode: cleanPCode,
+          nationalCode: nCode,
           firstName: String(fn).trim(),
           lastName: String(ln).trim(),
           mobile: r.mobile || r.phone || '',
@@ -408,6 +466,7 @@ export async function batchUpsertPersonnel(records: Array<any>) {
           gender: r.gender === 'زن' || r.gender === 'FEMALE' ? 'FEMALE' : 'MALE',
           extraData: {
             ...(r.extraData || {}),
+            hasNoPersonnelCode: !cleanPCode,
             workplace: r.workplace || '',
             unit: r.unit || '',
             subUnit: r.subUnit || '',
@@ -421,7 +480,7 @@ export async function batchUpsertPersonnel(records: Array<any>) {
             signatureImage: r.signatureImage || r.digitalSignature || r.extraData?.signatureImage || '',
           }
         };
-        return upsertPersonnel(payload);
+        return upsertPersonnel(payload, lookupCtx);
       }));
       results.push(...chunkResults);
     }
@@ -731,8 +790,8 @@ export async function upsertWorkPermit(permitData: any) {
     const inputPermitNumber = permitData.permitNumber || permitData.serialNumber;
 
     if (permitData.id) {
-      const numId = Number(permitData.id);
-      if (!isNaN(numId)) {
+      const numId = parseValidPgSerialId(permitData.id);
+      if (numId !== null) {
         existing = await db.select().from(schema.workPermits).where(eq(schema.workPermits.id, numId));
       }
     }
@@ -849,9 +908,8 @@ export async function upsertWorkPermit(permitData: any) {
 
 export async function deleteWorkPermit(idOrNumber: string | number) {
   try {
-    const isNum = typeof idOrNumber === 'number' || (typeof idOrNumber === 'string' && /^\d+$/.test(idOrNumber.trim()));
-    if (isNum) {
-      const numId = Number(idOrNumber);
+    const numId = parseValidPgSerialId(idOrNumber);
+    if (numId !== null) {
       const res = await db.delete(schema.workPermits).where(eq(schema.workPermits.id, numId)).returning();
       if (res.length > 0) return { success: true, count: res.length };
     }
@@ -905,8 +963,8 @@ export async function createRiskAssessment(data: any) {
 
 export async function deleteRiskAssessment(id: string | number) {
   try {
-    const numId = Number(id);
-    if (!isNaN(numId)) {
+    const numId = parseValidPgSerialId(id);
+    if (numId !== null) {
       return await db.delete(schema.riskAssessments).where(eq(schema.riskAssessments.id, numId)).returning();
     }
     return [];
@@ -932,9 +990,9 @@ export async function createIncident(data: any) {
 export async function upsertIncident(data: any) {
   try {
     let existing = null;
-    const isNum = data.id && (typeof data.id === 'number' || (typeof data.id === 'string' && /^\d+$/.test(data.id.trim())));
-    if (isNum) {
-      const byId = await db.select().from(schema.incidents).where(eq(schema.incidents.id, Number(data.id)));
+    const numId = parseValidPgSerialId(data.id);
+    if (numId !== null) {
+      const byId = await db.select().from(schema.incidents).where(eq(schema.incidents.id, numId));
       if (byId.length > 0) existing = byId[0];
     }
     if (!existing && data.incidentNumber) {
@@ -985,9 +1043,8 @@ export async function deleteIncident(idOrNumber: string | number) {
   try {
     const raw = String(idOrNumber || '').trim();
     if (!raw) return { success: false, count: 0 };
-    const isNum = /^\d+$/.test(raw);
-    if (isNum) {
-      const numId = Number(raw);
+    const numId = parseValidPgSerialId(raw);
+    if (numId !== null) {
       const res = await db.delete(schema.incidents).where(
         or(
           eq(schema.incidents.id, numId),
@@ -1551,9 +1608,9 @@ export async function deduplicateSafetyWarningsInDb(): Promise<number> {
 
 export async function deleteSafetyWarningById(id: number | string): Promise<boolean> {
   try {
-    const numericId = typeof id === 'string' ? parseInt(id, 10) : id;
-    if (isNaN(numericId)) {
-      // If it's a string that doesn't parse to number, try checking by notice number
+    const numericId = parseValidPgSerialId(id);
+    if (numericId === null) {
+      // If it's not a valid 32-bit serial ID, check by notice number
       await db.delete(schema.safetyWarnings).where(eq(schema.safetyWarnings.number, String(id)));
       return true;
     }
@@ -1984,9 +2041,9 @@ export async function deleteFireEquipment(idOrCode: string | number, actorUserna
       return true;
     }
 
-    const isNum = !isNaN(Number(idOrCode));
+    const numId = parseValidPgSerialId(idOrCode);
     const conditions = [];
-    if (isNum) conditions.push(eq(schema.fireEquipment.id, Number(idOrCode)));
+    if (numId !== null) conditions.push(eq(schema.fireEquipment.id, numId));
     conditions.push(eq(schema.fireEquipment.code, cleanTarget));
     await db.delete(schema.fireEquipment).where(or(...conditions));
     return true;
@@ -2149,8 +2206,8 @@ export async function saveNotificationRecord(notif: any) {
 
 export async function deleteNotificationRecord(idOrNotifId: string) {
   try {
-    const numId = Number(idOrNotifId);
-    if (!isNaN(numId) && Number.isInteger(numId) && numId > 0) {
+    const numId = parseValidPgSerialId(idOrNotifId);
+    if (numId !== null) {
       await db
         .update(schema.notifications)
         .set({ isDeleted: true })
@@ -2298,9 +2355,9 @@ export async function getAllNonConformances(filters?: {
 
 export async function getNonConformanceByIdOrTrackingCode(idOrCode: string | number) {
   try {
-    const isNum = !isNaN(Number(idOrCode));
+    const numId = parseValidPgSerialId(idOrCode);
     const conditions = [];
-    if (isNum) conditions.push(eq(schema.nonConformances.id, Number(idOrCode)));
+    if (numId !== null) conditions.push(eq(schema.nonConformances.id, numId));
     conditions.push(eq(schema.nonConformances.trackingCode, String(idOrCode)));
 
     const records = await withDbRetry(() =>

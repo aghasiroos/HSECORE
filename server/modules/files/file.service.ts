@@ -1,4 +1,5 @@
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { eq, and, isNull, desc, sql } from 'drizzle-orm';
@@ -83,6 +84,7 @@ const ALLOWED_MIME_TYPES = new Set([
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // xlsx
   'application/vnd.ms-excel',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // docx
+  'application/msword',
   'text/plain',
   'text/csv',
 ]);
@@ -92,6 +94,10 @@ const DOCUMENT_ALLOWED_MIMES = new Set([
   'image/jpeg',
   'image/png',
   'image/webp',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-excel',
 ]);
 
 export const VALID_DOCUMENT_CATEGORIES = new Set<HseDocumentCategory>([
@@ -104,13 +110,58 @@ export const VALID_DOCUMENT_CATEGORIES = new Set<HseDocumentCategory>([
 const MAX_DOCUMENT_SIZE_BYTES = 25 * 1024 * 1024; // 25MB strict limit for HSE documents
 
 const inMemoryFiles: SystemFileDTO[] = [];
+const FALLBACK_TMP_UPLOAD_DIR = path.join(os.tmpdir(), 'hse_uploads');
+let cachedWritableUploadDir: string | null = null;
+let systemFilesTableVerified = false;
 
-// Ensure upload directory exists
-if (!fs.existsSync(config.security.uploadDir)) {
+export function resolveWritableUploadDir(): string {
+  if (cachedWritableUploadDir) return cachedWritableUploadDir;
+  const candidates = [config.security.uploadDir, FALLBACK_TMP_UPLOAD_DIR];
+  for (const dir of candidates) {
+    try {
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.accessSync(dir, fs.constants.W_OK);
+      cachedWritableUploadDir = dir;
+      return dir;
+    } catch {
+      // Try next candidate directory
+    }
+  }
+  return FALLBACK_TMP_UPLOAD_DIR;
+}
+
+// Initialize writable upload directory at startup without throwing on restricted host mounts
+resolveWritableUploadDir();
+
+async function ensureSystemFilesTableExists(): Promise<void> {
+  if (systemFilesTableVerified) return;
   try {
-    fs.mkdirSync(config.security.uploadDir, { recursive: true });
-  } catch (e) {
-    logger.warn('Could not create upload directory', e);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS system_files (
+        id SERIAL PRIMARY KEY,
+        file_id TEXT NOT NULL UNIQUE,
+        entity_type TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        original_name TEXT NOT NULL,
+        stored_name TEXT NOT NULL,
+        mime_type TEXT NOT NULL,
+        file_size INTEGER NOT NULL,
+        file_path TEXT NOT NULL,
+        file_url TEXT,
+        uploaded_by TEXT,
+        uploader_role TEXT,
+        version INTEGER DEFAULT 1 NOT NULL,
+        is_public BOOLEAN DEFAULT FALSE NOT NULL,
+        metadata JSONB DEFAULT '{}'::jsonb,
+        deleted_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW() NOT NULL
+      );
+    `);
+    systemFilesTableVerified = true;
+  } catch (err) {
+    logger.warn('Could not auto-verify system_files table', err);
   }
 }
 
@@ -118,7 +169,11 @@ if (!fs.existsSync(config.security.uploadDir)) {
  * Inspects actual binary magic bytes of a file buffer to verify its true file type
  * and prevent spoofed extensions or malicious uploads.
  */
-export function verifyActualFileSignature(buffer: Buffer): {
+export function verifyActualFileSignature(
+  buffer: Buffer,
+  originalName?: string,
+  mimeType?: string
+): {
   valid: boolean;
   detectedMime?: string;
   safeExtension?: string;
@@ -127,15 +182,9 @@ export function verifyActualFileSignature(buffer: Buffer): {
     return { valid: false };
   }
 
-  // 1. PDF: "%PDF-" (25 50 44 46 2D)
-  if (
-    buffer.length >= 5 &&
-    buffer[0] === 0x25 &&
-    buffer[1] === 0x50 &&
-    buffer[2] === 0x44 &&
-    buffer[3] === 0x46 &&
-    buffer[4] === 0x2d
-  ) {
+  // 1. PDF: "%PDF-" anywhere within first 1024 bytes (ISO 32000-1 allows leading BOM/whitespace)
+  const pdfCheckLen = Math.min(buffer.length, 1024);
+  if (buffer.subarray(0, pdfCheckLen).includes(Buffer.from('%PDF-'))) {
     return { valid: true, detectedMime: 'application/pdf', safeExtension: '.pdf' };
   }
 
@@ -173,6 +222,44 @@ export function verifyActualFileSignature(buffer: Buffer): {
     return { valid: true, detectedMime: 'image/webp', safeExtension: '.webp' };
   }
 
+  // 5. OpenXML Office Documents (DOCX / XLSX - ZIP Container: 50 4B 03 04)
+  if (
+    buffer.length >= 4 &&
+    buffer[0] === 0x50 &&
+    buffer[1] === 0x4b &&
+    buffer[2] === 0x03 &&
+    buffer[3] === 0x04
+  ) {
+    const ext = path.extname(originalName || '').toLowerCase();
+    if (ext === '.xlsx' || mimeType?.includes('spreadsheet')) {
+      return {
+        valid: true,
+        detectedMime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        safeExtension: '.xlsx',
+      };
+    }
+    return {
+      valid: true,
+      detectedMime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      safeExtension: '.docx',
+    };
+  }
+
+  // 6. Legacy Office OLE2 Compound Documents (DOC / XLS: D0 CF 11 E0 A1 B1 1A E1)
+  if (
+    buffer.length >= 8 &&
+    buffer[0] === 0xd0 &&
+    buffer[1] === 0xcf &&
+    buffer[2] === 0x11 &&
+    buffer[3] === 0xe0
+  ) {
+    const ext = path.extname(originalName || '').toLowerCase();
+    if (ext === '.xls' || mimeType?.includes('excel')) {
+      return { valid: true, detectedMime: 'application/vnd.ms-excel', safeExtension: '.xls' };
+    }
+    return { valid: true, detectedMime: 'application/msword', safeExtension: '.doc' };
+  }
+
   return { valid: false };
 }
 
@@ -180,6 +267,164 @@ function sanitizeMetadataForClient(metadata: any): any {
   if (!metadata || typeof metadata !== 'object') return {};
   const { contentBase64, ...rest } = metadata;
   return rest;
+}
+
+export function normalizeUploadedFilename(rawName?: string): string {
+  if (!rawName || typeof rawName !== 'string') return 'document.pdf';
+  let value = rawName.trim();
+
+  // Repair known damaged sequences where \x80-\x9f bytes were previously replaced by '_'
+  value = value
+    .replace(/Ø¯Ø³ØªÙ_Ø±Ø§Ù_Ø¹Ù_Ù_/g, 'دستورالعمل')
+    .replace(/Ù_Ø¯[ÛÙ]_Ø±[ÛÙ]_Øª/g, 'مدیریت')
+    .replace(/ØªØº[ÛÙ]_[ÛÙ]_Ø±/g, 'تغییر');
+
+  // Convert Multer/Busboy Latin-1 (ISO-8859-1) UTF-8 mojibake back to clean UTF-8 Persian
+  if (/[ØÙÚÛ]/.test(value) && !/[\u0600-\u06FF]/.test(value)) {
+    try {
+      const decoded = Buffer.from(value, 'latin1').toString('utf8');
+      if (!decoded.includes('\uFFFD') && /[\u0600-\u06FF]/.test(decoded)) {
+        value = decoded;
+      }
+    } catch {
+      // Keep original if conversion fails
+    }
+  }
+
+  // Strip any residual broken Latin-1 mojibake fragments if previously corrupted by '_'
+  if (/[ØÙÚÛ]/.test(value)) {
+    value = value.replace(/[ØÙÚÛ][\u0080-\u00ff_]+/g, '').replace(/\s{2,}/g, ' ').trim();
+  }
+
+  const base = path.basename(value || 'document.pdf').replace(/[\x00-\x1f/?<>\\:*|"]/g, '_').trim();
+  return base || 'document.pdf';
+}
+
+let cachedGsFontmapDir: string | null | undefined;
+
+function ensureGhostscriptFontmapDir(): string | null {
+  if (cachedGsFontmapDir !== undefined) return cachedGsFontmapDir;
+  try {
+    const pickFont = (candidates: string[], fallback: string): string => {
+      for (const c of candidates) {
+        if (fs.existsSync(c)) return c;
+      }
+      return fallback;
+    };
+
+    const defaultFont = '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf';
+    const sansReg = pickFont(
+      [
+        '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+        '/usr/share/fonts/dejavu/DejaVuSans.ttf',
+        '/usr/share/fonts/TTF/DejaVuSans.ttf',
+        '/usr/share/fonts/noto/NotoNaskhArabic-Regular.ttf',
+        '/usr/share/fonts/truetype/freefont/FreeSans.ttf',
+      ],
+      defaultFont
+    );
+    const sansBold = pickFont(
+      [
+        '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+        '/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf',
+        '/usr/share/fonts/TTF/DejaVuSans-Bold.ttf',
+        '/usr/share/fonts/noto/NotoNaskhArabic-Bold.ttf',
+        '/usr/share/fonts/truetype/freefont/FreeSansBold.ttf',
+      ],
+      sansReg
+    );
+    const serifReg = pickFont(
+      [
+        '/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf',
+        '/usr/share/fonts/dejavu/DejaVuSerif.ttf',
+        '/usr/share/fonts/TTF/DejaVuSerif.ttf',
+        '/usr/share/fonts/truetype/freefont/FreeSerif.ttf',
+      ],
+      sansReg
+    );
+    const serifBold = pickFont(
+      [
+        '/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf',
+        '/usr/share/fonts/dejavu/DejaVuSerif-Bold.ttf',
+        '/usr/share/fonts/TTF/DejaVuSerif-Bold.ttf',
+        '/usr/share/fonts/truetype/freefont/FreeSerifBold.ttf',
+      ],
+      sansBold
+    );
+    const monoReg = pickFont(
+      [
+        '/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf',
+        '/usr/share/fonts/dejavu/DejaVuSansMono.ttf',
+        '/usr/share/fonts/TTF/DejaVuSansMono.ttf',
+        '/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf',
+      ],
+      sansReg
+    );
+    const monoBold = pickFont(
+      [
+        '/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf',
+        '/usr/share/fonts/dejavu/DejaVuSansMono-Bold.ttf',
+        '/usr/share/fonts/TTF/DejaVuSansMono-Bold.ttf',
+        '/usr/share/fonts/truetype/liberation/LiberationMono-Bold.ttf',
+      ],
+      sansBold
+    );
+
+    if (!fs.existsSync(sansReg)) {
+      cachedGsFontmapDir = null;
+      return null;
+    }
+
+    const dir = path.join(os.tmpdir(), 'hse_gs_fontmap');
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+
+    const fontmapContent = [
+      `/NimbusRoman-Regular (${serifReg}) ;`,
+      `/NimbusRoman-Bold (${serifBold}) ;`,
+      `/NimbusRoman-Italic (${serifReg}) ;`,
+      `/NimbusRoman-BoldItalic (${serifBold}) ;`,
+      `/NimbusSans-Regular (${sansReg}) ;`,
+      `/NimbusSans-Bold (${sansBold}) ;`,
+      `/NimbusSans-Italic (${sansReg}) ;`,
+      `/NimbusSans-BoldItalic (${sansBold}) ;`,
+      `/NimbusMonoPS-Regular (${monoReg}) ;`,
+      `/NimbusMonoPS-Bold (${monoBold}) ;`,
+      `/NimbusMonoPS-Italic (${monoReg}) ;`,
+      `/NimbusMonoPS-BoldItalic (${monoBold}) ;`,
+      `/Times-Roman (${serifReg}) ;`,
+      `/Times-Bold (${serifBold}) ;`,
+      `/Times-Italic (${serifReg}) ;`,
+      `/Times-BoldItalic (${serifBold}) ;`,
+      `/TimesNewRoman (${serifReg}) ;`,
+      `/TimesNewRomanPSMT (${serifReg}) ;`,
+      `/TimesNewRomanPS-BoldMT (${serifBold}) ;`,
+      `/TimesNewRoman,Bold (${serifBold}) ;`,
+      `/Helvetica (${sansReg}) ;`,
+      `/Helvetica-Bold (${sansBold}) ;`,
+      `/Helvetica-Oblique (${sansReg}) ;`,
+      `/Helvetica-BoldOblique (${sansBold}) ;`,
+      `/Arial (${sansReg}) ;`,
+      `/ArialMT (${sansReg}) ;`,
+      `/Arial-BoldMT (${sansBold}) ;`,
+      `/Arial,Bold (${sansBold}) ;`,
+      `/Tahoma (${sansReg}) ;`,
+      `/Tahoma-Bold (${sansBold}) ;`,
+      `/Calibri (${sansReg}) ;`,
+      `/Calibri-Bold (${sansBold}) ;`,
+      `/Courier (${monoReg}) ;`,
+      `/Courier-Bold (${monoBold}) ;`,
+      '',
+    ].join('\n');
+
+    fs.writeFileSync(path.join(dir, 'Fontmap'), fontmapContent, 'utf8');
+    cachedGsFontmapDir = dir;
+    return dir;
+  } catch {
+    cachedGsFontmapDir = null;
+    return null;
+  }
 }
 
 export class FileService {
@@ -222,45 +467,54 @@ export class FileService {
     if (
       params.entityType === 'DOCUMENT' ||
       DOCUMENT_ALLOWED_MIMES.has(params.mimeType) ||
-      ['.pdf', '.jpg', '.jpeg', '.png', '.webp'].includes(safeExt)
+      ['.pdf', '.jpg', '.jpeg', '.png', '.webp', '.docx', '.doc', '.xlsx', '.xls'].includes(safeExt)
     ) {
-      const sig = verifyActualFileSignature(params.fileBuffer);
+      const sig = verifyActualFileSignature(params.fileBuffer, params.originalName, params.mimeType);
       if (!sig.valid || !sig.detectedMime || !sig.safeExtension) {
         throw new ValidationError(
-          'نوع واقعی فایل (امضای باینری) معتبر نیست. تنها فایل‌های استاندارد و واقعی با فرمت PDF، JPG، PNG و WEBP مجاز هستند.'
+          'نوع واقعی فایل (امضای باینری) معتبر نیست. تنها فایل‌های استاندارد و واقعی با فرمت PDF، JPG، PNG، WEBP، Word و Excel مجاز هستند.'
         );
       }
       resolvedMime = sig.detectedMime;
       safeExt = sig.safeExtension;
     } else if (!ALLOWED_MIME_TYPES.has(params.mimeType)) {
       throw new ValidationError(
-        `فرمت فایل '${params.mimeType}' مجاز نیست. فرمت‌های مجاز: PDF, PNG, JPG, WEBP`
+        `فرمت فایل '${params.mimeType}' مجاز نیست. فرمت‌های مجاز: PDF, PNG, JPG, WEBP, DOCX, XLSX`
       );
     }
 
     // 3. Safe unique file naming to prevent collisions and path traversal
     const fileId = uuidv4();
     const storedName = `${fileId}${safeExt}`;
-    if (!fs.existsSync(config.security.uploadDir)) {
-      try {
-        fs.mkdirSync(config.security.uploadDir, { recursive: true });
-      } catch {}
-    }
-    const safeTargetPath = path.join(config.security.uploadDir, storedName);
+    const activeUploadDir = resolveWritableUploadDir();
+    let safeTargetPath = path.join(activeUploadDir, storedName);
 
     // Prevent directory traversal
     const normalizedTarget = path.normalize(safeTargetPath);
-    if (!normalizedTarget.startsWith(path.normalize(config.security.uploadDir))) {
+    if (!normalizedTarget.startsWith(path.normalize(activeUploadDir))) {
       throw new ForbiddenError('مسیر فایل نامعتبر است (Path Traversal Detected).');
     }
 
-    // Sanitize original filename
-    const cleanOriginalName = path
-      .basename(params.originalName || `document${safeExt}`)
-      .replace(/[\x00-\x1f\x80-\x9f/?<>\\:*|"]/g, '_');
+    // Sanitize and normalize UTF-8 original filename (preserving Persian characters)
+    const cleanOriginalName = normalizeUploadedFilename(params.originalName || `document${safeExt}`);
 
-    // Write file to disk
-    fs.writeFileSync(safeTargetPath, params.fileBuffer);
+    // Write file to disk with automatic fallback to os.tmpdir() if host volume is root-locked (EACCES)
+    try {
+      fs.writeFileSync(safeTargetPath, params.fileBuffer);
+    } catch {
+      try {
+        cachedWritableUploadDir = FALLBACK_TMP_UPLOAD_DIR;
+        if (!fs.existsSync(FALLBACK_TMP_UPLOAD_DIR)) {
+          fs.mkdirSync(FALLBACK_TMP_UPLOAD_DIR, { recursive: true });
+        }
+        safeTargetPath = path.join(FALLBACK_TMP_UPLOAD_DIR, storedName);
+        fs.writeFileSync(safeTargetPath, params.fileBuffer);
+      } catch (tmpErr) {
+        logger.debug('Disk write fallback skipped; file is persisted in PostgreSQL contentBase64', {
+          error: String(tmpErr),
+        });
+      }
+    }
 
     const versionNumber = params.version && params.version > 0 ? params.version : 1;
     const dbMetadata = {
@@ -288,7 +542,7 @@ export class FileService {
       createdAt: new Date().toISOString(),
     };
 
-    try {
+    const insertToDb = async () => {
       const [inserted] = await db
         .insert(schema.systemFiles)
         .values({
@@ -313,25 +567,38 @@ export class FileService {
         record.id = inserted.id;
         record.createdAt = inserted.createdAt.toISOString();
       }
-    } catch (e) {
-      logger.warn('System file database insert warning, keeping in fallback store', e);
+    };
+
+    try {
+      await insertToDb();
+    } catch {
+      try {
+        await ensureSystemFilesTableExists();
+        await insertToDb();
+      } catch (retryErr) {
+        logger.warn('System file database insert warning, keeping in fallback store', retryErr);
+      }
     }
 
     inMemoryFiles.unshift({ ...record, metadata: dbMetadata });
 
-    await auditService.log({
-      action: 'UPLOAD_FILE',
-      module: params.entityType === 'DOCUMENT' ? 'DOCUMENTS' : 'FILES',
-      entityType: params.entityType,
-      entityId: params.entityId,
-      newValue: {
-        fileId,
-        originalName: record.originalName,
-        mimeType: record.mimeType,
-        size: record.fileSize,
-        version: record.version,
-      },
-    });
+    try {
+      await auditService.log({
+        action: 'UPLOAD_FILE',
+        module: params.entityType === 'DOCUMENT' ? 'DOCUMENTS' : 'FILES',
+        entityType: params.entityType,
+        entityId: params.entityId,
+        newValue: {
+          fileId,
+          originalName: record.originalName,
+          mimeType: record.mimeType,
+          size: record.fileSize,
+          version: record.version,
+        },
+      });
+    } catch {
+      // Never block file upload completion on audit log write
+    }
 
     return record;
   }
@@ -353,7 +620,7 @@ export class FileService {
           fileId: dbFile.fileId,
           entityType: dbFile.entityType,
           entityId: dbFile.entityId,
-          originalName: dbFile.originalName,
+          originalName: normalizeUploadedFilename(dbFile.originalName),
           storedName: dbFile.storedName,
           mimeType: dbFile.mimeType,
           fileSize: dbFile.fileSize,
@@ -410,13 +677,16 @@ export class FileService {
       throw new NotFoundError('فایل درخواستی در سامانه پیدا نشد.');
     }
 
-    // Resolve physical path across possible upload directory mounts (Docker / Host / Relative)
+    // Resolve physical path across possible upload directory mounts (Docker / Host / Temp / Relative)
+    const activeDir = resolveWritableUploadDir();
     const candidatePaths = [
       fileMeta.filePath,
+      fileMeta.storedName ? path.join(activeDir, path.basename(fileMeta.storedName)) : '',
       fileMeta.storedName ? path.join(config.security.uploadDir, path.basename(fileMeta.storedName)) : '',
+      fileMeta.storedName ? path.join(FALLBACK_TMP_UPLOAD_DIR, path.basename(fileMeta.storedName)) : '',
       fileMeta.storedName ? path.resolve(process.cwd(), 'uploads', path.basename(fileMeta.storedName)) : '',
       fileMeta.storedName ? path.resolve(process.cwd(), 'data', 'uploads', path.basename(fileMeta.storedName)) : '',
-      fileMeta.filePath ? path.join(config.security.uploadDir, path.basename(fileMeta.filePath)) : '',
+      fileMeta.filePath ? path.join(activeDir, path.basename(fileMeta.filePath)) : '',
     ].filter(Boolean);
 
     let existingPath = candidatePaths.find((p) => {
@@ -432,15 +702,16 @@ export class FileService {
       try {
         const recoveredBuffer = Buffer.from(rawMetadata.contentBase64, 'base64');
         if (recoveredBuffer.length > 0) {
-          if (!fs.existsSync(config.security.uploadDir)) {
-            fs.mkdirSync(config.security.uploadDir, { recursive: true });
-          }
           const targetHealPath = path.join(
-            config.security.uploadDir,
+            activeDir,
             path.basename(fileMeta.storedName || `${fileMeta.fileId}.bin`)
           );
-          fs.writeFileSync(targetHealPath, recoveredBuffer);
-          fileMeta.filePath = targetHealPath;
+          try {
+            fs.writeFileSync(targetHealPath, recoveredBuffer);
+            fileMeta.filePath = targetHealPath;
+          } catch {
+            // Even if disk cache write fails on restricted volume, serve recoveredBuffer directly from memory
+          }
           fileMeta.fileSize = recoveredBuffer.length;
           return { file: fileMeta, buffer: recoveredBuffer };
         }
@@ -467,6 +738,10 @@ export class FileService {
     };
   }
 
+  private pdfinfoAvailable = true;
+  private pdftoppmAvailable = true;
+  private gsAvailable = true;
+
   async renderPdfPageToPng(fileId: string, pageNumber = 1): Promise<{ buffer: Buffer; totalPages: number }> {
     const { file } = await this.getFileById(fileId);
     if (file.mimeType !== 'application/pdf') {
@@ -479,13 +754,23 @@ export class FileService {
 
     // Get total pages via pdfinfo or Ghostscript
     let totalPages = 1;
-    try {
-      const { stdout } = await execFileAsync('pdfinfo', [file.filePath]);
-      const match = stdout.match(/Pages:\s+(\d+)/i);
-      if (match && match[1]) {
-        totalPages = parseInt(match[1], 10);
+    let countedPages = false;
+    if (this.pdfinfoAvailable) {
+      try {
+        const { stdout } = await execFileAsync('pdfinfo', [file.filePath]);
+        const match = stdout.match(/Pages:\s+(\d+)/i);
+        if (match && match[1]) {
+          totalPages = parseInt(match[1], 10);
+          countedPages = true;
+        }
+      } catch (err: any) {
+        if (err?.code === 'ENOENT' || String(err?.message || '').includes('ENOENT')) {
+          this.pdfinfoAvailable = false;
+        }
       }
-    } catch {
+    }
+
+    if (!countedPages && this.gsAvailable) {
       // Fallback 1: Ghostscript page count query
       try {
         const { stdout } = await execFileAsync('gs', [
@@ -498,17 +783,24 @@ export class FileService {
         const count = parseInt(stdout.trim(), 10);
         if (!isNaN(count) && count > 0) {
           totalPages = count;
+          countedPages = true;
         }
-      } catch {
-        // Fallback 2: Regex scanning of PDF structure
-        try {
-          const content = fs.readFileSync(file.filePath, 'latin1');
-          const pageMatches = content.match(/\/Type\s*\/Page[^s]/g);
-          if (pageMatches && pageMatches.length > 0) {
-            totalPages = pageMatches.length;
-          }
-        } catch {}
+      } catch (err: any) {
+        if (err?.code === 'ENOENT' || String(err?.message || '').includes('ENOENT')) {
+          this.gsAvailable = false;
+        }
       }
+    }
+
+    if (!countedPages) {
+      // Fallback 2: Regex scanning of PDF structure
+      try {
+        const content = fs.readFileSync(file.filePath, 'latin1');
+        const pageMatches = content.match(/\/Type\s*\/Page[^s]/g);
+        if (pageMatches && pageMatches.length > 0) {
+          totalPages = pageMatches.length;
+        }
+      } catch {}
     }
 
     const safePage = Math.max(1, Math.min(pageNumber, totalPages));
@@ -517,7 +809,7 @@ export class FileService {
     if (!fs.existsSync(cacheDir)) {
       try { fs.mkdirSync(cacheDir, { recursive: true }); } catch {}
     }
-    const cachedPagePath = path.join(cacheDir, `${fileId}_p${safePage}.png`);
+    const cachedPagePath = path.join(cacheDir, `${fileId}_v3_p${safePage}.png`);
     if (fs.existsSync(cachedPagePath) && fs.statSync(cachedPagePath).size > 0) {
       return { buffer: fs.readFileSync(cachedPagePath), totalPages };
     }
@@ -529,40 +821,51 @@ export class FileService {
       let rendered = false;
 
       // Strategy 1: pdftoppm (Poppler + Cairo + FreeType: flawless Persian/Arabic font shaping and ligatures)
-      try {
-        await execFileAsync('pdftoppm', [
-          '-png',
-          '-r', '150',
-          '-f', String(safePage),
-          '-l', String(safePage),
-          file.filePath,
-          tmpPrefix,
-        ]);
+      if (this.pdftoppmAvailable) {
+        try {
+          await execFileAsync('pdftoppm', [
+            '-png',
+            '-r', '150',
+            '-f', String(safePage),
+            '-l', String(safePage),
+            file.filePath,
+            tmpPrefix,
+          ]);
 
-        const expectedFile1 = `${tmpPrefix}-${safePage}.png`;
-        const expectedFile2 = `${tmpPrefix}-${String(safePage).padStart(2, '0')}.png`;
-        const expectedFile3 = `${tmpPrefix}-${String(safePage).padStart(3, '0')}.png`;
+          const expectedFile1 = `${tmpPrefix}-${safePage}.png`;
+          const expectedFile2 = `${tmpPrefix}-${String(safePage).padStart(2, '0')}.png`;
+          const expectedFile3 = `${tmpPrefix}-${String(safePage).padStart(3, '0')}.png`;
 
-        if (fs.existsSync(expectedFile1)) { generatedPath = expectedFile1; rendered = true; }
-        else if (fs.existsSync(expectedFile2)) { generatedPath = expectedFile2; rendered = true; }
-        else if (fs.existsSync(expectedFile3)) { generatedPath = expectedFile3; rendered = true; }
-        else {
-          const tmpDir = '/tmp';
-          const files = fs.readdirSync(tmpDir).filter(f => f.startsWith(path.basename(tmpPrefix)) && f.endsWith('.png'));
-          if (files.length > 0) {
-            generatedPath = path.join(tmpDir, files[0]);
-            rendered = true;
+          if (fs.existsSync(expectedFile1)) { generatedPath = expectedFile1; rendered = true; }
+          else if (fs.existsSync(expectedFile2)) { generatedPath = expectedFile2; rendered = true; }
+          else if (fs.existsSync(expectedFile3)) { generatedPath = expectedFile3; rendered = true; }
+          else {
+            const tmpDir = '/tmp';
+            const files = fs.readdirSync(tmpDir).filter(f => f.startsWith(path.basename(tmpPrefix)) && f.endsWith('.png'));
+            if (files.length > 0) {
+              generatedPath = path.join(tmpDir, files[0]);
+              rendered = true;
+            }
+          }
+        } catch (ppmErr: any) {
+          if (ppmErr?.code === 'ENOENT' || String(ppmErr?.message || '').includes('ENOENT')) {
+            this.pdftoppmAvailable = false;
+          } else {
+            logger.debug('pdftoppm rendering attempt failed, trying Ghostscript fallback', { error: ppmErr?.message });
           }
         }
-      } catch (ppmErr: any) {
-        logger.warn('pdftoppm rendering attempt failed, trying Ghostscript fallback', { error: ppmErr?.message });
       }
 
-      // Strategy 2: Ghostscript (native fallback with antialiasing)
-      if (!rendered) {
+      // Strategy 2: Ghostscript with system TrueType Fontmap (prevents missing NimbusRoman/Arial blank pages)
+      if (!rendered && this.gsAvailable) {
         try {
-          await execFileAsync('gs', [
-            '-dQUIET',
+          const gsFontmapDir = ensureGhostscriptFontmapDir();
+          const gsArgs: string[] = [];
+          if (gsFontmapDir) {
+            gsArgs.push(`-I${gsFontmapDir}`);
+          }
+          gsArgs.push(
+            '-sFONTPATH=/usr/share/fonts',
             '-dBATCH',
             '-dNOPAUSE',
             '-dNOSAFER',
@@ -573,13 +876,27 @@ export class FileService {
             `-dLastPage=${safePage}`,
             '-r150',
             `-sOutputFile=${generatedPath}`,
-            file.filePath,
-          ]);
-          if (fs.existsSync(generatedPath) && fs.statSync(generatedPath).size > 0) {
+            file.filePath
+          );
+          const { stdout, stderr } = await execFileAsync('gs', gsArgs);
+          const combinedOut = `${stdout || ''}\n${stderr || ''}`;
+          const hasFatalFontError =
+            combinedOut.includes('Unable to substitute for font') ||
+            combinedOut.includes('File did not complete the page properly');
+
+          if (
+            fs.existsSync(generatedPath) &&
+            fs.statSync(generatedPath).size > 0 &&
+            !(hasFatalFontError && fs.statSync(generatedPath).size < 16000)
+          ) {
             rendered = true;
           }
         } catch (gsErr: any) {
-          logger.warn('Ghostscript rendering attempt failed, trying ImageMagick fallback', { error: gsErr?.message });
+          if (gsErr?.code === 'ENOENT' || String(gsErr?.message || '').includes('ENOENT')) {
+            this.gsAvailable = false;
+          } else {
+            logger.debug('Ghostscript rendering attempt failed, trying ImageMagick fallback', { error: gsErr?.message });
+          }
         }
       }
 
@@ -596,7 +913,7 @@ export class FileService {
             rendered = true;
           }
         } catch (convErr: any) {
-          logger.warn('ImageMagick convert rendering attempt failed', { error: convErr?.message });
+          logger.debug('ImageMagick convert rendering attempt failed', { error: convErr?.message });
         }
       }
 
@@ -639,7 +956,7 @@ export class FileService {
           fileId: f.fileId,
           entityType: f.entityType,
           entityId: f.entityId,
-          originalName: f.originalName,
+          originalName: normalizeUploadedFilename(f.originalName),
           storedName: f.storedName,
           mimeType: f.mimeType,
           fileSize: f.fileSize,
@@ -721,7 +1038,7 @@ export class FileService {
         return {
           fileId: v.fileId,
           version: v.version || 1,
-          originalName: v.originalName,
+          originalName: normalizeUploadedFilename(v.originalName),
           mimeType: v.mimeType,
           fileSize: v.fileSize,
           uploadedBy: v.uploadedBy || 'کاربر سیستم',
@@ -735,11 +1052,13 @@ export class FileService {
         };
       });
 
+      const normalizedCurrentName = normalizeUploadedFilename(current.originalName);
+
       result.push({
         id: current.id,
         documentId,
         fileId: current.fileId,
-        title: meta.title || current.originalName,
+        title: meta.title || normalizedCurrentName,
         documentNumber: meta.documentNumber || '-',
         category,
         unitId: meta.unitId ?? null,
@@ -749,7 +1068,7 @@ export class FileService {
         description: meta.description || '',
         status: meta.status === 'ARCHIVED' ? 'ARCHIVED' : 'ACTIVE',
         version: current.version || 1,
-        originalName: current.originalName,
+        originalName: normalizedCurrentName,
         mimeType: current.mimeType,
         fileSize: current.fileSize,
         uploadedBy: current.uploadedBy || 'کاربر سیستم',
@@ -792,7 +1111,7 @@ export class FileService {
         fileId: f.fileId,
         entityType: f.entityType,
         entityId: f.entityId,
-        originalName: f.originalName,
+        originalName: normalizeUploadedFilename(f.originalName),
         storedName: f.storedName,
         mimeType: f.mimeType,
         fileSize: f.fileSize,

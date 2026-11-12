@@ -56,6 +56,17 @@ export interface LocalChatOptions {
   timeoutMs?: number;
   num_ctx?: number;
   contextTokens?: number;
+  onActivity?: () => void;
+  skipQueue?: boolean;
+}
+
+export interface LocalChatResult {
+  text: string;
+  model: string;
+  durationMs: number;
+  completed?: boolean;
+  doneReason?: string;
+  incompleteReason?: string;
 }
 
 type QueueTask<T> = (remainingMs: number) => Promise<T>;
@@ -76,12 +87,29 @@ export function normalizeOllamaModelName(name: unknown): string | null {
 
 export class LocalAIProvider {
   private activeCount = 0;
-  private queue: Array<{ run: () => void; reject: (err: any) => void; timer?: NodeJS.Timeout }> = [];
+  private queue: Array<{ run: () => void; reject: (err: any) => void; timer?: NodeJS.Timeout; abortCleanup?: () => void }> = [];
   private offlineUntil = 0;
   private readonly offlineCooldownMs = 5_000;
   private pullInProgress = false;
   private activeUrl: string | null = null;
   private runtimeEngineReachable = false;
+  private cachedInstalledModels: { data: OllamaModelInfo[]; expiresAt: number } | null = null;
+  private cachedLoadedModels: { data: Array<{ name: string; size: number; size_vram?: number }>; expiresAt: number } | null = null;
+  private lastActiveChatModel: string | null = null;
+  private warmUpInFlight = false;
+
+  constructor(customBaseUrl?: string) {
+    if (customBaseUrl && customBaseUrl.trim()) {
+      this.activeUrl = customBaseUrl.trim().replace(/\/$/, '');
+      this.runtimeEngineReachable = true;
+    }
+  }
+
+  private invalidateModelCaches(): void {
+    this.cachedInstalledModels = null;
+    this.cachedLoadedModels = null;
+    this.lastActiveChatModel = null;
+  }
 
   get isEngineEnabled(): boolean {
     return config.aiEngine.enabled || this.runtimeEngineReachable;
@@ -106,7 +134,7 @@ export class LocalAIProvider {
   }
 
   private getCandidateUrls(): string[] {
-    const urls = [config.aiEngine.url];
+    const urls = [...(this.activeUrl ? [this.activeUrl] : []), config.aiEngine.url];
     if (config.aiEngine.url.includes(':11434')) {
       if (config.aiEngine.url.includes('hse-ai-engine')) {
         urls.push(
@@ -156,9 +184,14 @@ export class LocalAIProvider {
   }
 
   private markOfflineIfNetworkError(err: any): boolean {
+    if (err?.name === 'AbortError') {
+      return false;
+    }
     const msg = String(err?.message || err || '').toLowerCase();
+    if (msg.includes('aborted')) {
+      return false;
+    }
     const isNetErr =
-      err?.name === 'AbortError' ||
       msg.includes('fetch failed') ||
       msg.includes('econnrefused') ||
       msg.includes('enotfound') ||
@@ -171,13 +204,19 @@ export class LocalAIProvider {
   }
 
   /**
-   * Concurrency-guarded execution queue
-   * Enforces maxConcurrency limit (1 on 8GB RAM VPS) to prevent OOM
+   * Concurrency-guarded execution queue with full AbortSignal cancellation support
    */
-  private async enqueue<T>(task: QueueTask<T>, timeoutMs = config.aiEngine.timeoutMs || 180000): Promise<T> {
+  private async enqueue<T>(
+    task: QueueTask<T>,
+    timeoutMs = config.aiEngine.timeoutMs || 180000,
+    signal?: AbortSignal
+  ): Promise<T> {
+    if (signal?.aborted) {
+      throw new DOMException('The user aborted a request.', 'AbortError');
+    }
     if (this.pullInProgress) throw new Error('موتور محلی در حال عملیات نگهداری مدل است؛ لطفاً کمی بعد تلاش کنید.');
     const queuedAt = Date.now();
-    const max = config.aiEngine.maxConcurrency || 1;
+    const max = Math.max(1, config.aiEngine.maxConcurrency || 4);
     if (this.activeCount < max) {
       this.activeCount++;
       try {
@@ -193,12 +232,32 @@ export class LocalAIProvider {
     }
 
     return new Promise<T>((resolve, reject) => {
-      const queuedTask: { run: () => void; reject: (err: any) => void; timer?: NodeJS.Timeout } = {
+      const queuedTask: { run: () => void; reject: (err: any) => void; timer?: NodeJS.Timeout; abortCleanup?: () => void } = {
         reject,
         run: () => undefined,
       };
+
+      if (signal) {
+        const onAbort = () => {
+          if (queuedTask.timer) clearTimeout(queuedTask.timer);
+          const idx = this.queue.indexOf(queuedTask);
+          if (idx !== -1) {
+            this.queue.splice(idx, 1);
+          }
+          reject(new DOMException('The user aborted a request.', 'AbortError'));
+        };
+        signal.addEventListener('abort', onAbort, { once: true });
+        queuedTask.abortCleanup = () => signal.removeEventListener('abort', onAbort);
+      }
+
       queuedTask.run = async () => {
         if (queuedTask.timer) clearTimeout(queuedTask.timer);
+        queuedTask.abortCleanup?.();
+        if (signal?.aborted) {
+          reject(new DOMException('The user aborted a request.', 'AbortError'));
+          this.processQueue();
+          return;
+        }
         const remainingMs = timeoutMs - (Date.now() - queuedAt);
         if (remainingMs <= 0) {
           reject(new Error('مهلت انتظار درخواست در صف موتور محلی هوش مصنوعی به پایان رسید.'));
@@ -218,6 +277,7 @@ export class LocalAIProvider {
       };
 
       queuedTask.timer = setTimeout(() => {
+        queuedTask.abortCleanup?.();
         const queuedIndex = this.queue.indexOf(queuedTask);
         if (queuedIndex !== -1) {
           this.queue.splice(queuedIndex, 1);
@@ -229,8 +289,8 @@ export class LocalAIProvider {
   }
 
   private processQueue() {
-    const max = config.aiEngine.maxConcurrency || 1;
-    if (this.activeCount < max && this.queue.length > 0) {
+    const max = Math.max(1, config.aiEngine.maxConcurrency || 4);
+    while (this.activeCount < max && this.queue.length > 0) {
       const next = this.queue.shift();
       if (next) {
         next.run();
@@ -287,6 +347,7 @@ export class LocalAIProvider {
           status.isAvailable = true;
           status.engineUrl = targetUrl;
           status.installedModels = data.models || [];
+          this.cachedInstalledModels = { data: status.installedModels, expiresAt: Date.now() + 60000 };
           const installedNames = new Set(status.installedModels.flatMap(model =>
             [model.name, model.model].filter((name): name is string => typeof name === 'string')
           ).map(name => this.canonicalModelName(name)).filter((name): name is string => name !== null));
@@ -316,32 +377,34 @@ export class LocalAIProvider {
           }
           status.localInferenceReady = status.chatModelInstalled;
 
-          // Query version
-          try {
-            const vController = new AbortController();
-            const vTimeout = setTimeout(() => vController.abort(), 2000);
-            const vResp = await fetch(`${targetUrl}/api/version`, {
-              method: 'GET',
-              signal: vController.signal,
-            });
-            clearTimeout(vTimeout);
-            if (vResp.ok) {
-              const vData = (await vResp.json()) as { version?: string };
-              status.version = vData.version;
-            }
-          } catch {}
-
-          // Query resident loaded models in RAM
-          try {
-            const psResp = await fetch(`${targetUrl}/api/ps`, {
-              method: 'GET',
-              signal: AbortSignal.timeout(2000),
-            });
-            if (psResp.ok) {
-              const psData = (await psResp.json()) as { models?: any[] };
-              status.loadedModels = psData?.models || [];
-            }
-          } catch {}
+          // Query version and resident loaded models in parallel
+          await Promise.all([
+            (async () => {
+              try {
+                const vResp = await fetch(`${targetUrl}/api/version`, {
+                  method: 'GET',
+                  signal: AbortSignal.timeout(1800),
+                });
+                if (vResp.ok) {
+                  const vData = (await vResp.json()) as { version?: string };
+                  status.version = vData.version;
+                }
+              } catch {}
+            })(),
+            (async () => {
+              try {
+                const psResp = await fetch(`${targetUrl}/api/ps`, {
+                  method: 'GET',
+                  signal: AbortSignal.timeout(1800),
+                });
+                if (psResp.ok) {
+                  const psData = (await psResp.json()) as { models?: any[] };
+                  status.loadedModels = psData?.models || [];
+                  this.cachedLoadedModels = { data: status.loadedModels, expiresAt: Date.now() + 15000 };
+                }
+              } catch {}
+            })(),
+          ]);
 
           status.memoryMetrics = AIMemoryEstimator.getSystemMemoryMetrics();
           return status;
@@ -369,11 +432,14 @@ export class LocalAIProvider {
   }
 
   /**
-   * List installed models on Local LLM Engine
+   * List installed models on Local LLM Engine (cached briefly to avoid serial HTTP overhead per chat request)
    */
-  async listInstalledModels(): Promise<OllamaModelInfo[]> {
+  async listInstalledModels(forceRefresh = false): Promise<OllamaModelInfo[]> {
     if (Date.now() < this.offlineUntil) {
       return [];
+    }
+    if (!forceRefresh && this.cachedInstalledModels && Date.now() < this.cachedInstalledModels.expiresAt) {
+      return this.cachedInstalledModels.data;
     }
     const candidateUrls = this.getCandidateUrls();
     for (const targetUrl of candidateUrls) {
@@ -390,7 +456,9 @@ export class LocalAIProvider {
           this.activeUrl = targetUrl;
           this.runtimeEngineReachable = true;
           const data = (await resp.json()) as { models?: OllamaModelInfo[] };
-          return data.models || [];
+          const models = data.models || [];
+          this.cachedInstalledModels = { data: models, expiresAt: Date.now() + 60000 };
+          return models;
         }
       } catch (err) {
         // Try next candidate URL
@@ -403,26 +471,101 @@ export class LocalAIProvider {
   }
 
   /**
-   * List currently resident models loaded in RAM
+   * List currently resident models loaded in RAM (cached briefly to avoid repeated /api/ps round-trips)
    */
-  async getLoadedModels(): Promise<Array<{ name: string; size: number; size_vram?: number }>> {
+  async getLoadedModels(forceRefresh = false): Promise<Array<{ name: string; size: number; size_vram?: number }>> {
+    if (!forceRefresh && this.cachedLoadedModels && Date.now() < this.cachedLoadedModels.expiresAt) {
+      return this.cachedLoadedModels.data;
+    }
     try {
       const resp = await fetch(`${this.baseUrl}/api/ps`, {
         method: 'GET',
-        signal: AbortSignal.timeout(3000),
+        signal: AbortSignal.timeout(2500),
       });
       if (!resp.ok) return [];
       const data = await resp.json() as { models?: Array<{ name: string; size: number; size_vram?: number }> };
-      return data?.models || [];
+      const models = data?.models || [];
+      this.cachedLoadedModels = { data: models, expiresAt: Date.now() + 15000 };
+      return models;
     } catch {
       return [];
     }
   }
 
   /**
+   * Non-blocking background warm-up so the chat model is already resident in RAM before user sends a message.
+   */
+  warmUpModel(preferredModel?: string): void {
+    if (this.warmUpInFlight || this.activeCount > 0 || this.pullInProgress || Date.now() < this.offlineUntil) {
+      return;
+    }
+    if (this.lastActiveChatModel && (!preferredModel || this.sameModelName(this.lastActiveChatModel, preferredModel))) {
+      return;
+    }
+    this.warmUpInFlight = true;
+    void (async () => {
+      try {
+        const [installed, loaded] = await Promise.all([
+          this.listInstalledModels(),
+          this.getLoadedModels(),
+        ]);
+        if (this.activeCount > 0 || this.pullInProgress || installed.length === 0) return;
+        const generative = installed.filter(m => {
+          const family = String(m?.details?.family || '').toLowerCase();
+          const name = String(m?.name || m?.model || '');
+          return Boolean(name) && family !== 'bert' && !/embed|embedding|bge-m3|nomic-embed|mxbai-embed/i.test(name);
+        });
+        if (generative.length === 0) return;
+
+        // If any generative model is already loaded in RAM, record it and skip warm-up
+        const alreadyLoadedGen = loaded.find(l =>
+          l.name && generative.some(g => this.sameModelName(g.name || g.model, l.name))
+        );
+        if (alreadyLoadedGen && (!preferredModel || this.sameModelName(alreadyLoadedGen.name, preferredModel))) {
+          this.lastActiveChatModel = alreadyLoadedGen.name;
+          return;
+        }
+
+        const target =
+          (preferredModel && generative.find(g => this.sameModelName(g.name || g.model, preferredModel))) ||
+          (config.aiEngine.defaultChatModel && generative.find(g => this.sameModelName(g.name || g.model, config.aiEngine.defaultChatModel))) ||
+          generative.slice().sort((a, b) => (a.size || 0) - (b.size || 0))[0];
+        const targetName = target?.name || target?.model;
+        if (!targetName || this.activeCount > 0) return;
+
+        const safeCtx = AIMemoryEstimator.getSafeContextTokens(targetName, 2048);
+        const resp = await fetch(`${this.baseUrl}/api/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: targetName,
+            messages: [],
+            stream: false,
+            keep_alive: (config.aiEngine as any).keepAlive || '30m',
+            options: { num_ctx: safeCtx, num_predict: 0 },
+          }),
+          signal: AbortSignal.timeout(45000),
+        });
+        if (resp.ok) {
+          this.lastActiveChatModel = targetName;
+          this.cachedLoadedModels = {
+            data: [{ name: targetName, size: target.size || 0 }],
+            expiresAt: Date.now() + 15000,
+          };
+        }
+      } catch {
+        // Non-blocking warm-up best effort
+      } finally {
+        this.warmUpInFlight = false;
+      }
+    })();
+  }
+
+  /**
    * Unload resident models from RAM (keep_alive: 0) to free memory instantly
    */
   async unloadModel(modelName?: string): Promise<boolean> {
+    this.invalidateModelCaches();
     try {
       if (modelName) {
         const normalized = this.normalizeModelName(modelName);
@@ -433,11 +576,12 @@ export class LocalAIProvider {
           body: JSON.stringify({ model: normalized, keep_alive: 0 }),
           signal: AbortSignal.timeout(5000),
         });
+        this.invalidateModelCaches();
         return true;
       }
 
       // Unload all active resident models
-      const loaded = await this.getLoadedModels();
+      const loaded = await this.getLoadedModels(true);
       for (const m of loaded) {
         if (m.name) {
           await fetch(`${this.baseUrl}/api/generate`, {
@@ -448,6 +592,7 @@ export class LocalAIProvider {
           }).catch(() => null);
         }
       }
+      this.invalidateModelCaches();
       return true;
     } catch {
       return false;
@@ -458,45 +603,64 @@ export class LocalAIProvider {
    * Intelligently manages loaded model residency in RAM.
    * Allows multiple models to remain resident in RAM up to maxLoadedModels (default 3)
    * so multiple concurrent users and models respond instantly without reload thrashing.
-   * Evicts unneeded models only when exceeding capacity or when system memory is low.
+   * Evicts unneeded models only when exceeding capacity AND system memory is critically low.
    */
   async evictOtherLoadedModels(targetModel: string): Promise<void> {
     try {
-      const loaded = await this.getLoadedModels();
-      const targetAlreadyLoaded = loaded.some(m => m.name && this.sameModelName(m.name, targetModel));
-      const maxAllowedLoaded = (config.aiEngine as any).maxLoadedModels || 3;
-
-      if (targetAlreadyLoaded && loaded.length <= maxAllowedLoaded) {
+      // Fast-path: if the exact same model was the last active chat model and no other model is cached as loaded, skip /api/ps!
+      if (
+        this.lastActiveChatModel &&
+        this.sameModelName(this.lastActiveChatModel, targetModel) &&
+        (!this.cachedLoadedModels ||
+          this.cachedLoadedModels.data.every(m => !m.name || this.sameModelName(m.name, targetModel)))
+      ) {
         return;
       }
 
-      let memoryCritical = false;
+      const maxAllowedLoaded = Math.max(1, (config.aiEngine as any).maxLoadedModels || 2);
+      const targetParamsB = AIMemoryEstimator.estimateParameterCount(targetModel);
+      let shouldCheckLoaded = targetParamsB >= 4;
+      let forceSingleModelInRam = targetParamsB >= 4;
+
       try {
         const metrics = AIMemoryEstimator.getSystemMemoryMetrics();
-        if (metrics.availableHostRamMB < 600 || metrics.freeHostRamMB < 400) {
-          memoryCritical = true;
+        if (metrics.totalHostRamMB <= 16384 || metrics.availableHostRamMB < 2500 || metrics.freeHostRamMB < 1024) {
+          shouldCheckLoaded = true;
+        }
+        if (metrics.totalHostRamMB <= 12288 || metrics.availableHostRamMB < 3000) {
+          forceSingleModelInRam = true;
         }
       } catch {
         // ignore metric lookup failure
       }
 
-      if (!memoryCritical && loaded.length < maxAllowedLoaded) {
+      if (!shouldCheckLoaded) {
         return;
       }
 
-      for (const m of loaded) {
-        if (m.name && !this.sameModelName(m.name, targetModel)) {
-          logger.info(`[LocalAIProvider] Freeing resident model ${m.name} from RAM to accommodate ${targetModel}`);
+      const loaded = await this.getLoadedModels();
+      if (loaded.length === 0) return;
+
+      const otherModels = loaded.filter(m => m.name && !this.sameModelName(m.name, targetModel));
+      if (otherModels.length === 0) {
+        this.lastActiveChatModel = targetModel;
+        return;
+      }
+
+      if (!forceSingleModelInRam && loaded.length < maxAllowedLoaded) {
+        return;
+      }
+
+      for (const m of otherModels) {
+        if (m.name) {
+          logger.info(`[LocalAIProvider] Unloading resident model ${m.name} from RAM before running ${targetModel} to prevent VPS swap thrashing`);
           await fetch(`${this.baseUrl}/api/generate`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ model: m.name, keep_alive: 0 }),
-            signal: AbortSignal.timeout(5000),
+            signal: AbortSignal.timeout(4000),
           }).catch(() => null);
-
-          if (!memoryCritical && loaded.length - 1 < maxAllowedLoaded) {
-            break;
-          }
+          this.invalidateModelCaches();
         }
       }
     } catch {
@@ -530,7 +694,6 @@ export class LocalAIProvider {
       const resp = await fetch(`${this.baseUrl}/api/pull`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        // Ollama streams manifest and layer download progress as NDJSON events.
         body: JSON.stringify({ model: normalized, stream: true }),
         signal: controller.signal,
       });
@@ -589,6 +752,7 @@ export class LocalAIProvider {
         return { success: false, message: `دریافت مدل ${normalized} کامل نشد: ${finalStatus || 'پاسخ نهایی معتبر از Ollama دریافت نشد.'}` };
       }
       this.offlineUntil = 0;
+      this.invalidateModelCaches();
       return { success: true, message: `مدل ${normalized} با موفقیت بارگیری شد.` };
     } catch (err: any) {
       this.markOfflineIfNetworkError(err);
@@ -622,12 +786,11 @@ export class LocalAIProvider {
       return { success: false, message: 'حذف مدل هنگام اجرای عملیات AI یا دریافت مدل مجاز نیست.' };
     }
 
-    const installed = await this.listInstalledModels();
+    const installed = await this.listInstalledModels(true);
     const exists = installed.some(model =>
       [model.name, model.model].some(name => typeof name === 'string' && this.sameModelName(name, normalized))
     );
     if (!exists) return { success: false, message: 'مدل موردنظر در موتور محلی نصب نشده است.' };
-    // Re-check after the inventory request, then lock inference during deletion.
     if (this.pullInProgress || this.activeCount > 0 || this.queue.length > 0) {
       return { success: false, message: 'حذف مدل در زمان اجرای درخواست AI مجاز نیست.' };
     }
@@ -643,6 +806,7 @@ export class LocalAIProvider {
         signal: controller.signal,
       });
       if (!resp.ok) return { success: false, message: `خطا در حذف مدل: HTTP ${resp.status}` };
+      this.invalidateModelCaches();
       return { success: true, message: `مدل ${normalized} با موفقیت حذف گردید.` };
     } catch (err: any) {
       this.markOfflineIfNetworkError(err);
@@ -653,48 +817,144 @@ export class LocalAIProvider {
     }
   }
 
+  private isSeparatorOrTableLine(line: string): boolean {
+    const trimmed = line.trim();
+    if (!trimmed) return true;
+    if (/^[-=_*─━┄┈|:\s]+$/.test(trimmed)) return true;
+    return false;
+  }
+
+  private hasDegenerateRepetition(text: string): boolean {
+    if (text.length < 160) return false;
+    // Detect deeply nested numbering loops like ۱.۱.۱.۱.۱. or 1.1.1.1.1.
+    if (/(?:[۰-۹0-9]+\.){5,}/.test(text)) return true;
+    const nonEmptyLines = text
+      .split('\n')
+      .filter(l => !this.isSeparatorOrTableLine(l))
+      .map(l => l.replace(/^[\s\-*•۰-۹0-9.)]+/, '').trim())
+      .filter(l => l.length >= 16);
+    if (nonEmptyLines.length >= 4) {
+      const last = nonEmptyLines[nonEmptyLines.length - 1];
+      const prev1 = nonEmptyLines[nonEmptyLines.length - 2];
+      const prev2 = nonEmptyLines[nonEmptyLines.length - 3];
+      const prev3 = nonEmptyLines[nonEmptyLines.length - 4];
+      if (last === prev1 && prev1 === prev2 && prev2 === prev3) return true;
+    }
+    return false;
+  }
+
+  private trimDegenerateRepetition(text: string): string {
+    if (!text) return '';
+    const rawLines = text.split('\n');
+    const kept: string[] = [];
+    let lastNormalized = '';
+    let repeatCount = 0;
+
+    for (const line of rawLines) {
+      if (/(?:[۰-۹0-9]+\.){5,}/.test(line)) {
+        break;
+      }
+      if (!this.isSeparatorOrTableLine(line)) {
+        const normalized = line.replace(/^[\s\-*•۰-۹0-9.)]+/, '').trim();
+        if (normalized.length >= 16) {
+          if (normalized === lastNormalized) {
+            repeatCount++;
+            if (repeatCount >= 2) {
+              break;
+            }
+          } else {
+            lastNormalized = normalized;
+            repeatCount = 0;
+          }
+        }
+      }
+      kept.push(line);
+    }
+    return kept.join('\n').trim();
+  }
+
+  private buildOptimalInferenceOptions(options: LocalChatOptions | undefined, safeCtx: number) {
+    const cpuCores = AIMemoryEstimator.getSystemMemoryMetrics().hostCpuCores || 4;
+    const optimalThreads = Math.max(2, Math.min(cpuCores, 8));
+    return {
+      temperature: options?.temperature ?? 0.25,
+      top_p: options?.top_p ?? 0.9,
+      top_k: 40,
+      repeat_penalty: 1.06,
+      repeat_last_n: 64,
+      num_predict: options?.max_tokens ?? 2048,
+      num_ctx: safeCtx,
+      num_thread: optimalThreads,
+      num_batch: 512,
+    };
+  }
+
   /**
-   * Chat completion via Local LLM Engine with concurrency lock
+   * Chat completion via Local LLM Engine with concurrency lock and AbortSignal support
    */
   async chat(
     messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>,
-    options?: LocalChatOptions
-  ): Promise<{ text: string; model: string; durationMs: number }> {
+    options?: LocalChatOptions,
+    signal?: AbortSignal
+  ): Promise<LocalChatResult> {
     await this.ensureRuntimeReachable();
     if (!this.isEngineEnabled || Date.now() < this.offlineUntil) {
       throw new Error('Local AI engine is offline');
     }
 
-    return this.enqueue(async (remainingMs) => {
+    const executeChat = async (remainingMs: number): Promise<LocalChatResult> => {
+      if (signal?.aborted) {
+        throw new DOMException('The user aborted a request.', 'AbortError');
+      }
       if (Date.now() < this.offlineUntil) {
         throw new Error('Local AI engine is offline');
       }
 
       const startTime = Date.now();
       const model = this.requireModel(options?.model, 'chat');
-      const timeoutMs = Math.min(options?.timeoutMs || config.aiEngine.timeoutMs || 180000, remainingMs);
+      const timeoutMs = Math.min(options?.timeoutMs || config.aiEngine.timeoutMs || 300000, remainingMs);
 
-      // Evict any other loaded models from RAM to prevent concurrent model residency OOM
       await this.evictOtherLoadedModels(model);
 
-      // Auto-tune num_ctx for safety
       const requestedCtx = options?.num_ctx || options?.contextTokens || config.aiEngine.contextTokens;
       const safeCtx = AIMemoryEstimator.getSafeContextTokens(model, requestedCtx);
 
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), timeoutMs);
+      const abortFromCaller = () => controller.abort();
+      if (signal?.aborted) controller.abort();
+      else signal?.addEventListener('abort', abortFromCaller, { once: true });
+
+      let timeout: ReturnType<typeof setTimeout> | null = null;
+      const resetWatchdog = () => {
+        if (timeout) clearTimeout(timeout);
+        timeout = setTimeout(() => controller.abort(), timeoutMs);
+        options?.onActivity?.();
+      };
+      resetWatchdog();
+
+      const prefillHeartbeat = setInterval(async () => {
+        if (controller.signal.aborted) return;
+        if (Date.now() - startTime > 480000) return;
+        try {
+          const psCtrl = new AbortController();
+          const psTimer = setTimeout(() => psCtrl.abort(), 3500);
+          const psResp = await fetch(`${this.baseUrl}/api/ps`, { signal: psCtrl.signal });
+          clearTimeout(psTimer);
+          if (psResp.ok) {
+            resetWatchdog();
+          }
+        } catch {
+          // Ignore transient probe errors
+        }
+      }, 12000);
 
       try {
         const payload: Record<string, any> = {
           model,
           messages,
           stream: false,
-          options: {
-            temperature: options?.temperature ?? 0.3,
-            top_p: options?.top_p ?? 0.85,
-            num_predict: options?.max_tokens ?? 1024,
-            num_ctx: safeCtx,
-          },
+          keep_alive: (config.aiEngine as any).keepAlive || '30m',
+          options: this.buildOptimalInferenceOptions(options, safeCtx),
         };
 
         const resp = await fetch(`${this.baseUrl}/api/chat`, {
@@ -713,51 +973,78 @@ export class LocalAIProvider {
         }
 
         this.offlineUntil = 0;
-        const data = (await resp.json()) as { message?: { content?: string }; model?: string };
-        clearTimeout(timeout);
-        const text = data.message?.content?.trim() || '';
+        this.lastActiveChatModel = model;
+        this.cachedLoadedModels = {
+          data: [{ name: model, size: 0 }],
+          expiresAt: Date.now() + 15000,
+        };
+        const data = (await resp.json()) as {
+          message?: { content?: string };
+          model?: string;
+          done?: boolean;
+          done_reason?: string;
+        };
+        const text = this.trimDegenerateRepetition(data.message?.content?.trim() || '');
+        const doneReason = String(data.done_reason || 'stop');
+        const completed = data.done !== false && doneReason !== 'length';
 
         return {
           text,
           model: data.model || model,
           durationMs: Date.now() - startTime,
+          completed,
+          doneReason,
+          incompleteReason:
+            doneReason === 'length'
+              ? 'پاسخ به سقف تعداد توکن خروجی رسید؛ برای تکمیل تحلیل دکمه «ادامه تولید پاسخ» را انتخاب کنید.'
+              : undefined,
         };
       } catch (err: any) {
-        clearTimeout(timeout);
         if (err?.message?.includes('ECONNRESET') || err?.code === 'ECONNRESET') {
           AIMemoryEstimator.recordOomEvent();
         }
-        const isNet = this.markOfflineIfNetworkError(err);
-        if (!isNet) {
+        const callerCancelled = signal?.aborted === true;
+        const isNet = callerCancelled ? false : this.markOfflineIfNetworkError(err);
+        if (!callerCancelled && !isNet) {
           logger.debug('[LocalAIProvider] Chat completion non-network error', { error: err.message });
         }
         throw err;
+      } finally {
+        clearInterval(prefillHeartbeat);
+        if (timeout) clearTimeout(timeout);
+        signal?.removeEventListener('abort', abortFromCaller);
       }
-    }, options?.timeoutMs || config.aiEngine.timeoutMs || 180000);
+    };
+
+    if (options?.skipQueue) {
+      return executeChat(options?.timeoutMs || config.aiEngine.timeoutMs || 300000);
+    }
+    return this.enqueue(executeChat, options?.timeoutMs || config.aiEngine.timeoutMs || 300000, signal);
   }
 
   /**
-   * Stream chat tokens from Ollama while holding the same bounded inference slot.
+   * Stream chat tokens from Ollama with activity-based sliding watchdog and strict completion verification.
    */
   async chatStream(
     messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>,
     options: LocalChatOptions,
     onToken: (token: string) => void,
     signal?: AbortSignal
-  ): Promise<{ text: string; model: string; durationMs: number }> {
+  ): Promise<LocalChatResult> {
     await this.ensureRuntimeReachable();
     if (!this.isEngineEnabled || Date.now() < this.offlineUntil) {
       throw new Error('Local AI engine is offline');
     }
 
-    return this.enqueue(async (remainingMs) => {
+    const executeStream = async (remainingMs: number): Promise<LocalChatResult> => {
+      if (signal?.aborted) {
+        throw new DOMException('The user aborted a request.', 'AbortError');
+      }
       const startedAt = Date.now();
       const model = this.requireModel(options.model, 'chat');
 
-      // Evict any other loaded models from RAM to prevent concurrent model residency OOM
       await this.evictOtherLoadedModels(model);
 
-      // Auto-tune num_ctx for safety
       const requestedCtx = options.num_ctx || options.contextTokens || config.aiEngine.contextTokens;
       const safeCtx = AIMemoryEstimator.getSafeContextTokens(model, requestedCtx);
 
@@ -769,7 +1056,36 @@ export class LocalAIProvider {
       };
       if (signal?.aborted) controller.abort();
       else signal?.addEventListener('abort', abortFromCaller, { once: true });
-      const timeout = setTimeout(() => controller.abort(), Math.min(options.timeoutMs || remainingMs, remainingMs));
+
+      const baseTimeoutMs = Math.min(options.timeoutMs || remainingMs, remainingMs);
+      let timeout: NodeJS.Timeout | null = setTimeout(() => controller.abort(), baseTimeoutMs);
+      const resetStreamWatchdog = () => {
+        if (timeout) clearTimeout(timeout);
+        timeout = setTimeout(() => controller.abort(), baseTimeoutMs);
+        options.onActivity?.();
+      };
+
+      // Active prefill liveness heartbeat: while Ollama is cold-loading weights from disk or
+      // evaluating the prompt on CPU (before the first token is emitted), poll /api/ps every 12s.
+      // As long as the Ollama daemon responds and total prefill time is under 8 minutes (480s),
+      // keep resetting the activity watchdog so CPU prefill never triggers a false 185s timeout.
+      let receivedFirstToken = false;
+      const maxPrefillWallMs = 480_000;
+      const prefillHeartbeat = setInterval(async () => {
+        if (receivedFirstToken || signal?.aborted || controller.signal.aborted) return;
+        if (Date.now() - startedAt > maxPrefillWallMs) return;
+        try {
+          const psResp = await fetch(`${this.baseUrl}/api/ps`, {
+            method: 'GET',
+            signal: AbortSignal.timeout(3500),
+          });
+          if (psResp.ok && !receivedFirstToken && !signal?.aborted) {
+            resetStreamWatchdog();
+          }
+        } catch {
+          // If Ollama /api/ps is unreachable, let the normal watchdog expire
+        }
+      }, 12_000);
 
       try {
         const response = await fetch(`${this.baseUrl}/api/chat`, {
@@ -779,12 +1095,8 @@ export class LocalAIProvider {
             model,
             messages,
             stream: true,
-            options: {
-              temperature: options.temperature ?? 0.4,
-              top_p: options.top_p ?? 0.85,
-              num_predict: options.max_tokens ?? 1024,
-              num_ctx: safeCtx,
-            },
+            keep_alive: (config.aiEngine as any).keepAlive || '30m',
+            options: this.buildOptimalInferenceOptions(options, safeCtx),
           }),
           signal: controller.signal,
         });
@@ -794,45 +1106,108 @@ export class LocalAIProvider {
         }
 
         this.offlineUntil = 0;
+        this.lastActiveChatModel = model;
+        this.cachedLoadedModels = {
+          data: [{ name: model, size: 0 }],
+          expiresAt: Date.now() + 15000,
+        };
+        resetStreamWatchdog();
         const reader = response.body.getReader();
         activeReader = reader;
         const decoder = new TextDecoder();
         let pending = '';
         let fullText = '';
         let returnedModel = model;
+        let stoppedByRepetitionGuard = false;
+        let receivedFinalDoneChunk = false;
+        let doneReason = '';
+
+        const processJsonLine = (rawLine: string): boolean => {
+          const trimmedLine = rawLine.trim();
+          if (!trimmedLine) return true;
+          let chunk: any;
+          try {
+            chunk = JSON.parse(trimmedLine);
+          } catch {
+            return false;
+          }
+          if (chunk.error) throw new Error(String(chunk.error));
+          if (chunk.model) returnedModel = chunk.model;
+          const token = chunk.message?.content || '';
+          if (token) {
+            receivedFirstToken = true;
+            fullText += token;
+            if (this.hasDegenerateRepetition(fullText)) {
+              stoppedByRepetitionGuard = true;
+              return true;
+            }
+            onToken(token);
+          }
+          if (chunk.done === true) {
+            receivedFirstToken = true;
+            receivedFinalDoneChunk = true;
+            doneReason = String(chunk.done_reason || 'stop');
+          }
+          return true;
+        };
+
         while (true) {
           if (signal?.aborted) {
             throw new DOMException('The user aborted a request.', 'AbortError');
           }
           const { value, done } = await reader.read();
           if (done) break;
+          resetStreamWatchdog();
           pending += decoder.decode(value, { stream: true });
-          const lines = pending.split('\n');
+          const lines = pending.split(/\r?\n/);
           pending = lines.pop() || '';
-          for (const line of lines) {
+          for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
             if (!line.trim()) continue;
-            const chunk = JSON.parse(line);
-            if (chunk.error) throw new Error(String(chunk.error));
-            if (chunk.model) returnedModel = chunk.model;
-            const token = chunk.message?.content || '';
-            if (token) {
-              fullText += token;
-              onToken(token);
+            const parsedOk = processJsonLine(line);
+            if (!parsedOk) {
+              // Re-prepend incomplete JSON fragment if split mid-frame
+              pending = lines.slice(i).join('\n') + (pending ? '\n' + pending : '');
+              break;
+            }
+            if (stoppedByRepetitionGuard) {
+              try { await reader.cancel(); } catch {}
+              break;
+            }
+          }
+          if (stoppedByRepetitionGuard) break;
+        }
+        if (!stoppedByRepetitionGuard) {
+          pending += decoder.decode();
+          if (pending.trim()) {
+            for (const line of pending.split(/\r?\n/)) {
+              if (line.trim()) processJsonLine(line);
             }
           }
         }
-        pending += decoder.decode();
-        if (pending.trim()) {
-          const chunk = JSON.parse(pending);
-          if (chunk.error) throw new Error(String(chunk.error));
-          if (chunk.model) returnedModel = chunk.model;
-          const token = chunk.message?.content || '';
-          if (token) { fullText += token; onToken(token); }
+
+        const cleanText = this.trimDegenerateRepetition(fullText);
+        const isTruncatedByLength = doneReason === 'length';
+        const isCompleted =
+          (receivedFinalDoneChunk || stoppedByRepetitionGuard) && !isTruncatedByLength;
+        let incompleteReason: string | undefined;
+        if (isTruncatedByLength) {
+          incompleteReason =
+            'پاسخ به سقف تعداد توکن خروجی رسید؛ برای تکمیل ادامه تحلیل روی دکمه «ادامه تولید پاسخ» کلیک کنید.';
+        } else if (!receivedFinalDoneChunk && !stoppedByRepetitionGuard) {
+          incompleteReason =
+            'جریان خروجی مدل پیش از دریافت سیگنال پایان کامل قطع شد؛ می‌توانید ادامه پاسخ را دریافت کنید.';
         }
-        return { text: fullText.trim(), model: returnedModel, durationMs: Date.now() - startedAt };
+
+        return {
+          text: cleanText,
+          model: returnedModel,
+          durationMs: Date.now() - startedAt,
+          completed: isCompleted,
+          doneReason: doneReason || (stoppedByRepetitionGuard ? 'repetition_guard' : 'incomplete'),
+          incompleteReason,
+        };
       } catch (error: any) {
-        // A client-requested stop (or disconnected client) is not an Ollama outage.
-        // Do not poison the provider's offline cooldown for an intentional cancellation.
         const callerCancelled = signal?.aborted === true;
         const isNetworkError = callerCancelled ? false : this.markOfflineIfNetworkError(error);
         if (!callerCancelled && !isNetworkError) {
@@ -840,11 +1215,17 @@ export class LocalAIProvider {
         }
         throw error;
       } finally {
-        clearTimeout(timeout);
+        clearInterval(prefillHeartbeat);
+        if (timeout) clearTimeout(timeout);
         signal?.removeEventListener('abort', abortFromCaller);
         try { activeReader?.releaseLock(); } catch {}
       }
-    }, options.timeoutMs || config.aiEngine.timeoutMs || 180000);
+    };
+
+    if (options.skipQueue) {
+      return executeStream(options.timeoutMs || config.aiEngine.timeoutMs || 300000);
+    }
+    return this.enqueue(executeStream, options.timeoutMs || config.aiEngine.timeoutMs || 300000, signal);
   }
 
   /**
@@ -852,7 +1233,8 @@ export class LocalAIProvider {
    */
   async generate(
     prompt: string,
-    options?: LocalChatOptions
+    options?: LocalChatOptions,
+    signal?: AbortSignal
   ): Promise<{ text: string; model: string; durationMs: number }> {
     await this.ensureRuntimeReachable();
     if (!this.isEngineEnabled || Date.now() < this.offlineUntil) {
@@ -860,6 +1242,9 @@ export class LocalAIProvider {
     }
 
     return this.enqueue(async (remainingMs) => {
+      if (signal?.aborted) {
+        throw new DOMException('The user aborted a request.', 'AbortError');
+      }
       if (Date.now() < this.offlineUntil) {
         throw new Error('Local AI engine is offline');
       }
@@ -869,6 +1254,9 @@ export class LocalAIProvider {
       const timeoutMs = remainingMs;
 
       const controller = new AbortController();
+      const abortFromCaller = () => controller.abort();
+      if (signal?.aborted) controller.abort();
+      else signal?.addEventListener('abort', abortFromCaller, { once: true });
       const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
       try {
@@ -877,9 +1265,13 @@ export class LocalAIProvider {
           prompt,
           system: options?.system,
           stream: false,
+          keep_alive: (config.aiEngine as any).keepAlive || '15m',
           options: {
-            temperature: options?.temperature ?? 0.3,
+            temperature: options?.temperature ?? 0.2,
             top_p: options?.top_p ?? 0.85,
+            top_k: 40,
+            repeat_penalty: 1.18,
+            repeat_last_n: 128,
             num_predict: options?.max_tokens ?? 1024,
             num_ctx: config.aiEngine.contextTokens,
           },
@@ -899,8 +1291,7 @@ export class LocalAIProvider {
 
         this.offlineUntil = 0;
         const data = (await resp.json()) as { response?: string; model?: string };
-        clearTimeout(timeout);
-        const text = data.response?.trim() || '';
+        const text = this.trimDegenerateRepetition(data.response?.trim() || '');
 
         return {
           text,
@@ -908,14 +1299,16 @@ export class LocalAIProvider {
           durationMs: Date.now() - startTime,
         };
       } catch (err: any) {
-        clearTimeout(timeout);
         const isNet = this.markOfflineIfNetworkError(err);
         if (!isNet) {
           logger.debug('[LocalAIProvider] Generate completion non-network error', { error: err.message });
         }
         throw err;
+      } finally {
+        clearTimeout(timeout);
+        signal?.removeEventListener('abort', abortFromCaller);
       }
-    }, config.aiEngine.timeoutMs || 180000);
+    }, config.aiEngine.timeoutMs || 180000, signal);
   }
 
   /**
@@ -923,7 +1316,9 @@ export class LocalAIProvider {
    */
   async generateEmbedding(
     prompt: string,
-    modelName?: string
+    modelName?: string,
+    timeoutLimitMs = 15000,
+    signal?: AbortSignal
   ): Promise<{ embedding: number[]; model: string; durationMs: number }> {
     await this.ensureRuntimeReachable();
     if (!this.isEngineEnabled || Date.now() < this.offlineUntil) {
@@ -931,6 +1326,9 @@ export class LocalAIProvider {
     }
 
     return this.enqueue(async (remainingMs) => {
+      if (signal?.aborted) {
+        throw new DOMException('The user aborted a request.', 'AbortError');
+      }
       if (Date.now() < this.offlineUntil) {
         throw new Error('Local AI engine is offline');
       }
@@ -938,7 +1336,10 @@ export class LocalAIProvider {
       const startTime = Date.now();
       const model = this.requireModel(modelName, 'embedding');
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), Math.min(30000, remainingMs));
+      const abortFromCaller = () => controller.abort();
+      if (signal?.aborted) controller.abort();
+      else signal?.addEventListener('abort', abortFromCaller, { once: true });
+      const timeout = setTimeout(() => controller.abort(), Math.min(timeoutLimitMs, remainingMs));
 
       try {
         const resp = await fetch(`${this.baseUrl}/api/embeddings`, {
@@ -954,18 +1355,19 @@ export class LocalAIProvider {
 
         this.offlineUntil = 0;
         const data = (await resp.json()) as { embedding?: number[] };
-        clearTimeout(timeout);
         return {
           embedding: data.embedding || [],
           model,
           durationMs: Date.now() - startTime,
         };
       } catch (err: any) {
-        clearTimeout(timeout);
         this.markOfflineIfNetworkError(err);
         throw err;
+      } finally {
+        clearTimeout(timeout);
+        signal?.removeEventListener('abort', abortFromCaller);
       }
-    }, 30000);
+    }, timeoutLimitMs, signal);
   }
 }
 

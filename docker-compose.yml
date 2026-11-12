@@ -37,11 +37,12 @@ services:
       - "FORECA_API_TOKEN=${FORECA_API_TOKEN:-}"
       - "UPLOAD_DIR=/app/uploads"
       - "BACKUP_DIR=/app/backups"
-      - "AI_ENGINE_ENABLED=${AI_ENGINE_ENABLED:-true}"
+      - "AI_ENGINE_ENABLED=${AI_ENGINE_ENABLED:-false}"
       - "AI_ENGINE_URL=${AI_ENGINE_URL:-http://hse-ai-engine:11434}"
-      - "AI_DEFAULT_CHAT_MODEL=${AI_DEFAULT_CHAT_MODEL:-qwen2.5:1.5b}"
-      - "AI_DEFAULT_EMBED_MODEL=${AI_DEFAULT_EMBED_MODEL:-bge-m3}"
-      - "AI_MAX_CONCURRENCY=${AI_MAX_CONCURRENCY:-4}"
+      - "AI_DEFAULT_CHAT_MODEL=${AI_DEFAULT_CHAT_MODEL:-}"
+      - "AI_DEFAULT_EMBED_MODEL=${AI_DEFAULT_EMBED_MODEL:-}"
+      - "AI_CLOUD_FALLBACK_ENABLED=false"
+      - "AI_MAX_CONCURRENCY=${AI_MAX_CONCURRENCY:-1}"
       - "AI_REQUEST_TIMEOUT_MS=${AI_REQUEST_TIMEOUT_MS:-180000}"
       - "NODE_OPTIONS=--dns-result-order=ipv4first --max-old-space-size=${APP_MAX_OLD_SPACE_MB:-1024}"
       - "UV_THREADPOOL_SIZE=${UV_THREADPOOL_SIZE:-4}"
@@ -65,14 +66,14 @@ services:
       start_period: 20s
     networks:
       - hse-network
-    depends_on:
-      - hse-ai-engine
 
-  # Independent Local AI Engine (Ollama - Offline CPU Inference)
+  # Independent Local AI Engine (Ollama - Offline CPU Inference, optional --profile ai)
   hse-ai-engine:
     image: ${OLLAMA_IMAGE:-ollama/ollama:0.40.13}
     container_name: hse-ai-engine
     restart: unless-stopped
+    profiles:
+      - ai
     env_file:
       - .env
     environment:
@@ -80,8 +81,8 @@ services:
       - "OLLAMA_NUM_PARALLEL=${AI_NUM_PARALLEL:-4}"
       - "OLLAMA_MAX_LOADED_MODELS=${AI_MAX_LOADED_MODELS:-3}"
       - "OLLAMA_KEEP_ALIVE=${AI_KEEP_ALIVE:-15m}"
-      - "OLLAMA_FLASH_ATTENTION=${AI_FLASH_ATTENTION:-0}"
-      - "OLLAMA_KV_CACHE_TYPE=${AI_KV_CACHE_TYPE:-q8_0}"
+      - "OLLAMA_FLASH_ATTENTION=${AI_FLASH_ATTENTION:-1}"
+      - "OLLAMA_KV_CACHE_TYPE=${AI_KV_CACHE_TYPE:-f16}"
       - "OLLAMA_ORIGINS="
       - "OMP_NUM_THREADS=${AI_CPU_THREADS:-4}"
     volumes:

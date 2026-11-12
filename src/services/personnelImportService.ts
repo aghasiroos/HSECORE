@@ -1,15 +1,18 @@
 import * as XLSX from 'xlsx';
 import { Personnel } from '../components/PersonnelManagement';
-import { normalizeNationalCode, isValidNationalCodeFormat } from '../utils/personnelHelper';
+import {
+  normalizeNationalCode,
+  isValidNationalCodeFormat,
+  cleanPersonnelCode,
+  sortPersonnelByCodeAsc,
+  setInMemoryPersonnelList
+} from '../utils/personnelHelper';
 import { addAuditLog } from '../utils/authHelper';
 import { calculateExactAge } from '../utils/jalaliDate';
 import { apiDb } from './apiDatabaseClient';
-import { workerManager } from '../workers/workerManager';
 import {
-  normalizePersianArabicText,
   normalizeForMatching,
   cleanPersianValue,
-  cleanExcelCellValue,
   normalizeDigits,
   matchPersonnelNames
 } from '../utils/textNormalization';
@@ -111,7 +114,7 @@ function autoDetectPersonnelColumnMappings(headers: string[]) {
 
     if (!mappings.nationalCode && (clean.includes('کدملی') || clean.includes('شناسهملی') || clean.includes('شمارهملی') || clean.includes('nationalcode') || clean === 'national_code' || clean === 'nid')) {
       mappings.nationalCode = h;
-    } else if (!mappings.personnelCode && (clean.includes('کدپرسنلی') || clean.includes('شمارهپرسنلی') || clean.includes('کدپرسنل') || clean.includes('شمارهکارمندی') || clean.includes('کدکارمندی') || clean.includes('personnelcode') || clean === 'empcode' || clean === 'personnel_code' || clean === 'pcode')) {
+    } else if (!mappings.personnelCode && (clean.includes('کدپرسنلی') || clean.includes('شمارهپرسنلی') || clean.includes('کدپرسنل') || clean.includes('شمارهکارمندی') || clean.includes('کدکارمندی') || clean.includes('شمارهاستخدامی') || clean.includes('کداستخدامی') || clean.includes('personnelcode') || clean === 'empcode' || clean === 'personnel_code' || clean === 'pcode')) {
       mappings.personnelCode = h;
     } else if (!mappings.firstName && (clean === 'نام' || clean === 'نامکوچک' || clean === 'اسم' || clean.includes('firstname') || clean === 'first_name')) {
       mappings.firstName = h;
@@ -127,7 +130,7 @@ function autoDetectPersonnelColumnMappings(headers: string[]) {
       mappings.workplace = h;
     } else if (!mappings.unit && (clean.includes('واحد') || clean.includes('دپارتمان') || clean.includes('مدیریت') || clean.includes('اداره') || clean.includes('بخش') || clean === 'unit' || clean === 'department')) {
       mappings.unit = h;
-    } else if (!mappings.subUnit && (clean.includes('زیرواحد') || clean.includes('قسمت') || clean.includes('کارگاه') || clean === 'subunit' || clean === 'sub_unit')) {
+    } else if (!mappings.subUnit && (clean.includes('زیرواحد') || clean.includes('زیرمجموعه') || clean.includes('قسمت') || clean.includes('کارگاه') || clean === 'subunit' || clean === 'sub_unit')) {
       mappings.subUnit = h;
     } else if (!mappings.jobTitle && (clean.includes('عنوانشغلی') || clean.includes('سمت') || clean.includes('پست') || clean.includes('شغل') || clean === 'jobtitle' || clean === 'position')) {
       mappings.jobTitle = h;
@@ -154,49 +157,33 @@ function autoDetectPersonnelColumnMappings(headers: string[]) {
  */
 function extractRawCellValue(val: unknown): string {
   if (val === null || val === undefined) return '';
-  if (typeof val === 'string') return val;
+  if (typeof val === 'string') return val.trim();
   if (typeof val === 'number') {
     if (Number.isInteger(val)) return String(val);
     return String(val);
   }
-  return String(val);
+  return String(val).trim();
 }
+
+const yieldToMain = () => new Promise<void>(resolve => setTimeout(resolve, 0));
 
 /**
  * Parses Personnel Excel file and generates pre-commit comparison preview
+ * sorted by personnel code ascending (with missing personnel codes moved to the end).
  */
 export async function parsePersonnelExcelFile(
   file: File,
   existingPersonnelList: Personnel[],
   onProgress?: (progress: number, message?: string) => void
 ): Promise<PersonnelImportPreviewResult> {
+  const report = (pct: number, msg: string) => {
+    if (onProgress) onProgress(pct, msg);
+  };
+
+  report(10, 'در حال خواندن ساختار فایل اکسل...');
   const data = await file.arrayBuffer();
+  await yieldToMain();
 
-  // 1. Attempt high-performance non-blocking Web Worker execution
-  try {
-    const workerResult = await workerManager.executeTask<any, any>(
-      'EXCEL_PARSE_PERSONNEL',
-      { fileBuffer: data, existingPersonnelList },
-      onProgress
-    ).promise;
-
-    if (workerResult && Array.isArray(workerResult.rows)) {
-      return {
-        fileName: file.name,
-        fileSize: file.size,
-        totalRows: workerResult.totalRows,
-        createdCount: workerResult.createdCount,
-        updatedCount: workerResult.updatedCount,
-        warningCount: workerResult.warningCount,
-        errorCount: workerResult.errorCount,
-        rows: workerResult.rows
-      };
-    }
-  } catch (workerErr) {
-    console.warn('HSECORE: Web Worker parsing fell back to main thread:', workerErr);
-  }
-
-  // 2. Synchronous fallback
   const workbook = XLSX.read(data, { type: 'array' });
 
   if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
@@ -211,6 +198,9 @@ export async function parsePersonnelExcelFile(
     throw new Error('فایل اکسل خالی است یا اطلاعات خوانا در آن یافت نشد.');
   }
 
+  report(30, 'تشخیص ستون‌ها و تطبیق فیلدها...');
+  await yieldToMain();
+
   const headers = Object.keys(rawJson[0]);
   const mappings = autoDetectPersonnelColumnMappings(headers);
 
@@ -222,15 +212,16 @@ export async function parsePersonnelExcelFile(
 
   const seenNationalCodesInFile = new Set<string>();
   const seenPersonnelCodesInFile = new Set<string>();
+  const totalRows = rawJson.length;
 
-  rawJson.forEach((row, idx) => {
+  for (let idx = 0; idx < totalRows; idx++) {
+    const row = rawJson[idx];
     const rowId = idx + 1;
     const errors: string[] = [];
     const warnings: string[] = [];
 
-    // Extract exact raw cell strings as they exist in Excel
     const rawNationalCode = extractRawCellValue(row[mappings.nationalCode || '']);
-    const rawPersonnelCode = extractRawCellValue(row[mappings.personnelCode || '']);
+    const rawPersonnelCode = cleanPersonnelCode(extractRawCellValue(row[mappings.personnelCode || '']));
     let rawFirstName = extractRawCellValue(row[mappings.firstName || '']);
     let rawLastName = extractRawCellValue(row[mappings.lastName || '']);
     const rawFullNameStr = extractRawCellValue(row[mappings.fullName || '']);
@@ -242,8 +233,8 @@ export async function parsePersonnelExcelFile(
     }
 
     const fullName = (rawFirstName && rawLastName ? `${rawFirstName} ${rawLastName}` : (rawFullNameStr || rawFirstName || rawLastName || '—'));
-    const gender = extractRawCellValue(row[mappings.gender || '']);
-    const militaryStatus = extractRawCellValue(row[mappings.militaryStatus || '']);
+    const gender = extractRawCellValue(row[mappings.gender || '']) || 'مرد';
+    const militaryStatus = extractRawCellValue(row[mappings.militaryStatus || '']) || 'پایان خدمت';
     const workplace = extractRawCellValue(row[mappings.workplace || '']);
     const unit = extractRawCellValue(row[mappings.unit || '']);
     const subUnit = extractRawCellValue(row[mappings.subUnit || '']);
@@ -255,9 +246,8 @@ export async function parsePersonnelExcelFile(
     const childrenCount = extractRawCellValue(row[mappings.childrenCount || '']);
     const notes = extractRawCellValue(row[mappings.notes || '']);
 
-    // Temporary normalized variables for matching & validation only
     const normNatCode = normalizeNationalCode(rawNationalCode);
-    const normPersCode = normalizeDigits(rawPersonnelCode).trim();
+    const normPersCode = rawPersonnelCode;
 
     // Validation checks
     if (!rawNationalCode && !rawPersonnelCode && !rawFullNameStr && !rawLastName) {
@@ -291,9 +281,10 @@ export async function parsePersonnelExcelFile(
 
     if (!matchedPerson && normPersCode) {
       matchedPerson = existingPersonnelList.find(p => {
-        if (!p.personnelCode) return false;
-        return normalizeDigits(p.personnelCode).trim() === normPersCode ||
-               normalizeForMatching(p.personnelCode) === normalizeForMatching(rawPersonnelCode);
+        const existingCode = cleanPersonnelCode(p.personnelCode);
+        if (!existingCode) return false;
+        return existingCode === normPersCode ||
+               normalizeForMatching(existingCode) === normalizeForMatching(normPersCode);
       });
       if (matchedPerson) matchMethod = 'PERSONNEL_CODE';
     }
@@ -316,9 +307,8 @@ export async function parsePersonnelExcelFile(
       action = 'UPDATE';
       updatedCount++;
 
-      // Compare and fill missing / update fields based on normalized difference
       const addChangeIfDiff = (key: keyof Personnel, labelFa: string, newFieldValue: string) => {
-        if (!newFieldValue) return; // Do not erase non-empty existing data
+        if (!newFieldValue) return;
         const currentVal = String(matchedPerson![key] || '');
         if (normalizeForMatching(currentVal) !== normalizeForMatching(newFieldValue)) {
           changedFields.push({
@@ -330,6 +320,7 @@ export async function parsePersonnelExcelFile(
         }
       };
 
+      addChangeIfDiff('personnelCode', 'کد پرسنلی', rawPersonnelCode);
       addChangeIfDiff('firstName', 'نام', rawFirstName);
       addChangeIfDiff('lastName', 'نام خانوادگی', rawLastName);
       addChangeIfDiff('workplace', 'محل خدمت', workplace);
@@ -351,10 +342,12 @@ export async function parsePersonnelExcelFile(
       else createdCount++;
     }
 
+    const effectivePreviewCode = rawPersonnelCode || cleanPersonnelCode(matchedPerson?.personnelCode);
+
     rowsPreview.push({
       rowId,
       rawNationalCode,
-      rawPersonnelCode,
+      rawPersonnelCode: effectivePreviewCode,
       firstName: rawFirstName,
       lastName: rawLastName,
       fullName,
@@ -374,14 +367,32 @@ export async function parsePersonnelExcelFile(
       action,
       matchMethod,
       matchedPersonnelId: matchedPerson?.id,
-      matchedPersonnelCode: matchedPerson?.personnelCode,
+      matchedPersonnelCode: cleanPersonnelCode(matchedPerson?.personnelCode),
       matchedFullName: matchedPerson ? `${matchedPerson.firstName} ${matchedPerson.lastName}` : undefined,
 
       changedFields,
       errors,
       warnings
     });
-  });
+
+    if (idx > 0 && idx % 150 === 0) {
+      const pct = Math.min(95, Math.round(30 + (idx / totalRows) * 65));
+      report(pct, `تطبیق ردیف ${idx + 1} از ${totalRows}...`);
+      await yieldToMain();
+    }
+  }
+
+  // Sort preview rows by personnel code ascending (missing personnel codes at the end)
+  const sortedRowsPreview = sortPersonnelByCodeAsc(
+    rowsPreview,
+    r => r.rawPersonnelCode || r.matchedPersonnelCode,
+    r => r.fullName
+  ).map((r, i) => ({
+    ...r,
+    rowId: i + 1
+  }));
+
+  report(100, 'تحلیل و مرتب‌سازی فایل اکسل به پایان رسید.');
 
   return {
     fileName: file.name,
@@ -391,12 +402,13 @@ export async function parsePersonnelExcelFile(
     updatedCount,
     warningCount,
     errorCount,
-    rows: rowsPreview
+    rows: sortedRowsPreview
   };
 }
 
 /**
- * Commits approved Excel import rows to System Personnel Master Database
+ * Commits approved Excel import rows to System Personnel Master Database,
+ * sorting the resulting list by personnel code ascending (missing personnel codes at the end).
  */
 export async function commitPersonnelImportBatch(
   rows: PersonnelImportRowPreview[],
@@ -415,13 +427,16 @@ export async function commitPersonnelImportBatch(
       return;
     }
 
+    const rowCleanCode = cleanPersonnelCode(row.rawPersonnelCode);
+
     if (row.action === 'UPDATE' && row.matchedPersonnelId) {
-      // Update existing record
       currentPersonnelList = currentPersonnelList.map(p => {
         if (p.id !== row.matchedPersonnelId) return p;
 
         return {
           ...p,
+          personnelCode: rowCleanCode || cleanPersonnelCode(p.personnelCode),
+          nationalCode: row.rawNationalCode || p.nationalCode,
           firstName: row.firstName || p.firstName,
           lastName: row.lastName || p.lastName,
           workplace: row.workplace || p.workplace || '',
@@ -440,17 +455,20 @@ export async function commitPersonnelImportBatch(
       });
       updatedCount++;
     } else {
-      // Ensure we do not add duplicate in currentPersonnelList if already exists
-      const alreadyAddedIdx = currentPersonnelList.findIndex(p => 
-        (row.rawNationalCode && p.nationalCode && normalizeDigits(p.nationalCode, true) === normalizeDigits(row.rawNationalCode, true)) ||
-        (row.rawPersonnelCode && p.personnelCode && normalizeDigits(p.personnelCode).trim() === normalizeDigits(row.rawPersonnelCode).trim())
-      );
+      const alreadyAddedIdx = currentPersonnelList.findIndex(p => {
+        const pCleanCode = cleanPersonnelCode(p.personnelCode);
+        return (
+          (row.rawNationalCode && p.nationalCode && normalizeDigits(p.nationalCode, true) === normalizeDigits(row.rawNationalCode, true)) ||
+          (rowCleanCode && pCleanCode && pCleanCode === rowCleanCode)
+        );
+      });
 
       if (alreadyAddedIdx >= 0) {
-        // Update existing instead of creating duplicate
         const p = currentPersonnelList[alreadyAddedIdx];
         currentPersonnelList[alreadyAddedIdx] = {
           ...p,
+          personnelCode: rowCleanCode || cleanPersonnelCode(p.personnelCode),
+          nationalCode: row.rawNationalCode || p.nationalCode,
           firstName: row.firstName || p.firstName,
           lastName: row.lastName || p.lastName,
           workplace: row.workplace || p.workplace,
@@ -470,13 +488,12 @@ export async function commitPersonnelImportBatch(
         return;
       }
 
-      // Create new record with guaranteed unique ID and code
       const uniqueSuffix = `${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 7)}`;
       const newPersonnel: Personnel = {
         id: `emp-${uniqueSuffix}`,
         firstName: row.firstName || row.fullName.split(' ')[0] || 'پرسنل',
         lastName: row.lastName || row.fullName.split(' ').slice(1).join(' ') || 'جدید',
-        personnelCode: row.rawPersonnelCode || `EMP-${Date.now().toString(36).toUpperCase()}-${idx + 1}`,
+        personnelCode: rowCleanCode,
         nationalCode: row.rawNationalCode,
         workplace: row.workplace || '',
         unit: row.unit || 'نامشخص',
@@ -492,10 +509,14 @@ export async function commitPersonnelImportBatch(
         militaryStatus: row.militaryStatus || 'پایان خدمت',
         notes: row.notes || 'ثبت شده از طریق ورود فایل اکسل'
       };
-      currentPersonnelList.unshift(newPersonnel);
+      currentPersonnelList.push(newPersonnel);
       createdCount++;
     }
   });
+
+  // Sort the complete personnel list by personnelCode ascending, moving missing personnelCode records to the end
+  currentPersonnelList = sortPersonnelByCodeAsc(currentPersonnelList);
+  setInMemoryPersonnelList(currentPersonnelList);
 
   // Persist directly to database (Single Source of Truth)
   try {

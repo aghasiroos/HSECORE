@@ -369,7 +369,7 @@ export default function PdfDocumentViewer({
             <ChevronRight className="w-4 h-4 rtl:rotate-0 ltr:rotate-180" />
           </button>
 
-          <div className="flex items-center gap-1 font-mono px-2 text-xs font-semibold">
+          <div dir="ltr" className="flex items-center gap-1 font-mono px-2 text-xs font-semibold">
             <span>{currentPage}</span>
             <span className="text-slate-400">/</span>
             <span className="text-slate-400">{numPages || '...'}</span>
@@ -396,7 +396,7 @@ export default function PdfDocumentViewer({
             <ZoomOut className="w-4 h-4" />
           </button>
 
-          <span className="text-[11px] font-mono font-bold text-slate-300 px-1.5 min-w-[45px] text-center">
+          <span dir="ltr" className="text-[11px] font-mono font-bold text-slate-300 px-2 min-w-[52px] text-center inline-block">
             {Math.round(scale * 100)}%
           </span>
 
@@ -515,7 +515,7 @@ export default function PdfDocumentViewer({
               {isFa ? 'در حال رندر و پردازش سند با بالاترین کیفیت...' : 'Rendering PDF document...'}
             </p>
             <p className="text-xs text-slate-400 mt-1">
-              {fileName}
+              {displayName}
             </p>
           </div>
         )}
@@ -673,7 +673,7 @@ export default function PdfDocumentViewer({
       {/* Bottom status bar */}
       <div className="px-4 py-2 bg-slate-850 border-t border-slate-800 text-[11px] text-slate-400 flex items-center justify-between">
         <span className="truncate max-w-sm">
-          {displayName} ({fileName})
+          {displayName}
         </span>
         <span className="font-mono text-[10px] text-slate-400">
           تعداد کل صفحات: {numPages}

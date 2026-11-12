@@ -519,23 +519,55 @@ export interface AuditLogEntry {
 
 export interface NotificationEntry {
   id: string;
+  notifId?: string;
   ts: string; // ISO string
+  createdAt?: string;
   title: string;
   body: string;
-  type: 'popup' | 'in-app' | 'push';
-  targetType: 'all' | 'users' | 'departments' | 'roles' | 'single';
+  type: 'popup' | 'in-app' | 'push' | 'popup_and_push';
+  targetType: 'all' | 'departments' | 'unit_managers' | 'hse_experts' | 'users' | 'roles' | 'single';
   targetValues: string[]; // e.g. role names, user IDs, department IDs
   sender: string;
   readBy: string[]; // User IDs who have read this
   images?: string[];
   sirenType?: string;
+  actionGuidelines?: string;
   metadata?: Record<string, any>;
   acknowledgedBy?: Array<{
     userId: string;
     userName?: string;
     timestamp: string;
     note?: string;
+    acknowledgmentSource?: string;
   }>;
+  viewedBy?: Array<{
+    userId: string;
+    userName?: string;
+    timestamp: string;
+    source: string;
+    deviceType?: string;
+  }>;
+  deliveryReport?: {
+    dispatchedAt: string;
+    inAppPopupDelivered: boolean;
+    webPushAttempted: boolean;
+    totalTargetedDevices: number;
+    pushSentCount: number;
+    pushFailedCount: number;
+    pushExpiredRemovedCount: number;
+    deviceLogs: Array<{
+      subscriptionId: string;
+      userId?: string;
+      userName?: string;
+      deviceType?: string;
+      deviceName?: string;
+      endpointDomain?: string;
+      status: 'delivered' | 'failed' | 'expired';
+      statusCode?: number;
+      errorMessage?: string;
+      timestamp: string;
+    }>;
+  };
 }
 
 // --- Work Permit (پروانه کار) Types ---

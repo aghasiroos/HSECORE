@@ -1511,7 +1511,9 @@ export default function SystemSettings({ language, currentUser, onUserUpdateTrig
               <button
                 onClick={() => setActiveSubTab('org_structure')}
                 className={`px-4 py-2 text-xs font-black rounded-lg cursor-pointer transition flex items-center gap-1.5 ${
-                  activeSubTab === 'org_structure' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                  activeSubTab === 'org_structure'
+                    ? 'bg-blue-600 text-white shadow-sm font-black'
+                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-800/50 font-bold'
                 }`}
               >
                 <Building2 className="w-4 h-4" />
@@ -1522,7 +1524,9 @@ export default function SystemSettings({ language, currentUser, onUserUpdateTrig
               <button
                 onClick={() => setActiveSubTab('personnel')}
                 className={`px-4 py-2 text-xs font-black rounded-lg cursor-pointer transition flex items-center gap-1.5 ${
-                  activeSubTab === 'personnel' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-900'
+                  activeSubTab === 'personnel'
+                    ? 'bg-blue-600 text-white shadow-sm font-black'
+                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-800/50 font-bold'
                 }`}
               >
                 <Users className="w-4 h-4" />
@@ -1533,7 +1537,9 @@ export default function SystemSettings({ language, currentUser, onUserUpdateTrig
               <button
                 onClick={() => setActiveSubTab('users')}
                 className={`px-4 py-2 text-xs font-black rounded-lg cursor-pointer transition flex items-center gap-1.5 ${
-                  activeSubTab === 'users' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-900'
+                  activeSubTab === 'users'
+                    ? 'bg-blue-600 text-white shadow-sm font-black'
+                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-800/50 font-bold'
                 }`}
               >
                 <ShieldAlert className="w-4 h-4" />
@@ -1544,11 +1550,13 @@ export default function SystemSettings({ language, currentUser, onUserUpdateTrig
               <button
                 onClick={() => setActiveSubTab('notifications')}
                 className={`px-4 py-2 text-xs font-black rounded-lg cursor-pointer transition flex items-center gap-1.5 ${
-                  activeSubTab === 'notifications' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-900'
+                  activeSubTab === 'notifications'
+                    ? 'bg-blue-600 text-white shadow-sm font-black'
+                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-800/50 font-bold'
                 }`}
                 id="settings-tab-notifications"
               >
-                <Bell className="w-4 h-4 text-amber-500" />
+                <Bell className={`w-4 h-4 ${activeSubTab === 'notifications' ? 'text-white' : 'text-amber-500'}`} />
                 <span>{isFa ? 'ارسال هشدار فوری HSE و اعلان‌ها' : 'Instant HSE Alerts & Notifications'}</span>
               </button>
             )}
@@ -1556,7 +1564,9 @@ export default function SystemSettings({ language, currentUser, onUserUpdateTrig
               <button
                 onClick={() => setActiveSubTab('audit')}
                 className={`px-4 py-2 text-xs font-black rounded-lg cursor-pointer transition flex items-center gap-1.5 ${
-                  activeSubTab === 'audit' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-900'
+                  activeSubTab === 'audit'
+                    ? 'bg-blue-600 text-white shadow-sm font-black'
+                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-800/50 font-bold'
                 }`}
               >
                 <Activity className="w-4 h-4" />
@@ -1567,7 +1577,9 @@ export default function SystemSettings({ language, currentUser, onUserUpdateTrig
               <button
                 onClick={() => setActiveSubTab('ui_config')}
                 className={`px-4 py-2 text-xs font-black rounded-lg cursor-pointer transition flex items-center gap-1.5 ${
-                  activeSubTab === 'ui_config' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-900'
+                  activeSubTab === 'ui_config'
+                    ? 'bg-blue-600 text-white shadow-sm font-black'
+                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-800/50 font-bold'
                 }`}
               >
                 <Settings className="w-4 h-4" />
@@ -1578,10 +1590,12 @@ export default function SystemSettings({ language, currentUser, onUserUpdateTrig
               <button
                 onClick={() => setActiveSubTab('automation')}
                 className={`px-4 py-2 text-xs font-black rounded-lg cursor-pointer transition flex items-center gap-1.5 ${
-                  activeSubTab === 'automation' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-900'
+                  activeSubTab === 'automation'
+                    ? 'bg-blue-600 text-white shadow-sm font-black'
+                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-800/50 font-bold'
                 }`}
               >
-                <Zap className="w-4 h-4 text-blue-500" />
+                <Zap className={`w-4 h-4 ${activeSubTab === 'automation' ? 'text-white' : 'text-blue-500'}`} />
                 <span>{isFa ? 'وب‌هوک و اتوماسیون داخلی' : 'Webhooks & Automation'}</span>
               </button>
             )}
@@ -1589,7 +1603,9 @@ export default function SystemSettings({ language, currentUser, onUserUpdateTrig
               <button
                 onClick={() => setActiveSubTab('integration')}
                 className={`px-4 py-2 text-xs font-black rounded-lg cursor-pointer transition flex items-center gap-1.5 ${
-                  activeSubTab === 'integration' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-900'
+                  activeSubTab === 'integration'
+                    ? 'bg-blue-600 text-white shadow-sm font-black'
+                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-800/50 font-bold'
                 }`}
               >
                 <Globe className="w-4 h-4" />
@@ -1600,7 +1616,9 @@ export default function SystemSettings({ language, currentUser, onUserUpdateTrig
               <button
                 onClick={() => setActiveSubTab('backup')}
                 className={`px-4 py-2 text-xs font-black rounded-lg cursor-pointer transition flex items-center gap-1.5 ${
-                  activeSubTab === 'backup' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-900'
+                  activeSubTab === 'backup'
+                    ? 'bg-blue-600 text-white shadow-sm font-black'
+                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-800/50 font-bold'
                 }`}
               >
                 <Database className="w-4 h-4" />
@@ -1611,10 +1629,12 @@ export default function SystemSettings({ language, currentUser, onUserUpdateTrig
               <button
                 onClick={() => setActiveSubTab('ai')}
                 className={`px-4 py-2 text-xs font-black rounded-lg cursor-pointer transition flex items-center gap-1.5 ${
-                  activeSubTab === 'ai' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-900'
+                  activeSubTab === 'ai'
+                    ? 'bg-blue-600 text-white shadow-sm font-black'
+                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-800/50 font-bold'
                 }`}
               >
-                <Bot className="w-4 h-4 text-indigo-500" />
+                <Bot className={`w-4 h-4 ${activeSubTab === 'ai' ? 'text-white' : 'text-indigo-500'}`} />
                 <span>{isFa ? 'مدیریت هوش مصنوعی' : 'AI Management'}</span>
               </button>
             )}

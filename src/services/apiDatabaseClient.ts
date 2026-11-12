@@ -239,6 +239,87 @@ function invalidateCacheKeys(...prefixes: string[]) {
   }
 }
 
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('خطا در خواندن فایل انتخابی'));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function sendDocumentWithJsonFallback(
+  url: string,
+  formData: FormData,
+  defaultErrMsg: string
+): Promise<{ success: boolean; data?: any; error?: string }> {
+  invalidateCacheKeys('documents');
+  let firstErrMsg = defaultErrMsg;
+
+  const attachedFile = formData.get('file');
+  if (attachedFile instanceof File && attachedFile.name && !formData.get('originalFileName')) {
+    formData.set('originalFileName', attachedFile.name);
+  }
+
+  try {
+    const res = await authFetch(url, {
+      method: 'POST',
+      body: formData,
+    });
+    const parsed = await parseJsonSafely<any>(res);
+    invalidateCacheKeys('documents');
+    if (parsed.ok && parsed.data?.success) {
+      return { success: true, data: parsed.data.data };
+    }
+    firstErrMsg =
+      parsed.data?.error?.message || parsed.data?.message || parsed.error || defaultErrMsg;
+    // If server returned a definitive business validation/permission error (not a missing-file or proxy/multipart issue), return immediately
+    if (
+      res.status === 401 ||
+      res.status === 403 ||
+      (res.status === 422 && !firstErrMsg.includes('فایل'))
+    ) {
+      return { success: false, error: firstErrMsg };
+    }
+  } catch (err: any) {
+    firstErrMsg = err?.message || defaultErrMsg;
+  }
+
+  // Fallback: send as JSON base64 payload if multipart upload was blocked or stripped by proxy
+  try {
+    const fileEntry = formData.get('file');
+    if (typeof File !== 'undefined' && fileEntry instanceof File) {
+      const jsonBody: Record<string, any> = {};
+      formData.forEach((val, key) => {
+        if (key !== 'file') jsonBody[key] = val;
+      });
+      jsonBody.fileData = await fileToBase64(fileEntry);
+      jsonBody.originalFileName = fileEntry.name;
+      jsonBody.mimeType = fileEntry.type || 'application/pdf';
+
+      const fallbackRes = await authFetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(jsonBody),
+      });
+      const fallbackParsed = await parseJsonSafely<any>(fallbackRes);
+      invalidateCacheKeys('documents');
+      if (fallbackParsed.ok && fallbackParsed.data?.success) {
+        return { success: true, data: fallbackParsed.data.data };
+      }
+      firstErrMsg =
+        fallbackParsed.data?.error?.message ||
+        fallbackParsed.data?.message ||
+        fallbackParsed.error ||
+        firstErrMsg;
+    }
+  } catch {
+    // Keep original error message
+  }
+
+  return { success: false, error: firstErrMsg };
+}
+
 export const apiDb = {
   // Cache utility for explicit invalidation
   invalidateCache(...prefixes: string[]) {
@@ -598,14 +679,7 @@ export const apiDb = {
     try {
       invalidateCacheKeys('incidents', 'sync:full');
       try {
-        const saved = localStorage.getItem('hse_safety_incidents');
-        if (saved) {
-          const list = JSON.parse(saved);
-          if (Array.isArray(list)) {
-            const filtered = list.filter((i: any) => String(i.id) !== String(id) && String(i.reportNumber) !== String(id) && String(i.incidentNumber) !== String(id));
-            localStorage.setItem('hse_safety_incidents', JSON.stringify(filtered));
-          }
-        }
+        localStorage.removeItem('hse_safety_incidents');
       } catch (_) {}
       const res = await authFetch(`/api/v1/incidents/${encodeURIComponent(String(id))}`, {
         method: 'DELETE',
@@ -667,14 +741,7 @@ export const apiDb = {
     try {
       invalidateCacheKeys('warnings', 'warnings:list', 'sync:full');
       try {
-        const saved = localStorage.getItem('warning_records');
-        if (saved) {
-          const list = JSON.parse(saved);
-          if (Array.isArray(list)) {
-            const filtered = list.filter((w: any) => String(w.id) !== String(id) && String(w.number) !== String(id));
-            localStorage.setItem('warning_records', JSON.stringify(filtered));
-          }
-        }
+        localStorage.removeItem('warning_records');
       } catch (_) {}
       const res = await authFetch(`/api/v1/warnings/${encodeURIComponent(String(id))}`, {
         method: 'DELETE',
@@ -1119,8 +1186,8 @@ export const apiDb = {
     try {
       const res = await fetch('/api/v1/notifications/public/vapid-public-key');
       if (!res.ok) return null;
-      const json: ApiResponse = await res.json();
-      return json.data?.publicKey || null;
+      const json: any = await res.json();
+      return json?.data?.publicKey || json?.publicKey || null;
     } catch {
       return null;
     }
@@ -1130,23 +1197,34 @@ export const apiDb = {
     subscription: any;
     userId?: string;
     username?: string;
+    userName?: string;
+    role?: string;
+    jobTitle?: string;
+    departmentIds?: string[];
+    departmentName?: string;
+    deviceType?: 'desktop' | 'laptop' | 'mobile' | 'tablet';
+    deviceName?: string;
+    browserName?: string;
+    osName?: string;
     clientSessionId?: string;
-  }): Promise<boolean> {
+  }): Promise<any> {
     try {
-      const res = await fetch('/api/v1/notifications/public/push-subscribe', {
+      const res = await authFetch('/api/v1/notifications/public/push-subscribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      return res.ok;
+      if (!res.ok) return null;
+      const json: any = await res.json();
+      return json?.data || true;
     } catch {
-      return false;
+      return null;
     }
   },
 
   async unsubscribeWebPush(endpoint: string): Promise<boolean> {
     try {
-      const res = await fetch('/api/v1/notifications/public/push-unsubscribe', {
+      const res = await authFetch('/api/v1/notifications/public/push-unsubscribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ endpoint }),
@@ -1154,6 +1232,69 @@ export const apiDb = {
       return res.ok;
     } catch {
       return false;
+    }
+  },
+
+  async getPushSubscriptions(all?: boolean): Promise<any[]> {
+    try {
+      const url = all
+        ? '/api/v1/notifications/push-subscriptions?all=true'
+        : '/api/v1/notifications/push-subscriptions';
+      const res = await authFetch(url);
+      if (!res.ok) return [];
+      const json: any = await res.json();
+      return json?.data || [];
+    } catch {
+      return [];
+    }
+  },
+
+  async deletePushSubscription(idOrEndpoint: string): Promise<boolean> {
+    try {
+      const res = await authFetch(
+        `/api/v1/notifications/push-subscriptions/${encodeURIComponent(idOrEndpoint)}`,
+        { method: 'DELETE' }
+      );
+      return res.ok;
+    } catch {
+      return false;
+    }
+  },
+
+  async confirmNotificationViewed(
+    notifId: string,
+    source: 'browser_push_click' | 'in_app_popup' | 'alert_details_view',
+    userId?: string,
+    userName?: string,
+    deviceType?: string
+  ): Promise<boolean> {
+    try {
+      invalidateCacheKeys('notifications', 'sync:full');
+      const res = await fetch('/api/v1/notifications/public/view', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          notifId,
+          source,
+          userId,
+          userName,
+          deviceType,
+        }),
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  },
+
+  async getNotificationById(id: string): Promise<any | null> {
+    try {
+      const res = await authFetch(`/api/v1/notifications/${encodeURIComponent(id)}`);
+      if (!res.ok) return null;
+      const json: any = await res.json();
+      return json?.data || null;
+    } catch {
+      return null;
     }
   },
 
@@ -1970,22 +2111,11 @@ export const apiDb = {
   },
 
   async createDocument(formData: FormData): Promise<{ success: boolean; data?: any; error?: string }> {
-    try {
-      invalidateCacheKeys('documents');
-      const res = await authFetch('/api/v1/files/documents', {
-        method: 'POST',
-        body: formData,
-      });
-      const parsed = await parseJsonSafely<any>(res);
-      invalidateCacheKeys('documents');
-      if (!parsed.ok || !parsed.data?.success) {
-        const errMsg = parsed.data?.error?.message || parsed.data?.message || parsed.error || 'خطا در ثبت و بارگذاری مستند';
-        return { success: false, error: errMsg };
-      }
-      return { success: true, data: parsed.data.data };
-    } catch (err: any) {
-      return { success: false, error: err?.message || 'خطا در ارتباط با سرور' };
-    }
+    return sendDocumentWithJsonFallback(
+      '/api/v1/files/documents',
+      formData,
+      'خطا در ثبت و بارگذاری مستند'
+    );
   },
 
   async updateDocument(
@@ -2025,22 +2155,11 @@ export const apiDb = {
     documentId: string,
     formData: FormData
   ): Promise<{ success: boolean; data?: any; error?: string }> {
-    try {
-      invalidateCacheKeys('documents');
-      const res = await authFetch(`/api/v1/files/documents/${encodeURIComponent(documentId)}/replace`, {
-        method: 'POST',
-        body: formData,
-      });
-      const parsed = await parseJsonSafely<any>(res);
-      invalidateCacheKeys('documents');
-      if (!parsed.ok || !parsed.data?.success) {
-        const errMsg = parsed.data?.error?.message || parsed.data?.message || parsed.error || 'خطا در جایگزینی فایل و ثبت نسخه جدید';
-        return { success: false, error: errMsg };
-      }
-      return { success: true, data: parsed.data.data };
-    } catch (err: any) {
-      return { success: false, error: err?.message || 'خطا در ارتباط با سرور' };
-    }
+    return sendDocumentWithJsonFallback(
+      `/api/v1/files/documents/${encodeURIComponent(documentId)}/replace`,
+      formData,
+      'خطا در جایگزینی فایل و ثبت نسخه جدید'
+    );
   },
 
   async deleteDocument(documentId: string): Promise<{ success: boolean; error?: string }> {
@@ -2075,7 +2194,7 @@ export const apiDb = {
 
   async fetchPdfPageImageUrl(fileId: string, page = 1): Promise<{ url: string; totalPages: number } | null> {
     try {
-      const res = await authFetch(`/api/v1/files/${encodeURIComponent(fileId)}/render-page?page=${page}`);
+      const res = await authFetch(`/api/v1/files/${encodeURIComponent(fileId)}/render-page?page=${page}&v=3`);
       if (!res.ok) return null;
       const totalPagesHeader = res.headers.get('X-Total-Pages');
       const totalPages = totalPagesHeader ? parseInt(totalPagesHeader, 10) : 1;

@@ -5,7 +5,7 @@
  */
 
 import { db, schema } from '../../core/db.ts';
-import { desc, eq, or, ilike } from 'drizzle-orm';
+import { desc, eq, or, ilike, inArray } from 'drizzle-orm';
 import { ptwRepository } from '../ptw/ptw.repository.ts';
 import { incidentRepository } from '../incidents/incident.repository.ts';
 import { weatherService } from '../../weather/service.ts';
@@ -34,24 +34,42 @@ export function normalizePersianText(input: string): string {
 }
 
 export class AIToolsRegistry {
+  private cachedSettingsMap: { map: Map<string, any>; expiresAt: number } | null = null;
+  private inflightSettingsPromise: Promise<Map<string, any>> | null = null;
+
   private async loadSettingsMap(): Promise<Map<string, any>> {
-    const map = new Map<string, any>();
-    try {
-      const rows = await db.select().from(schema.systemSettings).catch(() => []);
-      for (const r of rows) {
-        if (r && r.key) {
-          let val = r.value;
-          if (typeof val === 'string') {
-            try {
-              val = JSON.parse(val);
-            } catch {}
+    const now = Date.now();
+    if (this.cachedSettingsMap && now < this.cachedSettingsMap.expiresAt) {
+      return this.cachedSettingsMap.map;
+    }
+    if (this.inflightSettingsPromise) {
+      return this.inflightSettingsPromise;
+    }
+
+    this.inflightSettingsPromise = (async () => {
+      const map = new Map<string, any>();
+      try {
+        const rows = await db.select().from(schema.systemSettings).catch(() => []);
+        for (const r of rows) {
+          if (r && r.key) {
+            let val = r.value;
+            if (typeof val === 'string') {
+              try {
+                val = JSON.parse(val);
+              } catch {}
+            }
+            map.set(r.key, val);
+            map.set(r.key.toLowerCase(), val);
           }
-          map.set(r.key, val);
-          map.set(r.key.toLowerCase(), val);
         }
+        this.cachedSettingsMap = { map, expiresAt: Date.now() + 4000 };
+      } catch {} finally {
+        this.inflightSettingsPromise = null;
       }
-    } catch {}
-    return map;
+      return map;
+    })();
+
+    return this.inflightSettingsPromise;
   }
 
   /** Read the persisted navigation/module metadata used by the system UI. */
@@ -251,8 +269,9 @@ export class AIToolsRegistry {
    */
   async getHealthAndExamsSummary(): Promise<AIToolResult> {
     try {
-      const [exams, audio, spiro, opto, diseases, settingsMap] = await Promise.all([
+      const [sqlExams, sqlLabs, audio, spiro, opto, diseases, settingsMap] = await Promise.all([
         db.select().from(schema.periodicMedicalExams).catch(() => []),
+        db.select().from(schema.labResults).catch(() => []),
         db.select().from(schema.audiometryRecords).catch(() => []),
         db.select().from(schema.spirometryRecords).catch(() => []),
         db.select().from(schema.optometryRecords).catch(() => []),
@@ -260,34 +279,98 @@ export class AIToolsRegistry {
         this.loadSettingsMap(),
       ]);
 
-      const extraExams = Array.isArray(settingsMap.get('hse_medical_exams_v4')) ? settingsMap.get('hse_medical_exams_v4') : [];
-      const allExams = exams.length > 0 ? exams : extraExams;
-      const totalExams = allExams.length;
+      const medicalRecords = Array.isArray(settingsMap.get('hse_medical_records_v4')) ? settingsMap.get('hse_medical_records_v4') : [];
+      const settingExams = Array.isArray(settingsMap.get('hse_medical_exams_v4')) ? settingsMap.get('hse_medical_exams_v4') : [];
+      const occExamsV2 = Array.isArray(settingsMap.get('occ_health_exams_data_v2')) ? settingsMap.get('occ_health_exams_data_v2') : [];
+      const nonPeriodicExams = Array.isArray(settingsMap.get('hse_non_periodic_exams_v1')) ? settingsMap.get('hse_non_periodic_exams_v1') : [];
+      const structuredLabs = Array.isArray(settingsMap.get('hse_structured_lab_results_v1')) ? settingsMap.get('hse_structured_lab_results_v1') : [];
 
+      const seenExamIds = new Set<string>();
+      const allExams: any[] = [];
+      for (const item of [...settingExams, ...sqlExams, ...occExamsV2]) {
+        if (!item || typeof item !== 'object') continue;
+        const key = String(item.id || `${item.employeeCode || item.personnelId || ''}-${item.examYear || ''}-${item.examDate || ''}`);
+        if (seenExamIds.has(key)) continue;
+        seenExamIds.add(key);
+        allExams.push(item);
+      }
+
+      const totalExams = allExams.length;
       let fit = 0;
       let conditional = 0;
+      let needsSpecialist = 0;
       let unfit = 0;
+      let underReview = 0;
+      const byYear = new Map<number, number>();
+      let visionCount = opto.length;
+      let audioCount = audio.length;
+      let spiroCount = spiro.length;
 
       for (const e of allExams) {
-        const status = String((e as any).fitnessStatus || (e as any).doctorVerdict || (e as any).final_opinion || '').toUpperCase();
-        if (status.includes('UNFIT') || status.includes('عدم صلاحیت') || status.includes('نامناسب')) {
+        const yr = Number(e.examYear || 0);
+        if (yr > 1300) byYear.set(yr, (byYear.get(yr) || 0) + 1);
+
+        const rawStatus = String(e.status || e.fitnessStatus || e.doctorVerdict || e.final_opinion || '').trim().toLowerCase();
+        if (rawStatus === 'unfit' || rawStatus.includes('unfit') || rawStatus.includes('عدم صلاحیت') || rawStatus.includes('نامناسب')) {
           unfit++;
-        } else if (status.includes('CONDITIONAL') || status.includes('مشروط') || (e as any).restrictions) {
+        } else if (rawStatus === 'needs_specialist' || rawStatus.includes('specialist') || rawStatus.includes('تخصصی')) {
+          needsSpecialist++;
+        } else if (rawStatus === 'under_review' || rawStatus === 'pending' || rawStatus.includes('بررسی') || rawStatus.includes('انتظار')) {
+          underReview++;
+        } else if (
+          rawStatus === 'fit_with_limitations' ||
+          rawStatus.includes('conditional') ||
+          rawStatus.includes('limitation') ||
+          rawStatus.includes('مشروط') ||
+          rawStatus.includes('محدودیت') ||
+          Boolean(e.restrictions)
+        ) {
           conditional++;
         } else {
           fit++;
         }
+
+        if (e.findings?.vision) visionCount++;
+        if (e.findings?.audiometry) audioCount++;
+        if (e.findings?.spirometry) spiroCount++;
       }
+
+      const yearSummary = Array.from(byYear.entries())
+        .sort((a, b) => b[0] - a[0])
+        .map(([yr, cnt]) => `سال ${yr}: ${cnt} مورد`)
+        .join('، ');
+
+      const totalLabs = sqlLabs.length + structuredLabs.length;
+      const abnormalLabs = [
+        ...sqlLabs.filter((l: any) => l.isAbnormal),
+        ...structuredLabs.filter((l: any) => l.status && l.status !== 'normal'),
+      ].length;
 
       return {
         toolName: 'health_medical_summary',
-        titleFa: 'ماژول بهداشت حرفه‌ای و معاینات طب کار',
+        titleFa: 'ماژول بهداشت حرفه‌ای و معاینات ادواری طب کار',
         summary: [
-          `• کل پرونده‌های معاینات طب کار: ${totalExams} پرونده`,
-          `• وضعیت تناسب شغلی: ${fit} نفر بلامانع (Fit)، ${conditional} نفر مشروط (Conditional)، ${unfit} نفر عدم صلاحیت (Unfit)`,
-          `• رکوردهای پاراکلینیکی: ${audio.length} ادیومتری (شنوایی‌سنجی)، ${spiro.length} اسپیرومتری (تنفس)، ${opto.length} اپتومتری (بینایی‌سنجی) و ${diseases.length} تشخیص بیماری شغلی`,
+          `• کل پرونده‌های سلامت پرسنل در ماژول معاینات ادواری: ${medicalRecords.length || totalExams} پرونده پایه | مجموع نوبت‌های معاینه ادواری ثبت‌شده: ${totalExams} نوبت${yearSummary ? ` (${yearSummary})` : ''}`,
+          `• وضعیت تناسب شغلی (Fitness for Duty): ${fit} مورد بلامانع (Fit)، ${conditional} مورد مشروط/با محدودیت، ${needsSpecialist} مورد نیازمند ارزیابی تخصصی، ${unfit} مورد نامناسب (Unfit) و ${underReview} مورد در حال بررسی`,
+          `• ارزیابی‌های پاراکلینیکی و آزمایشگاهی: ${audioCount} شنوایی‌سنجی (ادیومتری)، ${spiroCount} عملکرد ریه (اسپیرومتری)، ${visionCount} بینایی‌سنجی (اپتومتری)، ${totalLabs} رکورد آزمایشگاهی (${abnormalLabs} مورد خارج از محدوده نرمال)، ${nonPeriodicExams.length} معاینه غیرادواری و ${diseases.length} تشخیص بیماری شغلی`,
         ].join('\n'),
-        data: { totalExams, fit, conditional, unfit, audiometryCount: audio.length, spirometryCount: spiro.length, optometryCount: opto.length, diseasesCount: diseases.length },
+        data: {
+          totalMedicalDossiers: medicalRecords.length,
+          totalExams,
+          fit,
+          conditional,
+          needsSpecialist,
+          unfit,
+          underReview,
+          byYear: Object.fromEntries(byYear),
+          audiometryCount: audioCount,
+          spirometryCount: spiroCount,
+          optometryCount: visionCount,
+          totalLabs,
+          abnormalLabs,
+          nonPeriodicCount: nonPeriodicExams.length,
+          diseasesCount: diseases.length,
+        },
         timestamp: new Date().toISOString(),
       };
     } catch {
@@ -306,7 +389,14 @@ export class AIToolsRegistry {
    */
   async getNutritionHighRiskSummary(): Promise<AIToolResult> {
     try {
-      const exams = await db.select().from(schema.periodicMedicalExams).catch(() => []);
+      const [sqlExams, settingsMap] = await Promise.all([
+        db.select().from(schema.periodicMedicalExams).catch(() => []),
+        this.loadSettingsMap(),
+      ]);
+      const settingExams = Array.isArray(settingsMap.get('hse_medical_exams_v4')) ? settingsMap.get('hse_medical_exams_v4') : [];
+      const structuredLabs = Array.isArray(settingsMap.get('hse_structured_lab_results_v1')) ? settingsMap.get('hse_structured_lab_results_v1') : [];
+      const exams = settingExams.length > 0 ? [...settingExams, ...sqlExams] : sqlExams;
+
       let normalBmi = 0;
       let overweight = 0;
       let obeseGrade1 = 0;
@@ -316,7 +406,7 @@ export class AIToolsRegistry {
       let highBloodSugar = 0;
 
       for (const exam of exams) {
-        const raw = ((exam as any).rawData || (exam as any).extraData || {}) as Record<string, any>;
+        const raw = ((exam as any).rawData || (exam as any).extraData || (exam as any).findings || {}) as Record<string, any>;
         const bmi = Number((exam as any).bmi || raw.bmi || 0);
         if (bmi > 0 && bmi < 25) normalBmi++;
         else if (bmi >= 25 && bmi < 30) overweight++;
@@ -324,12 +414,25 @@ export class AIToolsRegistry {
         else if (bmi >= 35 && bmi < 40) obeseGrade2++;
         else if (bmi >= 40) obeseGrade3++;
 
-        const sys = Number((exam as any).systolicBp || raw.bloodPressureSystolic || 0);
-        const dia = Number((exam as any).diastolicBp || raw.bloodPressureDiastolic || 0);
+        let sys = Number((exam as any).systolicBp || raw.bloodPressureSystolic || 0);
+        let dia = Number((exam as any).diastolicBp || raw.bloodPressureDiastolic || 0);
+        if ((!sys || !dia) && typeof raw.bloodPressure === 'string') {
+          const bpMatch = raw.bloodPressure.match(/(\d{2,3})\s*[/\\]\s*(\d{2,3})/);
+          if (bpMatch) {
+            sys = Number(bpMatch[1]);
+            dia = Number(bpMatch[2]);
+          }
+        }
         if (sys >= 140 || dia >= 90) highBloodPressure++;
 
         const fbs = Number(raw.fbs || 0);
         if (fbs >= 126) highBloodSugar++;
+      }
+
+      if (highBloodSugar === 0 && structuredLabs.length > 0) {
+        highBloodSugar = structuredLabs.filter((l: any) =>
+          String(l.testCode || l.testName || '').toUpperCase().includes('FBS') && Number(l.value || 0) >= 126
+        ).length;
       }
 
       return {
@@ -943,8 +1046,19 @@ export class AIToolsRegistry {
     }
 
     const isGlobalAdmin = userContext ? isGlobalAdminUser(userContext) : false;
-    const canViewPersonnel = isGlobalAdmin || (userContext ? checkUserHasPermission(userContext, 'personnel:read') : false);
-    const canViewMedical = isGlobalAdmin || (userContext ? checkUserHasPermission(userContext, 'health:read') : false);
+    const canViewPersonnel =
+      isGlobalAdmin ||
+      (userContext
+        ? checkUserHasPermission(userContext, 'personnel:read') ||
+          checkUserHasPermission(userContext, 'health:read') ||
+          checkUserHasPermission(userContext, 'reports:read')
+        : false);
+    const canViewMedical =
+      isGlobalAdmin ||
+      (userContext
+        ? checkUserHasPermission(userContext, 'health:read') ||
+          checkUserHasPermission(userContext, 'personnel:read')
+        : false);
 
     if (userContext && !canViewPersonnel) {
       return {
@@ -957,40 +1071,106 @@ export class AIToolsRegistry {
     }
 
     try {
-      const allPersonnel = await db.select().from(schema.personnel).catch(() => []);
-      const matched = allPersonnel.filter((p: any) => {
-        const pCode = normalizePersianText(p.personnelCode || '');
-        const nCode = normalizePersianText(p.nationalCode || '');
-        const fullName = normalizePersianText(`${p.firstName || ''} ${p.lastName || ''}`);
-        return (
-          pCode === cleanId ||
-          nCode === cleanId ||
-          (cleanId.length >= 2 && (fullName.includes(cleanId) || pCode.includes(cleanId) || nCode.includes(cleanId)))
-        );
-      });
+      const [allPersonnel, settingsMap] = await Promise.all([
+        db.select().from(schema.personnel).catch(() => []),
+        this.loadSettingsMap(),
+      ]);
 
-      if (matched.length === 0) {
+      const medicalRecords: any[] = Array.isArray(settingsMap.get('hse_medical_records_v4'))
+        ? settingsMap.get('hse_medical_records_v4')
+        : [];
+      const settingExams: any[] = Array.isArray(settingsMap.get('hse_medical_exams_v4'))
+        ? settingsMap.get('hse_medical_exams_v4')
+        : [];
+      const structuredLabs: any[] = Array.isArray(settingsMap.get('hse_structured_lab_results_v1'))
+        ? settingsMap.get('hse_structured_lab_results_v1')
+        : [];
+      const nonPeriodicSettingExams: any[] = Array.isArray(settingsMap.get('hse_non_periodic_exams_v1'))
+        ? settingsMap.get('hse_non_periodic_exams_v1')
+        : [];
+
+      const numericTokens = Array.from(
+        new Set(
+          Array.from(cleanId.matchAll(/\d{3,12}/g)).map(m => m[0].trim())
+        )
+      );
+
+      const stripHonorifics = (s: string) =>
+        normalizePersianText(s)
+          .replace(/\b(اقای|اقا|خانم|مهندس|دکتر|کارشناس|پرسنل|کارگر|استاد)\b/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+
+      const matchesPersonQuery = (pCodeRaw: string, nCodeRaw: string, fullNameRaw: string): boolean => {
+        const pCode = normalizePersianText(pCodeRaw);
+        const nCode = normalizePersianText(nCodeRaw);
+        const cleanName = stripHonorifics(fullNameRaw);
+        if (pCode && (pCode === cleanId || numericTokens.includes(pCode))) return true;
+        if (nCode && (nCode === cleanId || numericTokens.includes(nCode))) return true;
+        if (cleanName.length >= 3 && (cleanId.includes(cleanName) || (cleanId.length >= 3 && cleanName.includes(cleanId)))) {
+          return true;
+        }
+        return false;
+      };
+
+      const matchedSql = allPersonnel.filter((p: any) =>
+        matchesPersonQuery(
+          p.personnelCode || '',
+          p.nationalCode || '',
+          `${p.firstName || ''} ${p.lastName || ''}`
+        )
+      );
+
+      const matchedMedRecords = medicalRecords.filter((r: any) =>
+        matchesPersonQuery(
+          r.employeeCode || '',
+          r.nationalCode || '',
+          r.fullName || `${r.firstName || ''} ${r.lastName || ''}`
+        )
+      );
+
+      if (matchedSql.length === 0 && matchedMedRecords.length === 0) {
         return {
           toolName: 'personnel_dossier',
           titleFa: 'پرونده جامع ۳۶۰ درجه پرسنل',
-          summary: `❌ هیچ پرونده پرسنلی با شناسه یا مشخصات «${identifier}» در سامانه یافت نشد. لطفاً کد پرسنلی را مجدداً بررسی فرمایید.`,
+          summary: `❌ هیچ پرونده پرسنلی یا پرونده سلامت با شناسه/مشخصات «${identifier}» در پایگاه داده سامانه یافت نشد.`,
           data: { notFound: true, query: identifier },
           timestamp: new Date().toISOString(),
         };
       }
 
-      const person = matched[0];
-      const personId = person.id;
-      const fullName = `${person.firstName || ''} ${person.lastName || ''}`.trim() || 'بدون نام';
+      const sqlPerson = matchedSql[0] || null;
+      const medRecord =
+        matchedMedRecords[0] ||
+        (sqlPerson
+          ? medicalRecords.find((r: any) => {
+              const empCode = normalizePersianText(r.employeeCode || '');
+              const natCode = normalizePersianText(r.nationalCode || '');
+              const pCode = normalizePersianText(sqlPerson.personnelCode || '');
+              const nCode = normalizePersianText(sqlPerson.nationalCode || '');
+              return (pCode && empCode === pCode) || (nCode && (natCode === nCode || empCode === nCode));
+            })
+          : null) ||
+        null;
 
-      // 1. Fetch Related Records in Parallel
+      const personId = sqlPerson?.id ?? -1;
+      const personnelCode = String(sqlPerson?.personnelCode || medRecord?.employeeCode || '-').trim();
+      const nationalCode = String(sqlPerson?.nationalCode || medRecord?.nationalCode || '-').trim();
+      const fullName =
+        (sqlPerson ? `${sqlPerson.firstName || ''} ${sqlPerson.lastName || ''}`.trim() : '') ||
+        medRecord?.fullName ||
+        `${medRecord?.firstName || ''} ${medRecord?.lastName || ''}`.trim() ||
+        'بدون نام';
+      const extra = (sqlPerson?.extraData && typeof sqlPerson.extraData === 'object' ? sqlPerson.extraData : {}) as Record<string, any>;
+
+      // 1. Fetch Related Records in Parallel (avoiding full-table scans on medical sub-tables)
       const [
         companies,
         sites,
         departments,
         units,
         positions,
-        exams,
+        sqlExams,
         trainings,
         courses,
         warnings,
@@ -1003,56 +1183,188 @@ export class AIToolsRegistry {
         db.select().from(schema.orgDepartments).catch(() => []),
         db.select().from(schema.orgUnits).catch(() => []),
         db.select().from(schema.orgPositions).catch(() => []),
-        canViewMedical ? db.select().from(schema.periodicMedicalExams).where(eq(schema.periodicMedicalExams.personnelId, personId)).catch(() => []) : Promise.resolve([]),
-        db.select().from(schema.trainingAttendances).where(eq(schema.trainingAttendances.personnelId, personId)).catch(() => []),
+        canViewMedical && personId > 0
+          ? db.select().from(schema.periodicMedicalExams).where(eq(schema.periodicMedicalExams.personnelId, personId)).catch(() => [])
+          : Promise.resolve([]),
+        personId > 0
+          ? db.select().from(schema.trainingAttendances).where(eq(schema.trainingAttendances.personnelId, personId)).catch(() => [])
+          : Promise.resolve([]),
         db.select().from(schema.hseTrainings).catch(() => []),
-        db.select().from(schema.safetyWarnings).where(or(
-          eq(schema.safetyWarnings.personnelId, personId),
-          eq(schema.safetyWarnings.personnelCode, person.personnelCode)
-        )).catch(() => []),
-        db.select().from(schema.ppeIssuances).where(eq(schema.ppeIssuances.personnelId, personId)).catch(() => []),
+        personId > 0
+          ? db.select().from(schema.safetyWarnings).where(or(
+              eq(schema.safetyWarnings.personnelId, personId),
+              eq(schema.safetyWarnings.personnelCode, personnelCode)
+            )).catch(() => [])
+          : Promise.resolve([]),
+        personId > 0
+          ? db.select().from(schema.ppeIssuances).where(eq(schema.ppeIssuances.personnelId, personId)).catch(() => [])
+          : Promise.resolve([]),
         incidentRepository.findAll().catch(() => []),
         ptwRepository.findAll().catch(() => []),
       ]);
 
-      const company = companies.find((c: any) => c.id === person.companyId)?.name || '-';
-      const site = sites.find((s: any) => s.id === person.siteId)?.name || '-';
-      const department = departments.find((d: any) => d.id === person.departmentId)?.name || '-';
-      const unit = units.find((u: any) => u.id === person.unitId)?.name || '-';
-      const position = positions.find((p: any) => p.id === person.positionId)?.title || person.jobTitle || '-';
+      const examIds = sqlExams.map((e: any) => e.id).filter((id: any) => typeof id === 'number');
+      const [sqlLabs, sqlAudio, sqlSpiro, sqlOpto] =
+        canViewMedical && examIds.length > 0
+          ? await Promise.all([
+              db.select().from(schema.labResults).where(inArray(schema.labResults.examId, examIds)).catch(() => []),
+              db.select().from(schema.audiometryRecords).where(inArray(schema.audiometryRecords.examId, examIds)).catch(() => []),
+              db.select().from(schema.spirometryRecords).where(inArray(schema.spirometryRecords.examId, examIds)).catch(() => []),
+              db.select().from(schema.optometryRecords).where(inArray(schema.optometryRecords.examId, examIds)).catch(() => []),
+            ])
+          : [[], [], [], []];
+
+      const company = companies.find((c: any) => c.id === sqlPerson?.companyId)?.name || extra.companyName || '-';
+      const site = sites.find((s: any) => s.id === sqlPerson?.siteId)?.name || extra.siteName || '-';
+      const department =
+        departments.find((d: any) => d.id === sqlPerson?.departmentId)?.name ||
+        medRecord?.department ||
+        extra.department ||
+        extra.workArea ||
+        '-';
+      const unit = units.find((u: any) => u.id === sqlPerson?.unitId)?.name || extra.unitName || '-';
+      const position =
+        positions.find((p: any) => p.id === sqlPerson?.positionId)?.title ||
+        sqlPerson?.jobTitle ||
+        medRecord?.jobTitle ||
+        extra.jobTitle ||
+        '-';
 
       const lines: string[] = [];
-      lines.push(`📋 **پرونده جامع ۳۶۰ درجه پرسنل:** ${fullName} (کد: ${person.personnelCode})`);
+      lines.push(`📋 **پرونده جامع ۳۶۰ درجه پرسنل:** ${fullName} (کد پرسنلی: ${personnelCode} | کد ملی: ${nationalCode})`);
       lines.push(`───────────────────────────────────────`);
 
       // 1. Identity & Org Placement
       lines.push(`👤 **۱. مشخصات فردی و ساختار سازمانی:**`);
-      lines.push(`  • نام و نام خانوادگی: ${fullName} | نام پدر: ${person.fatherName || '-'}`);
-      lines.push(`  • کد ملی: ${person.nationalCode || '-'} | جنسیت: ${person.gender === 'FEMALE' ? 'خانم' : 'آقا'} | گروه خونی: ${person.bloodGroup || '-'}`);
-      lines.push(`  • شرکت: ${company} | سایت: ${site} | اداره: ${department} | واحد: ${unit}`);
-      lines.push(`  • شغل/سمت: ${position} | نوع استخدام: ${person.employmentType || '-'} | شیفت: ${person.shiftType || '-'}`);
-      lines.push(`  • وضعیت اشتغال: ${person.status === 'ACTIVE' ? '🟢 فعال' : '🔴 غیرفعال/معلق'} | تاریخ استخدام: ${person.hireDate || '-'}`);
+      lines.push(`  • نام و نام خانوادگی: ${fullName} | نام پدر: ${sqlPerson?.fatherName || extra.fatherName || '-'}`);
+      lines.push(`  • کد پرسنلی: ${personnelCode} | کد ملی: ${nationalCode} | جنسیت: ${sqlPerson?.gender === 'FEMALE' ? 'خانم' : 'آقا'} | گروه خونی: ${sqlPerson?.bloodGroup || medRecord?.bloodType || extra.bloodGroup || '-'}`);
+      lines.push(`  • تاریخ تولد: ${sqlPerson?.birthDate || medRecord?.birthDate || extra.birthDate || '-'}${medRecord?.age ? ` (${medRecord.age} سال)` : ''} | تحصیلات: ${medRecord?.education || extra.education || '-'}`);
+      lines.push(`  • شرکت: ${company} | سایت: ${site} | اداره/امور: ${department} | واحد: ${unit}`);
+      lines.push(`  • شغل/سمت سازمانی: ${position} | نوع استخدام: ${sqlPerson?.employmentType || extra.contractType || '-'} | شیفت کاری: ${sqlPerson?.shiftType || extra.shiftPattern || '-'}`);
+      lines.push(`  • وضعیت اشتغال: ${(sqlPerson?.status || 'ACTIVE') === 'ACTIVE' ? '🟢 شاغل فعال' : '🔴 غیرفعال/معلق'} | تاریخ استخدام: ${sqlPerson?.hireDate || extra.hireDate || '-'}`);
 
-      // 2. Health & Medical Exams
-      lines.push(`\n🩺 **۲. سوابق معاینات سلامت شغلی و طب کار:**`);
+      // 2. Health & Periodic Medical Exams (merged from both SQL and Periodic Medical Exams module settings)
+      lines.push(`\n🩺 **۲. سوابق معاینات سلامت شغلی و طب کار (ماژول معاینات ادواری):**`);
       if (!canViewMedical) {
         lines.push(`  🔒 *اطلاعات پزشکی به دلیل محرمانگی طبق مجوزهای امنیتی RBAC برای نقش شما ماسک شده است.*`);
-      } else if (exams.length === 0) {
-        lines.push(`  • هیچ پرونده معاینه ادواری برای این پرسنل ثبت نشده است.`);
       } else {
-        const latestExam = exams.sort((a: any, b: any) => (b.examYear || 0) - (a.examYear || 0))[0];
+        const normPCode = normalizePersianText(personnelCode);
+        const normNCode = normalizePersianText(nationalCode);
+        const medRecordId = medRecord?.id ? String(medRecord.id) : '';
+
+        const matchedSettingExams = settingExams.filter((e: any) => {
+          const eCode = normalizePersianText(e.employeeCode || '');
+          if (medRecordId && String(e.recordId || '') === medRecordId) return true;
+          if (normPCode && normPCode !== '-' && eCode === normPCode) return true;
+          if (normNCode && normNCode !== '-' && eCode === normNCode) return true;
+          return false;
+        });
+
+        const matchedNonPeriodic = nonPeriodicSettingExams.filter((e: any) => {
+          const eCode = normalizePersianText(e.employeeCode || '');
+          const eNat = normalizePersianText(e.nationalCode || '');
+          if (medRecordId && String(e.recordId || '') === medRecordId) return true;
+          if (normPCode && normPCode !== '-' && eCode === normPCode) return true;
+          if (normNCode && normNCode !== '-' && (eCode === normNCode || eNat === normNCode)) return true;
+          return false;
+        });
+
+        const matchedStructuredLabs = structuredLabs.filter((l: any) => {
+          const lCode = normalizePersianText(l.employeeCode || '');
+          if (medRecordId && String(l.recordId || '') === medRecordId) return true;
+          if (normPCode && normPCode !== '-' && lCode === normPCode) return true;
+          if (normNCode && normNCode !== '-' && lCode === normNCode) return true;
+          return false;
+        });
+
+        const combinedExams: any[] = [...matchedSettingExams];
+        for (const se of sqlExams) {
+          const exists = combinedExams.some((ce: any) => Number(ce.examYear || 0) === Number(se.examYear || 0));
+          if (!exists) combinedExams.push(se);
+        }
+        combinedExams.sort((a: any, b: any) => Number(b.examYear || 0) - Number(a.examYear || 0));
+
+        if (medRecord?.chronicConditions?.length) {
+          const conds = medRecord.chronicConditions
+            .map((c: any) => `${c.conditionName} (تشخیص: ${c.diagnosedYear || '-'}, وضعیت: ${c.treatmentStatus || '-'}${c.restrictions ? `، محدودیت: ${c.restrictions}` : ''})`)
+            .join(' | ');
+          lines.push(`  • سوابق بیماری‌های مزمن و زمینه‌ای: ${conds}`);
+        }
+        if (medRecord?.riskFactors?.length) {
+          const risks = medRecord.riskFactors
+            .map((rf: any) => `${rf.hazardType} (شدت: ${rf.intensity}، PPE الزامی: ${rf.ppeRequired})`)
+            .join(' | ');
+          lines.push(`  • عوامل زیان‌آور شغلی مرتبط با پست: ${risks}`);
+        }
+        if (medRecord?.notes) {
+          lines.push(`  • یادداشت پرونده سلامت: ${medRecord.notes}`);
+        }
+
         const verdictFa: Record<string, string> = {
-          FIT: '🟢 بلامانع و متناسب (Fit)',
-          CONDITIONAL_FIT: '🟡 مشروط (Conditional Fit)',
-          UNFIT: '🔴 عدم صلاحیت / نامناسب (Unfit)',
-          PENDING: '⚪ در انتظار بررسی',
+          fit: '🟢 مناسب کار بدون محدودیت (Fit)',
+          FIT: '🟢 مناسب کار بدون محدودیت (Fit)',
+          fit_with_limitations: '🟡 مناسب کار با محدودیت / مشروط (Conditional Fit)',
+          CONDITIONAL_FIT: '🟡 مناسب کار با محدودیت / مشروط (Conditional Fit)',
+          needs_specialist: '🟠 نیازمند ارزیابی تخصصی (Needs Specialist)',
+          unfit: '🔴 نامناسب برای شغل فعلی / عدم صلاحیت (Unfit)',
+          UNFIT: '🔴 نامناسب برای شغل فعلی / عدم صلاحیت (Unfit)',
+          under_review: '⚪ در حال بررسی پزشکی (Under Review)',
+          PENDING: '⚪ در انتظار بررسی پزشکی (Pending)',
         };
-        lines.push(`  • تعداد دوره‌های معاینات ثبت‌شده: ${exams.length} دوره (آخرین دوره: سال ${latestExam.examYear || '-'})`);
-        lines.push(`  • نظر نهایی پزشک طب کار: ${verdictFa[latestExam.doctorVerdict || ''] || latestExam.doctorVerdict || '-'}`);
-        if (latestExam.restrictions) lines.push(`  • محدودیت‌های شغلی تجویزی: ${latestExam.restrictions}`);
-        if (latestExam.bmi) lines.push(`  • قد: ${latestExam.height ?? '-'} cm | وزن: ${latestExam.weight ?? '-'} kg | شاخص توده بدنی (BMI): ${latestExam.bmi}`);
-        if (latestExam.systolicBp || latestExam.diastolicBp) lines.push(`  • فشار خون: ${latestExam.systolicBp ?? '-'}/${latestExam.diastolicBp ?? '-'} mmHg | ضربان قلب: ${latestExam.pulseRate ?? '-'} bpm`);
-        if (latestExam.clinicalNotes) lines.push(`  • ملاحظات بالینی: ${latestExam.clinicalNotes}`);
+
+        if (combinedExams.length === 0) {
+          lines.push(`  • هیچ نوبت معاینه ادواری ثبت‌شده‌ای برای این پرسنل یافت نشد.`);
+        } else {
+          lines.push(`  • تعداد دوره‌های معاینات ادواری ثبت‌شده: ${combinedExams.length} دوره (${combinedExams.map((e: any) => e.examYear || '-').join('، ')})`);
+          for (const ex of combinedExams.slice(0, 4)) {
+            const findings = (ex.findings || ex.rawData || {}) as Record<string, any>;
+            const statusKey = String(ex.status || ex.doctorVerdict || ex.fitnessStatus || '').trim();
+            const statusLabel = verdictFa[statusKey] || statusKey || '-';
+            const height = findings.heightCm ?? ex.height ?? '-';
+            const weight = findings.weightKg ?? ex.weight ?? '-';
+            const bmi = findings.bmi ?? ex.bmi ?? '-';
+            const bp = findings.bloodPressure || (ex.systolicBp && ex.diastolicBp ? `${ex.systolicBp}/${ex.diastolicBp}` : '-');
+            lines.push(`  ─── دوره سال ${ex.examYear || '-'} (تاریخ: ${ex.examDate || '-'} | نوع: ${ex.examType || 'دوره‌ای سالانه'}) ───`);
+            lines.push(`    - مرکز طب کار: ${ex.medicalCenter || '-'} | پزشک معاینه‌گر: ${ex.doctor || ex.doctorName || '-'}`);
+            lines.push(`    - نظر نهایی طب کار: ${statusLabel}`);
+            lines.push(`    - علائم حیاتی و آنتروپومتری: قد ${height} cm | وزن ${weight} kg | شاخص توده بدنی (BMI): ${bmi} | فشار خون: ${bp}`);
+            if (findings.vision) lines.push(`    - بینایی‌سنجی (اپتومتری): ${findings.vision}`);
+            if (findings.audiometry) lines.push(`    - شنوایی‌سنجی (ادیومتری): ${findings.audiometry}`);
+            if (findings.spirometry) lines.push(`    - عملکرد ریه (اسپیرومتری): ${findings.spirometry}`);
+            if (findings.ecg) lines.push(`    - نوار قلب (ECG): ${findings.ecg}`);
+            if (findings.bloodTests) lines.push(`    - آزمایش‌های خون و بیوشیمی: ${findings.bloodTests}`);
+            if (findings.generalConclusion || ex.clinicalNotes) {
+              lines.push(`    - جمع‌بندی بالینی پزشک: ${findings.generalConclusion || ex.clinicalNotes}`);
+            }
+            if (ex.recommendations || ex.restrictions) {
+              lines.push(`    - توصیه‌ها و محدودیت‌های پزشکی: ${[ex.recommendations, ex.restrictions].filter(Boolean).join(' | ')}`);
+            }
+          }
+        }
+
+        if (matchedStructuredLabs.length > 0 || sqlLabs.length > 0) {
+          const labItems = [
+            ...matchedStructuredLabs.map((l: any) => `${l.testName || l.testCode} (${l.examYear || '-'}): ${l.value} ${l.unit || ''}${l.status && l.status !== 'normal' ? ` [⚠️ غیرنرمال: ${l.status}]` : ''}`),
+            ...sqlLabs.map((l: any) => `${l.parameterName}: ${l.resultValue} ${l.unit || ''}${l.isAbnormal ? ' [⚠️ غیرنرمال]' : ''}`),
+          ];
+          lines.push(`  • جزئیات پارامترهای آزمایشگاهی ثبت‌شده (${labItems.length} مورد): ${labItems.slice(0, 12).join(' | ')}`);
+        }
+
+        if (sqlAudio.length > 0) {
+          const latestAudio = sqlAudio[0];
+          lines.push(`  • رکورد ادیومتری جدول تخصصی: گوش راست ${latestAudio.rightEarAvg ?? '-'} dB | گوش چپ ${latestAudio.leftEarAvg ?? '-'} dB (${latestAudio.interpretation || '-'})`);
+        }
+        if (sqlSpiro.length > 0) {
+          const latestSpiro = sqlSpiro[0];
+          lines.push(`  • رکورد اسپیرومتری جدول تخصصی: FVC=${latestSpiro.fvc ?? '-'}% | FEV1=${latestSpiro.fev1 ?? '-'}% | FEV1/FVC=${latestSpiro.fev1FvcRatio ?? '-'}% (${latestSpiro.pattern || '-'})`);
+        }
+        if (sqlOpto.length > 0) {
+          const latestOpto = sqlOpto[0];
+          lines.push(`  • رکورد اپتومتری جدول تخصصی: دید راست ${latestOpto.rightEyeAcuity || '-'} | دید چپ ${latestOpto.leftEyeAcuity || '-'} | دید رنگ: ${latestOpto.colorVision || '-'}`);
+        }
+        if (matchedNonPeriodic.length > 0) {
+          lines.push(`  • معاینات غیر دوره‌ای / بازگشت به کار: ${matchedNonPeriodic.length} نوبت (${matchedNonPeriodic.map((n: any) => `${n.examDate}: ${n.reason} - ${n.status}`).join(' | ')})`);
+        }
       }
 
       // 3. HSE Training & Competency
@@ -1069,8 +1381,7 @@ export class AIToolsRegistry {
 
       // 4. PTW Involvement
       const involvedPermits = permits.filter((p: any) =>
-        p.issuerId === personId ||
-        p.acceptorId === personId ||
+        (personId > 0 && (p.issuerId === personId || p.acceptorId === personId)) ||
         (p.contractorName && p.contractorName.includes(fullName))
       );
       lines.push(`\n📜 **۴. پروانه‌های کار ایمن (PTW) مرتبط:**`);
@@ -1085,7 +1396,7 @@ export class AIToolsRegistry {
 
       // 5. Safety Incidents & Near Misses
       const personIncidents = incidents.filter((inc: any) =>
-        inc.involvedPersonnelId === personId ||
+        (personId > 0 && inc.involvedPersonnelId === personId) ||
         (inc.personnelName && normalizePersianText(inc.personnelName).includes(normalizePersianText(fullName)))
       );
       lines.push(`\n⚠️ **۵. سوابق حوادث و شبه‌حوادث شغلی:**`);
@@ -1125,15 +1436,14 @@ export class AIToolsRegistry {
         titleFa: `پرونده جامع ۳۶۰ درجه پرسنل (${fullName})`,
         summary: lines.join('\n'),
         data: {
-          personnelId: person.id,
-          personnelCode: person.personnelCode,
-          nationalCode: person.nationalCode,
+          personnelId: personId,
+          personnelCode,
+          nationalCode,
           fullName,
           company,
           department,
           unit,
           position,
-          totalExams: exams.length,
           totalTrainings: trainings.length,
           totalPermits: involvedPermits.length,
           totalIncidents: personIncidents.length,
@@ -1149,6 +1459,61 @@ export class AIToolsRegistry {
         titleFa: 'پرونده جامع ۳۶۰ درجه پرسنل',
         summary: `خطا در دریافت پرونده پرسنلی: ${err?.message || 'خطای ناشناخته سرور'}`,
         data: { error: String(err?.message || err) },
+        timestamp: new Date().toISOString(),
+      };
+    }
+  }
+
+  /**
+   * Tool 21: Process Safety Management (PSM / RBPS CCPS & OSHA 1910.119) Summary
+   */
+  async getPsmSummary(): Promise<AIToolResult> {
+    try {
+      const [projects, assessments, gaps, capaItems, studies, stageGates] = await Promise.all([
+        db.select().from(schema.psmProjects).catch(() => []),
+        db.select().from(schema.psmAssessments).catch(() => []),
+        db.select().from(schema.psmGaps).catch(() => []),
+        db.select().from(schema.psmCapaItems).catch(() => []),
+        db.select().from(schema.psmSpecializedStudies).catch(() => []),
+        db.select().from(schema.psmStageGates).catch(() => []),
+      ]);
+
+      const activeProjects = projects.filter((p: any) => !['COMPLETED', 'CLOSED', 'CANCELLED'].includes(String(p.status || '').toUpperCase())).length;
+      const openGaps = gaps.filter((g: any) => !['CLOSED', 'RESOLVED', 'VERIFIED'].includes(String(g.status || '').toUpperCase())).length;
+      const openCapa = capaItems.filter((c: any) => !['CLOSED', 'VERIFIED', 'EFFECTIVE'].includes(String(c.stage || c.status || '').toUpperCase())).length;
+      const approvedGates = stageGates.filter((g: any) => String(g.status || '').toUpperCase() === 'APPROVED').length;
+      const recentProjects = projects.slice(0, 4).map((p: any) => `${p.projectCode || p.id}: ${p.title} (وضعیت: ${p.status || 'در جریان'})`);
+
+      return {
+        toolName: 'psm_summary',
+        titleFa: 'ماژول مدیریت ایمنی فرآیند (PSM - CCPS 20 / OSHA 1910.119)',
+        summary: [
+          `• کل پروژه‌های استقرار PSM: ${projects.length} پروژه (${activeProjects} پروژه فعال)`,
+          `• ارزیابی‌های انطباق و شکاف (Gap Analysis): ${assessments.length} ارزیابی | شکاف‌های شناسایی‌شده: ${gaps.length} مورد (${openGaps} شکاف باز)`,
+          `• اقدامات اصلاحی و پیشگیرانه PSM (CAPA): ${capaItems.length} مورد (${openCapa} در جریان اجرا/راستی‌آزمایی)`,
+          `• مطالعات تخصصی ایمنی فرآیند (PHA/HAZOP/LOPA/MOC/PSSR/MI/bowtie): ${studies.length} مطالعه | دروازه‌های مرحله‌ای (Stage-Gate): ${stageGates.length} دروازه (${approvedGates} تاییدشده)`,
+          recentProjects.length > 0 ? `• آخرین پروژه‌های PSM: ${recentProjects.join(' | ')}` : '',
+        ].filter(Boolean).join('\n'),
+        data: {
+          totalProjects: projects.length,
+          activeProjects,
+          totalAssessments: assessments.length,
+          totalGaps: gaps.length,
+          openGaps,
+          totalCapa: capaItems.length,
+          openCapa,
+          totalStudies: studies.length,
+          totalStageGates: stageGates.length,
+          approvedGates,
+        },
+        timestamp: new Date().toISOString(),
+      };
+    } catch {
+      return {
+        toolName: 'psm_summary',
+        titleFa: 'ماژول مدیریت ایمنی فرآیند (PSM)',
+        summary: 'اطلاعات مدیریت ایمنی فرآیند (PSM) در دسترس نیست.',
+        data: {},
         timestamp: new Date().toISOString(),
       };
     }
@@ -1178,6 +1543,7 @@ export class AIToolsRegistry {
       canHealth ? this.getHealthAndExamsSummary().then(r => ({ name: 'معاینات بهداشت حرفه‌ای و طب کار', res: r })) : Promise.resolve({ name: 'معاینات بهداشت حرفه‌ای و طب کار', res: null }),
       canHealth ? this.getNutritionHighRiskSummary().then(r => ({ name: 'پایش تغذیه و بیماران پرخطر', res: r })) : Promise.resolve({ name: 'پایش تغذیه و بیماران پرخطر', res: null }),
       canSafety ? this.getRiskAssessmentsSummary().then(r => ({ name: 'ارزیابی ریسک و مخاطرات (JSA)', res: r })) : Promise.resolve({ name: 'ارزیابی ریسک و مخاطرات (JSA)', res: null }),
+      canSafety ? this.getPsmSummary().then(r => ({ name: 'مدیریت ایمنی فرآیند (PSM)', res: r })) : Promise.resolve({ name: 'مدیریت ایمنی فرآیند (PSM)', res: null }),
       canSafety ? this.get5SAndInspectionsSummary().then(r => ({ name: 'نظام آراستگی ۵S و بازرسی‌ها', res: r })) : Promise.resolve({ name: 'نظام آراستگی ۵S و بازرسی‌ها', res: null }),
       canFire ? this.getFireSafetySummary().then(r => ({ name: 'آتش‌نشانی و تجهیزات اطفاء حریق', res: r })) : Promise.resolve({ name: 'آتش‌نشانی و تجهیزات اطفاء حریق', res: null }),
       canSafety ? this.getWarningsAndAnomaliesSummary().then(r => ({ name: 'اخطارهای ایمنی و عدم انطباق‌ها', res: r })) : Promise.resolve({ name: 'اخطارهای ایمنی و عدم انطباق‌ها', res: null }),

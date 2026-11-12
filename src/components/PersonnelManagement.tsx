@@ -63,7 +63,10 @@ import {
   setInMemoryPersonnelList,
   purgeLegacyBrowserCache,
   processSignatureImageFile,
-  getPersonnelSignature
+  getPersonnelSignature,
+  cleanPersonnelCode,
+  compareByPersonnelCodeAsc,
+  sortPersonnelByCodeAsc
 } from '../utils/personnelHelper';
 import { apiDb } from '../services/apiDatabaseClient';
 import OrgChartPickerModal from './OrgChartPickerModal';
@@ -126,15 +129,17 @@ export default function PersonnelManagement({ isFa, currentUser }: { isFa: boole
     let isMounted = true;
     const formatPersonnelRecords = (data: any[]): Personnel[] => {
       const seenIds = new Set<string>();
-      return (data || []).map((p: any, idx: number) => {
+      const formatted = (data || []).map((p: any, idx: number) => {
         let id = p.id || `emp-${Date.now()}-${idx}`;
         if (seenIds.has(id)) {
           id = `${id}-${idx}-${Math.random().toString(36).substring(2, 7)}`;
         }
         seenIds.add(id);
         const calculatedAge = p.birthDate ? calculateExactAge(p.birthDate) : (p.age || 0);
-        return { ...p, id, workplace: p.workplace || '', age: calculatedAge };
+        const cleanCode = p.extraData?.hasNoPersonnelCode ? '' : cleanPersonnelCode(p.personnelCode);
+        return { ...p, id, personnelCode: cleanCode, workplace: p.workplace || '', age: calculatedAge };
       });
+      return sortPersonnelByCodeAsc(formatted);
     };
 
     const fetchRemote = async (forceRefresh = false) => {
@@ -260,8 +265,8 @@ export default function PersonnelManagement({ isFa, currentUser }: { isFa: boole
   const [editingId, setEditingId] = useState<string | null>(null);
   const [viewingPersonnel, setViewingPersonnel] = useState<Personnel | null>(null);
 
-  // Sorting
-  const [sortField, setSortField] = useState<'name' | 'personnelCode' | 'unit' | 'age' | 'education' | 'workplace' | 'jobTitle' | 'nationalCode' | 'gender'>('name');
+  // Sorting (Default: by personnelCode ascending from smallest to largest, missing codes at the end)
+  const [sortField, setSortField] = useState<'name' | 'personnelCode' | 'unit' | 'age' | 'education' | 'workplace' | 'jobTitle' | 'nationalCode' | 'gender'>('personnelCode');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
 
   // Deletion modal
@@ -611,6 +616,7 @@ export default function PersonnelManagement({ isFa, currentUser }: { isFa: boole
         }
       }
       
+      nextList = sortPersonnelByCodeAsc(nextList);
       setPersonnelList(nextList);
       setInMemoryPersonnelList(nextList);
       setSaveConfirmOpen(false);
@@ -879,15 +885,23 @@ export default function PersonnelManagement({ isFa, currentUser }: { isFa: boole
       return matchesSearch && matchesWorkplace && matchesUnit && matchesSubUnit && matchesEdu && matchesMarital;
     }).sort((a, b) => {
       if (!sortField) return 0;
+
+      if (sortField === 'personnelCode') {
+        return compareByPersonnelCodeAsc(
+          a.personnelCode,
+          b.personnelCode,
+          sortDirection,
+          `${a.firstName} ${a.lastName}`.trim(),
+          `${b.firstName} ${b.lastName}`.trim()
+        );
+      }
+
       let aVal: any = '';
       let bVal: any = '';
 
       if (sortField === 'name') {
         aVal = `${a.firstName} ${a.lastName}`;
         bVal = `${b.firstName} ${b.lastName}`;
-      } else if (sortField === 'personnelCode') {
-        aVal = a.personnelCode;
-        bVal = b.personnelCode;
       } else if (sortField === 'education') {
         aVal = a.education || '';
         bVal = b.education || '';
@@ -913,7 +927,7 @@ export default function PersonnelManagement({ isFa, currentUser }: { isFa: boole
 
       if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1;
       if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;
-      return 0;
+      return compareByPersonnelCodeAsc(a.personnelCode, b.personnelCode, 'asc');
     });
   }, [personnelList, search, workplaceFilter, unitFilter, subUnitFilter, educationFilter, maritalFilter, sortField, sortDirection]);
 
@@ -1442,7 +1456,7 @@ export default function PersonnelManagement({ isFa, currentUser }: { isFa: boole
                       
                       {/* 2. شماره پرسنلی */}
                       <td className="px-3.5 py-3.5 text-center font-mono font-bold text-slate-700 dark:text-slate-300">
-                        {p.personnelCode}
+                        {p.personnelCode || '—'}
                       </td>
 
                       {/* 3. نام و نام خانوادگی */}
@@ -1635,7 +1649,7 @@ export default function PersonnelManagement({ isFa, currentUser }: { isFa: boole
                         {p.firstName} {p.lastName}
                       </h4>
                       <span className="text-xs font-mono font-extrabold text-amber-600 block">
-                        کد: {p.personnelCode}
+                        کد: {p.personnelCode || '—'}
                       </span>
                     </div>
                   </div>
@@ -2611,16 +2625,14 @@ export default function PersonnelManagement({ isFa, currentUser }: { isFa: boole
         isOpen={importModalOpen}
         onClose={() => setImportModalOpen(false)}
         personnelList={personnelList}
-        onSuccess={async (updatedList) => {
-          setPersonnelList(updatedList);
-          try {
-            await apiDb.batchSavePersonnel(updatedList);
-            const fresh = await apiDb.getPersonnel();
-            if (fresh && fresh.length > 0) {
-              setPersonnelList(fresh as any);
-            }
-          } catch (e) {
-            console.error('Failed to sync updated personnel list with database:', e);
+        onSuccess={(updatedList) => {
+          const sortedList = sortPersonnelByCodeAsc(updatedList);
+          setPersonnelList(sortedList);
+          setSortField('personnelCode');
+          setSortDirection('asc');
+          setCurrentPage(1);
+          if (!hasActiveFilters) {
+            setSearch(' ');
           }
         }}
         currentUser={currentUser}

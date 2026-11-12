@@ -100,6 +100,15 @@ export const SYSTEM_MODULE_GROUPS: SystemModuleGroup[] = [
     iconName: 'Workflow'
   },
   {
+    id: 'intelligent_analytics',
+    titleFa: 'مرکز هوشمند مدیریت و تحلیل HSE',
+    titleEn: 'Intelligent HSE Management & Analytics Center',
+    color: 'text-violet-600 dark:text-violet-400',
+    bgLight: 'bg-violet-50 dark:bg-violet-950/30',
+    borderLight: 'border-violet-200 dark:border-violet-800/40',
+    iconName: 'BrainCircuit'
+  },
+  {
     id: 'system',
     titleFa: 'مدیریت و پیکربندی سامانه',
     titleEn: 'Governance & Administration',
@@ -152,8 +161,6 @@ export const ALL_SYSTEM_MODULES: SystemModuleConfig[] = [
   { key: 'dashboard', titleFa: 'داشبورد جامع مدیریتی', titleEn: 'Unified Executive Dashboard', groupId: 'dashboards', category: 'داشبوردها و تحلیل‌های آماری', enabled: true, descriptionFa: 'داشبورد اصلی آمار، شاخص‌های کلیدی عملکرد HSE و تحلیل‌های کلی' },
   { key: 'heat', titleFa: 'پایش استرس گرمایی', titleEn: 'Thermal Heat Stress Monitor', groupId: 'dashboards', category: 'داشبوردها و تحلیل‌های آماری', enabled: true, descriptionFa: 'پایش آنلاین شاخص WBGT، استرس گرمایی محیط و توصیه‌های ایمنی' },
   { key: 'hse-ms', titleFa: 'پایش نرخ رویدادها (TRIR)', titleEn: 'TRIR Incident Rate', groupId: 'dashboards', category: 'داشبوردها و تحلیل‌های آماری', enabled: true, descriptionFa: 'محاسبه استاندارد نرخ رویدادهای قابل ثبت TRIR و ساعات کارکرد' },
-  { key: 'reports', titleFa: 'گزارشات و تحلیل‌های آماری', titleEn: 'Statistical Reports & BI', groupId: 'dashboards', category: 'داشبوردها و تحلیل‌های آماری', enabled: true, descriptionFa: 'گزارش‌های مدیریتی، نمودارهای تحلیلی و خروجی‌های جامع سیستم' },
-  { key: 'ai-assistant', titleFa: 'هوش مصنوعی HSECORE', titleEn: 'HSECORE AI Assistant', groupId: 'dashboards', category: 'داشبوردها و تحلیل‌های آماری', enabled: true, descriptionFa: 'دستیار مستقل هوش مصنوعی محلی با ۱۰ مشاور تخصصی و استخراج داده‌های زنده سازمان' },
 
   // 2. Specialized HSE Departments
   { key: 'safety-unit', titleFa: 'واحد ایمنی و بازرسی‌ها', titleEn: 'Safety Operations Department', groupId: 'departments', category: 'دپارتمان‌های تخصصی HSE', enabled: true, descriptionFa: 'مدیریت نظارت بر ایمنی عملیاتی، چک‌لیست‌های تخصصی، ممیزی‌ها و گشت‌های ایمنی' },
@@ -161,6 +168,7 @@ export const ALL_SYSTEM_MODULES: SystemModuleConfig[] = [
   { key: 'health-env', titleFa: 'واحد بهداشت و محیط زیست', titleEn: 'Health & Environment Department', groupId: 'departments', category: 'دپارتمان‌های تخصصی HSE', enabled: true, descriptionFa: 'پایش آلاینده‌های محیط زیست، معاینات طب کار و بهداشت حرفه‌ای' },
 
   // 3. Permits & Risk Control
+  { key: 'psm', titleFa: 'مدیریت استقرار ایمنی فرایند (PSM)', titleEn: 'Process Safety Management (PSM)', groupId: 'safety_permits', category: 'مجوزهای کار و کنترل ریسک', enabled: true, descriptionFa: 'سیستم جامع مدیریت پروژه استقرار و بلوغ ایمنی فرایند (PSM) مبتنی بر ۲۰ عنصر CCPS RBPS و ۱۴ الزام OSHA 1910.119' },
   { key: 'permit', titleFa: 'پروانه کار ایمن (PTW)', titleEn: 'Permit to Work (PTW)', groupId: 'safety_permits', category: 'مجوزهای کار و کنترل ریسک', enabled: true, descriptionFa: 'صدور و گردش کار دیجیتال پروانه‌های کار گرم، سرد، حفاری و فضاهای بسته' },
   { key: 'ptw-audit', titleFa: 'ممیزی پروانه‌های کار (PTW Audit)', titleEn: 'Permit to Work Audit System', groupId: 'safety_permits', category: 'مجوزهای کار و کنترل ریسک', enabled: true, descriptionFa: 'ممیزی جامع و چک‌لیست ۳۰ گانه انطباق سیستم صدور پروانه کار ایمن' },
   { key: 'risk', titleFa: 'ارزیابی ریسک هوشمند (AI JSA)', titleEn: 'AI Risk Assessment (JSA/FMEA)', groupId: 'safety_permits', category: 'مجوزهای کار و کنترل ریسک', enabled: true, descriptionFa: 'شناسایی خطرات و ارزیابی ریسک با هوش مصنوعی بر اساس JSA / FMEA' },
@@ -171,7 +179,6 @@ export const ALL_SYSTEM_MODULES: SystemModuleConfig[] = [
   { key: 'warnings', titleFa: 'ثبت و پیگیری اخطارها', titleEn: 'Personnel Written Warnings', groupId: 'incidents_compliance', category: 'رویدادها و انضباط ایمنی', enabled: true, descriptionFa: 'ثبت و پیگیری اخطارهای کتبی ایمنی و عدم انطباق‌های پرسنلی' },
 
   // 5. Human Capital & Training
-  { key: 'personnel-history', titleFa: 'پرونده جامع ۳۶۰ درجه پرسنل', titleEn: 'Personnel 360° History Dossier', groupId: 'human_capital', category: 'سرمایه انسانی و آموزش', enabled: true, descriptionFa: 'جستجو و مشاهده پرونده ۳۶۰ درجه پرسنل شامل آموزش‌ها، اخطارها و PPE' },
   { key: 'training', titleFa: 'مدیریت و تقویم آموزش', titleEn: 'Training Management & Calendar', groupId: 'human_capital', category: 'سرمایه انسانی و آموزش', enabled: true, descriptionFa: 'سجلات دوره‌های آموزشی HSE، گواهینامه‌ها و آمار ساعات آموزش' },
 
   // 6. Workflows & Digital Workplace
@@ -179,12 +186,32 @@ export const ALL_SYSTEM_MODULES: SystemModuleConfig[] = [
   { key: 'pending-documents', titleFa: 'کارتابل و اسناد در انتظار اقدام', titleEn: 'Documents Awaiting Action & Sign', groupId: 'workflows', category: 'کارتابل و فرآیندهای سازمانی', enabled: true, descriptionFa: 'کارتابل هوشمند مشاهده، بررسی، تأیید، رد، امضای دیجیتال و ارجاع اسناد و پروانه‌ها' },
   { key: 'non-conformances', titleFa: 'مدیریت عدم انطباق‌ها (CAPA)', titleEn: 'Non-Conformities & CAPA', groupId: 'workflows', category: 'کارتابل و فرآیندهای سازمانی', enabled: true, descriptionFa: 'سامانه جامع ثبت، ارجاع، علل ریشه‌ای و اقدامات اصلاحی و پیشگیرانه کلیه واحدها' },
 
-  // 7. Governance & Administration (مدیریت و پیکربندی سامانه)
+  // 7. Intelligent HSE Management & Analytics Center (مرکز هوشمند مدیریت و تحلیل HSE)
+  { key: 'reports', titleFa: 'گزارشات تحلیلی و آماری', titleEn: 'Analytical & Statistical Reports', groupId: 'intelligent_analytics', category: 'مرکز هوشمند مدیریت و تحلیل HSE', enabled: true, descriptionFa: 'گزارش‌های مدیریتی، نمودارهای تحلیلی و خروجی‌های جامع سیستم' },
+  { key: 'personnel-history', titleFa: 'پرونده ۳۶۰ درجه پرسنل', titleEn: 'Personnel 360° Dossier', groupId: 'intelligent_analytics', category: 'مرکز هوشمند مدیریت و تحلیل HSE', enabled: true, descriptionFa: 'جستجو و مشاهده پرونده ۳۶۰ درجه پرسنل شامل آموزش‌ها، اخطارها و PPE' },
+  { key: 'ai-assistant', titleFa: 'هوش مصنوعی HSECORE', titleEn: 'HSECORE AI Assistant', groupId: 'intelligent_analytics', category: 'مرکز هوشمند مدیریت و تحلیل HSE', enabled: true, descriptionFa: 'دستیار مستقل هوش مصنوعی محلی با ۱۰ مشاور تخصصی و استخراج داده‌های زنده سازمان' },
+
+  // 8. Governance & Administration (مدیریت و پیکربندی سامانه)
   { key: 'process-management', titleFa: 'مدیریت فرآیندها (BPMN)', titleEn: 'Process Management (Camunda 8)', groupId: 'system', category: 'مدیریت و پیکربندی سامانه', enabled: true, descriptionFa: 'طراحی، مدل‌سازی و اجرای فرآیندهای سازمانی و گردش‌کارهای Camunda' },
   { key: 'notifications', titleFa: 'مدیریت هشدار و اعلان‌ها', titleEn: 'Alerts & Notifications Management', groupId: 'system', category: 'مدیریت و پیکربندی سامانه', enabled: true, descriptionFa: 'ارسال هشدار فوری HSE، مشاهده تاریخچه اعلان‌ها و دسترسی به آرشیو و بایگانی اعلان‌های سامانه' },
   { key: 'user-mgmt', titleFa: 'مدیریت کاربران و دسترسی‌ها', titleEn: 'User Management & RBAC Roles', groupId: 'system', category: 'مدیریت و پیکربندی سامانه', enabled: true, descriptionFa: 'مدیریت حساب‌های کاربری، نقش‌ها و ماتریس دسترسی به ماژول‌های سامانه' },
   { key: 'system', titleFa: 'تنظیمات و ساختار سازمانی', titleEn: 'System Settings & Architecture', groupId: 'system', category: 'مدیریت و پیکربندی سامانه', enabled: true, descriptionFa: 'پیکربندی سامانه، مدیریت ساختار سازمانی، لوگو و بازیابی پایگاه داده' },
   { key: 'profile', titleFa: 'شناسنامه و تنظیمات کاربری', titleEn: 'My Personal Profile & Security', groupId: 'system', category: 'مدیریت و پیکربندی سامانه', enabled: true, descriptionFa: 'مشخصات حساب کاربری جاری، تغییر رمز عبور و تنظیمات شخصی' }
+];
+
+export const ALL_PSM_SUBITEMS = [
+  { key: 'dashboard', titleFa: 'داشبورد کنترل و پایش پروژه PSM', titleEn: 'PSM Control & Monitoring Dashboard', descriptionFa: 'پایش درصد پیشرفت کل، پیشرفت واحدها، ۲۰ عنصر CCPS، ۱۴ الزام OSHA و انحراف زمانی' },
+  { key: 'project', titleFa: 'مدیریت پروژه اصلی و دامنه PSM', titleEn: 'PSM Project Charter & Scope', descriptionFa: 'تعریف کد، نام، دامنه پروژه، مدیر و حامی پروژه، اعضای تیم، واحدهای مشمول و بودجه' },
+  { key: 'org-assets', titleFa: 'ساختار سازمانی مرکزی و تجهیزات فرایندی (SCE)', titleEn: 'Central Org & Process Assets', descriptionFa: 'اتصال زنده به ساختار سازمانی مرکزی و ثبت تجهیزات بحرانی ایمنی و PSI' },
+  { key: 'assessment', titleFa: 'ارزیابی اولیه PSM و ماتریس تطبیق N:M', titleEn: 'Initial Assessment & Traceability Matrix', descriptionFa: 'ارزیابی ۲۰ عنصر CCPS و ۱۴ الزام OSHA به همراه ماتریس تطبیق چندبه‌چند با تفکیک ارتباط مستقیم و غیرمستقیم' },
+  { key: 'gap-analysis', titleFa: 'تحلیل شکاف (Gap Analysis) و استخراج خودکار', titleEn: 'Automated Gap Analysis', descriptionFa: 'استخراج خودکار شکاف‌ها از ارزیابی اولیه، سطح‌بندی ریسک و دروازه توجیه فنی خارج از دامنه' },
+  { key: 'wbs-gantt', titleFa: 'مدیریت WBS، برنامه اجرایی و نمودار گانت', titleEn: 'WBS, Schedule & Gantt Chart', descriptionFa: 'ساختار شکست کار سلسله‌مراتبی، زمان‌بندی، پیش‌نیازها، مسیر بحرانی و محاسبه تأخیر' },
+  { key: 'documents', titleFa: 'بانک اسناد، مدارک و شواهد PSM', titleEn: 'PSM Document & Evidence Bank', descriptionFa: 'مدیریت نسخه، تاریخ بازنگری/انقضا، چرخه تأیید چندمرحله‌ای و کنترل کفایت شواهد فنی' },
+  { key: 'capa', titleFa: 'گردش کار ۸ مرحله‌ای اقدامات اصلاحی (CAPA)', titleEn: '8-Stage CAPA Workflow', descriptionFa: 'گردش کار کامل ۸ مرحله‌ای CAPA با الزام صحه‌گذاری مستقل اثربخشی قبل از بستن اقدام' },
+  { key: 'studies', titleFa: '۱۴ زیرماژول تخصصی ایمنی فرایند', titleEn: '14 Specialized PSM Subsystems', descriptionFa: 'مدیریت PSI, PHA, HAZOP, HAZID, LOPA, Bow-Tie, SOP, MI, MOC, PSSR, Contractors, Training, Incidents, ERP' },
+  { key: 'maturity', titleFa: 'مدل بلوغ ۵ سطحی PSM (Maturity Model)', titleEn: '5-Level PSM Maturity Model', descriptionFa: 'ارزیابی مستقل سطح بلوغ از سطح ۱ (Initial) تا سطح ۵ (Leading) برای هر عنصر و کل مجتمع' },
+  { key: 'handover', titleFa: 'دروازه تحویل نهایی پروژه و دوره نگهداشت', titleEn: 'Final Handover & Sustainment Gate', descriptionFa: 'کنترل خودکار ۷ شرط الزامی تحویل نهایی پروژه استقرار و انتقال به سیستم فعال PSM' },
+  { key: 'ai-audit', titleFa: 'هوش مصنوعی محلی PSM و تاریخچه ممیزی (Audit Log)', titleEn: 'Local PSM AI & Audit Trail', descriptionFa: 'تحلیل شکاف، پیشنهاد برنامه اجرایی و ارزیابی ریسک با هوش مصنوعی محلی بدون ارسال داده به کلود' },
 ];
 
 export const ALL_DOCUMENTS_SUBITEMS = [
@@ -331,6 +358,12 @@ export function getMergedUiConfig(): SystemModuleConfig[] {
 
     const mergedList: SystemModuleConfig[] = [];
     const validGroupIds = new Set(SYSTEM_MODULE_GROUPS.map(g => g.id));
+    const legacyTitlesToMigrate = new Set([
+      'گزارشات و تحلیل‌های آماری',
+      'گزارشات و آمار',
+      'پرونده جامع ۳۶۰ درجه پرسنل',
+      'سوابق و پرونده جامع پرسنل',
+    ]);
 
     // 1. Preserve saved modules in their stored order and customized properties
     parsed.forEach(savedItem => {
@@ -340,11 +373,15 @@ export function getMergedUiConfig(): SystemModuleConfig[] {
         if (!resolvedGroupId || !validGroupIds.has(resolvedGroupId) || resolvedGroupId === 'safety') {
           resolvedGroupId = sysModule.groupId || 'dashboards';
         }
+        const resolvedTitleFa =
+          !savedItem.titleFa || legacyTitlesToMigrate.has(savedItem.titleFa)
+            ? sysModule.titleFa
+            : savedItem.titleFa;
 
         mergedList.push({
           key: sysModule.key,
-          titleFa: savedItem.titleFa || sysModule.titleFa,
-          titleEn: savedItem.titleEn || sysModule.titleEn,
+          titleFa: resolvedTitleFa,
+          titleEn: sysModule.titleEn || savedItem.titleEn,
           enabled: savedItem.enabled !== undefined ? savedItem.enabled : true,
           groupId: sysModule.groupId || resolvedGroupId,
           category: sysModule.category,
@@ -367,6 +404,25 @@ export function getMergedUiConfig(): SystemModuleConfig[] {
         });
       }
     });
+
+    // 3. Ensure canonical order for 'intelligent_analytics' sub-modules (1. reports, 2. personnel-history, 3. ai-assistant)
+    const canonicalAnalyticsOrder: Record<string, number> = {
+      reports: 1,
+      'personnel-history': 2,
+      'ai-assistant': 3,
+    };
+    const analyticsItems = mergedList
+      .filter(m => m.groupId === 'intelligent_analytics')
+      .sort((a, b) => (canonicalAnalyticsOrder[a.key] || 99) - (canonicalAnalyticsOrder[b.key] || 99));
+
+    if (analyticsItems.length > 1) {
+      let ptr = 0;
+      for (let i = 0; i < mergedList.length; i++) {
+        if (mergedList[i].groupId === 'intelligent_analytics') {
+          mergedList[i] = analyticsItems[ptr++];
+        }
+      }
+    }
 
     return mergedList;
   } catch (err) {

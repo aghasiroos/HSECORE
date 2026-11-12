@@ -1,9 +1,8 @@
 import { personnelRepository } from './personnel.repository.ts';
 import { auditService } from '../audit/audit.service.ts';
 import { ValidationError, NotFoundError } from '../../core/errors.ts';
-import { db, schema } from '../../core/db.ts';
-import { sql } from 'drizzle-orm';
 import { personnelAccessService } from '../../core/personnelAccess.service.ts';
+import { cleanPersonnelCode } from '../../../src/utils/textNormalization.ts';
 
 export class PersonnelService {
   async getHierarchy() {
@@ -27,18 +26,14 @@ export class PersonnelService {
   }
 
   async upsertPersonnel(data: any, actorName?: string) {
-    const pCode = String(data.personnelCode || '').trim();
-    if (!pCode) {
-      throw new ValidationError('کد پرسنلی برای ثبت پرسنل الزامی است.');
-    }
-    if (!data.firstName || !data.lastName) {
+    const pCode = cleanPersonnelCode(data.personnelCode);
+    const nCode = String(data.nationalCode || data.nationalId || '').trim();
+    if (!data.firstName && !data.lastName && !data.fullName) {
       throw new ValidationError('نام و نام خانوادگی الزامی است.');
     }
-    if (!data.nationalCode) {
-      data.nationalCode = data.nationalId || pCode;
-    }
 
-    const existing = await personnelRepository.findByIdentifier(pCode);
+    const lookupKey = pCode || nCode || (data.id ? String(data.id) : '');
+    const existing = lookupKey ? await personnelRepository.findByIdentifier(lookupKey) : null;
     const result = await personnelRepository.upsert(data);
 
     // If personnel was deactivated, automatically manage/revoke active user assignments
@@ -61,8 +56,8 @@ export class PersonnelService {
       action: existing ? 'UPDATE_PERSONNEL' : 'CREATE_PERSONNEL',
       module: 'PERSONNEL',
       entityType: 'PERSONNEL',
-      entityId: pCode,
-      personnelCode: pCode,
+      entityId: pCode || nCode || String(result?.id || ''),
+      personnelCode: pCode || undefined,
       oldValue: existing,
       newValue: result,
       details: { actor: actorName },
@@ -76,15 +71,17 @@ export class PersonnelService {
       throw new ValidationError('داده‌های ارسالی باید به صورت آرایه باشند.');
     }
 
-    const results = [];
-    for (const r of records) {
-      if (!r.personnelCode && !r.nationalCode) continue;
-      if (!r.personnelCode) r.personnelCode = r.nationalCode;
-      const res = await this.upsertPersonnel(r, actorName);
-      results.push(res);
-    }
+    const result = await personnelRepository.batchUpsert(records);
 
-    return { count: results.length, success: true };
+    await auditService.log({
+      action: 'BATCH_UPSERT_PERSONNEL',
+      module: 'PERSONNEL',
+      entityType: 'PERSONNEL',
+      entityId: `batch-${Date.now()}`,
+      details: { actor: actorName, count: result.count },
+    }).catch(() => {});
+
+    return result;
   }
 
   async deletePersonnel(identifier: string, actorName?: string, deleteAssociatedUser = false) {
@@ -100,23 +97,10 @@ export class PersonnelService {
       });
     }
 
-    const deleted = await personnelRepository.delete(cleanId);
+    const deleted = await personnelRepository.delete(cleanId, deleteAssociatedUser);
 
     if (!deleted && !existing) {
       throw new NotFoundError(`پرسنل با کد یا شناسه '${cleanId}' یافت نشد.`);
-    }
-
-    // If requested, also remove/deactivate the associated user in users table
-    if (deleteAssociatedUser && (existing || deleted)) {
-      const pCode = existing?.personnelCode || (deleted as any)?.personnelCode;
-      const nId = existing?.nationalCode || (deleted as any)?.nationalCode;
-      try {
-        await db.delete(schema.users).where(
-          sql`(${schema.users.personnelNumber} = ${pCode} OR (${nId} <> '' AND ${schema.users.nationalId} = ${nId})) AND ${schema.users.role} NOT IN ('ADMIN', 'ADMINISTRATOR', 'Administrator')`
-        );
-      } catch (err) {
-        console.warn('[PersonnelService] Associated user deletion note:', err);
-      }
     }
 
     await auditService.log({
@@ -134,4 +118,5 @@ export class PersonnelService {
 }
 
 export const personnelService = new PersonnelService();
+
 

@@ -540,8 +540,8 @@ export default function FiveSModuleView({ language, currentUser }: Props) {
           onClick={() => setActiveTab('dashboard')}
           className={`flex-1 min-w-[120px] py-2.5 px-3 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 ${
             activeTab === 'dashboard'
-              ? 'bg-white dark:bg-slate-700 text-emerald-600 dark:text-emerald-400 shadow-xs font-black'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+              ? 'bg-emerald-600 text-white shadow-xs font-black'
+              : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-700/50'
           }`}
         >
           <BarChart3 className="w-4 h-4" />
@@ -552,8 +552,8 @@ export default function FiveSModuleView({ language, currentUser }: Props) {
           onClick={() => setActiveTab('inspections')}
           className={`flex-1 min-w-[120px] py-2.5 px-3 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 ${
             activeTab === 'inspections'
-              ? 'bg-white dark:bg-slate-700 text-emerald-600 dark:text-emerald-400 shadow-xs font-black'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+              ? 'bg-emerald-600 text-white shadow-xs font-black'
+              : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-700/50'
           }`}
         >
           <ListChecks className="w-4 h-4" />
@@ -564,11 +564,11 @@ export default function FiveSModuleView({ language, currentUser }: Props) {
           onClick={() => setActiveTab('nc-capa')}
           className={`flex-1 min-w-[120px] py-2.5 px-3 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 ${
             activeTab === 'nc-capa'
-              ? 'bg-white dark:bg-slate-700 text-emerald-600 dark:text-emerald-400 shadow-xs font-black'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+              ? 'bg-emerald-600 text-white shadow-xs font-black'
+              : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-700/50'
           }`}
         >
-          <ShieldAlert className="w-4 h-4 text-purple-500" />
+          <ShieldAlert className={`w-4 h-4 ${activeTab === 'nc-capa' ? 'text-white' : 'text-purple-400'}`} />
           <span>عدم انطباق‌ها و CAPA ({kpis.openNonConformances} باز)</span>
         </button>
 
@@ -576,11 +576,11 @@ export default function FiveSModuleView({ language, currentUser }: Props) {
           onClick={() => setActiveTab('planning')}
           className={`flex-1 min-w-[120px] py-2.5 px-3 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 ${
             activeTab === 'planning'
-              ? 'bg-white dark:bg-slate-700 text-emerald-600 dark:text-emerald-400 shadow-xs font-black'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+              ? 'bg-emerald-600 text-white shadow-xs font-black'
+              : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-700/50'
           }`}
         >
-          <CalendarClock className="w-4 h-4 text-blue-500" />
+          <CalendarClock className={`w-4 h-4 ${activeTab === 'planning' ? 'text-white' : 'text-blue-400'}`} />
           <span>برنامه‌ریزی بازرسی ({schedules.length})</span>
         </button>
 
@@ -588,11 +588,11 @@ export default function FiveSModuleView({ language, currentUser }: Props) {
           onClick={() => setActiveTab('ranking')}
           className={`flex-1 min-w-[120px] py-2.5 px-3 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 ${
             activeTab === 'ranking'
-              ? 'bg-white dark:bg-slate-700 text-emerald-600 dark:text-emerald-400 shadow-xs font-black'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+              ? 'bg-emerald-600 text-white shadow-xs font-black'
+              : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-700/50'
           }`}
         >
-          <Award className="w-4 h-4 text-amber-500" />
+          <Award className={`w-4 h-4 ${activeTab === 'ranking' ? 'text-white' : 'text-amber-400'}`} />
           <span>رتبه‌بندی واحدها</span>
         </button>
       </div>

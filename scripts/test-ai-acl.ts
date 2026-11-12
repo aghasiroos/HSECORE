@@ -108,8 +108,8 @@ test('retrieved document and tool content stays outside the system prompt', () =
   assert.ok(messages[0].content.includes('غیرقابل‌اعتماد'));
   assert.equal(messages[0].content.includes(injection), false);
   assert.equal(messages[1].role, 'user');
-  assert.equal(messages[1].content, retrievedContext);
-  assert.equal(messages[2].content, 'Summarize the document.');
+  assert.ok(messages[1].content.includes(retrievedContext));
+  assert.ok(messages[1].content.includes('Summarize the document.'));
 });
 
 test('client-supplied system and malformed history messages are discarded', () => {

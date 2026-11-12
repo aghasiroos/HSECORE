@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { fileService, HseDocumentCategory } from './file.service.ts';
+import { fileService, HseDocumentCategory, normalizeUploadedFilename } from './file.service.ts';
 import { ApiResponse } from '../../core/response.ts';
 import { ValidationError } from '../../core/errors.ts';
 import { broadcastDataMutation } from '../../core/socket.ts';
@@ -12,7 +12,7 @@ function extractFileFromRequest(req: Request): {
   if (req.file) {
     return {
       fileBuffer: req.file.buffer,
-      originalName: req.file.originalname,
+      originalName: normalizeUploadedFilename(req.body?.originalFileName || req.file.originalname),
       mimeType: req.file.mimetype,
     };
   }
@@ -22,7 +22,9 @@ function extractFileFromRequest(req: Request): {
       : req.body.fileData;
     return {
       fileBuffer: Buffer.from(base64Data, 'base64'),
-      originalName: req.body.originalFileName || req.body.fileName || 'document.pdf',
+      originalName: normalizeUploadedFilename(
+        req.body.originalFileName || req.body.fileName || 'document.pdf'
+      ),
       mimeType: req.body.mimeType || 'application/pdf',
     };
   }
@@ -98,7 +100,7 @@ export class FileController {
 
     res.setHeader('Content-Type', 'image/png');
     res.setHeader('X-Total-Pages', String(totalPages));
-    res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
+    res.setHeader('Cache-Control', 'private, max-age=3600');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.send(buffer);
   }

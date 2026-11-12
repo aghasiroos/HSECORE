@@ -442,7 +442,7 @@ export default function HealthEnvChecklistFormModal({
               className={`px-4 py-2.5 font-black border-b-2 transition flex items-center gap-1.5 cursor-pointer ${
                 activeTab === 'items'
                   ? 'border-teal-600 text-teal-600 dark:text-teal-400'
-                  : 'border-transparent text-slate-500 hover:text-slate-700'
+                  : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-white'
               }`}
             >
               <span>۱. چک‌لیست ارزیابی</span>
@@ -457,7 +457,7 @@ export default function HealthEnvChecklistFormModal({
               className={`px-4 py-2.5 font-black border-b-2 transition flex items-center gap-1.5 cursor-pointer ${
                 activeTab === 'schedule'
                   ? 'border-teal-600 text-teal-600 dark:text-teal-400'
-                  : 'border-transparent text-slate-500 hover:text-slate-700'
+                  : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-white'
               }`}
             >
               <Repeat className="w-3.5 h-3.5" />
@@ -475,7 +475,7 @@ export default function HealthEnvChecklistFormModal({
               className={`px-4 py-2.5 font-black border-b-2 transition flex items-center gap-1.5 cursor-pointer ${
                 activeTab === 'info'
                   ? 'border-teal-600 text-teal-600 dark:text-teal-400'
-                  : 'border-transparent text-slate-500 hover:text-slate-700'
+                  : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-white'
               }`}
             >
               <span>۳. مشخصات و مسئولان</span>
@@ -487,7 +487,7 @@ export default function HealthEnvChecklistFormModal({
               className={`px-4 py-2.5 font-black border-b-2 transition flex items-center gap-1.5 cursor-pointer ${
                 activeTab === 'attachments'
                   ? 'border-teal-600 text-teal-600 dark:text-teal-400'
-                  : 'border-transparent text-slate-500 hover:text-slate-700'
+                  : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-white'
               }`}
             >
               <Paperclip className="w-3.5 h-3.5" />
@@ -505,7 +505,7 @@ export default function HealthEnvChecklistFormModal({
               className={`px-4 py-2.5 font-black border-b-2 transition flex items-center gap-1.5 cursor-pointer ${
                 activeTab === 'summary'
                   ? 'border-teal-600 text-teal-600 dark:text-teal-400'
-                  : 'border-transparent text-slate-500 hover:text-slate-700'
+                  : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-white'
               }`}
             >
               <span>۵. جمع‌بندی، CAPA و تصاویر</span>

@@ -17,6 +17,7 @@ interface NotificationContextType {
   unreadCount: number;
   criticalAlerts: AppNotification[];
   activePopupAlert: AppNotification | null;
+  selectedAlertDetails: AppNotification | null;
   popupQueue: AppNotification[];
   preferences: NotificationPreferences;
   isMuted: boolean;
@@ -28,6 +29,8 @@ interface NotificationContextType {
   closeSettings: () => void;
   openBroadcast: () => void;
   closeBroadcast: () => void;
+  openAlertDetails: (notifOrId: AppNotification | string) => Promise<void>;
+  closeAlertDetails: () => void;
   toggleMute: () => void;
   setVolume: (vol: number) => void;
   closePopup: () => void;
@@ -96,6 +99,7 @@ export const NotificationProvider: React.FC<{
     CentralNotificationService.getPreferences()
   );
   const [activePopupAlert, setActivePopupAlert] = useState<AppNotification | null>(null);
+  const [selectedAlertDetails, setSelectedAlertDetails] = useState<AppNotification | null>(null);
   const [popupQueue, setPopupQueue] = useState<AppNotification[]>([]);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isBroadcastOpen, setIsBroadcastOpen] = useState(false);
@@ -113,7 +117,7 @@ export const NotificationProvider: React.FC<{
   // Automatically register Web Push subscription if notification permission is already granted
   useEffect(() => {
     if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-      CentralNotificationService.subscribeToWebPush(currentUser).catch(() => {});
+      CentralNotificationService.subscribeToWebPush(currentUser as any).catch(() => {});
     }
   }, [currentUser?.id, currentUser?.username]);
 
@@ -146,6 +150,11 @@ export const NotificationProvider: React.FC<{
       if (currentUser?.id) {
         const data = await CentralNotificationService.getNotifications();
         setNotifications(data);
+        setSelectedAlertDetails((curr) => {
+          if (!curr) return null;
+          const updated = data.find((d) => d.notifId === curr.notifId);
+          return updated ? { ...curr, ...updated } : curr;
+        });
 
         const isCriticalAlert = (n: AppNotification) => n.category === 'critical_hse' || n.priority === 'critical';
         const isWorkflowOrReferral = (n: AppNotification) =>
@@ -176,7 +185,7 @@ export const NotificationProvider: React.FC<{
           }
 
           if (popupPref === 'none') return false;
-          if (n.type === 'popup' || n.requiresAck) return true;
+          if (n.type === 'popup' || n.type === 'popup_and_push' || n.requiresAck) return true;
           if (popupPref === 'all') return true;
           if (popupPref === 'important_and_critical' && (isCriticalAlert(n) || isWorkflowOrReferral(n))) return true;
           if (popupPref === 'critical_only' && isCriticalAlert(n)) return true;
@@ -254,6 +263,57 @@ export const NotificationProvider: React.FC<{
       const targetType = notif.targetType || 'all';
       if (targetType === 'all') return true;
       const values = notif.targetValues || [];
+
+      if (targetType === 'unit_managers') {
+        const role = (currentUser.role || '').toLowerCase();
+        const jt = (currentUser.jobTitle || '').toLowerCase();
+        const isMgr =
+          role.includes('manager') ||
+          role.includes('supervisor') ||
+          role.includes('executive') ||
+          role.includes('admin') ||
+          jt.includes('مدیر') ||
+          jt.includes('رئیس') ||
+          jt.includes('سرپرست') ||
+          jt.includes('مسئول واحد') ||
+          jt.includes('فرمانده') ||
+          Boolean((currentUser as any).ptwQualification?.responsibilities?.areaSupervisor) ||
+          Boolean((currentUser as any).ptwQualification?.responsibilities?.issuer);
+        if (values.length > 0) {
+          const uid = String(currentUser.id || '').toLowerCase();
+          const uname = (currentUser.username || '').toLowerCase();
+          return isMgr || values.some((v) => v.toLowerCase() === uid || v.toLowerCase() === uname);
+        }
+        return isMgr;
+      }
+
+      if (targetType === 'hse_experts') {
+        const role = (currentUser.role || '').toLowerCase();
+        const jt = (currentUser.jobTitle || '').toLowerCase();
+        const deptIds = (currentUser.departmentIds || []).map((d) => String(d).toLowerCase());
+        const isHse =
+          role.includes('hse') ||
+          role.includes('safety') ||
+          role.includes('inspector') ||
+          role.includes('medical') ||
+          role.includes('auditor') ||
+          role.includes('admin') ||
+          jt.includes('hse') ||
+          jt.includes('ایمنی') ||
+          jt.includes('بهداشت') ||
+          jt.includes('محیط زیست') ||
+          jt.includes('آتش‌نشان') ||
+          jt.includes('بازرس') ||
+          deptIds.some((d) => d.includes('hse') || d.includes('safety') || d.includes('ایمنی')) ||
+          Boolean((currentUser as any).ptwQualification?.responsibilities?.safetyUnit);
+        if (values.length > 0) {
+          const uid = String(currentUser.id || '').toLowerCase();
+          const uname = (currentUser.username || '').toLowerCase();
+          return isHse || values.some((v) => v.toLowerCase() === uid || v.toLowerCase() === uname);
+        }
+        return isHse;
+      }
+
       if (values.length === 0) return true;
 
       if (targetType === 'roles') {
@@ -272,14 +332,110 @@ export const NotificationProvider: React.FC<{
       if (targetType === 'single' || targetType === 'user' || targetType === 'users') {
         const uid = String(currentUser.id || '');
         const uname = (currentUser.username || '').toLowerCase();
+        const fullName = (currentUser.fullName || '').toLowerCase();
         return values.some(
-          (v) => String(v).toLowerCase() === uid.toLowerCase() || String(v).toLowerCase() === uname
+          (v) =>
+            String(v).toLowerCase() === uid.toLowerCase() ||
+            String(v).toLowerCase() === uname ||
+            (fullName && String(v).toLowerCase() === fullName)
         );
       }
       return true;
     },
     [currentUser]
   );
+
+  // Open Alert Details Modal & record view confirmation
+  const openAlertDetails = useCallback(
+    async (notifOrId: AppNotification | string) => {
+      if (typeof notifOrId === 'object' && notifOrId !== null) {
+        setSelectedAlertDetails(notifOrId);
+        CentralNotificationService.confirmAlertViewed(
+          notifOrId.notifId,
+          'alert_details_view',
+          currentUser?.id || currentUser?.username,
+          currentUser?.fullName || currentUser?.username
+        ).catch(() => {});
+        const fresh = await apiDb.getNotificationById(notifOrId.notifId);
+        if (fresh) {
+          setSelectedAlertDetails((prev) =>
+            prev && prev.notifId === notifOrId.notifId ? { ...prev, ...fresh } : prev
+          );
+        }
+        return;
+      }
+
+      const idStr = String(notifOrId || '').trim();
+      if (!idStr) return;
+
+      const existing = notifications.find((n) => n.notifId === idStr || String(n.id) === idStr);
+      if (existing) {
+        setSelectedAlertDetails(existing);
+      }
+
+      CentralNotificationService.confirmAlertViewed(
+        idStr,
+        'alert_details_view',
+        currentUser?.id || currentUser?.username,
+        currentUser?.fullName || currentUser?.username
+      ).catch(() => {});
+
+      const fresh = await apiDb.getNotificationById(idStr);
+      if (fresh) {
+        setSelectedAlertDetails({
+          ...fresh,
+          notifId: fresh.notifId || fresh.id || idStr,
+          createdAt: fresh.createdAt || new Date().toISOString(),
+        });
+      }
+    },
+    [notifications, currentUser]
+  );
+
+  const closeAlertDetails = useCallback(() => {
+    setSelectedAlertDetails(null);
+    // Clean alertId query param from URL hash if present
+    if (typeof window !== 'undefined' && window.location.hash.includes('alertId=')) {
+      const baseHash = window.location.hash.split('?')[0] || '#dashboard';
+      window.history.replaceState(null, '', baseHash);
+    }
+  }, []);
+
+  // Deep-Link Listener: When user clicks a Browser Push notification, URL opens with #notifications?alertId=<notifId>
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const checkDeepLinkAlert = async () => {
+      const hash = window.location.hash || '';
+      const search = window.location.search || '';
+      let alertId = '';
+
+      if (hash.includes('alertId=')) {
+        const qPart = hash.split('?')[1] || '';
+        const params = new URLSearchParams(qPart);
+        alertId = params.get('alertId') || '';
+      } else if (search.includes('alertId=')) {
+        const params = new URLSearchParams(search);
+        alertId = params.get('alertId') || '';
+      }
+
+      if (alertId) {
+        await CentralNotificationService.confirmAlertViewed(
+          alertId,
+          'browser_push_click',
+          currentUser?.id || currentUser?.username,
+          currentUser?.fullName || currentUser?.username
+        );
+        await openAlertDetails(alertId);
+      }
+    };
+
+    checkDeepLinkAlert();
+    window.addEventListener('hashchange', checkDeepLinkAlert);
+    return () => {
+      window.removeEventListener('hashchange', checkDeepLinkAlert);
+    };
+  }, [currentUser?.id, currentUser?.username, openAlertDetails]);
 
   // Unified Incoming Alert Processor (Deduplicates across Local Dispatch, Socket.IO, SSE, and Service Worker Push)
   const processIncomingAlert = useCallback(
@@ -302,7 +458,14 @@ export const NotificationProvider: React.FC<{
         (lastProcessedById && now - lastProcessedById < 12000) ||
         (lastProcessedBySig && now - lastProcessedBySig < 4000)
       ) {
-        // Already processed via another real-time channel (local / socket / sse / sw_push)
+        // If deliveryReport arrived on a subsequent update, merge it into state
+        if (normalizedNotif.deliveryReport) {
+          setNotifications((prev) =>
+            prev.map((n) =>
+              n.notifId === notifId ? { ...n, deliveryReport: normalizedNotif.deliveryReport } : n
+            )
+          );
+        }
         return;
       }
 
@@ -331,7 +494,7 @@ export const NotificationProvider: React.FC<{
       // 2. Dispatch event for real-time bell ringing animation
       window.dispatchEvent(new CustomEvent('hse_new_notification_received', { detail: normalizedNotif }));
 
-      // 3. Queue center popup modal
+      // 3. Queue center popup modal (Simultaneous Popup + Browser Push)
       const isImportantOrWorkflow =
         normalizedNotif.priority === 'high' ||
         normalizedNotif.category === 'warning' ||
@@ -346,9 +509,15 @@ export const NotificationProvider: React.FC<{
 
       const shouldShowPopup =
         normalizedNotif.type === 'popup' ||
+        normalizedNotif.type === 'popup_and_push' ||
         normalizedNotif.requiresAck ||
         isCritical ||
-        (!currentUser && (isCritical || normalizedNotif.requiresAck || normalizedNotif.type === 'popup' || normalizedNotif.priority === 'high')) ||
+        (!currentUser &&
+          (isCritical ||
+            normalizedNotif.requiresAck ||
+            normalizedNotif.type === 'popup' ||
+            normalizedNotif.type === 'popup_and_push' ||
+            normalizedNotif.priority === 'high')) ||
         popupPref === 'all' ||
         (popupPref === 'important_and_critical' && (isCritical || isImportantOrWorkflow)) ||
         (popupPref === 'critical_only' && isCritical);
@@ -380,21 +549,61 @@ export const NotificationProvider: React.FC<{
         }
       }
 
-      // 5. Native System / Lock Screen Notification via Service Worker
-      if (sourceChannel !== 'sw_push' && (isCritical || document.hidden || !currentUser)) {
+      // 5. Simultaneous Native System / Browser Notification via Service Worker
+      if (
+        sourceChannel !== 'sw_push' &&
+        (normalizedNotif.type === 'popup_and_push' ||
+          normalizedNotif.type === 'push' ||
+          isCritical ||
+          document.hidden ||
+          !currentUser)
+      ) {
         CentralNotificationService.dispatchSystemOsNotification(normalizedNotif).catch(() => {});
       }
     },
     [currentUser, isTargetUser, preferences]
   );
 
-  // Listen for real-time Socket.IO events
+  // Listen for real-time Socket.IO events (including delivery report & view confirmation updates)
   useEffect(() => {
     if (!socket) return;
 
     const onSocketAlert = (notif: AppNotification) => processIncomingAlert(notif, 'socket');
+    const onDeliveryReport = (payload: { notifId: string; deliveryReport: any }) => {
+      if (!payload?.notifId) return;
+      setNotifications((prev) =>
+        prev.map((n) =>
+          n.notifId === payload.notifId ? { ...n, deliveryReport: payload.deliveryReport } : n
+        )
+      );
+      setSelectedAlertDetails((curr) =>
+        curr && curr.notifId === payload.notifId
+          ? { ...curr, deliveryReport: payload.deliveryReport }
+          : curr
+      );
+    };
+    const onViewed = (payload: { notifId: string; viewedBy: any }) => {
+      if (!payload?.notifId || !payload?.viewedBy) return;
+      setNotifications((prev) =>
+        prev.map((n) => {
+          if (n.notifId !== payload.notifId) return n;
+          const list = Array.isArray(n.viewedBy) ? n.viewedBy : [];
+          if (list.some((v) => v.userId === payload.viewedBy.userId)) return n;
+          return { ...n, viewedBy: [...list, payload.viewedBy] };
+        })
+      );
+      setSelectedAlertDetails((curr) => {
+        if (!curr || curr.notifId !== payload.notifId) return curr;
+        const list = Array.isArray(curr.viewedBy) ? curr.viewedBy : [];
+        if (list.some((v) => v.userId === payload.viewedBy.userId)) return curr;
+        return { ...curr, viewedBy: [...list, payload.viewedBy] };
+      });
+    };
+
     socket.on('notification_alert', onSocketAlert);
     socket.on('public_emergency_alert', onSocketAlert);
+    socket.on('notification_delivery_report', onDeliveryReport);
+    socket.on('notification_viewed', onViewed);
 
     const handleSocketReconnect = () => {
       refreshNotifications();
@@ -404,6 +613,8 @@ export const NotificationProvider: React.FC<{
     return () => {
       socket.off('notification_alert', onSocketAlert);
       socket.off('public_emergency_alert', onSocketAlert);
+      socket.off('notification_delivery_report', onDeliveryReport);
+      socket.off('notification_viewed', onViewed);
       socket.off('connect', handleSocketReconnect);
     };
   }, [socket, processIncomingAlert, refreshNotifications]);
@@ -456,6 +667,13 @@ export const NotificationProvider: React.FC<{
       } else if (msg.type === 'HSE_SW_EMERGENCY_OPENED' && msg.payload) {
         const alert = msg.payload as AppNotification;
         if (alert && alert.notifId) {
+          CentralNotificationService.confirmAlertViewed(
+            alert.notifId,
+            'browser_push_click',
+            currentUser?.id || currentUser?.username,
+            currentUser?.fullName || currentUser?.username
+          ).catch(() => {});
+          openAlertDetails(alert);
           setPopupQueue((prev) => {
             if (prev.some((p) => p.notifId === alert.notifId)) return prev;
             return [alert, ...prev];
@@ -468,7 +686,7 @@ export const NotificationProvider: React.FC<{
     return () => {
       navigator.serviceWorker.removeEventListener('message', handleSwMessage);
     };
-  }, [processIncomingAlert]);
+  }, [processIncomingAlert, currentUser, openAlertDetails]);
 
   // Listen for local system events
   useEffect(() => {
@@ -512,12 +730,21 @@ export const NotificationProvider: React.FC<{
     };
   }, [refreshNotifications, processIncomingAlert]);
 
-  // Synchronize activePopupAlert from queue
+  // Synchronize activePopupAlert from queue & record in_app_popup view confirmation
   useEffect(() => {
     if (!activePopupAlert && popupQueue.length > 0) {
-      setActivePopupAlert(popupQueue[0]);
+      const nextAlert = popupQueue[0];
+      setActivePopupAlert(nextAlert);
+      if (nextAlert?.notifId) {
+        CentralNotificationService.confirmAlertViewed(
+          nextAlert.notifId,
+          'in_app_popup',
+          currentUser?.id || currentUser?.username,
+          currentUser?.fullName || currentUser?.username
+        ).catch(() => {});
+      }
     }
-  }, [activePopupAlert, popupQueue]);
+  }, [activePopupAlert, popupQueue, currentUser]);
 
   const closePopup = useCallback(() => {
     stopSirenLoop();
@@ -582,26 +809,33 @@ export const NotificationProvider: React.FC<{
       }
 
       if (success) {
+        const ackObj = {
+          userId: currentUser?.id || currentUser?.username || 'guest_user',
+          userName: currentUser?.fullName || currentUser?.username || 'کاربر (صفحه ورود)',
+          timestamp: new Date().toISOString(),
+          note,
+          acknowledgmentSource: acknowledgmentSource || (currentUser?.id ? 'in_app_modal' : 'login_screen'),
+          status: 'acknowledged',
+        };
         setNotifications((prev) =>
           prev.map((n) =>
             n.notifId === idStr || n.id === Number(id)
               ? {
                   ...n,
                   read: true,
-                  acknowledgedBy: [
-                    ...(n.acknowledgedBy || []),
-                    {
-                      userId: currentUser?.id || currentUser?.username || 'guest_user',
-                      userName: currentUser?.fullName || currentUser?.username || 'کاربر (صفحه ورود)',
-                      timestamp: new Date().toISOString(),
-                      note,
-                      acknowledgmentSource: acknowledgmentSource || (currentUser?.id ? 'in_app_modal' : 'login_screen'),
-                      status: 'acknowledged',
-                    },
-                  ],
+                  acknowledgedBy: [...(n.acknowledgedBy || []), ackObj],
                 }
               : n
           )
+        );
+        setSelectedAlertDetails((curr) =>
+          curr && (curr.notifId === idStr || curr.id === Number(id))
+            ? {
+                ...curr,
+                read: true,
+                acknowledgedBy: [...(curr.acknowledgedBy || []), ackObj],
+              }
+            : curr
         );
         closePopup();
       }
@@ -614,6 +848,9 @@ export const NotificationProvider: React.FC<{
     const success = await CentralNotificationService.delete(id);
     if (success) {
       setNotifications((prev) => prev.filter((n) => n.notifId !== String(id) && n.id !== Number(id)));
+      setSelectedAlertDetails((curr) =>
+        curr && (curr.notifId === String(id) || curr.id === Number(id)) ? null : curr
+      );
     }
     return success;
   }, []);
@@ -623,6 +860,7 @@ export const NotificationProvider: React.FC<{
     if (success) {
       setNotifications([]);
       setActivePopupAlert(null);
+      setSelectedAlertDetails(null);
       setPopupQueue([]);
     }
     return success;
@@ -680,6 +918,7 @@ export const NotificationProvider: React.FC<{
     unreadCount,
     criticalAlerts,
     activePopupAlert,
+    selectedAlertDetails,
     popupQueue,
     preferences,
     isMuted,
@@ -691,6 +930,8 @@ export const NotificationProvider: React.FC<{
     closeSettings: () => setIsSettingsOpen(false),
     openBroadcast: () => setIsBroadcastOpen(true),
     closeBroadcast: () => setIsBroadcastOpen(false),
+    openAlertDetails,
+    closeAlertDetails,
     toggleMute,
     setVolume,
     closePopup,

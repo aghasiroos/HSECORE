@@ -495,7 +495,7 @@ export default function EquipmentDetailsView({
             className={`pb-3 font-bold text-xs sm:text-sm border-b-2 flex items-center gap-2 transition-colors cursor-pointer ${
               activeTab === 'inspections'
                 ? 'border-red-500 text-red-600 dark:text-red-400'
-                : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-white'
             }`}
           >
             <Calendar className="w-4 h-4" />
@@ -510,7 +510,7 @@ export default function EquipmentDetailsView({
             className={`pb-3 font-bold text-xs sm:text-sm border-b-2 flex items-center gap-2 transition-colors cursor-pointer ${
               activeTab === 'defects'
                 ? 'border-red-500 text-red-600 dark:text-red-400'
-                : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-white'
             }`}
           >
             <Wrench className="w-4 h-4" />
@@ -527,7 +527,7 @@ export default function EquipmentDetailsView({
             className={`pb-3 font-bold text-xs sm:text-sm border-b-2 flex items-center gap-2 transition-colors cursor-pointer ${
               activeTab === 'status_history'
                 ? 'border-red-500 text-red-600 dark:text-red-400'
-                : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-white'
             }`}
           >
             <History className="w-4 h-4" />

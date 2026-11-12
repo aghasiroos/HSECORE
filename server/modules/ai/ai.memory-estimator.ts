@@ -277,8 +277,8 @@ export class AIMemoryEstimator {
     const sys = this.getSystemMemoryMetrics();
     const containerLimit = sys.containerLimitMB;
 
-    // Determine safe context window
-    const availableForContext = Math.max(0, containerLimit - (ggufSizeMB + cpuRepackMB + visionMmprojMB + baseRuntimeMB + 400));
+    // Determine safe context window (minimum 2048 tokens so system prompt + RAG/tool data + full Persian reply never truncate at 512 tokens)
+    const availableForContext = Math.max(0, containerLimit - (ggufSizeMB + cpuRepackMB + visionMmprojMB + baseRuntimeMB + 200));
     const factorPerToken = this.getKvFactorPerTokenMB(paramsB);
     const maxCalculatedTokens = Math.floor(availableForContext / factorPerToken);
 
@@ -287,10 +287,10 @@ export class AIMemoryEstimator {
       safeContextTokens = 8192;
     } else if (maxCalculatedTokens >= 4096) {
       safeContextTokens = 4096;
-    } else if (maxCalculatedTokens >= 2048) {
-      safeContextTokens = 2048;
+    } else if (maxCalculatedTokens >= 3072) {
+      safeContextTokens = 3072;
     } else {
-      safeContextTokens = Math.max(512, Math.floor(maxCalculatedTokens / 256) * 256);
+      safeContextTokens = 2048;
     }
 
     let oomRisk: 'safe' | 'warning' | 'critical' = 'safe';

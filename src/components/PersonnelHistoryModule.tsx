@@ -726,8 +726,8 @@ export default function PersonnelHistoryModule({ isFa, currentUser, warnings: pr
               onClick={() => setActiveTab('overview')}
               className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition shrink-0 cursor-pointer ${
                 activeTab === 'overview'
-                  ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-950 font-black shadow-sm'
-                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  ? 'bg-blue-600 text-white font-black shadow-md'
+                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/80'
               }`}
             >
               <Activity className="w-4 h-4" />
@@ -738,8 +738,8 @@ export default function PersonnelHistoryModule({ isFa, currentUser, warnings: pr
               onClick={() => setActiveTab('identity')}
               className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition shrink-0 cursor-pointer ${
                 activeTab === 'identity'
-                  ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-950 font-black shadow-sm'
-                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  ? 'bg-blue-600 text-white font-black shadow-md'
+                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/80'
               }`}
             >
               <User className="w-4 h-4" />
@@ -750,13 +750,17 @@ export default function PersonnelHistoryModule({ isFa, currentUser, warnings: pr
               onClick={() => setActiveTab('health')}
               className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition shrink-0 cursor-pointer ${
                 activeTab === 'health'
-                  ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-950 font-black shadow-sm'
-                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  ? 'bg-blue-600 text-white font-black shadow-md'
+                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/80'
               }`}
             >
-              <Heart className="w-4 h-4 text-rose-500" />
+              <Heart className={`w-4 h-4 ${activeTab === 'health' ? 'text-white' : 'text-rose-500'}`} />
               <span>طب کار و محدودیت‌ها</span>
-              <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-rose-500/10 text-rose-600 font-mono">
+              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-mono font-bold ${
+                activeTab === 'health'
+                  ? 'bg-white/20 text-white'
+                  : 'bg-rose-500/10 text-rose-600 dark:text-rose-400'
+              }`}>
                 {dossier.medicalExams.length + dossier.occupationalRestrictions.length}
               </span>
             </button>
@@ -765,13 +769,17 @@ export default function PersonnelHistoryModule({ isFa, currentUser, warnings: pr
               onClick={() => setActiveTab('training')}
               className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition shrink-0 cursor-pointer ${
                 activeTab === 'training'
-                  ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-950 font-black shadow-sm'
-                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  ? 'bg-blue-600 text-white font-black shadow-md'
+                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/80'
               }`}
             >
-              <GraduationCap className="w-4 h-4 text-blue-500" />
+              <GraduationCap className={`w-4 h-4 ${activeTab === 'training' ? 'text-white' : 'text-blue-500'}`} />
               <span>آموزش و صلاحیت‌ها</span>
-              <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-blue-500/10 text-blue-600 font-mono">
+              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-mono font-bold ${
+                activeTab === 'training'
+                  ? 'bg-white/20 text-white'
+                  : 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
+              }`}>
                 {dossier.trainingCourses.length + dossier.qualifications.length}
               </span>
             </button>
@@ -780,13 +788,17 @@ export default function PersonnelHistoryModule({ isFa, currentUser, warnings: pr
               onClick={() => setActiveTab('permits')}
               className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition shrink-0 cursor-pointer ${
                 activeTab === 'permits'
-                  ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-950 font-black shadow-sm'
-                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  ? 'bg-blue-600 text-white font-black shadow-md'
+                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/80'
               }`}
             >
-              <FileText className="w-4 h-4 text-blue-500" />
+              <FileText className={`w-4 h-4 ${activeTab === 'permits' ? 'text-white' : 'text-blue-500'}`} />
               <span>پروانه‌های کار (PTW)</span>
-              <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-blue-500/10 text-blue-600 font-mono">
+              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-mono font-bold ${
+                activeTab === 'permits'
+                  ? 'bg-white/20 text-white'
+                  : 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
+              }`}>
                 {dossier.workPermits.length}
               </span>
             </button>
@@ -795,13 +807,17 @@ export default function PersonnelHistoryModule({ isFa, currentUser, warnings: pr
               onClick={() => setActiveTab('incidents')}
               className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition shrink-0 cursor-pointer ${
                 activeTab === 'incidents'
-                  ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-950 font-black shadow-sm'
-                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  ? 'bg-blue-600 text-white font-black shadow-md'
+                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/80'
               }`}
             >
-              <AlertTriangle className="w-4 h-4 text-rose-500" />
+              <AlertTriangle className={`w-4 h-4 ${activeTab === 'incidents' ? 'text-white' : 'text-rose-500'}`} />
               <span>حوادث و BBS</span>
-              <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-rose-500/10 text-rose-600 font-mono">
+              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-mono font-bold ${
+                activeTab === 'incidents'
+                  ? 'bg-white/20 text-white'
+                  : 'bg-rose-500/10 text-rose-600 dark:text-rose-400'
+              }`}>
                 {dossier.incidents.length + dossier.bbsObservations.length}
               </span>
             </button>
@@ -810,13 +826,17 @@ export default function PersonnelHistoryModule({ isFa, currentUser, warnings: pr
               onClick={() => setActiveTab('capa')}
               className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition shrink-0 cursor-pointer ${
                 activeTab === 'capa'
-                  ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-950 font-black shadow-sm'
-                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  ? 'bg-blue-600 text-white font-black shadow-md'
+                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/80'
               }`}
             >
-              <CheckSquare className="w-4 h-4 text-indigo-500" />
+              <CheckSquare className={`w-4 h-4 ${activeTab === 'capa' ? 'text-white' : 'text-indigo-500'}`} />
               <span>عدم انطباق‌ها و CAPA</span>
-              <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-indigo-500/10 text-indigo-600 font-mono font-bold">
+              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-mono font-bold ${
+                activeTab === 'capa'
+                  ? 'bg-white/20 text-white'
+                  : 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400'
+              }`}>
                 {dossier.nonConformances?.length || 0}
               </span>
             </button>
@@ -825,13 +845,17 @@ export default function PersonnelHistoryModule({ isFa, currentUser, warnings: pr
               onClick={() => setActiveTab('risks')}
               className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition shrink-0 cursor-pointer ${
                 activeTab === 'risks'
-                  ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-950 font-black shadow-sm'
-                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  ? 'bg-blue-600 text-white font-black shadow-md'
+                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/80'
               }`}
             >
-              <ShieldCheck className="w-4 h-4 text-emerald-500" />
+              <ShieldCheck className={`w-4 h-4 ${activeTab === 'risks' ? 'text-white' : 'text-emerald-500'}`} />
               <span>ارزیابی ریسک</span>
-              <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-emerald-500/10 text-emerald-600 font-mono">
+              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-mono font-bold ${
+                activeTab === 'risks'
+                  ? 'bg-white/20 text-white'
+                  : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+              }`}>
                 {dossier.riskAssessments.length + dossier.safetyInspections.length}
               </span>
             </button>
@@ -840,13 +864,17 @@ export default function PersonnelHistoryModule({ isFa, currentUser, warnings: pr
               onClick={() => setActiveTab('inspections')}
               className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition shrink-0 cursor-pointer ${
                 activeTab === 'inspections'
-                  ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-950 font-black shadow-sm'
-                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  ? 'bg-blue-600 text-white font-black shadow-md'
+                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/80'
               }`}
             >
-              <ClipboardCheck className="w-4 h-4 text-teal-500" />
+              <ClipboardCheck className={`w-4 h-4 ${activeTab === 'inspections' ? 'text-white' : 'text-teal-500'}`} />
               <span>بازرسی‌های بهداشت و 5S</span>
-              <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-teal-500/10 text-teal-600 font-mono">
+              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-mono font-bold ${
+                activeTab === 'inspections'
+                  ? 'bg-white/20 text-white'
+                  : 'bg-teal-500/10 text-teal-600 dark:text-teal-400'
+              }`}>
                 {(dossier.healthEnvInspections?.length || 0) + (dossier.fiveSInspections?.length || 0)}
               </span>
             </button>
@@ -855,13 +883,17 @@ export default function PersonnelHistoryModule({ isFa, currentUser, warnings: pr
               onClick={() => setActiveTab('referrals')}
               className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition shrink-0 cursor-pointer ${
                 activeTab === 'referrals'
-                  ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-950 font-black shadow-sm'
-                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  ? 'bg-blue-600 text-white font-black shadow-md'
+                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/80'
               }`}
             >
-              <Send className="w-4 h-4 text-sky-500" />
+              <Send className={`w-4 h-4 ${activeTab === 'referrals' ? 'text-white' : 'text-sky-500'}`} />
               <span>ارجاعات و کارتابل</span>
-              <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-sky-500/10 text-sky-600 font-mono">
+              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-mono font-bold ${
+                activeTab === 'referrals'
+                  ? 'bg-white/20 text-white'
+                  : 'bg-sky-500/10 text-sky-600 dark:text-sky-400'
+              }`}>
                 {dossier.referrals?.length || 0}
               </span>
             </button>
@@ -870,13 +902,17 @@ export default function PersonnelHistoryModule({ isFa, currentUser, warnings: pr
               onClick={() => setActiveTab('warnings')}
               className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition shrink-0 cursor-pointer ${
                 activeTab === 'warnings'
-                  ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-950 font-black shadow-sm'
-                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  ? 'bg-blue-600 text-white font-black shadow-md'
+                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/80'
               }`}
             >
-              <ShieldAlert className="w-4 h-4 text-rose-500" />
+              <ShieldAlert className={`w-4 h-4 ${activeTab === 'warnings' ? 'text-white' : 'text-rose-500'}`} />
               <span>اخطارهای انضباطی و ایمنی</span>
-              <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-rose-500/10 text-rose-600 font-mono font-bold">
+              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-mono font-bold ${
+                activeTab === 'warnings'
+                  ? 'bg-white/20 text-white'
+                  : 'bg-rose-500/10 text-rose-600 dark:text-rose-400'
+              }`}>
                 {dossier.warnings.length}
               </span>
             </button>
@@ -885,13 +921,17 @@ export default function PersonnelHistoryModule({ isFa, currentUser, warnings: pr
               onClick={() => setActiveTab('ppe')}
               className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition shrink-0 cursor-pointer ${
                 activeTab === 'ppe'
-                  ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-950 font-black shadow-sm'
-                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  ? 'bg-blue-600 text-white font-black shadow-md'
+                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/80'
               }`}
             >
-              <HardHat className="w-4 h-4 text-blue-500" />
+              <HardHat className={`w-4 h-4 ${activeTab === 'ppe' ? 'text-white' : 'text-blue-500'}`} />
               <span>تجهیزات حفاظت فردی (PPE)</span>
-              <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-blue-500/10 text-blue-600 font-mono font-bold">
+              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-mono font-bold ${
+                activeTab === 'ppe'
+                  ? 'bg-white/20 text-white'
+                  : 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
+              }`}>
                 {dossier.ppeIssuances.length}
               </span>
             </button>
@@ -900,13 +940,17 @@ export default function PersonnelHistoryModule({ isFa, currentUser, warnings: pr
               onClick={() => setActiveTab('attachments')}
               className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition shrink-0 cursor-pointer ${
                 activeTab === 'attachments'
-                  ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-950 font-black shadow-sm'
-                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  ? 'bg-blue-600 text-white font-black shadow-md'
+                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/80'
               }`}
             >
               <Paperclip className="w-4 h-4" />
               <span>پیوست‌ها</span>
-              <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-slate-200 dark:bg-slate-700 font-mono">
+              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-mono font-bold ${
+                activeTab === 'attachments'
+                  ? 'bg-white/20 text-white'
+                  : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
+              }`}>
                 {dossier.attachments.length}
               </span>
             </button>
@@ -915,13 +959,17 @@ export default function PersonnelHistoryModule({ isFa, currentUser, warnings: pr
               onClick={() => setActiveTab('audit_logs')}
               className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition shrink-0 cursor-pointer ${
                 activeTab === 'audit_logs'
-                  ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-950 font-black shadow-sm'
-                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  ? 'bg-blue-600 text-white font-black shadow-md'
+                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/80'
               }`}
             >
               <History className="w-4 h-4" />
               <span>لاگ سوابق</span>
-              <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-slate-200 dark:bg-slate-700 font-mono">
+              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-mono font-bold ${
+                activeTab === 'audit_logs'
+                  ? 'bg-white/20 text-white'
+                  : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
+              }`}>
                 {dossier.auditLogs.length}
               </span>
             </button>

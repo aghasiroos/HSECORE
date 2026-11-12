@@ -54,6 +54,8 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'fire_equipment:*',
     'five_s:*',
     'documents:read',
+    'documents:create',
+    'documents:update',
   ],
   EXECUTIVEMANAGER: [
     'ptw:*',
@@ -66,6 +68,28 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'fire_equipment:*',
     'five_s:*',
     'documents:read',
+    'documents:create',
+    'documents:update',
+  ],
+  FIRE_OFFICER: [
+    'fire_equipment:*',
+    'ptw:read',
+    'incidents:create',
+    'incidents:read',
+    'incidents:update',
+    'workflow:action',
+    'notifications:read',
+    'notifications:create',
+    'reports:read',
+    'documents:read',
+    'documents:create',
+    'documents:update',
+  ],
+  PROCESS_MANAGER: [
+    'workflow:*',
+    'reports:*',
+    'documents:*',
+    'notifications:read',
   ],
   SAFETY_OFFICER: [
     'ptw:read',
@@ -130,12 +154,16 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'personnel:read',
     'workflow:action',
     'documents:read',
+    'documents:create',
+    'documents:update',
   ],
   MEDICALSTAFF: [
     'health:*',
     'personnel:read',
     'workflow:action',
     'documents:read',
+    'documents:create',
+    'documents:update',
   ],
   NUTRITIONIST: [
     'health:*',
@@ -143,6 +171,8 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'reports:read',
     'workflow:action',
     'documents:read',
+    'documents:create',
+    'documents:update',
   ],
   NUTRITION_EXPERT: [
     'health:*',
@@ -150,6 +180,8 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'reports:read',
     'workflow:action',
     'documents:read',
+    'documents:create',
+    'documents:update',
   ],
   WORKER: [
     'ptw:read',
@@ -172,6 +204,8 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'reports:read',
     'notifications:read',
     'documents:read',
+    'documents:create',
+    'documents:update',
   ],
   PROJECT_MANAGER: [
     'ptw:*',
@@ -254,22 +288,28 @@ export function normalizeRoleToCanonical(roleInput?: string): string {
   if (ROLE_PERMISSIONS[cleaned]) return cleaned;
 
   // Persian & alias mappings
-  if (cleaned.includes('مدیرارشد') || cleaned.includes('مدیرسیستم') || cleaned.includes('مدیرکل') || cleaned === 'ADMIN' || cleaned === 'ADMINISTRATOR') {
+  if (cleaned.includes('مدیرارشد') || cleaned.includes('مدیرسیستم') || cleaned.includes('مدیرسامانه') || cleaned.includes('مدیرکل') || cleaned === 'ADMIN' || cleaned === 'ADMINISTRATOR' || cleaned === 'SUPERADMIN') {
     return 'ADMINISTRATOR';
   }
   if (cleaned.includes('HSE') || cleaned.includes('مدیرایمنی')) {
     return 'HSE_MANAGER';
   }
+  if (cleaned.includes('آتشنشان') || cleaned.includes('آتش‌نشان') || cleaned.includes('FIRE')) {
+    return 'FIRE_OFFICER';
+  }
+  if (cleaned.includes('فرآیند') || cleaned.includes('PROCESS')) {
+    return 'PROCESS_MANAGER';
+  }
   if (cleaned.includes('ایمنی') || cleaned.includes('بازرس') || cleaned.includes('SAFETY') || cleaned.includes('INSPECTOR')) {
     return 'SAFETY_OFFICER';
   }
-  if (cleaned.includes('بهداشت') || cleaned.includes('پزشک') || cleaned.includes('درمان') || cleaned.includes('طبکار') || cleaned.includes('DOCTOR') || cleaned.includes('MEDICAL')) {
+  if (cleaned.includes('بهداشت') || cleaned.includes('پزشک') || cleaned.includes('درمان') || cleaned.includes('طبکار') || cleaned.includes('DOCTOR') || cleaned.includes('MEDICAL') || cleaned.includes('HEALTH')) {
     return 'DOCTOR_OCCUPATIONAL';
   }
   if (cleaned.includes('پیمانکار') || cleaned.includes('CONTRACTOR')) {
     return 'CONTRACTOR';
   }
-  if (cleaned.includes('اجرایی') || cleaned.includes('EXECUTIVE')) {
+  if (cleaned.includes('اجرایی') || cleaned.includes('مجتمع') || cleaned.includes('DIRECTOR') || cleaned.includes('EXECUTIVE')) {
     return 'EXECUTIVE_MANAGER';
   }
   if (cleaned.includes('ممیز') || cleaned.includes('AUDIT')) {
@@ -278,13 +318,13 @@ export function normalizeRoleToCanonical(roleInput?: string): string {
   if (cleaned.includes('پروژه') || cleaned.includes('PROJECT')) {
     return 'PROJECT_MANAGER';
   }
-  if (cleaned.includes('سرپرست') || cleaned.includes('SUPERVISOR')) {
+  if (cleaned.includes('سرپرست') || cleaned.includes('مسئولواحد') || cleaned.includes('SUPERVISOR') || cleaned.includes('UNIT')) {
     return 'SUPERVISOR';
   }
-  if (cleaned.includes('کارگر') || cleaned.includes('پرسنل') || cleaned.includes('WORKER')) {
+  if (cleaned.includes('کارگر') || cleaned.includes('پرسنل') || cleaned.includes('WORKER') || cleaned.includes('STAFF')) {
     return 'WORKER';
   }
-  if (cleaned.includes('اختصاصی') || cleaned.includes('CUSTOM') || (cleaned && cleaned !== 'USER' && cleaned !== 'کاربر')) {
+  if (cleaned.includes('اختصاصی') || cleaned.includes('CUSTOM') || (cleaned && cleaned !== 'USER' && cleaned !== 'کاربر' && cleaned !== 'STANDARDUSER')) {
     return 'CUSTOM_ROLE';
   }
 
@@ -353,8 +393,10 @@ export function checkUserHasPermission(user: UserContext | undefined, permission
 
     // 2.2 Check by matching normalized module keys and legacy aliases
     const cleanReqMod = reqModule.toLowerCase().replace(/\s+|_/g, '');
+    let explicitlyDenied = false;
     for (const [modKey, actions] of Object.entries(permsObj)) {
       const cleanModKey = modKey.toLowerCase().replace(/\s+|_/g, '');
+      const isPendingDocsKey = cleanModKey.includes('pendingdocument');
       const matches =
         cleanModKey === cleanReqMod ||
         cleanModKey.startsWith(cleanReqMod + '.') ||
@@ -364,7 +406,7 @@ export function checkUserHasPermission(user: UserContext | undefined, permission
         (cleanReqMod.includes('health') && (cleanModKey.includes('health') || cleanModKey.includes('medical'))) ||
         (cleanReqMod.includes('warning') && (cleanModKey.includes('warning') || cleanModKey.includes('employee'))) ||
         (cleanReqMod.includes('report') && (cleanModKey.includes('report') || cleanModKey.includes('trir'))) ||
-        (cleanReqMod.includes('document') && (cleanModKey.includes('document') || cleanModKey.includes('مستند'))) ||
+        (cleanReqMod.includes('document') && !cleanReqMod.includes('pending') && !isPendingDocsKey && (cleanModKey.includes('document') || cleanModKey.includes('مستند'))) ||
         (cleanReqMod.includes('notification') && (cleanModKey.includes('notification') || cleanModKey.includes('اعلان') || cleanModKey.includes('alert'))) ||
         (cleanReqMod.includes('orgstructure') && (cleanModKey.includes('orgstructure') || cleanModKey.includes('organization') || cleanModKey.includes('ساختار')));
 
@@ -385,11 +427,12 @@ export function checkUserHasPermission(user: UserContext | undefined, permission
         if (reqAction === 'emergency' && actions['emergency'] === true) return true;
         if (reqAction === 'configure' && actions['configure'] === true) return true;
 
-        if (reqAction === 'read' && actions['view'] === false) return false;
-        if (reqAction === 'update' && actions['edit'] === false) return false;
-        if (typeof actions[reqAction] === 'boolean' && actions[reqAction] === false) return false;
+        if (reqAction === 'read' && actions['view'] === false) explicitlyDenied = true;
+        if (reqAction === 'update' && actions['edit'] === false) explicitlyDenied = true;
+        if (typeof actions[reqAction] === 'boolean' && actions[reqAction] === false) explicitlyDenied = true;
       }
     }
+    if (explicitlyDenied) return false;
   }
 
   // 3. Fallback to canonical role matrix
@@ -401,6 +444,40 @@ export function checkUserHasPermission(user: UserContext | undefined, permission
   if (rolePerms.some(p => p.endsWith(':*') && permission.startsWith(p.replace(':*', '')))) return true;
 
   return false;
+}
+
+const liveUserPermsCache = new Map<string, { role: string; permissions: any; expiresAt: number }>();
+
+async function resolveLiveUserContext(user: UserContext): Promise<UserContext> {
+  if (!user.uid) return user;
+  const cached = liveUserPermsCache.get(user.uid);
+  if (cached && cached.expiresAt > Date.now()) {
+    return { ...user, role: cached.role || user.role, permissions: cached.permissions ?? user.permissions };
+  }
+  try {
+    const { db, schema } = await import('../db.ts');
+    const { eq } = await import('drizzle-orm');
+    const [dbUser] = await db
+      .select({ role: schema.users.role, permissions: schema.users.permissions })
+      .from(schema.users)
+      .where(eq(schema.users.uid, user.uid))
+      .limit(1);
+    if (dbUser) {
+      liveUserPermsCache.set(user.uid, {
+        role: dbUser.role || user.role,
+        permissions: dbUser.permissions,
+        expiresAt: Date.now() + 15000,
+      });
+      return {
+        ...user,
+        role: dbUser.role || user.role,
+        permissions: (dbUser.permissions as any) ?? user.permissions,
+      };
+    }
+  } catch {
+    // Fallback to token user context
+  }
+  return user;
 }
 
 /**
@@ -455,7 +532,8 @@ export async function authenticateToken(req: Request): Promise<UserContext | nul
     const decoded = jwt.verify(token, config.security.jwtSecret) as any;
     if (decoded && decoded.uid) {
       const rawRole = (decoded.role || 'USER').toUpperCase();
-      const perms = decoded.permissions || ROLE_PERMISSIONS[rawRole] || ['user:read'];
+      const canonicalRole = normalizeRoleToCanonical(decoded.role);
+      const perms = decoded.permissions || ROLE_PERMISSIONS[canonicalRole] || ROLE_PERMISSIONS[rawRole] || ['user:read'];
       return {
         uid: decoded.uid,
         id: decoded.id,
@@ -569,19 +647,30 @@ export function requireRole(...allowedRoles: string[]) {
 }
 
 export function requirePermission(permission: string) {
-  return (req: Request, res: Response, next: NextFunction) => {
-    if (!req.user) {
-      return next(new UnauthorizedError('احراز هویت الزامی است.'));
-    }
-    const canonicalRole = normalizeRoleToCanonical(req.user.role);
-    if (canonicalRole === 'ADMIN' || canonicalRole === 'ADMINISTRATOR') {
-      return next();
-    }
+  return async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      if (!req.user) {
+        return next(new UnauthorizedError('احراز هویت الزامی است.'));
+      }
+      const canonicalRole = normalizeRoleToCanonical(req.user.role);
+      if (canonicalRole === 'ADMIN' || canonicalRole === 'ADMINISTRATOR' || isGlobalAdminUser(req.user)) {
+        return next();
+      }
 
-    if (checkUserHasPermission(req.user, permission)) {
-      return next();
-    }
+      if (checkUserHasPermission(req.user, permission)) {
+        return next();
+      }
 
-    return next(new ForbiddenError(`مجوز امنیتی '${permission}' برای کاربر شما صادر نشده است.`));
+      // Fallback: check live user permissions object from database in case compact JWT scopes omitted custom object permissions
+      const liveUser = await resolveLiveUserContext(req.user);
+      if (isGlobalAdminUser(liveUser) || checkUserHasPermission(liveUser, permission)) {
+        req.user = liveUser;
+        return next();
+      }
+
+      return next(new ForbiddenError(`مجوز امنیتی '${permission}' برای کاربر شما صادر نشده است.`));
+    } catch (err) {
+      return next(err);
+    }
   };
 }

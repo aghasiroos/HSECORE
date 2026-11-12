@@ -1,12 +1,21 @@
 import { Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import webpush from 'web-push';
-import { notificationRepository } from './notification.repository.ts';
+import {
+  notificationRepository,
+  detectUnitManagerFromProfile,
+  detectHseExpertFromProfile,
+} from './notification.repository.ts';
 import {
   NotificationRecord,
   NotificationCategory,
   NotificationPriority,
   NotificationType,
+  TargetAudienceType,
+  DevicePlatformType,
+  PushDeliveryDeviceLog,
+  NotificationDeliveryReport,
+  NotificationViewConfirmation,
   UserNotificationPreferences,
   WebPushSubscriptionRecord,
   VapidKeySet,
@@ -28,6 +37,63 @@ const publicSseClients = new Map<string, Response>();
 
 let vapidInitialized = false;
 let activeVapidKeys: VapidKeySet | null = null;
+
+function parseUserAgentMetadata(uaRaw?: string, platformRaw?: string): {
+  deviceType: DevicePlatformType;
+  browserName: string;
+  osName: string;
+  defaultDeviceName: string;
+} {
+  const ua = String(uaRaw || '');
+  const plat = String(platformRaw || '');
+
+  let osName = 'سیستم‌عامل';
+  if (/windows/i.test(ua)) osName = 'Windows';
+  else if (/android/i.test(ua)) osName = 'Android';
+  else if (/iphone|ipad|ipod/i.test(ua)) osName = 'iOS';
+  else if (/macintosh|mac os x/i.test(ua)) osName = 'macOS';
+  else if (/linux/i.test(ua)) osName = 'Linux';
+
+  let browserName = 'مرورگر';
+  if (/edg\//i.test(ua)) browserName = 'Microsoft Edge';
+  else if (/opr\/|opera/i.test(ua)) browserName = 'Opera';
+  else if (/chrome|crios/i.test(ua)) browserName = 'Google Chrome';
+  else if (/firefox|fxios/i.test(ua)) browserName = 'Mozilla Firefox';
+  else if (/safari/i.test(ua)) browserName = 'Apple Safari';
+
+  let deviceType: DevicePlatformType = 'desktop';
+  if (/ipad|tablet/i.test(ua)) {
+    deviceType = 'tablet';
+  } else if (/mobile|android|iphone|ipod/i.test(ua)) {
+    deviceType = 'mobile';
+  } else if (/macintosh/i.test(ua) || /laptop/i.test(plat)) {
+    deviceType = 'laptop';
+  }
+
+  const typeLabelFa =
+    deviceType === 'mobile'
+      ? 'تلفن همراه'
+      : deviceType === 'tablet'
+      ? 'تبلت'
+      : deviceType === 'laptop'
+      ? 'لپ‌تاپ'
+      : 'کامپیوتر';
+
+  return {
+    deviceType,
+    browserName,
+    osName,
+    defaultDeviceName: `${typeLabelFa} (${osName} - ${browserName})`,
+  };
+}
+
+function getEndpointDomain(endpoint: string): string {
+  try {
+    return new URL(endpoint).hostname;
+  } catch {
+    return 'push-service';
+  }
+}
 
 export class NotificationService {
   async ensureVapidKeys(): Promise<VapidKeySet> {
@@ -77,17 +143,57 @@ export class NotificationService {
     userId?: string;
     userName?: string;
     role?: string;
+    jobTitle?: string;
     departmentIds?: string[];
+    departmentName?: string;
+    isUnitManager?: boolean;
+    isHseExpert?: boolean;
+    deviceType?: DevicePlatformType;
+    deviceName?: string;
+    browserName?: string;
+    osName?: string;
     guestSessionId?: string;
     userAgent?: string;
     platform?: string;
   }): Promise<WebPushSubscriptionRecord> {
     await this.ensureVapidKeys();
-    return notificationRepository.upsertPushSubscription(payload);
+    const uaMeta = parseUserAgentMetadata(payload.userAgent, payload.platform);
+    const finalDeviceType = payload.deviceType || uaMeta.deviceType;
+    const finalBrowserName = payload.browserName || uaMeta.browserName;
+    const finalOsName = payload.osName || uaMeta.osName;
+    const finalDeviceName =
+      payload.deviceName && payload.deviceName.trim()
+        ? payload.deviceName.trim()
+        : uaMeta.defaultDeviceName;
+
+    return notificationRepository.upsertPushSubscription({
+      ...payload,
+      deviceType: finalDeviceType,
+      deviceName: finalDeviceName,
+      browserName: finalBrowserName,
+      osName: finalOsName,
+    });
   }
 
-  async unregisterPushSubscription(endpoint: string): Promise<boolean> {
-    return notificationRepository.removePushSubscription(endpoint);
+  async getPushSubscriptions(userId?: string, isAdmin = false): Promise<Array<Omit<WebPushSubscriptionRecord, 'keys'> & { endpointDomain: string }>> {
+    const allSubs = await notificationRepository.getAllPushSubscriptions();
+    const filtered = isAdmin
+      ? allSubs
+      : userId
+      ? allSubs.filter((s) => s.userId && s.userId.toLowerCase() === userId.toLowerCase())
+      : [];
+
+    return filtered.map((s) => {
+      const { keys: _keys, ...rest } = s;
+      return {
+        ...rest,
+        endpointDomain: getEndpointDomain(s.endpoint),
+      };
+    });
+  }
+
+  async unregisterPushSubscription(idOrEndpoint: string, requestingUserId?: string, isAdmin = true): Promise<boolean> {
+    return notificationRepository.removePushSubscription(idOrEndpoint, requestingUserId, isAdmin);
   }
 
   async getAllNotifications(userId?: string): Promise<{ notifications: NotificationRecord[]; unreadCount: number }> {
@@ -109,7 +215,7 @@ export class NotificationService {
     sourceModule?: string;
     actionUrl?: string;
     recordId?: string;
-    targetType?: 'all' | 'roles' | 'departments' | 'user' | 'single';
+    targetType?: TargetAudienceType;
     targetValues?: string[];
     sender?: string;
     entityType?: string;
@@ -117,6 +223,7 @@ export class NotificationService {
     link?: string;
     requiresAck?: boolean;
     sirenType?: string;
+    actionGuidelines?: string;
     metadata?: Record<string, any>;
   }): Promise<NotificationRecord> {
     // Determine priority and category intelligently if omitted
@@ -141,28 +248,45 @@ export class NotificationService {
         ? data.body
         : undefined);
 
+    const generatedNotifId = `notif-${Date.now()}-${uuidv4().slice(0, 6)}`;
+    const defaultDeepLink = `#notifications?alertId=${encodeURIComponent(generatedNotifId)}`;
+    const resolvedActionUrl =
+      data.actionUrl ||
+      data.link ||
+      (data.entityType === 'WORK_PERMIT'
+        ? `#permit?id=${data.entityId || ''}&alertId=${encodeURIComponent(generatedNotifId)}`
+        : defaultDeepLink);
+
+    const isSimultaneousPopupAndPush =
+      data.type === 'popup_and_push' ||
+      data.type === 'popup' ||
+      data.type === 'push' ||
+      data.metadata?.sendBrowserPush !== false;
+
     const record: NotificationRecord = {
-      notifId: `notif-${Date.now()}-${uuidv4().slice(0, 6)}`,
+      notifId: generatedNotifId,
       title: String(data.title || '').trim(),
       body: String(data.body || '').trim(),
-      type: data.type || (category === 'critical_hse' || priority === 'critical' ? 'popup' : 'in-app'),
+      type: data.type || (category === 'critical_hse' || priority === 'critical' ? 'popup_and_push' : 'popup'),
       category,
       priority,
       sourceModule: data.sourceModule || (data.entityType ? String(data.entityType).toLowerCase() : 'system'),
-      actionUrl: data.actionUrl || data.link || (data.entityType === 'WORK_PERMIT' ? `#permit?id=${data.entityId || ''}` : undefined),
-      recordId: data.recordId || data.entityId,
+      actionUrl: resolvedActionUrl,
+      recordId: data.recordId || data.entityId || generatedNotifId,
       targetType: data.targetType || 'all',
       targetValues: data.targetValues || [],
       sender: data.sender || 'سامانه جامع HSECORE',
       entityType: data.entityType,
       entityId: data.entityId,
-      link: data.link || data.actionUrl,
+      link: resolvedActionUrl,
       requiresAck: data.requiresAck !== undefined ? data.requiresAck : (priority === 'critical' || category === 'critical_hse'),
       acknowledgedBy: [],
+      viewedBy: [],
       sirenType: siren,
       metadata: {
         ...(data.metadata || {}),
         sirenType: siren,
+        simultaneousPopupAndPush: isSimultaneousPopupAndPush,
         ...(actionGuidelines ? { actionGuidelines } : {}),
       },
       read: false,
@@ -172,7 +296,7 @@ export class NotificationService {
 
     const saved = await notificationRepository.create(record);
 
-    // 1. Dedicated WebSocket Notification Alert event
+    // 1. Dedicated WebSocket Notification Alert event (Simultaneous In-App Popup)
     try {
       socketService.broadcast('notification_alert', saved);
     } catch (err: any) {
@@ -180,7 +304,6 @@ export class NotificationService {
     }
 
     // 1.1 Dedicated Public Emergency Alert Broadcast (for login screen and unauthenticated clients)
-    // Strictly sanitized: NO confidential user records, NO internal IDs or private notes
     const isPublicEmergency =
       (saved.category === 'critical_hse' || saved.priority === 'critical') &&
       (saved.targetType === 'all' || !saved.targetType);
@@ -199,8 +322,9 @@ export class NotificationService {
       sourceModule: saved.sourceModule || 'emergency',
       sirenType: saved.sirenType || 'siren_evacuation',
       actionGuidelines: (saved.metadata as any)?.actionGuidelines || saved.body,
-      requiresAck: true,
-      type: 'popup',
+      actionUrl: saved.actionUrl || `/#notifications?alertId=${encodeURIComponent(saved.notifId)}`,
+      requiresAck: Boolean(saved.requiresAck),
+      type: saved.type || 'popup_and_push',
       createdAt: saved.createdAt,
     };
 
@@ -219,9 +343,23 @@ export class NotificationService {
     // 3. Authenticated SSE broadcast
     this.broadcastSSE('notification', saved);
 
-    // 4. Native OS Web Push Dispatch (Service Worker / Lock Screen / Background / Closed Browser)
-    if (isPublicEmergency || saved.type === 'push' || saved.type === 'popup' || saved.priority === 'critical' || saved.priority === 'high') {
-      void this.dispatchWebPushToSubscribers(saved, sanitizedPublicPayload, isPublicEmergency);
+    // 4. Simultaneous Native OS Browser Web Push Dispatch (Service Worker / Lock Screen / Background / Closed Browser)
+    if (
+      isSimultaneousPopupAndPush ||
+      isPublicEmergency ||
+      saved.priority === 'critical' ||
+      saved.priority === 'high'
+    ) {
+      const deliveryReport = await this.dispatchWebPushToSubscribers(
+        saved,
+        sanitizedPublicPayload,
+        isPublicEmergency
+      );
+      saved.deliveryReport = deliveryReport;
+      saved.metadata = {
+        ...(saved.metadata || {}),
+        deliveryReport,
+      };
     }
 
     return saved;
@@ -229,22 +367,42 @@ export class NotificationService {
 
   /**
    * Dispatches encrypted RFC 8030 Web Push messages to subscribed browsers & PWAs.
-   * Ensures lock-screen privacy by stripping confidential fields.
+   * Records a full Delivery Report (status, Push Service HTTP response, errors) per device.
    */
   private async dispatchWebPushToSubscribers(
     fullRecord: NotificationRecord,
     sanitizedPublicPayload: Record<string, any>,
     isPublicEmergency: boolean
-  ): Promise<void> {
+  ): Promise<NotificationDeliveryReport> {
+    const report: NotificationDeliveryReport = {
+      dispatchedAt: new Date().toISOString(),
+      simultaneousPopupAndPush: true,
+      inAppBroadcasted: true,
+      totalTargetedDevices: 0,
+      pushDeliveredCount: 0,
+      pushFailedCount: 0,
+      expiredRemovedCount: 0,
+      deviceLogs: [],
+    };
+
     try {
       await this.ensureVapidKeys();
       const subs = await notificationRepository.getAllPushSubscriptions();
-      if (!subs || subs.length === 0) return;
+      if (!subs || subs.length === 0) {
+        await notificationRepository.updateDeliveryReport(fullRecord.notifId, report);
+        return report;
+      }
 
-      const targetType = fullRecord.targetType || 'all';
-      const targetValues = (fullRecord.targetValues || []).map((v) => String(v).toLowerCase());
+      const usersMap = await notificationRepository.getUsersDirectorySnapshot();
+      const targetType: TargetAudienceType = fullRecord.targetType || 'all';
+      const targetValues = (fullRecord.targetValues || []).map((v) => String(v).trim().toLowerCase());
 
-      // Lock-screen safe payload (no confidential personnel or internal administrative fields)
+      // Deep-link URL so clicking the OS notification opens the exact Alert Details page in HSECORE
+      const deepLinkUrl =
+        fullRecord.actionUrl && fullRecord.actionUrl.includes('alertId=')
+          ? fullRecord.actionUrl
+          : `/#notifications?alertId=${encodeURIComponent(fullRecord.notifId)}`;
+
       const pushPayloadString = JSON.stringify({
         notifId: sanitizedPublicPayload.notifId,
         title: sanitizedPublicPayload.title,
@@ -252,30 +410,87 @@ export class NotificationService {
         priority: sanitizedPublicPayload.priority,
         riskLevelFa: sanitizedPublicPayload.riskLevelFa,
         category: sanitizedPublicPayload.category,
+        sourceModule: fullRecord.sourceModule || 'system',
         sirenType: sanitizedPublicPayload.sirenType,
         actionGuidelines: sanitizedPublicPayload.actionGuidelines,
         requiresAck: Boolean(fullRecord.requiresAck),
         createdAt: sanitizedPublicPayload.createdAt,
-        actionUrl: '/',
+        actionUrl: deepLinkUrl,
       });
 
       const isCritical = fullRecord.category === 'critical_hse' || fullRecord.priority === 'critical';
 
+      // Filter subscriptions matching targeted audience
+      const targetedSubs = subs.filter((sub) => {
+        if (isPublicEmergency || targetType === 'all') return true;
+        if (!sub.userId) return false;
+
+        const uidLower = sub.userId.toLowerCase();
+        const unameLower = (sub.userName || '').toLowerCase();
+        const userEntry = usersMap.get(uidLower) || usersMap.get(unameLower);
+
+        const effectiveRole = (userEntry?.role || sub.role || '').toLowerCase();
+        const effectiveJobTitle = userEntry?.jobTitle || sub.jobTitle || '';
+        const effectiveDeptIds = (
+          userEntry?.departmentIds && userEntry.departmentIds.length > 0
+            ? userEntry.departmentIds
+            : sub.departmentIds || []
+        ).map((d) => String(d).toLowerCase());
+        const effectiveDeptName = (userEntry?.departmentName || sub.departmentName || '').toLowerCase();
+
+        if (targetType === 'departments') {
+          if (targetValues.length === 0) return true;
+          return targetValues.some(
+            (tv) =>
+              effectiveDeptIds.includes(tv) ||
+              (effectiveDeptName && effectiveDeptName.includes(tv))
+          );
+        }
+
+        if (targetType === 'unit_managers') {
+          return Boolean(
+            userEntry?.isUnitManager ||
+              sub.isUnitManager ||
+              detectUnitManagerFromProfile(effectiveRole, effectiveJobTitle)
+          );
+        }
+
+        if (targetType === 'hse_experts') {
+          return Boolean(
+            userEntry?.isHseExpert ||
+              sub.isHseExpert ||
+              detectHseExpertFromProfile(effectiveRole, effectiveJobTitle, effectiveDeptName)
+          );
+        }
+
+        if (targetType === 'roles') {
+          if (targetValues.length === 0) return true;
+          return targetValues.includes(effectiveRole);
+        }
+
+        if (targetType === 'users' || targetType === 'single' || targetType === 'user') {
+          if (targetValues.length === 0) return true;
+          return (
+            targetValues.includes(uidLower) ||
+            (unameLower && targetValues.includes(unameLower)) ||
+            (userEntry?.username && targetValues.includes(userEntry.username.toLowerCase()))
+          );
+        }
+
+        return true;
+      });
+
+      report.totalTargetedDevices = targetedSubs.length;
+
       await Promise.allSettled(
-        subs.map(async (sub) => {
-          // Filter audience if not a public/global alert
-          if (!isPublicEmergency && targetType !== 'all') {
-            if (!sub.userId) return; // Unauthenticated device cannot receive non-public targeted notifications
-            if (targetType === 'roles' && sub.role && !targetValues.includes(sub.role.toLowerCase())) {
-              return;
-            }
-            if ((targetType === 'single' || targetType === 'user') && !targetValues.includes(sub.userId.toLowerCase())) {
-              return;
-            }
-          }
+        targetedSubs.map(async (sub) => {
+          const nowIso = new Date().toISOString();
+          const domain = getEndpointDomain(sub.endpoint);
+          const uidLower = (sub.userId || '').toLowerCase();
+          const userEntry = uidLower ? usersMap.get(uidLower) : undefined;
 
           try {
-            await webpush.sendNotification(
+            const sendResult = await webpush.sendNotification(
               {
                 endpoint: sub.endpoint,
                 keys: sub.keys,
@@ -285,22 +500,133 @@ export class NotificationService {
                 TTL: isCritical ? 86400 : 14400,
                 urgency: isCritical ? 'high' : 'normal',
                 topic: String(fullRecord.notifId).slice(0, 32),
+                timeout: 6000,
               }
             );
+
+            const statusCode = sendResult?.statusCode || 201;
+            report.pushDeliveredCount += 1;
+
+            const logItem: PushDeliveryDeviceLog = {
+              subscriptionId: sub.id,
+              userId: sub.userId || 'guest',
+              userName: userEntry?.fullName || sub.userName || 'کاربر دستگاه',
+              role: userEntry?.role || sub.role,
+              department: userEntry?.departmentName || sub.departmentName,
+              deviceType: sub.deviceType || 'desktop',
+              deviceName: sub.deviceName || `${sub.platform || 'دستگاه'} (${domain})`,
+              endpointDomain: domain,
+              status: 'delivered',
+              statusCode,
+              pushServiceResponse: `${statusCode} Created — تحویل موفق به سرویس Push مرورگر (${domain})`,
+              timestamp: nowIso,
+            };
+            report.deviceLogs.push(logItem);
+
+            await notificationRepository.updatePushSubscriptionStatus(sub.endpoint, {
+              lastSuccessAt: nowIso,
+              lastStatusCode: statusCode,
+              lastError: undefined,
+            });
           } catch (pushErr: any) {
-            const statusCode = pushErr?.statusCode;
+            const statusCode = pushErr?.statusCode || 500;
+            const errBody = String(pushErr?.body || pushErr?.message || 'خطا در ارسال به سرویس Push').slice(0, 220);
+
             if (statusCode === 404 || statusCode === 410) {
-              // Subscription expired or revoked by user/OS -> prune from DB
+              report.expiredRemovedCount += 1;
+              report.pushFailedCount += 1;
+              report.deviceLogs.push({
+                subscriptionId: sub.id,
+                userId: sub.userId || 'guest',
+                userName: userEntry?.fullName || sub.userName || 'کاربر دستگاه',
+                role: userEntry?.role || sub.role,
+                department: userEntry?.departmentName || sub.departmentName,
+                deviceType: sub.deviceType || 'desktop',
+                deviceName: sub.deviceName || domain,
+                endpointDomain: domain,
+                status: 'expired_removed',
+                statusCode,
+                pushServiceResponse: `${statusCode} Gone — اشتراک منقضی یا لغوشده در مرورگر`,
+                errorMessage: errBody,
+                timestamp: nowIso,
+              });
               await notificationRepository.removePushSubscription(sub.endpoint);
             } else {
-              logger.debug('Web Push delivery warning:', { statusCode, message: pushErr?.message });
+              report.pushFailedCount += 1;
+              report.deviceLogs.push({
+                subscriptionId: sub.id,
+                userId: sub.userId || 'guest',
+                userName: userEntry?.fullName || sub.userName || 'کاربر دستگاه',
+                role: userEntry?.role || sub.role,
+                department: userEntry?.departmentName || sub.departmentName,
+                deviceType: sub.deviceType || 'desktop',
+                deviceName: sub.deviceName || domain,
+                endpointDomain: domain,
+                status: 'failed',
+                statusCode,
+                pushServiceResponse: `خطای سرویس Push (کد ${statusCode})`,
+                errorMessage: errBody,
+                timestamp: nowIso,
+              });
+              await notificationRepository.updatePushSubscriptionStatus(sub.endpoint, {
+                lastFailureAt: nowIso,
+                lastStatusCode: statusCode,
+                lastError: errBody,
+              });
             }
           }
         })
       );
+
+      await notificationRepository.updateDeliveryReport(fullRecord.notifId, report);
+      broadcastDataMutation('notifications', 'delivery_report_updated', {
+        notifId: fullRecord.notifId,
+        deliveryReport: report,
+      });
+      this.broadcastSSE('notification_delivery_report', {
+        notifId: fullRecord.notifId,
+        deliveryReport: report,
+      });
     } catch (err) {
       logger.debug('Web Push dispatch error:', err);
     }
+
+    return report;
+  }
+
+  async confirmAlertViewed(
+    idOrNotifId: string | number,
+    payload: {
+      userId?: string;
+      userName?: string;
+      clientSessionId?: string;
+      source?: 'browser_push_click' | 'in_app_popup' | 'alert_details_view' | string;
+      deviceType?: DevicePlatformType;
+      deviceInfo?: string;
+      clientIp?: string;
+    }
+  ): Promise<boolean> {
+    const viewEntry: NotificationViewConfirmation = {
+      userId: payload.userId || payload.clientSessionId || 'guest',
+      userName: payload.userName || payload.userId || 'کاربر سیستم',
+      clientSessionId: payload.clientSessionId,
+      source: (payload.source as any) || 'in_app_popup',
+      deviceType: payload.deviceType,
+      deviceInfo: payload.deviceInfo,
+      clientIp: payload.clientIp,
+      timestamp: new Date().toISOString(),
+    };
+
+    const ok = await notificationRepository.recordViewConfirmation(idOrNotifId, viewEntry);
+    broadcastDataMutation('notifications', 'view_confirmed', {
+      id: idOrNotifId,
+      viewEntry,
+    });
+    this.broadcastSSE('notification_viewed', {
+      id: idOrNotifId,
+      viewEntry,
+    });
+    return ok;
   }
 
   async getPublicActiveEmergencies(sinceIso?: string) {
