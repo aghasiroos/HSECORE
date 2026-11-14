@@ -10,6 +10,7 @@ import VehicleManager from './vehicles/VehicleManager';
 import FireDailyReportView from './daily-report/FireDailyReportView';
 import { CategoryIcon, getCategoryMeta } from './config/categoryIcons';
 import { getMergedFireDeptConfig, FireDeptSubItemConfig } from '../../config/modulesConfig';
+import { SubViewTransition } from '../../motion';
 
 interface Props {
   language: 'fa' | 'en';
@@ -111,7 +112,7 @@ export default function FireDeptModule({ language }: Props) {
       {/* Mobile Drawer Backdrop */}
       {sidebarOpen && (
         <div
-          className="fixed inset-0 bg-slate-950/50 backdrop-blur-xs z-30 lg:hidden"
+          className="fixed inset-0 bg-slate-950/50 backdrop-blur-xs z-30 animate-fade-in lg:hidden"
           onClick={() => setSidebarOpen(false)}
           aria-hidden="true"
         />
@@ -163,9 +164,9 @@ export default function FireDeptModule({ language }: Props) {
               <button
                 key={item.key}
                 onClick={() => handleSelectSection(item.key)}
-                className={`w-full flex items-center ${
+                className={`hse-motion-tab w-full flex items-center ${
                   sidebarOpen ? 'gap-3 px-3 py-2.5 justify-between' : 'justify-center py-2 px-0'
-                } rounded-xl font-bold text-xs transition-all duration-200 ease-in-out cursor-pointer group relative ${
+                } rounded-xl font-bold text-xs cursor-pointer group relative ${
                   isActive
                     ? 'bg-blue-50/95 dark:bg-blue-950/50 text-blue-700 dark:text-blue-400 font-black border border-blue-200/80 dark:border-blue-800/60 shadow-xs shadow-blue-500/5'
                     : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100/80 dark:hover:bg-slate-800/60 hover:text-blue-600 dark:hover:text-blue-400 border border-transparent'
@@ -218,9 +219,9 @@ export default function FireDeptModule({ language }: Props) {
               <button
                 key={cat}
                 onClick={() => handleSelectSection(cat)}
-                className={`w-full flex items-center justify-between ${
+                className={`hse-motion-tab w-full flex items-center justify-between ${
                   sidebarOpen ? 'px-2.5 py-2' : 'px-0 py-2 justify-center'
-                } rounded-xl text-xs font-bold transition-all duration-200 ease-in-out cursor-pointer group relative ${
+                } rounded-xl text-xs font-bold cursor-pointer group relative ${
                   isActive
                     ? 'bg-blue-50/95 dark:bg-blue-950/50 text-blue-700 dark:text-blue-400 font-black border border-blue-200/80 dark:border-blue-800/60 shadow-xs shadow-blue-500/5'
                     : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100/80 dark:hover:bg-slate-800/60 hover:text-blue-600 dark:hover:text-blue-400 border border-transparent'
@@ -279,34 +280,36 @@ export default function FireDeptModule({ language }: Props) {
 
       {/* Main Content Area */}
       <main className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
-        {activeSection === 'dashboard' ? (
-          <FireDashboard 
-            language={language} 
-            equipment={equipment} 
-            onSelectCategory={(cat) => setActiveSection(cat)} 
-            onSelectVehicles={() => setActiveSection('vehicles')}
-            onSelectDailyReport={() => setActiveSection('daily-report')}
-          />
-        ) : activeSection === 'daily-report' ? (
-          <div className="overflow-y-auto h-full w-full bg-slate-50 dark:bg-slate-900">
-            <FireDailyReportView language={language} />
-          </div>
-        ) : activeSection === 'vehicles' ? (
-          <div className="p-4 md:p-6 overflow-y-auto h-full bg-slate-50 dark:bg-slate-900">
-            <VehicleManager language={language} />
-          </div>
-        ) : (
-          <CategoryManager 
-            language={language}
-            category={activeSection}
-            data={equipment.filter(e => e.category === activeSection)}
-            allEquipment={equipment}
-            onAdd={addEquipment}
-            onUpdate={updateEquipment}
-            onDelete={deleteEquipment}
-            onNavigateCategory={(targetCat) => setActiveSection(targetCat)}
-          />
-        )}
+        <SubViewTransition viewKey={activeSection} isFa={isFa} className="flex-1 flex flex-col min-h-0 h-full">
+          {activeSection === 'dashboard' ? (
+            <FireDashboard 
+              language={language} 
+              equipment={equipment} 
+              onSelectCategory={(cat) => setActiveSection(cat)} 
+              onSelectVehicles={() => setActiveSection('vehicles')}
+              onSelectDailyReport={() => setActiveSection('daily-report')}
+            />
+          ) : activeSection === 'daily-report' ? (
+            <div className="overflow-y-auto h-full w-full bg-slate-50 dark:bg-slate-900">
+              <FireDailyReportView language={language} />
+            </div>
+          ) : activeSection === 'vehicles' ? (
+            <div className="p-4 md:p-6 overflow-y-auto h-full bg-slate-50 dark:bg-slate-900">
+              <VehicleManager language={language} />
+            </div>
+          ) : (
+            <CategoryManager 
+              language={language}
+              category={activeSection}
+              data={equipment.filter(e => e.category === activeSection)}
+              allEquipment={equipment}
+              onAdd={addEquipment}
+              onUpdate={updateEquipment}
+              onDelete={deleteEquipment}
+              onNavigateCategory={(targetCat) => setActiveSection(targetCat)}
+            />
+          )}
+        </SubViewTransition>
       </main>
     </div>
   );

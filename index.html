@@ -3,6 +3,13 @@
   <head>
     <script>
       (function() {
+        try {
+          var savedTheme = localStorage.getItem('hse_theme_mode');
+          if (savedTheme === 'dark') {
+            document.documentElement.classList.remove('light');
+            document.documentElement.classList.add('dark');
+          }
+        } catch (_) {}
         var NativeWebSocket = window.WebSocket;
         if (NativeWebSocket) {
           window.WebSocket = function(url, protocols) {

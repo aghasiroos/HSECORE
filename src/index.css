@@ -2,6 +2,7 @@
 @source "../index.html";
 @source "../src";
 @custom-variant dark (&:where(.dark, .dark *));
+@import "./styles/motion.css";
 
 /* ==========================================================================
    Vazirmatn Typography Standard
@@ -149,7 +150,7 @@ html.dark {
     font-family: var(--font-sans);
     font-weight: 300;
     accent-color: #2563eb;
-    transition: all 0.2s ease-in-out;
+    transition: border-color var(--hse-motion-duration-micro) ease, box-shadow var(--hse-motion-duration-micro) ease, background-color var(--hse-motion-duration-micro) ease;
   }
 
   input:focus, select:focus, textarea:focus,
@@ -393,12 +394,6 @@ html.dark ::-webkit-scrollbar-thumb:hover {
   background: #475569;
 }
 
-/* Forms / Inputs */
-input, select, textarea {
-  transition: all 0.3s ease-in-out;
-}
-
-
 /* Sidebar Active Item Glow */
 .sidebar-active {
   background: linear-gradient(90deg, rgba(37, 99, 235, 0.15) 0%, rgba(37, 99, 235, 0.05) 100%) !important;
@@ -406,19 +401,13 @@ input, select, textarea {
   color: #2563eb !important;
 }
 .sidebar-item {
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform var(--hse-motion-duration-micro) var(--hse-motion-ease-standard), background-color var(--hse-motion-duration-micro) ease, color var(--hse-motion-duration-micro) ease;
 }
 .sidebar-item:hover {
-  transform: translateY(-1px);
+  transform: translate3d(0, -1px, 0);
 }
 
-/* Animations */
-.animate-fade-in {
-  animation: fadeIn 0.4s ease-out forwards;
-}
-.animate-slide-up {
-  animation: slideUp 0.5s ease-out forwards;
-}
+/* Decorative Ambient Blobs & Spin */
 .animate-blob {
   animation: blob 12s infinite ease-in-out;
 }
@@ -430,15 +419,6 @@ input, select, textarea {
 }
 .animate-spin-slow {
   animation: spin 25s linear infinite;
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-@keyframes slideUp {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
 }
 @keyframes blob {
   0%, 100% {
@@ -460,6 +440,248 @@ input, select, textarea {
   }
   66% {
     transform: translate(25px, -30px) scale(0.85) rotate(-240deg);
+  }
+}
+
+/* ==========================================================================
+   HSECORE Login Screen Subtle & GPU-Optimized Animations
+   - Uses compositor-only properties (transform, opacity)
+   - Smooth theme transition & error/status feedback animations
+   - Full prefers-reduced-motion compliance
+   ========================================================================== */
+@keyframes loginCardReveal {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 22px, 0) scale(0.985);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes loginFadeSlideUp {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 14px, 0);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes loginLogoEnter {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 8px, 0) scale(0.95);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes loginAlertReveal {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, -8px, 0) scale(0.98);
+  }
+  60% {
+    opacity: 1;
+    transform: translate3d(-3px, 0, 0) scale(1);
+  }
+  80% {
+    transform: translate3d(2px, 0, 0) scale(1);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes loginStatusReveal {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, -8px, 0) scale(0.98);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes loginThemeIconSpin {
+  0% {
+    opacity: 0.4;
+    transform: rotate(-75deg) scale(0.75);
+  }
+  100% {
+    opacity: 1;
+    transform: rotate(0deg) scale(1);
+  }
+}
+
+@keyframes loginWaveFloatSlow {
+  0%, 100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(-14px, 8px, 0) scale(1.025);
+  }
+}
+
+@keyframes loginWaveFloatReverse {
+  0%, 100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(14px, -8px, 0) scale(1.02);
+  }
+}
+
+.login-card-enter {
+  animation: loginCardReveal 0.65s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.login-logo-enter {
+  animation: loginLogoEnter 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.06s both;
+}
+
+.login-stagger-1 {
+  animation: loginFadeSlideUp 0.55s cubic-bezier(0.16, 1, 0.3, 1) 0.12s both;
+}
+
+.login-stagger-2 {
+  animation: loginFadeSlideUp 0.55s cubic-bezier(0.16, 1, 0.3, 1) 0.19s both;
+}
+
+.login-stagger-3 {
+  animation: loginFadeSlideUp 0.55s cubic-bezier(0.16, 1, 0.3, 1) 0.26s both;
+}
+
+.login-stagger-4 {
+  animation: loginFadeSlideUp 0.55s cubic-bezier(0.16, 1, 0.3, 1) 0.33s both;
+}
+
+.login-stagger-5 {
+  animation: loginFadeSlideUp 0.55s cubic-bezier(0.16, 1, 0.3, 1) 0.40s both;
+}
+
+.login-alert-error {
+  animation: loginAlertReveal 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.login-alert-status {
+  animation: loginStatusReveal 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.login-theme-icon {
+  animation: loginThemeIconSpin 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.login-theme-surface {
+  transition: background-color 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+              border-color 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+              color 0.25s ease,
+              box-shadow 0.35s ease;
+}
+
+.login-wave-slow {
+  animation: loginWaveFloatSlow 22s ease-in-out infinite;
+  will-change: transform;
+}
+
+.login-wave-reverse {
+  animation: loginWaveFloatReverse 26s ease-in-out infinite;
+  will-change: transform;
+}
+
+.login-input-field {
+  transition: border-color 0.22s ease,
+              box-shadow 0.22s ease,
+              background-color 0.25s ease,
+              color 0.22s ease,
+              transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.login-input-field:hover:not(:focus) {
+  border-color: #94a3b8;
+}
+
+html.dark .login-input-field:hover:not(:focus) {
+  border-color: #475569;
+}
+
+.login-input-field:focus {
+  transform: translate3d(0, -1px, 0);
+  border-color: #0284c7 !important;
+  box-shadow: 0 8px 22px -6px rgba(2, 132, 199, 0.2), 0 0 0 3.5px rgba(14, 165, 233, 0.2) !important;
+}
+
+html.dark .login-input-field:focus {
+  border-color: #38bdf8 !important;
+  box-shadow: 0 8px 22px -6px rgba(56, 189, 248, 0.24), 0 0 0 3.5px rgba(56, 189, 248, 0.24) !important;
+}
+
+.login-submit-btn {
+  background-size: 180% 100%;
+  background-position: 0% 50%;
+  transition: background-position 0.45s cubic-bezier(0.16, 1, 0.3, 1),
+              transform 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 0.25s ease,
+              filter 0.2s ease;
+}
+
+.login-submit-btn:hover:not(:disabled) {
+  background-position: 100% 50%;
+  transform: translate3d(0, -2px, 0);
+  box-shadow: 0 14px 28px -6px rgba(16, 185, 129, 0.45), 0 6px 16px -4px rgba(2, 132, 199, 0.35);
+}
+
+.login-submit-btn:active:not(:disabled) {
+  transform: translate3d(0, 0.5px, 0) scale(0.985);
+}
+
+.login-pillar-card {
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1),
+              background-color 0.28s ease,
+              border-color 0.28s ease,
+              box-shadow 0.28s ease;
+}
+
+.login-pillar-card:hover {
+  transform: translate3d(-3px, -1.5px, 0);
+  box-shadow: 0 10px 24px -8px rgba(2, 12, 27, 0.55);
+}
+
+[dir="ltr"] .login-pillar-card:hover {
+  transform: translate3d(3px, -1.5px, 0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .login-card-enter,
+  .login-logo-enter,
+  .login-stagger-1,
+  .login-stagger-2,
+  .login-stagger-3,
+  .login-stagger-4,
+  .login-stagger-5,
+  .login-alert-error,
+  .login-alert-status,
+  .login-theme-icon,
+  .login-wave-slow,
+  .login-wave-reverse {
+    animation: none !important;
+    transform: none !important;
+    opacity: 1 !important;
+  }
+  .login-input-field,
+  .login-submit-btn,
+  .login-pillar-card,
+  .login-theme-surface {
+    transition: none !important;
+    transform: none !important;
   }
 }
 

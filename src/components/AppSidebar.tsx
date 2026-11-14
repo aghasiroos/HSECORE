@@ -53,6 +53,8 @@ import { useSync } from '../context/SyncContext';
 import { useSystemBranding, getSidebarNavBranding } from '../utils/systemBrandingHelper';
 import { HseCoreBrandText } from './common/HseCoreBrandText';
 import { prefetchModule } from '../utils/modulePrefetcher';
+import { LayoutGroup, motion } from 'motion/react';
+import { HSE_MOTION_CONFIG, HseThemeToggleButton } from '../motion';
 
 export type MainTabKey =
   | 'dashboard'
@@ -100,7 +102,7 @@ interface AppSidebarProps {
   language: 'fa' | 'en';
   setLanguage?: (lang: 'fa' | 'en') => void;
   themeMode?: 'light' | 'dark';
-  setThemeMode?: (theme: 'light' | 'dark') => void;
+  setThemeMode?: (theme: 'light' | 'dark', origin?: { x: number; y: number }) => void;
   currentUser: UserProfile;
   allowedTabs: TabItemConfig[];
   isOpen: boolean;
@@ -557,7 +559,7 @@ export default function AppSidebar({
       {/* Mobile Backdrop */}
       {isOpen && (
         <div
-          className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-[9990] transition-opacity duration-300 lg:hidden"
+          className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-[9990] animate-fade-in lg:hidden"
           onClick={onClose}
           aria-hidden="true"
         />
@@ -640,15 +642,13 @@ export default function AppSidebar({
                   <Languages className="w-4 h-4" />
                 </button>
 
-                <button
-                  type="button"
-                  onClick={() => setThemeMode && setThemeMode(themeMode === 'dark' ? 'light' : 'dark')}
-                  className="p-1.5 text-slate-400 hover:text-amber-500 dark:hover:text-amber-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
-                  title={themeMode === 'dark' ? (isFa ? 'حالت روشن' : 'Light Mode') : (isFa ? 'حالت تاریک' : 'Dark Mode')}
+                <HseThemeToggleButton
+                  themeMode={themeMode}
+                  onToggle={(origin) => setThemeMode && setThemeMode(themeMode === 'dark' ? 'light' : 'dark', origin)}
+                  isFa={isFa}
+                  variant="sidebar"
                   id="sidebar-theme-toggle-btn"
-                >
-                  {themeMode === 'dark' ? <Moon className="w-4 h-4 text-amber-400" /> : <Sun className="w-4 h-4 text-amber-500" />}
-                </button>
+                />
 
                 <button
                   type="button"
@@ -736,6 +736,7 @@ export default function AppSidebar({
         >
           {!effectiveCollapsed ? (
             /* ===================== EXPANDED SIDEBAR VIEW ===================== */
+            <LayoutGroup id="hse-sidebar-expanded">
             <div className="space-y-3">
               {/* Pinned / Quick Access Bar */}
               {!normalizedQuery && pinnedTabs.length > 0 && (
@@ -850,87 +851,98 @@ export default function AppSidebar({
                       </button>
 
                       {/* Smooth Collapsible Module Item List */}
-                      {isGroupOpen && (
-                        <div
-                          className={`space-y-0.5 ${
-                            isFa ? 'mr-2 pr-1.5 border-r' : 'ml-2 pl-1.5 border-l'
-                          } border-slate-200/80 dark:border-slate-800/80`}
-                        >
-                          {group.tabs.map(tab => {
-                            const isActive = activeTab === tab.key;
-                            const isPinned = pinnedKeys.includes(tab.key);
-                            const meta = MODULE_META[tab.key] || { icon: tab.icon || Layers, tone: 'sky' as ToneKey };
-                            const toneStyle = TONE_PALETTE[meta.tone];
-                            const TabIcon = meta.icon || tab.icon;
-                            const title = isFa ? tab.titleFa : tab.titleEn || tab.titleFa;
+                      <div
+                        className="hse-collapsible"
+                        data-open={isGroupOpen ? 'true' : 'false'}
+                      >
+                        <div className="hse-collapsible-inner">
+                          <div
+                            className={`space-y-0.5 ${
+                              isFa ? 'mr-2 pr-1.5 border-r' : 'ml-2 pl-1.5 border-l'
+                            } border-slate-200/80 dark:border-slate-800/80`}
+                          >
+                            {group.tabs.map(tab => {
+                              const isActive = activeTab === tab.key;
+                              const isPinned = pinnedKeys.includes(tab.key);
+                              const meta = MODULE_META[tab.key] || { icon: tab.icon || Layers, tone: 'sky' as ToneKey };
+                              const toneStyle = TONE_PALETTE[meta.tone];
+                              const TabIcon = meta.icon || tab.icon;
+                              const title = isFa ? tab.titleFa : tab.titleEn || tab.titleFa;
 
-                            return (
-                              <button
-                                key={tab.key}
-                                type="button"
-                                id={`sidebar-nav-${tab.key}`}
-                                onClick={() => handleSelectTab(tab.key)}
-                                onMouseEnter={() => prefetchModule(tab.key)}
-                                onTouchStart={() => prefetchModule(tab.key)}
-                                className={`w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-xl text-xs transition-all duration-150 cursor-pointer group relative border ${
-                                  isActive
-                                    ? `${toneStyle.activeBg} ${toneStyle.activeBorder} ${toneStyle.activeText} font-black shadow-2xs`
-                                    : 'border-transparent text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/70 dark:hover:bg-slate-800/50 font-semibold'
-                                }`}
-                              >
-                                {isActive && (
-                                  <span
-                                    className={`absolute ${
-                                      isFa ? 'right-0 rounded-l-full' : 'left-0 rounded-r-full'
-                                    } top-2 bottom-2 w-1 ${toneStyle.activeBar}`}
-                                    aria-hidden="true"
-                                  />
-                                )}
-
-                                <div className="flex items-center gap-2.5 min-w-0">
-                                  <div
-                                    className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 transition-transform duration-150 group-hover:scale-105 ${
-                                      isActive ? toneStyle.activeIconBg : `${toneStyle.iconBg} ${toneStyle.iconText}`
-                                    }`}
-                                  >
-                                    <TabIcon className="w-3.5 h-3.5" />
-                                  </div>
-                                  <span className="truncate text-[11.5px] leading-tight">{title}</span>
-                                </div>
-
-                                <div className="flex items-center gap-1.5 shrink-0">
-                                  {tab.badge !== undefined && Number(tab.badge) > 0 && (
-                                    <span className="px-1.5 py-0.5 rounded-full text-[9px] font-mono font-black bg-rose-500 text-white tabular-nums shadow-2xs">
-                                      {tab.badge}
-                                    </span>
-                                  )}
-
-                                  <span
-                                    onClick={e => togglePinTab(e, tab.key)}
-                                    className={`p-1 rounded-md transition-opacity cursor-pointer ${
-                                      isPinned
-                                        ? 'text-amber-500 opacity-90 hover:opacity-100'
-                                        : 'text-slate-400 opacity-0 group-hover:opacity-100 hover:text-amber-500'
-                                    }`}
-                                    title={isPinned ? (isFa ? 'برداشتن سنجاق' : 'Unpin') : (isFa ? 'سنجاق به دسترسی سریع' : 'Pin to top')}
-                                  >
-                                    <Pin className={`w-3 h-3 ${isPinned ? 'fill-amber-500/20' : ''}`} />
-                                  </span>
-
+                              return (
+                                <button
+                                  key={tab.key}
+                                  type="button"
+                                  id={`sidebar-nav-${tab.key}`}
+                                  onClick={() => handleSelectTab(tab.key)}
+                                  onMouseEnter={() => prefetchModule(tab.key)}
+                                  onTouchStart={() => prefetchModule(tab.key)}
+                                  className={`hse-motion-tab w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-xl text-xs cursor-pointer group relative border ${
+                                    isActive
+                                      ? `${toneStyle.activeBg} ${toneStyle.activeBorder} ${toneStyle.activeText} font-black shadow-2xs`
+                                      : 'border-transparent text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/70 dark:hover:bg-slate-800/50 font-semibold'
+                                  }`}
+                                >
                                   {isActive && (
-                                    <span className={`w-1.5 h-1.5 rounded-full ${toneStyle.activeDot} shrink-0`} />
+                                    <motion.span
+                                      layoutId="hse-sidebar-active-bar"
+                                      transition={{
+                                        duration: HSE_MOTION_CONFIG.durations.tab,
+                                        ease: HSE_MOTION_CONFIG.easings.standard
+                                      }}
+                                      className={`absolute ${
+                                        isFa ? 'right-0 rounded-l-full' : 'left-0 rounded-r-full'
+                                      } top-2 bottom-2 w-1 ${toneStyle.activeBar}`}
+                                      aria-hidden="true"
+                                    />
                                   )}
-                                </div>
-                              </button>
-                            );
-                          })}
+
+                                  <div className="flex items-center gap-2.5 min-w-0">
+                                    <div
+                                      className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 transition-transform duration-200 group-hover:scale-110 ${
+                                        isActive ? toneStyle.activeIconBg : `${toneStyle.iconBg} ${toneStyle.iconText}`
+                                      }`}
+                                    >
+                                      <TabIcon className="w-3.5 h-3.5" />
+                                    </div>
+                                    <span className="truncate text-[11.5px] leading-tight">{title}</span>
+                                  </div>
+
+                                  <div className="flex items-center gap-1.5 shrink-0">
+                                    {tab.badge !== undefined && Number(tab.badge) > 0 && (
+                                      <span className="px-1.5 py-0.5 rounded-full text-[9px] font-mono font-black bg-rose-500 text-white tabular-nums shadow-2xs">
+                                        {tab.badge}
+                                      </span>
+                                    )}
+
+                                    <span
+                                      onClick={e => togglePinTab(e, tab.key)}
+                                      className={`p-1 rounded-md transition-opacity cursor-pointer ${
+                                        isPinned
+                                          ? 'text-amber-500 opacity-90 hover:opacity-100'
+                                          : 'text-slate-400 opacity-0 group-hover:opacity-100 hover:text-amber-500'
+                                      }`}
+                                      title={isPinned ? (isFa ? 'برداشتن سنجاق' : 'Unpin') : (isFa ? 'سنجاق به دسترسی سریع' : 'Pin to top')}
+                                    >
+                                      <Pin className={`w-3 h-3 ${isPinned ? 'fill-amber-500/20' : ''}`} />
+                                    </span>
+
+                                    {isActive && (
+                                      <span className={`w-1.5 h-1.5 rounded-full ${toneStyle.activeDot} shrink-0`} />
+                                    )}
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
                         </div>
-                      )}
+                      </div>
                     </div>
                   );
                 })
               )}
             </div>
+            </LayoutGroup>
           ) : (
             /* ===================== DECLUTTERED RAIL NAVIGATION (USER REQUIREMENT) =====================
                Only show GROUP icons + the single ACTIVE executed module.
@@ -1100,6 +1112,14 @@ export default function AppSidebar({
                   className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-white dark:border-slate-900 ${syncDotClass}`}
                 />
               </div>
+
+              <HseThemeToggleButton
+                themeMode={themeMode}
+                onToggle={(origin) => setThemeMode && setThemeMode(themeMode === 'dark' ? 'light' : 'dark', origin)}
+                isFa={isFa}
+                variant="rail"
+                id="sidebar-theme-toggle-btn-collapsed"
+              />
 
               {onLogout && (
                 <button

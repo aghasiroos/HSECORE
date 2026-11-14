@@ -65,12 +65,12 @@ export const DashboardTrainingChart: React.FC<DashboardTrainingChartProps> = Rea
   return (
     <div 
       onClick={() => onNavigate && onNavigate('training')}
-      className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between space-y-4 h-full cursor-pointer hover:border-blue-400 dark:hover:border-blue-600 transition-all duration-200"
+      className="hse-motion-card bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between space-y-4 h-full cursor-pointer hover:border-blue-400 dark:hover:border-blue-600"
     >
       {/* Header */}
       <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
         <div className="flex items-center gap-2.5">
-          <div className="p-2 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-xl">
+          <div className="hse-card-icon p-2 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-xl">
             <GraduationCap className="w-5 h-5" />
           </div>
           <div>
@@ -105,7 +105,7 @@ export const DashboardTrainingChart: React.FC<DashboardTrainingChartProps> = Rea
       </div>
 
       {/* Bar Chart */}
-      <div className="flex-1 min-h-[170px] w-full min-w-0">
+      <div className="hse-chart-reveal flex-1 min-h-[170px] w-full min-w-0">
         <ResponsiveContainer width="100%" height={170} minWidth={0} minHeight={170} debounce={50}>
           <BarChart data={chartData} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
             <XAxis dataKey="name" tick={{ fontSize: 9, fontWeight: 'bold' }} />

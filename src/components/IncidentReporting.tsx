@@ -38,6 +38,7 @@ import {
   calculateDeadlineInfo 
 } from '../utils/incidentSupplementaryHelper';
 import { printService } from '../services/printService';
+import { SubViewTransition } from '../motion';
 import { apiDb } from '../services/apiDatabaseClient';
 import { useUnifiedOrgUnits } from '../utils/orgUnitsHelper';
 import { CreateReferralModal } from './referral/CreateReferralModal';
@@ -945,7 +946,7 @@ export default function IncidentReporting({ isFa, currentUser }: IncidentReporti
         <div className="flex items-center gap-2 mt-6 pt-4 border-t border-white/10 overflow-x-auto">
           <button
             onClick={() => setActiveTab('reports')}
-            className={`px-4 py-2 rounded-xl text-xs font-black transition flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+            className={`hse-motion-tab px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 whitespace-nowrap cursor-pointer ${
               activeTab === 'reports' 
                 ? 'bg-rose-600 text-white shadow-md' 
                 : 'text-slate-300 hover:text-white hover:bg-white/10'
@@ -960,7 +961,7 @@ export default function IncidentReporting({ isFa, currentUser }: IncidentReporti
 
           <button
             onClick={() => setActiveTab('pyramid')}
-            className={`px-4 py-2 rounded-xl text-xs font-black transition flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+            className={`hse-motion-tab px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 whitespace-nowrap cursor-pointer ${
               activeTab === 'pyramid' 
                 ? 'bg-rose-600 text-white shadow-md' 
                 : 'text-slate-300 hover:text-white hover:bg-white/10'
@@ -972,7 +973,7 @@ export default function IncidentReporting({ isFa, currentUser }: IncidentReporti
 
           <button
             onClick={() => setActiveTab('stats')}
-            className={`px-4 py-2 rounded-xl text-xs font-black transition flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+            className={`hse-motion-tab px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 whitespace-nowrap cursor-pointer ${
               activeTab === 'stats' 
                 ? 'bg-rose-600 text-white shadow-md' 
                 : 'text-slate-300 hover:text-white hover:bg-white/10'
@@ -985,48 +986,49 @@ export default function IncidentReporting({ isFa, currentUser }: IncidentReporti
       </div>
 
       {/* KPI Cards Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-sm flex items-center justify-between">
+      <div className="hse-stagger-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="hse-motion-card bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-sm flex items-center justify-between">
           <div>
             <p className="text-slate-400 text-xs font-bold">{isFa ? 'کل اعمال و شرایط ناایمن' : 'Total Unsafe Acts/Cond.'}</p>
             <h3 className="text-2xl font-black text-amber-600 mt-1 font-mono">{pyramidStats.totalAnomalies}</h3>
           </div>
-          <div className="p-3 bg-amber-50 text-amber-600 rounded-2xl">
+          <div className="hse-card-icon p-3 bg-amber-50 text-amber-600 rounded-2xl">
             <AlertTriangle className="w-6 h-6" />
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-sm flex items-center justify-between">
+        <div className="hse-motion-card bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-sm flex items-center justify-between">
           <div>
             <p className="text-slate-400 text-xs font-bold">{isFa ? 'شبه‌حوادث (Near Misses)' : 'Near Misses'}</p>
             <h3 className="text-2xl font-black text-sky-600 mt-1 font-mono">{pyramidStats.nearMissCount}</h3>
           </div>
-          <div className="p-3 bg-sky-50 text-sky-600 rounded-2xl">
+          <div className="hse-card-icon p-3 bg-sky-50 text-sky-600 rounded-2xl">
             <Eye className="w-6 h-6" />
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-sm flex items-center justify-between">
+        <div className="hse-motion-card bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-sm flex items-center justify-between">
           <div>
             <p className="text-slate-400 text-xs font-bold">{isFa ? 'حوادث قابل ثبت (OSHA Recordable)' : 'OSHA Recordables'}</p>
             <h3 className="text-2xl font-black text-rose-600 mt-1 font-mono">{pyramidStats.oshaRecordableCount}</h3>
           </div>
-          <div className="p-3 bg-rose-50 text-rose-600 rounded-2xl">
+          <div className="hse-card-icon p-3 bg-rose-50 text-rose-600 rounded-2xl">
             <ShieldAlert className="w-6 h-6" />
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-sm flex items-center justify-between">
+        <div className="hse-motion-card bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-sm flex items-center justify-between">
           <div>
             <p className="text-slate-400 text-xs font-bold">{isFa ? 'حوادث منجر به روز تلف‌شده (LTI)' : 'Lost Time Injury (LTI)'}</p>
             <h3 className="text-2xl font-black text-purple-600 mt-1 font-mono">{pyramidStats.ltiCount}</h3>
           </div>
-          <div className="p-3 bg-purple-50 text-purple-600 rounded-2xl">
+          <div className="hse-card-icon p-3 bg-purple-50 text-purple-600 rounded-2xl">
             <UserX className="w-6 h-6" />
           </div>
         </div>
       </div>
 
+      <SubViewTransition viewKey={activeTab} isFa={isFa}>
       {/* TAB 1: INCIDENT LOG LEDGER */}
       {activeTab === 'reports' && (
         <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-100 dark:border-slate-800 p-6 shadow-sm space-y-6">
@@ -1376,6 +1378,7 @@ export default function IncidentReporting({ isFa, currentUser }: IncidentReporti
           </div>
         </div>
       )}
+      </SubViewTransition>
 
       {/* NEW REPORT MODAL */}
       {showNewModal && (

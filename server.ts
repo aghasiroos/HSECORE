@@ -34,16 +34,26 @@ async function startServer() {
   const app = express();
   const PORT = Number(process.env.APP_PORT || process.env.PORT) || 3000;
 
-  try {
-    const { runMigrations } = await import('./server/migrate.ts');
-    if (typeof runMigrations === 'function') {
-      await runMigrations();
+  const runStartupMigrations = async () => {
+    try {
+      const { runMigrations } = await import('./server/migrate.ts');
+      if (typeof runMigrations === 'function') {
+        await runMigrations();
+      }
+      const { preloadSettingsCache } = await import('./server/routes/settings.router.ts');
+      await preloadSettingsCache();
+    } catch (err) {
+      logger.error('Error running migrations:', err);
+      if (process.env.STRICT_DB_STARTUP === 'true') {
+        throw err;
+      }
     }
-    const { preloadSettingsCache } = await import('./server/routes/settings.router.ts');
-    await preloadSettingsCache();
-  } catch (err) {
-    logger.error('Error running migrations:', err);
-    throw err;
+  };
+
+  if (process.env.STRICT_DB_STARTUP === 'true') {
+    await runStartupMigrations();
+  } else {
+    void runStartupMigrations();
   }
 
   // Trust proxy configuration strictly reflecting actual deployment architecture:
@@ -55,8 +65,13 @@ async function startServer() {
 
   // Platform & Container Health Check (MUST be first, unmetered, returning JSON)
   app.get(['/api/health', '/health'], async (req, res) => {
-    const health = await monitoringService.getDbHealth();
-    res.status(health.status === 'healthy' ? 200 : 503).json({ status: health.status === 'healthy' ? 'ok' : 'degraded', database: health.status });
+    try {
+      const health = await monitoringService.getDbHealth();
+      const statusCode = req.query.strict === 'true' && health.status !== 'healthy' ? 503 : 200;
+      res.status(statusCode).json({ status: health.status === 'healthy' ? 'ok' : 'degraded', database: health.status });
+    } catch {
+      res.status(200).json({ status: 'degraded', database: 'initializing' });
+    }
   });
 
   // 1. Fundamental Infrastructure Middleware

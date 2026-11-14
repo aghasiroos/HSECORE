@@ -38,6 +38,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts';
 import { WarningRecord } from '../types';
+import { SubViewTransition } from '../motion';
 import { 
   deduplicateWarningRecords, 
   sanitizeWarningRecords,
@@ -1112,7 +1113,7 @@ export default function WarningsManager({
           <button
             type="button"
             onClick={() => setActiveTab('records')}
-            className={`flex-1 py-3 px-4 rounded-xl font-black text-xs transition-all flex items-center justify-center gap-2 cursor-pointer ${
+            className={`hse-motion-tab flex-1 py-3 px-4 rounded-xl font-black text-xs flex items-center justify-center gap-2 cursor-pointer ${
               activeTab === 'records'
                 ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-md border border-blue-500/20'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
@@ -1130,7 +1131,7 @@ export default function WarningsManager({
           <button
             type="button"
             onClick={() => setActiveTab('charts')}
-            className={`flex-1 py-3 px-4 rounded-xl font-black text-xs transition-all flex items-center justify-center gap-2 cursor-pointer ${
+            className={`hse-motion-tab flex-1 py-3 px-4 rounded-xl font-black text-xs flex items-center justify-center gap-2 cursor-pointer ${
               activeTab === 'charts'
                 ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-md border border-blue-500/20'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
@@ -1148,8 +1149,9 @@ export default function WarningsManager({
       {/* ========================================================================= */}
       {/* SECTION 1: REGISTRATION & LEDGER MANAGEMENT (ثبت گزارش خطا و مدیریت پرونده‌ها) */}
       {/* ========================================================================= */}
+      <SubViewTransition viewKey={activeTab} isFa={isFa}>
       {activeTab === 'records' && (
-        <div className="space-y-6 animate-in fade-in duration-200">
+        <div className="space-y-6">
           
           {/* Alert Banner if Duplicate Records are Detected in Warnings List */}
           {duplicateDetectedCount > 0 && (
@@ -2235,6 +2237,7 @@ export default function WarningsManager({
           </div>
         </div>
       )}
+      </SubViewTransition>
 
       {/* --- CONFIRM DELETE MODAL --- */}
       {deleteConfirm && (

@@ -29,6 +29,7 @@ import { getUnits, getJobTitles } from '../utils/orgHelper';
 import { findPersonnelByCode } from '../utils/personnelHelper';
 import CentralPersonnelSelector from './CentralPersonnelSelector';
 import { apiDb } from '../services/apiDatabaseClient';
+import { SubViewTransition } from '../motion';
 
 interface TrainingMgmtProps {
   isFa: boolean;
@@ -481,7 +482,7 @@ export default function TrainingMgmt({ isFa, currentUser }: TrainingMgmtProps) {
                     setActiveTab(tab.key as any);
                     setSearchTerm('');
                   }}
-                  className={`sm:flex-1 sm:min-w-[160px] py-2.5 sm:py-3 px-2.5 sm:px-3.5 rounded-2xl text-[11px] sm:text-xs md:text-sm font-black transition-all flex items-center justify-center gap-1.5 sm:gap-2 cursor-pointer min-w-0 ${
+                  className={`hse-motion-tab sm:flex-1 sm:min-w-[160px] py-2.5 sm:py-3 px-2.5 sm:px-3.5 rounded-2xl text-[11px] sm:text-xs md:text-sm font-black flex items-center justify-center gap-1.5 sm:gap-2 cursor-pointer min-w-0 ${
                     isActive
                       ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-md border border-slate-200/80 dark:border-slate-700/80'
                       : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-white/60 dark:hover:bg-slate-900/60'
@@ -503,7 +504,7 @@ export default function TrainingMgmt({ isFa, currentUser }: TrainingMgmtProps) {
         </div>
 
         {/* Tab Content Section */}
-        <div className="p-5 md:p-7">
+        <SubViewTransition viewKey={activeTab} isFa={isFa} className="p-5 md:p-7">
           {/* ========================================================
               TAB 1: COMPREHENSIVE DASHBOARD (داشبورد جامع)
              ======================================================== */}
@@ -1249,7 +1250,7 @@ export default function TrainingMgmt({ isFa, currentUser }: TrainingMgmtProps) {
               </div>
             </div>
           )}
-        </div>
+        </SubViewTransition>
 
         {/* --- CONFIRM DELETE MODAL --- */}
         {deleteConfirm && (

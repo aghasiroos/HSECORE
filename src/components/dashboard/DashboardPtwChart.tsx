@@ -68,13 +68,13 @@ export const DashboardPtwChart: React.FC<DashboardPtwChartProps> = ({
   return (
     <div 
       onClick={() => onNavigate && onNavigate('permit')}
-      className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between space-y-4 h-full cursor-pointer hover:border-amber-400 dark:hover:border-amber-600 transition-all duration-200"
+      className="hse-motion-card bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between space-y-4 h-full cursor-pointer hover:border-amber-400 dark:hover:border-amber-600"
       title={isFa ? 'کلیک جهت انتقال به ماژول پروانه کار (PTW)' : 'Click to navigate to Work Permits'}
     >
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3">
         <div className="flex items-center gap-2.5">
-          <div className="p-2 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-xl">
+          <div className="hse-card-icon p-2 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-xl">
             <FileCheck className="w-5 h-5" />
           </div>
           <div>
@@ -133,7 +133,7 @@ export const DashboardPtwChart: React.FC<DashboardPtwChartProps> = ({
       </div>
 
       {/* Chart Canvas */}
-      <div className="flex-1 min-h-[170px] w-full min-w-0">
+      <div className="hse-chart-reveal flex-1 min-h-[170px] w-full min-w-0">
         <ResponsiveContainer width="100%" height={170} minWidth={0} minHeight={170} debounce={50}>
           {viewType === 'bar' ? (
             <BarChart data={chartData} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>

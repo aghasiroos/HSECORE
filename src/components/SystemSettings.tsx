@@ -71,6 +71,7 @@ import AiManagementTab from './system-settings/AiManagementTab';
 import { GlobalAuditLogSystem } from './GlobalAuditLogSystem';
 import { SystemNotificationsTab } from './system-settings/SystemNotificationsTab';
 import { hasPermission, isUserAdmin } from '../utils/authHelper';
+import { SubViewTransition } from '../motion';
 
 
 
@@ -1510,7 +1511,7 @@ export default function SystemSettings({ language, currentUser, onUserUpdateTrig
             {canAccessOrgStructure && (
               <button
                 onClick={() => setActiveSubTab('org_structure')}
-                className={`px-4 py-2 text-xs font-black rounded-lg cursor-pointer transition flex items-center gap-1.5 ${
+                className={`hse-motion-tab px-4 py-2 text-xs font-black rounded-lg cursor-pointer flex items-center gap-1.5 ${
                   activeSubTab === 'org_structure'
                     ? 'bg-blue-600 text-white shadow-sm font-black'
                     : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-800/50 font-bold'
@@ -1523,7 +1524,7 @@ export default function SystemSettings({ language, currentUser, onUserUpdateTrig
             {canAccessPersonnel && (
               <button
                 onClick={() => setActiveSubTab('personnel')}
-                className={`px-4 py-2 text-xs font-black rounded-lg cursor-pointer transition flex items-center gap-1.5 ${
+                className={`hse-motion-tab px-4 py-2 text-xs font-black rounded-lg cursor-pointer flex items-center gap-1.5 ${
                   activeSubTab === 'personnel'
                     ? 'bg-blue-600 text-white shadow-sm font-black'
                     : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-800/50 font-bold'
@@ -1536,7 +1537,7 @@ export default function SystemSettings({ language, currentUser, onUserUpdateTrig
             {canAccessUsers && (
               <button
                 onClick={() => setActiveSubTab('users')}
-                className={`px-4 py-2 text-xs font-black rounded-lg cursor-pointer transition flex items-center gap-1.5 ${
+                className={`hse-motion-tab px-4 py-2 text-xs font-black rounded-lg cursor-pointer flex items-center gap-1.5 ${
                   activeSubTab === 'users'
                     ? 'bg-blue-600 text-white shadow-sm font-black'
                     : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-800/50 font-bold'
@@ -1549,7 +1550,7 @@ export default function SystemSettings({ language, currentUser, onUserUpdateTrig
             {canAccessNotifications && (
               <button
                 onClick={() => setActiveSubTab('notifications')}
-                className={`px-4 py-2 text-xs font-black rounded-lg cursor-pointer transition flex items-center gap-1.5 ${
+                className={`hse-motion-tab px-4 py-2 text-xs font-black rounded-lg cursor-pointer flex items-center gap-1.5 ${
                   activeSubTab === 'notifications'
                     ? 'bg-blue-600 text-white shadow-sm font-black'
                     : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-800/50 font-bold'
@@ -1563,7 +1564,7 @@ export default function SystemSettings({ language, currentUser, onUserUpdateTrig
             {canAccessAudit && (
               <button
                 onClick={() => setActiveSubTab('audit')}
-                className={`px-4 py-2 text-xs font-black rounded-lg cursor-pointer transition flex items-center gap-1.5 ${
+                className={`hse-motion-tab px-4 py-2 text-xs font-black rounded-lg cursor-pointer flex items-center gap-1.5 ${
                   activeSubTab === 'audit'
                     ? 'bg-blue-600 text-white shadow-sm font-black'
                     : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-800/50 font-bold'
@@ -1576,7 +1577,7 @@ export default function SystemSettings({ language, currentUser, onUserUpdateTrig
             {canAccessUiConfig && (
               <button
                 onClick={() => setActiveSubTab('ui_config')}
-                className={`px-4 py-2 text-xs font-black rounded-lg cursor-pointer transition flex items-center gap-1.5 ${
+                className={`hse-motion-tab px-4 py-2 text-xs font-black rounded-lg cursor-pointer flex items-center gap-1.5 ${
                   activeSubTab === 'ui_config'
                     ? 'bg-blue-600 text-white shadow-sm font-black'
                     : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-800/50 font-bold'
@@ -1589,7 +1590,7 @@ export default function SystemSettings({ language, currentUser, onUserUpdateTrig
             {canAccessApi && (
               <button
                 onClick={() => setActiveSubTab('automation')}
-                className={`px-4 py-2 text-xs font-black rounded-lg cursor-pointer transition flex items-center gap-1.5 ${
+                className={`hse-motion-tab px-4 py-2 text-xs font-black rounded-lg cursor-pointer flex items-center gap-1.5 ${
                   activeSubTab === 'automation'
                     ? 'bg-blue-600 text-white shadow-sm font-black'
                     : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-800/50 font-bold'
@@ -1602,7 +1603,7 @@ export default function SystemSettings({ language, currentUser, onUserUpdateTrig
             {canAccessApi && (
               <button
                 onClick={() => setActiveSubTab('integration')}
-                className={`px-4 py-2 text-xs font-black rounded-lg cursor-pointer transition flex items-center gap-1.5 ${
+                className={`hse-motion-tab px-4 py-2 text-xs font-black rounded-lg cursor-pointer flex items-center gap-1.5 ${
                   activeSubTab === 'integration'
                     ? 'bg-blue-600 text-white shadow-sm font-black'
                     : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-800/50 font-bold'
@@ -1615,7 +1616,7 @@ export default function SystemSettings({ language, currentUser, onUserUpdateTrig
             {canAccessBackup && (
               <button
                 onClick={() => setActiveSubTab('backup')}
-                className={`px-4 py-2 text-xs font-black rounded-lg cursor-pointer transition flex items-center gap-1.5 ${
+                className={`hse-motion-tab px-4 py-2 text-xs font-black rounded-lg cursor-pointer flex items-center gap-1.5 ${
                   activeSubTab === 'backup'
                     ? 'bg-blue-600 text-white shadow-sm font-black'
                     : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-800/50 font-bold'
@@ -1628,7 +1629,7 @@ export default function SystemSettings({ language, currentUser, onUserUpdateTrig
             {canAccessAi && (
               <button
                 onClick={() => setActiveSubTab('ai')}
-                className={`px-4 py-2 text-xs font-black rounded-lg cursor-pointer transition flex items-center gap-1.5 ${
+                className={`hse-motion-tab px-4 py-2 text-xs font-black rounded-lg cursor-pointer flex items-center gap-1.5 ${
                   activeSubTab === 'ai'
                     ? 'bg-blue-600 text-white shadow-sm font-black'
                     : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-800/50 font-bold'
@@ -1641,6 +1642,8 @@ export default function SystemSettings({ language, currentUser, onUserUpdateTrig
           </div>
         </div>
       )}
+
+      <SubViewTransition viewKey={activeSubTab} isFa={isFa}>
 
       {/* SECTION 0: AI Management UI */}
       {activeSubTab === 'ai' && canAccessAi && (
@@ -1691,6 +1694,7 @@ export default function SystemSettings({ language, currentUser, onUserUpdateTrig
       {activeSubTab === 'audit' && canAccessAudit && (
         <GlobalAuditLogSystem isFa={isFa} />
       )}
+      </SubViewTransition>
 
     </div>
   );

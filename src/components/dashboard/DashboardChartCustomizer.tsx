@@ -222,7 +222,7 @@ export const DashboardChartCustomizer: React.FC<DashboardChartCustomizerProps> =
 
   return (
     <div 
-      className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between space-y-4 relative h-full"
+      className="hse-motion-card bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between space-y-4 relative h-full"
       id="dashboard-combined-incident"
     >
       {/* Header with Title and Quick Controls */}
@@ -489,7 +489,7 @@ export const DashboardChartCustomizer: React.FC<DashboardChartCustomizerProps> =
       )}
 
       {/* Main Chart Canvas */}
-      <div className="h-44 sm:h-52 w-full min-w-0 flex-1" id="dashboard-trend-chart-compact">
+      <div className="hse-chart-reveal h-44 sm:h-52 w-full min-w-0 flex-1" id="dashboard-trend-chart-compact">
         {chartData.length > 0 ? (
           <ResponsiveContainer width="100%" height={192} minWidth={0} minHeight={160} debounce={50}>
             {config.chartType === 'area' && config.metric !== 'dual' ? (

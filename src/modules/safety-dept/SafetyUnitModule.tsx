@@ -6,6 +6,7 @@ import { OperationalSafetyInspection, SafetyChecklistTypeTemplate } from './type
 import { safetyDeptService } from './services/safetyDeptService';
 import SafetyOverviewDashboard from './components/SafetyOverviewDashboard';
 import OperationalChecklistsView from './components/OperationalChecklistsView';
+import { SubViewTransition } from '../../motion';
 
 interface Props {
   isFa?: boolean;
@@ -95,7 +96,7 @@ export default function SafetyUnitModule({ isFa = true, currentUser }: Props) {
                     setReinspectAuditForTrigger(null);
                   }
                 }}
-                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-black whitespace-nowrap transition-all cursor-pointer ${
+                className={`hse-motion-tab flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-black whitespace-nowrap cursor-pointer ${
                   isActive
                     ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
                     : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/60 font-bold'
@@ -110,30 +111,32 @@ export default function SafetyUnitModule({ isFa = true, currentUser }: Props) {
       </div>
 
       {/* Main View Render */}
-      {activeTab === 'dashboard' ? (
-        <SafetyOverviewDashboard
-          inspections={inspections}
-          templates={templates}
-          onNewInspection={handleNewInspectionFromDashboard}
-          onViewInspection={handleViewInspectionFromDashboard}
-          onReinspectInspection={handleReinspectFromDashboard}
-          onNavigateToChecklists={handleNavigateToChecklistsWithFilter}
-          isFa={isFa}
-        />
-      ) : (
-        <OperationalChecklistsView
-          inspections={inspections}
-          templates={templates}
-          selectedTemplateId={undefined}
-          initialScheduleStatus={scheduleFilterForChecklists}
-          selectedAudit={selectedAuditForView}
-          initialReinspectAudit={reinspectAuditForTrigger}
-          onSaveInspection={handleSaveInspection}
-          onDeleteInspection={handleDeleteInspection}
-          currentUser={currentUser}
-          isFa={isFa}
-        />
-      )}
+      <SubViewTransition viewKey={activeTab} isFa={isFa}>
+        {activeTab === 'dashboard' ? (
+          <SafetyOverviewDashboard
+            inspections={inspections}
+            templates={templates}
+            onNewInspection={handleNewInspectionFromDashboard}
+            onViewInspection={handleViewInspectionFromDashboard}
+            onReinspectInspection={handleReinspectFromDashboard}
+            onNavigateToChecklists={handleNavigateToChecklistsWithFilter}
+            isFa={isFa}
+          />
+        ) : (
+          <OperationalChecklistsView
+            inspections={inspections}
+            templates={templates}
+            selectedTemplateId={undefined}
+            initialScheduleStatus={scheduleFilterForChecklists}
+            selectedAudit={selectedAuditForView}
+            initialReinspectAudit={reinspectAuditForTrigger}
+            onSaveInspection={handleSaveInspection}
+            onDeleteInspection={handleDeleteInspection}
+            currentUser={currentUser}
+            isFa={isFa}
+          />
+        )}
+      </SubViewTransition>
     </div>
   );
 }

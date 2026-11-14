@@ -25,6 +25,15 @@ import { initializeRbacSeeds, hasPermission, isUserAdmin, addAuditLog, getCurren
 import { getMergedUiConfig } from './config/modulesConfig';
 import { getPendingReferralsForUser, fetchDocumentReferralsFromServer } from './utils/referralHelper';
 import {
+  HseMotionProvider,
+  ModuleStageTransition,
+  ModuleSkeletonFallback,
+  HseThemeToggleButton,
+  ThemeToggleOrigin,
+  setThemeTransitionActive,
+  HSE_MOTION_CONFIG,
+} from './motion';
+import {
   LayoutDashboard, 
   Thermometer, 
   ShieldAlert, 
@@ -113,7 +122,7 @@ function lazyWithRetry<T extends React.ComponentType<any>>(
 interface ModuleErrorBoundaryProps {
   children: React.ReactNode;
   isFa: boolean;
-  key?: React.Key;
+  resetKey?: React.Key;
 }
 
 interface ModuleErrorBoundaryState {
@@ -130,6 +139,12 @@ class ModuleErrorBoundary extends Component<ModuleErrorBoundaryProps, ModuleErro
 
   static getDerivedStateFromError(error: Error) {
     return { hasError: true, error };
+  }
+
+  componentDidUpdate(prevProps: ModuleErrorBoundaryProps) {
+    if (this.state.hasError && prevProps.resetKey !== this.props.resetKey) {
+      this.setState({ hasError: false, error: null });
+    }
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
@@ -247,24 +262,6 @@ const InstructionsDocumentsModule = lazyWithRetry(() => import('./components/Ins
 const SystemNotificationsTab = lazyWithRetry(() => import('./components/system-settings/SystemNotificationsTab'), 'notifications');
 const AiAssistantApp = lazyWithRetry(() => import('./modules/ai/AiAssistantApp'), 'ai-assistant');
 const PsmManagementModule = lazyWithRetry(() => import('./modules/psm/PsmManagementModule'), 'psm');
-
-function ModuleLoadingFallback({ isFa }: { isFa: boolean }) {
-  return (
-    <div className="flex flex-col items-center justify-center min-h-[400px] p-8 space-y-4 animate-in fade-in duration-200">
-      <div className="w-12 h-12 rounded-2xl bg-blue-500/10 dark:bg-blue-500/20 border border-blue-500/30 flex items-center justify-center">
-        <div className="w-6 h-6 border-3 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-      </div>
-      <div className="text-center space-y-1">
-        <div className="text-sm font-bold text-slate-700 dark:text-slate-200">
-          {isFa ? "در حال بارگذاری ماژول..." : "Loading module..."}
-        </div>
-        <div className="text-xs text-slate-400">
-          {isFa ? "لطفاً چند لحظه شکیبا باشید" : "Please wait a moment"}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // Seed data definitions for first-time mount
 const JALALI_MONTH_NAMES = ['فروردین','اردیبهشت','خرداد','تیر','مرداد','شهریور','مهر','آبان','آذر','دی','بهمن','اسفند'];
@@ -505,15 +502,94 @@ export default function App() {
     }
   });
 
-  useEffect(() => {
+  const themeTransitionTimerRef = useRef<number | null>(null);
+  const lastThemeToggleAtRef = useRef<number>(0);
+
+  const applyThemeClasses = useCallback((mode: 'dark' | 'light') => {
+    if (typeof document === 'undefined') return;
     document.documentElement.classList.remove('light', 'dark', 'navy');
-    if (themeMode === 'dark') { document.documentElement.classList.add('dark'); } else { document.documentElement.classList.add('light'); }
+    document.documentElement.classList.add(mode === 'dark' ? 'dark' : 'light');
     try {
-      localStorage.setItem('hse_theme_mode', themeMode);
+      localStorage.setItem('hse_theme_mode', mode);
     } catch (e) {
       console.error(e);
     }
-  }, [themeMode]);
+  }, []);
+
+  const handleSetThemeMode = useCallback(
+    (nextMode: 'dark' | 'light', origin?: ThemeToggleOrigin) => {
+      if (nextMode === themeMode) return;
+
+      const now = Date.now();
+      if (now - lastThemeToggleAtRef.current < 320) {
+        return;
+      }
+      lastThemeToggleAtRef.current = now;
+
+      if (typeof document === 'undefined') {
+        setThemeMode(nextMode);
+        return;
+      }
+
+      const rootEl = document.documentElement;
+      const tier = rootEl.getAttribute('data-motion-tier') || 'cinematic';
+      const prefersReduced =
+        tier === 'reduced' ||
+        (typeof window !== 'undefined' &&
+          typeof window.matchMedia === 'function' &&
+          window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+
+      if (prefersReduced) {
+        applyThemeClasses(nextMode);
+        setThemeMode(nextMode);
+        return;
+      }
+
+      const originX = origin?.x ?? window.innerWidth / 2;
+      const originY = origin?.y ?? 36;
+      const endRadius = Math.hypot(
+        Math.max(originX, window.innerWidth - originX),
+        Math.max(originY, window.innerHeight - originY)
+      );
+
+      rootEl.style.setProperty('--hse-theme-origin-x', `${Math.round(originX)}px`);
+      rootEl.style.setProperty('--hse-theme-origin-y', `${Math.round(originY)}px`);
+      rootEl.style.setProperty('--hse-theme-reveal-radius', `${Math.ceil(endRadius)}px`);
+
+      // Non-blocking Radial Light/Dark Reveal Wave + Coordinated Hybrid Color Interpolation
+      setThemeTransitionActive(true);
+      rootEl.setAttribute('data-theme-direction', nextMode === 'light' ? 'to-light' : 'to-dark');
+      rootEl.setAttribute('data-theme-transition', 'active');
+
+      if (themeTransitionTimerRef.current) {
+        window.clearTimeout(themeTransitionTimerRef.current);
+      }
+      const transitionMs = tier === 'balanced' ? 320 : HSE_MOTION_CONFIG.durationsMs.theme + 20;
+      themeTransitionTimerRef.current = window.setTimeout(() => {
+        rootEl.removeAttribute('data-theme-transition');
+        rootEl.removeAttribute('data-theme-direction');
+        setThemeTransitionActive(false);
+        themeTransitionTimerRef.current = null;
+      }, transitionMs);
+
+      applyThemeClasses(nextMode);
+      setThemeMode(nextMode);
+    },
+    [themeMode, applyThemeClasses]
+  );
+
+  useEffect(() => {
+    return () => {
+      if (themeTransitionTimerRef.current) {
+        window.clearTimeout(themeTransitionTimerRef.current);
+      }
+      setThemeTransitionActive(false);
+    };
+  }, []);
+
+  useEffect(() => {
+    applyThemeClasses(themeMode);
+  }, [themeMode, applyThemeClasses]);
 
   const [isFullscreenFormOpen, setIsFullscreenFormOpen] = useState(false);
 
@@ -1068,22 +1144,24 @@ export default function App() {
 
   if (!currentUser) {
     return (
-      <SyncProvider>
-        <NotificationProvider currentUser={null}>
-          <LoginScreen 
-            onLoginSuccess={(user) => {
-              setCurrentUser(user);
-              setCurrentUserInAuth(user);
-              setActiveTab('dashboard');
-            }}
-            language={language}
-            setLanguage={setLanguage}
-            themeMode={themeMode}
-            setThemeMode={setThemeMode}
-          />
-          <NotificationPopupModal />
-        </NotificationProvider>
-      </SyncProvider>
+      <HseMotionProvider>
+        <SyncProvider>
+          <NotificationProvider currentUser={null}>
+            <LoginScreen 
+              onLoginSuccess={(user) => {
+                setCurrentUser(user);
+                setCurrentUserInAuth(user);
+                setActiveTab('dashboard');
+              }}
+              language={language}
+              setLanguage={setLanguage}
+              themeMode={themeMode}
+              setThemeMode={handleSetThemeMode}
+            />
+            <NotificationPopupModal />
+          </NotificationProvider>
+        </SyncProvider>
+      </HseMotionProvider>
     );
   }
 
@@ -1108,9 +1186,10 @@ export default function App() {
  };
 
  return (
+ <HseMotionProvider>
  <SyncProvider>
  <NotificationProvider currentUser={currentUser}>
- <div className="h-screen h-[100dvh] max-h-screen max-h-[100dvh] relative overflow-hidden bg-slate-50 dark:bg-[#0b0f19] flex flex-row font-sans select-none text-slate-800 dark:text-slate-100 transition-colors duration-500" id="app-layout" dir={isFa ? 'rtl' : 'ltr'}>
+ <div className="h-screen h-[100dvh] max-h-screen max-h-[100dvh] relative overflow-hidden bg-slate-50 dark:bg-[#0b0f19] flex flex-row font-sans select-none text-slate-800 dark:text-slate-100 transition-colors duration-300" id="app-layout" dir={isFa ? 'rtl' : 'ltr'}>
  
  {/* ── Background Geometric & Ambient Glow Layers (Inspired by Login Screen) ── */}
  <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden" aria-hidden="true">
@@ -1136,7 +1215,7 @@ export default function App() {
    language={language}
    setLanguage={setLanguage}
    themeMode={themeMode}
-   setThemeMode={setThemeMode}
+   setThemeMode={handleSetThemeMode}
    currentUser={currentUser}
    allowedTabs={allowedTabs}
    isOpen={isSidebarOpen}
@@ -1183,6 +1262,15 @@ export default function App() {
   {/* Clock block */}
   <HeaderClock language={language} />
 
+  {/* Theme Toggle Button */}
+  <HseThemeToggleButton
+    themeMode={themeMode}
+    onToggle={(origin) => handleSetThemeMode(themeMode === 'dark' ? 'light' : 'dark', origin)}
+    isFa={isFa}
+    variant="header"
+    id="header-theme-toggle-btn"
+  />
+
   {/* Central HSE Notification & Alert Center */}
   <NotificationBellDropdown language={language} />
 
@@ -1207,9 +1295,14 @@ export default function App() {
   {/* Core Sub-Module View Render */}
   <main className={`flex-1 min-w-0 min-h-0 ${activeTab === 'ai-assistant' ? 'overflow-hidden flex flex-col p-0 sm:px-4 sm:py-2.5 lg:px-6 lg:py-3' : `overflow-y-auto custom-scrollbar px-3 sm:px-4 lg:px-6 ${showTopNavbar ? 'py-2.5 sm:py-3 lg:py-3.5' : 'py-3.5 sm:py-4 lg:py-5'}`}`} id="app-main-stage">
       <div className={`w-full max-w-[1920px] mx-auto ${activeTab === 'ai-assistant' ? 'flex-1 h-full min-h-0 flex flex-col overflow-hidden' : 'space-y-6'}`}>
-       <ModuleErrorBoundary isFa={isFa} key={activeTab}>
-         <React.Suspense fallback={<ModuleLoadingFallback isFa={isFa} />}>
-           <div className={activeTab === 'ai-assistant' ? 'flex-1 h-full min-h-0 flex flex-col overflow-hidden' : ''}>
+       <ModuleErrorBoundary isFa={isFa} resetKey={activeTab}>
+         <React.Suspense fallback={<ModuleSkeletonFallback isFa={isFa} />}>
+           <ModuleStageTransition
+             moduleKey={activeTab}
+             isFa={isFa}
+             isFullHeight={activeTab === 'ai-assistant'}
+             scrollContainerId="app-main-stage"
+           >
          {activeTab === 'dashboard' && (
  <Dashboard 
  heatRecord={activeHeatRecord}
@@ -1418,7 +1511,7 @@ export default function App() {
                 }}
               />
             )}
- </div>
+           </ModuleStageTransition>
        </React.Suspense>
        </ModuleErrorBoundary>
  </div>
@@ -1439,5 +1532,6 @@ export default function App() {
  </div>
  </NotificationProvider>
  </SyncProvider>
+ </HseMotionProvider>
  );
 }

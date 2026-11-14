@@ -35,12 +35,12 @@ export const DashboardFiveSTrendChart: React.FC<DashboardFiveSTrendChartProps> =
   return (
     <div 
       onClick={() => onNavigate && onNavigate('fire-dept')}
-      className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between space-y-4 h-full cursor-pointer hover:border-pink-400 dark:hover:border-pink-600 transition-all duration-200"
+      className="hse-motion-card bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between space-y-4 h-full cursor-pointer hover:border-pink-400 dark:hover:border-pink-600"
     >
       {/* Header */}
       <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
         <div className="flex items-center gap-2.5">
-          <div className="p-2 bg-pink-500/10 text-pink-600 dark:text-pink-400 rounded-xl">
+          <div className="hse-card-icon p-2 bg-pink-500/10 text-pink-600 dark:text-pink-400 rounded-xl">
             <Layers className="w-5 h-5" />
           </div>
           <div>

@@ -13,6 +13,7 @@ import { CentralNotificationService } from '../services/notificationService';
 import { syncPermitReferral } from '../utils/referralHelper';
 import { Trash2, ShieldAlert, AlertTriangle, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { checkIsIranHolidayClient, checkIsSeniorDutyOfficer } from '../utils/iranCalendarUtils';
+import { SubViewTransition } from '../motion';
 
 interface WorkPermitProps {
   language: 'en' | 'fa';
@@ -240,54 +241,56 @@ export default function WorkPermitModule({ language, currentUser }: WorkPermitPr
         onOpenFieldManager={() => setIsFieldManagerOpen(true)}
       />
 
-      {/* Main Forms (Hot & Cold) */}
-      {activeTab === 'Hot' && (
-        <PermitFormMain
-          permitType="Hot"
-          currentUser={currentUser}
-          isFa={isFa}
-          initialHolidayWarningConfirmed={holidayConfirmedFromPrompt}
-          onSave={handleSaveNewPermit}
-          onCancel={() => {
-            setHolidayConfirmedFromPrompt(false);
-            setActiveTab('dashboard');
-          }}
-        />
-      )}
+      <SubViewTransition viewKey={activeTab} isFa={isFa}>
+        {/* Main Forms (Hot & Cold) */}
+        {activeTab === 'Hot' && (
+          <PermitFormMain
+            permitType="Hot"
+            currentUser={currentUser}
+            isFa={isFa}
+            initialHolidayWarningConfirmed={holidayConfirmedFromPrompt}
+            onSave={handleSaveNewPermit}
+            onCancel={() => {
+              setHolidayConfirmedFromPrompt(false);
+              setActiveTab('dashboard');
+            }}
+          />
+        )}
 
-      {activeTab === 'Cold' && (
-        <PermitFormMain
-          permitType="Cold"
-          currentUser={currentUser}
-          isFa={isFa}
-          onSave={handleSaveNewPermit}
-          onCancel={() => setActiveTab('dashboard')}
-        />
-      )}
+        {activeTab === 'Cold' && (
+          <PermitFormMain
+            permitType="Cold"
+            currentUser={currentUser}
+            isFa={isFa}
+            onSave={handleSaveNewPermit}
+            onCancel={() => setActiveTab('dashboard')}
+          />
+        )}
 
-      {/* Supplementary Permits (Excavation, Confined Space, Electrical, Radiation, etc.) */}
-      {(['Excavation', 'ProcessMechanical', 'ConfinedSpace', 'ElectricalIsolation', 'Radiation', 'VehicleCrane'] as PermitCategory[]).includes(activeTab as PermitCategory) && (
-        <PermitFormSupplementary
-          category={activeTab as PermitCategory}
-          currentUser={currentUser}
-          isFa={isFa}
-          onSave={handleSaveNewPermit}
-          onCancel={() => setActiveTab('dashboard')}
-        />
-      )}
+        {/* Supplementary Permits (Excavation, Confined Space, Electrical, Radiation, etc.) */}
+        {(['Excavation', 'ProcessMechanical', 'ConfinedSpace', 'ElectricalIsolation', 'Radiation', 'VehicleCrane'] as PermitCategory[]).includes(activeTab as PermitCategory) && (
+          <PermitFormSupplementary
+            category={activeTab as PermitCategory}
+            currentUser={currentUser}
+            isFa={isFa}
+            onSave={handleSaveNewPermit}
+            onCancel={() => setActiveTab('dashboard')}
+          />
+        )}
 
-      {/* Dashboard View */}
-      {activeTab === 'dashboard' && (
-        <PermitDashboard
-          permits={permits}
-          isFa={isFa}
-          currentUser={currentUser}
-          onUpdatePermit={handleUpdatePermit}
-          onNewPermitClick={(cat) => handleSelectTab(cat || 'Hot')}
-          onDeletePermit={handleDeletePermit}
-          onOpenFieldManager={() => setIsFieldManagerOpen(true)}
-        />
-      )}
+        {/* Dashboard View */}
+        {activeTab === 'dashboard' && (
+          <PermitDashboard
+            permits={permits}
+            isFa={isFa}
+            currentUser={currentUser}
+            onUpdatePermit={handleUpdatePermit}
+            onNewPermitClick={(cat) => handleSelectTab(cat || 'Hot')}
+            onDeletePermit={handleDeletePermit}
+            onOpenFieldManager={() => setIsFieldManagerOpen(true)}
+          />
+        )}
+      </SubViewTransition>
 
       {/* Master Print Modal */}
       {printPermitModal && (

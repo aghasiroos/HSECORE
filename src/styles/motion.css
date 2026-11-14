@@ -1,0 +1,593 @@
+/* ==========================================================================
+   HSECORE Advanced Unified Motion System (Professional Hybrid Motion)
+   Style: Advanced & Cinematic with Adaptive Performance Tiers
+   Tokens:
+   - Module Transition : 350–550ms (380ms enter / 150ms exit)
+   - Tab Transition    : 250–350ms (260ms enter / 110ms exit)
+   - Theme Transition  : 400–600ms (460ms View Transition Reveal + Fallback)
+   - Card Morph        : 350–500ms (420ms)
+   - Hover             : 200–300ms (220ms)
+   - Modal / Dialog    : 250–400ms (280ms)
+   - Submenu           : 200–300ms (240ms)
+   - Icons             : 200–350ms (240ms)
+   ========================================================================== */
+
+:root {
+  --hse-motion-duration-micro: 200ms;
+  --hse-motion-duration-hover: 220ms;
+  --hse-motion-duration-icon: 240ms;
+  --hse-motion-duration-submenu: 240ms;
+  --hse-motion-duration-tab: 260ms;
+  --hse-motion-duration-modal: 280ms;
+  --hse-motion-duration-page: 380ms;
+  --hse-motion-duration-card-morph: 420ms;
+  --hse-theme-transition-duration: 460ms;
+
+  --hse-motion-ease-standard: cubic-bezier(0.22, 1, 0.36, 1);
+  --hse-motion-ease-smooth: cubic-bezier(0.16, 1, 0.3, 1);
+  --hse-motion-ease-inout: cubic-bezier(0.4, 0, 0.2, 1);
+  --hse-motion-ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  --hse-theme-transition-ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+  --hse-theme-origin-x: 50vw;
+  --hse-theme-origin-y: 32px;
+  --hse-theme-reveal-radius: 150vmax;
+
+  --hse-shimmer-base: #eef2f6;
+  --hse-shimmer-highlight: rgba(255, 255, 255, 0.78);
+  --hse-card-sheen: linear-gradient(
+    135deg,
+    rgba(56, 189, 248, 0.08) 0%,
+    rgba(16, 185, 129, 0.04) 45%,
+    transparent 75%
+  );
+  --hse-theme-glow: rgba(245, 158, 11, 0.32);
+}
+
+html.dark {
+  --hse-shimmer-base: #1a2438;
+  --hse-shimmer-highlight: rgba(148, 163, 184, 0.16);
+  --hse-card-sheen: linear-gradient(
+    135deg,
+    rgba(56, 189, 248, 0.1) 0%,
+    rgba(99, 102, 241, 0.06) 45%,
+    transparent 75%
+  );
+  --hse-theme-glow: rgba(56, 189, 248, 0.32);
+}
+
+/* Adaptive scaling for lower-end devices */
+html[data-motion-tier='balanced'] {
+  --hse-motion-duration-hover: 160ms;
+  --hse-motion-duration-icon: 170ms;
+  --hse-motion-duration-submenu: 170ms;
+  --hse-motion-duration-tab: 180ms;
+  --hse-motion-duration-modal: 200ms;
+  --hse-motion-duration-page: 240ms;
+  --hse-motion-duration-card-morph: 240ms;
+  --hse-theme-transition-duration: 300ms;
+}
+
+/* ==========================================================================
+   1. Core Unified Keyframes (GPU Transform & Opacity)
+   ========================================================================== */
+@keyframes hseFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes hseSlideUp {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 10px, 0) scale(0.992);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes hseScaleIn {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 6px, 0) scale(0.965);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes hseSlideDown {
+  from {
+    opacity: 0;
+    transform: translate3d(0, -8px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes hseShimmerSweep {
+  0% {
+    transform: translate3d(-100%, 0, 0);
+  }
+  100% {
+    transform: translate3d(100%, 0, 0);
+  }
+}
+
+@keyframes hseStageHeaderReveal {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 8px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes hseChartReveal {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 10px, 0) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes hseThemeHybridFade {
+  0% {
+    opacity: 1;
+  }
+  34% {
+    opacity: 0.93;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes hseThemeRadialReveal {
+  from {
+    clip-path: circle(0px at var(--hse-theme-origin-x, 50vw) var(--hse-theme-origin-y, 32px));
+  }
+  to {
+    clip-path: circle(var(--hse-theme-reveal-radius, 150vmax) at var(--hse-theme-origin-x, 50vw) var(--hse-theme-origin-y, 32px));
+  }
+}
+
+/* ==========================================================================
+   2. Unified Entrance Classes & Codebase Compatibility Layer
+   ========================================================================== */
+.animate-fade-in,
+.animate-fadeIn {
+  animation: hseFadeIn var(--hse-motion-duration-tab) var(--hse-motion-ease-standard) both;
+}
+
+.animate-slide-up {
+  animation: hseSlideUp var(--hse-motion-duration-page) var(--hse-motion-ease-standard) both;
+}
+
+.animate-scaleIn {
+  animation: hseScaleIn var(--hse-motion-duration-modal) var(--hse-motion-ease-smooth) both;
+}
+
+.animate-in {
+  --hse-enter-opacity: 0;
+  --hse-enter-scale: 1;
+  --hse-enter-x: 0px;
+  --hse-enter-y: 0px;
+  animation: hseEnterUnified var(--hse-motion-duration-modal) var(--hse-motion-ease-standard) both;
+}
+
+.animate-in.fade-in {
+  --hse-enter-opacity: 0;
+}
+
+.animate-in.zoom-in-95 {
+  --hse-enter-scale: 0.96;
+  --hse-enter-y: 6px;
+}
+
+.animate-in.slide-in-from-top-2 {
+  --hse-enter-y: -8px;
+}
+
+.animate-in.slide-in-from-bottom-5 {
+  --hse-enter-y: 12px;
+}
+
+.animate-in.duration-150 {
+  animation-duration: 200ms;
+}
+
+.animate-in.duration-200 {
+  animation-duration: 260ms;
+}
+
+.animate-in.duration-300 {
+  animation-duration: 320ms;
+}
+
+@keyframes hseEnterUnified {
+  from {
+    opacity: var(--hse-enter-opacity, 0);
+    transform: translate3d(var(--hse-enter-x, 0px), var(--hse-enter-y, 0px), 0) scale(var(--hse-enter-scale, 1));
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+/* Non-blocking stage reveal & chart entrance */
+.hse-stage-reveal-header {
+  animation: hseStageHeaderReveal 300ms var(--hse-motion-ease-smooth) both;
+}
+
+.hse-chart-reveal {
+  animation: hseChartReveal 360ms var(--hse-motion-ease-smooth) both;
+}
+
+/* Lightweight GPU-only stagger reveal capped cleanly at first 8 grid items */
+.hse-stagger-grid > * {
+  animation: hseSlideUp 320ms var(--hse-motion-ease-smooth) both;
+}
+.hse-stagger-grid > *:nth-child(1) { animation-delay: 0ms; }
+.hse-stagger-grid > *:nth-child(2) { animation-delay: 28ms; }
+.hse-stagger-grid > *:nth-child(3) { animation-delay: 56ms; }
+.hse-stagger-grid > *:nth-child(4) { animation-delay: 84ms; }
+.hse-stagger-grid > *:nth-child(5) { animation-delay: 112ms; }
+.hse-stagger-grid > *:nth-child(6) { animation-delay: 140ms; }
+.hse-stagger-grid > *:nth-child(7) { animation-delay: 168ms; }
+.hse-stagger-grid > *:nth-child(8) { animation-delay: 196ms; }
+.hse-stagger-grid > *:nth-child(n+9) { animation-delay: 210ms; }
+
+/* ==========================================================================
+   3. Advanced Card Motion, Tabs & Collapsibles
+   - Hover Elevation, Smooth Scale, Dynamic Shadow, Icon Motion,
+     Controlled Gradient Highlight, Border Glow, Press Feedback
+   ========================================================================== */
+.hse-motion-card {
+  position: relative;
+  transform: translate3d(0, 0, 0) scale(1);
+  transition:
+    transform var(--hse-motion-duration-hover) var(--hse-motion-ease-standard),
+    box-shadow var(--hse-motion-duration-hover) var(--hse-motion-ease-standard),
+    border-color var(--hse-motion-duration-hover) var(--hse-motion-ease-inout),
+    background-color var(--hse-motion-duration-hover) var(--hse-motion-ease-inout);
+}
+
+.hse-motion-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--hse-card-sheen);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--hse-motion-duration-hover) var(--hse-motion-ease-standard);
+}
+
+.hse-motion-card:hover {
+  transform: translate3d(0, -3px, 0) scale(1.006);
+  box-shadow:
+    0 14px 28px -12px rgba(15, 23, 42, 0.16),
+    0 4px 12px -4px rgba(37, 99, 235, 0.1),
+    0 0 0 1px rgba(59, 130, 246, 0.16);
+}
+
+.hse-motion-card:hover::after {
+  opacity: 1;
+}
+
+html.dark .hse-motion-card:hover {
+  box-shadow:
+    0 18px 34px -12px rgba(2, 6, 23, 0.72),
+    0 6px 16px -4px rgba(56, 189, 248, 0.15),
+    0 0 0 1px rgba(56, 189, 248, 0.24);
+}
+
+.hse-motion-card:active {
+  transform: translate3d(0, 0, 0) scale(0.988);
+  transition-duration: 110ms;
+}
+
+.hse-motion-card .hse-card-icon {
+  transition:
+    transform var(--hse-motion-duration-icon) var(--hse-motion-ease-smooth),
+    background-color var(--hse-motion-duration-hover) ease;
+}
+
+.hse-motion-card:hover .hse-card-icon {
+  transform: scale(1.1) rotate(-3deg);
+}
+
+[dir='ltr'] .hse-motion-card:hover .hse-card-icon {
+  transform: scale(1.1) rotate(3deg);
+}
+
+.hse-motion-tab {
+  transition:
+    transform var(--hse-motion-duration-hover) var(--hse-motion-ease-standard),
+    background-color var(--hse-motion-duration-hover) ease,
+    color var(--hse-motion-duration-hover) ease,
+    border-color var(--hse-motion-duration-hover) ease,
+    box-shadow var(--hse-motion-duration-hover) ease;
+}
+
+.hse-motion-tab:active:not(:disabled) {
+  transform: scale(0.975);
+}
+
+/* Smooth Submenu / Accordion Expand & Collapse without height thrashing */
+.hse-collapsible {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows var(--hse-motion-duration-submenu) var(--hse-motion-ease-standard),
+    opacity var(--hse-motion-duration-hover) var(--hse-motion-ease-inout);
+}
+
+.hse-collapsible[data-open='true'] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.hse-collapsible-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* ==========================================================================
+   4. Subtle GPU Shimmer Skeleton
+   ========================================================================== */
+.hse-skeleton {
+  position: relative;
+  overflow: hidden;
+  background-color: var(--hse-shimmer-base);
+}
+
+.hse-skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--hse-shimmer-highlight) 50%,
+    transparent 100%
+  );
+  transform: translate3d(-100%, 0, 0);
+  animation: hseShimmerSweep 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  will-change: transform;
+}
+
+/* ==========================================================================
+   5. Dynamic Theme Morph Engine (Light <-> Dark Mode)
+   - Non-blocking GPU Radial Light/Dark Reveal Wave (460ms) from click origin
+   - Coordinated Color & Fade Interpolation across ALL UI layers without DOM lock
+   ========================================================================== */
+@keyframes hseThemeRadialWave {
+  0% {
+    opacity: 0.42;
+    clip-path: circle(0px at var(--hse-theme-origin-x, 50vw) var(--hse-theme-origin-y, 32px));
+  }
+  65% {
+    opacity: 0.22;
+  }
+  100% {
+    opacity: 0;
+    clip-path: circle(var(--hse-theme-reveal-radius, 150vmax) at var(--hse-theme-origin-x, 50vw) var(--hse-theme-origin-y, 32px));
+  }
+}
+
+html[data-theme-transition='active']::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  pointer-events: none;
+  background: radial-gradient(
+    circle at var(--hse-theme-origin-x, 50vw) var(--hse-theme-origin-y, 32px),
+    rgba(254, 243, 199, 0.55) 0%,
+    rgba(56, 189, 248, 0.22) 45%,
+    rgba(248, 250, 252, 0.12) 100%
+  );
+  animation: hseThemeRadialWave var(--hse-theme-transition-duration) var(--hse-theme-transition-ease) forwards;
+  will-change: clip-path, opacity;
+}
+
+html[data-theme-transition='active'][data-theme-direction='to-dark']::after {
+  background: radial-gradient(
+    circle at var(--hse-theme-origin-x, 50vw) var(--hse-theme-origin-y, 32px),
+    rgba(15, 23, 42, 0.62) 0%,
+    rgba(30, 58, 138, 0.28) 48%,
+    rgba(2, 6, 23, 0.16) 100%
+  );
+}
+
+.hse-theme-toggle-btn {
+  position: relative;
+  overflow: visible;
+  transition:
+    background-color 320ms var(--hse-theme-transition-ease),
+    border-color 320ms var(--hse-theme-transition-ease),
+    color 320ms var(--hse-theme-transition-ease),
+    box-shadow 320ms var(--hse-theme-transition-ease),
+    transform 180ms var(--hse-motion-ease-standard);
+}
+
+.hse-theme-toggle-btn::before {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: inherit;
+  opacity: 0;
+  pointer-events: none;
+  box-shadow: 0 0 14px 2px var(--hse-theme-glow);
+  transition: opacity 280ms var(--hse-theme-transition-ease);
+}
+
+.hse-theme-toggle-btn:hover::before,
+.hse-theme-toggle-btn[data-switching='true']::before {
+  opacity: 0.75;
+}
+
+.hse-theme-toggle-btn:active:not(:disabled) {
+  transform: scale(0.92);
+}
+
+.hse-theme-icon-stage {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+}
+
+.hse-theme-icon-sun,
+.hse-theme-icon-moon {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transition:
+    transform var(--hse-theme-transition-duration) var(--hse-theme-transition-ease),
+    opacity 340ms var(--hse-theme-transition-ease),
+    color var(--hse-theme-transition-duration) var(--hse-theme-transition-ease);
+}
+
+.hse-theme-icon-active {
+  opacity: 1;
+  transform: rotate(0deg) scale(1);
+}
+
+.hse-theme-icon-inactive-sun {
+  opacity: 0;
+  transform: rotate(110deg) scale(0.45);
+  pointer-events: none;
+}
+
+.hse-theme-icon-inactive-moon {
+  opacity: 0;
+  transform: rotate(-110deg) scale(0.45);
+  pointer-events: none;
+}
+
+.hse-theme-toggle-btn:hover .hse-theme-icon-active {
+  transform: rotate(16deg) scale(1.1);
+}
+
+/* Fallback coordinated color & surface interpolation when View Transition API is unavailable */
+html[data-theme-transition='active'],
+html[data-theme-transition='active'] body,
+html[data-theme-transition='active'] #app-layout,
+html[data-theme-transition='active'] #app-main-area,
+html[data-theme-transition='active'] #app-main-stage,
+html[data-theme-transition='active'] #app-main-sidebar,
+html[data-theme-transition='active'] #app-header,
+html[data-theme-transition='active'] #app-footer,
+html[data-theme-transition='active'] header,
+html[data-theme-transition='active'] footer,
+html[data-theme-transition='active'] aside,
+html[data-theme-transition='active'] nav,
+html[data-theme-transition='active'] main,
+html[data-theme-transition='active'] section,
+html[data-theme-transition='active'] article,
+html[data-theme-transition='active'] div,
+html[data-theme-transition='active'] span,
+html[data-theme-transition='active'] p,
+html[data-theme-transition='active'] h1,
+html[data-theme-transition='active'] h2,
+html[data-theme-transition='active'] h3,
+html[data-theme-transition='active'] h4,
+html[data-theme-transition='active'] h5,
+html[data-theme-transition='active'] h6,
+html[data-theme-transition='active'] label,
+html[data-theme-transition='active'] button,
+html[data-theme-transition='active'] input,
+html[data-theme-transition='active'] select,
+html[data-theme-transition='active'] textarea,
+html[data-theme-transition='active'] table,
+html[data-theme-transition='active'] thead,
+html[data-theme-transition='active'] tbody,
+html[data-theme-transition='active'] tr,
+html[data-theme-transition='active'] th,
+html[data-theme-transition='active'] td,
+html[data-theme-transition='active'] hr,
+html[data-theme-transition='active'] [role='dialog'],
+html[data-theme-transition='active'] .recharts-cartesian-grid line,
+html[data-theme-transition='active'] .recharts-cartesian-axis-line,
+html[data-theme-transition='active'] .recharts-cartesian-axis-tick-line,
+html[data-theme-transition='active'] .recharts-cartesian-axis-tick text,
+html[data-theme-transition='active'] .recharts-default-tooltip {
+  transition-property: background-color, border-color, color, fill, stroke, box-shadow !important;
+  transition-duration: var(--hse-theme-transition-duration) !important;
+  transition-timing-function: var(--hse-theme-transition-ease) !important;
+}
+
+html[data-theme-transition='active'] #app-main-stage,
+html[data-theme-transition='active'] .login-theme-surface {
+  animation: hseThemeHybridFade var(--hse-theme-transition-duration) var(--hse-theme-transition-ease) both;
+}
+
+/* ==========================================================================
+   6. Accessibility & Reduced Motion Compliance
+   ========================================================================== */
+html[data-motion-tier='reduced'] *,
+html[data-motion-tier='reduced'] *::before,
+html[data-motion-tier='reduced'] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in,
+  .animate-fadeIn,
+  .animate-slide-up,
+  .animate-scaleIn,
+  .animate-in,
+  .hse-stage-reveal-header,
+  .hse-chart-reveal,
+  .hse-stagger-grid > *,
+  .hse-skeleton::after,
+  html[data-theme-transition='active'] #app-main-stage,
+  html[data-theme-transition='active'] .login-theme-surface {
+    animation: none !important;
+    transform: none !important;
+    opacity: 1 !important;
+  }
+
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none !important;
+  }
+
+  .hse-motion-card,
+  .hse-motion-card::after,
+  .hse-motion-card .hse-card-icon,
+  .hse-motion-tab,
+  .hse-collapsible,
+  .hse-theme-toggle-btn,
+  .hse-theme-toggle-btn::before,
+  .hse-theme-icon-sun,
+  .hse-theme-icon-moon,
+  html[data-theme-transition='active'],
+  html[data-theme-transition='active'] * {
+    transition: none !important;
+    transform: none !important;
+  }
+}

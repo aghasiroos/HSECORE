@@ -43,6 +43,7 @@ import { getComplexPersonnelList, ComplexPersonnel } from '../utils/personnelHel
 import { WarningRecord } from '../types';
 import { ComprehensivePersonnelDossier } from '../types/personnelDossierTypes';
 import { personnelDossierService } from '../services/personnelDossierService';
+import { SubViewTransition } from '../motion';
 
 import PersonnelDossierPrintModal from './personnel-dossier/PersonnelDossierPrintModal';
 import PersonnelDossierAttachmentsModal from './personnel-dossier/PersonnelDossierAttachmentsModal';
@@ -977,6 +978,7 @@ export default function PersonnelHistoryModule({ isFa, currentUser, warnings: pr
           </div>
 
           {/* 3. TAB CONTENT PANELS */}
+          <SubViewTransition viewKey={activeTab} isFa={isFa}>
 
           {/* =========================================================================
               TAB 1: OVERVIEW & 360° PANORAMIC DOSSIER VIEW
@@ -2696,6 +2698,7 @@ export default function PersonnelHistoryModule({ isFa, currentUser, warnings: pr
               )}
             </div>
           )}
+          </SubViewTransition>
 
         </div>
       ) : (

@@ -330,7 +330,7 @@ export const NotificationBellDropdown: React.FC<NotificationBellDropdownProps> =
               <button
                 type="button"
                 onClick={() => setActiveTab('all')}
-                className={`flex-1 py-1 px-2 rounded-lg transition cursor-pointer text-center ${
+                className={`hse-motion-tab flex-1 py-1 px-2 rounded-lg cursor-pointer text-center ${
                   activeTab === 'all'
                     ? 'bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 shadow-xs'
                     : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'
@@ -341,7 +341,7 @@ export const NotificationBellDropdown: React.FC<NotificationBellDropdownProps> =
               <button
                 type="button"
                 onClick={() => setActiveTab('unread')}
-                className={`flex-1 py-1 px-2 rounded-lg transition cursor-pointer text-center ${
+                className={`hse-motion-tab flex-1 py-1 px-2 rounded-lg cursor-pointer text-center ${
                   activeTab === 'unread'
                     ? 'bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 shadow-xs'
                     : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'
@@ -352,7 +352,7 @@ export const NotificationBellDropdown: React.FC<NotificationBellDropdownProps> =
               <button
                 type="button"
                 onClick={() => setActiveTab('critical')}
-                className={`flex-1 py-1 px-2 rounded-lg transition cursor-pointer text-center ${
+                className={`hse-motion-tab flex-1 py-1 px-2 rounded-lg cursor-pointer text-center ${
                   activeTab === 'critical'
                     ? 'bg-white dark:bg-slate-900 text-rose-600 dark:text-rose-400 shadow-xs'
                     : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'

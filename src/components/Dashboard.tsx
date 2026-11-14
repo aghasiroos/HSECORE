@@ -59,6 +59,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { HeatRecord, TrirSeriesPoint, WarningRecord, UserProfile, NotificationEntry } from '../types';
+import { HseSkeleton, AnimatedCounter, registerCardMorphOrigin } from '../motion';
 
 interface DashboardProps {
   heatRecord: HeatRecord | null;
@@ -93,12 +94,15 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
     metrics,
     layout,
     loading: isMetricsLoading,
+    error: metricsError,
     refetch,
     saveLayout,
     resetLayout,
     isSaving,
     setLayout
   } = useDashboardMetrics(currentUser?.id || currentUser?.username);
+
+  const showInitialKpiSkeleton = isMetricsLoading && !metrics && !metricsError;
 
   // Layout items state
   const [cardsLayout, setCardsLayout] = useState<CardLayoutItem[]>(() => {
@@ -694,7 +698,41 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
     }
   }, [isFa]);
 
-  const handleCardClick = useCallback((cardId: string) => {
+  const getCardAccentColor = useCallback((cardId: string): string => {
+    if (cardId.includes('incident') || cardId.includes('risk') || cardId.includes('warning') || cardId.includes('anomal')) {
+      return 'rgba(239, 68, 68, 0.38)';
+    }
+    if (cardId.includes('permit') || cardId.includes('heat') || cardId.includes('fire')) {
+      return 'rgba(245, 158, 11, 0.38)';
+    }
+    if (cardId.includes('health') || cardId.includes('safe') || cardId.includes('5s')) {
+      return 'rgba(16, 185, 129, 0.38)';
+    }
+    return 'rgba(37, 99, 235, 0.38)';
+  }, []);
+
+  const triggerNavigationWithMorph = useCallback(
+    (targetTab: string, e?: React.MouseEvent<HTMLElement>, accentColor?: string) => {
+      if (!targetTab || !onNavigate) return;
+      if (e && e.currentTarget && typeof e.currentTarget.getBoundingClientRect === 'function') {
+        const rect = e.currentTarget.getBoundingClientRect();
+        registerCardMorphOrigin({
+          targetKey: targetTab,
+          rect: {
+            top: rect.top,
+            left: rect.left,
+            width: rect.width,
+            height: rect.height,
+          },
+          accentColor: accentColor || 'rgba(37, 99, 235, 0.38)',
+        });
+      }
+      onNavigate(targetTab);
+    },
+    [onNavigate]
+  );
+
+  const handleCardClick = useCallback((cardId: string, e?: React.MouseEvent<HTMLElement>) => {
     if (isAdmin && isEditMode) return;
     if (cardId === 'card-quick-actions') return; // Quick actions has its own internal buttons
     const targetTab = getCardTargetTab(cardId);
@@ -707,9 +745,9 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
           detail: { tab: 'system', subItem: 'notifications' }
         }));
       }
-      onNavigate(targetTab);
+      triggerNavigationWithMorph(targetTab, e, getCardAccentColor(cardId));
     }
-  }, [isAdmin, isEditMode, getCardTargetTab, onNavigate]);
+  }, [isAdmin, isEditMode, getCardTargetTab, onNavigate, triggerNavigationWithMorph, getCardAccentColor]);
 
   // ── RENDER INDIVIDUAL CARD BY ID (Complete 100% Coverage for all 29 Card IDs) ──
   const renderCardContent = (cardId: string) => {
@@ -720,7 +758,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
       // 1. KPI: Rolling 12M Incidents
       case 'kpi-incidents':
         return (
-          <div className={`bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between relative overflow-hidden transition-all duration-300 h-full min-h-[140px] ${isClickable ? 'hover:border-blue-400 hover:shadow-md cursor-pointer group/kpi' : ''}`}>
+          <div className={`bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between relative overflow-hidden h-full min-h-[140px] ${isClickable ? 'hse-motion-card hover:border-blue-400 cursor-pointer group/kpi' : ''}`}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5">
                 <p className="text-slate-850 dark:text-slate-200 text-sm font-black tracking-tight">
@@ -731,9 +769,13 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
               {getPriorityBadge(cardId)}
             </div>
             <div className="flex items-baseline justify-between pt-2">
-              <h4 className="text-3xl sm:text-4xl font-black font-mono text-slate-800 dark:text-slate-100 leading-none">
-                {fmtInt(currentIncidentsCount)}
-              </h4>
+              {showInitialKpiSkeleton ? (
+                <HseSkeleton className="h-8 w-20" />
+              ) : (
+                <h4 className="text-3xl sm:text-4xl font-black font-mono text-slate-800 dark:text-slate-100 leading-none">
+                  <AnimatedCounter value={currentIncidentsCount} formatter={fmtInt} />
+                </h4>
+              )}
               <div className={`flex items-center text-xs font-bold ${incidentTrend === 'down' ? 'text-emerald-500' : incidentTrend === 'up' ? 'text-red-500' : 'text-slate-400'}`}>
                 {incidentTrend === 'up' ? <TrendingUp className="w-4 h-4 mr-0.5" /> : incidentTrend === 'down' ? <TrendingDown className="w-4 h-4 mr-0.5" /> : null}
                 <span className="text-sm font-black">{fmtNum(Math.abs(incidentPercentChange), 0)}%</span>
@@ -749,7 +791,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
       // 2. KPI: Target TRIR Benchmark
       case 'kpi-trir-target':
         return (
-          <div className={`bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between relative overflow-hidden transition-all duration-300 h-full min-h-[140px] ${isClickable ? 'hover:border-indigo-400 hover:shadow-md cursor-pointer group/kpi' : ''}`}>
+          <div className={`bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between relative overflow-hidden h-full min-h-[140px] ${isClickable ? 'hse-motion-card hover:border-indigo-400 cursor-pointer group/kpi' : ''}`}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5">
                 <p className="text-slate-850 dark:text-slate-200 text-sm font-black tracking-tight">
@@ -760,10 +802,14 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
               {getPriorityBadge(cardId)}
             </div>
             <div className="flex items-baseline justify-between pt-2">
-              <h4 className="text-3xl sm:text-4xl font-black font-mono text-indigo-600 dark:text-indigo-400 leading-none">
-                {fmtNum(currentRollingTrir, 2)}
-              </h4>
-              <div className="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center text-indigo-600">
+              {showInitialKpiSkeleton ? (
+                <HseSkeleton className="h-8 w-20" />
+              ) : (
+                <h4 className="text-3xl sm:text-4xl font-black font-mono text-indigo-600 dark:text-indigo-400 leading-none">
+                  <AnimatedCounter value={currentRollingTrir} formatter={(v) => fmtNum(v, 2)} />
+                </h4>
+              )}
+              <div className="hse-card-icon w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center text-indigo-600">
                 <Activity className="w-5 h-5" />
               </div>
             </div>
@@ -777,7 +823,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
       // 3. KPI: Safe Man-Hours Worked
       case 'kpi-safe-hours':
         return (
-          <div className={`bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between relative overflow-hidden transition-all duration-300 h-full min-h-[140px] ${isClickable ? 'hover:border-teal-400 hover:shadow-md cursor-pointer group/kpi' : ''}`}>
+          <div className={`bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between relative overflow-hidden h-full min-h-[140px] ${isClickable ? 'hse-motion-card hover:border-teal-400 cursor-pointer group/kpi' : ''}`}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5">
                 <p className="text-slate-850 dark:text-slate-200 text-sm font-black tracking-tight">
@@ -788,10 +834,14 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
               {getPriorityBadge(cardId)}
             </div>
             <div className="flex items-baseline justify-between pt-2">
-              <h4 className="text-2xl sm:text-3xl font-black font-mono text-teal-600 dark:text-teal-400 leading-none">
-                {fmtInt(totalSafeHours)}
-              </h4>
-              <div className="w-10 h-10 rounded-xl bg-teal-500/10 flex items-center justify-center text-teal-600">
+              {showInitialKpiSkeleton ? (
+                <HseSkeleton className="h-8 w-24" />
+              ) : (
+                <h4 className="text-2xl sm:text-3xl font-black font-mono text-teal-600 dark:text-teal-400 leading-none">
+                  <AnimatedCounter value={totalSafeHours} formatter={fmtInt} />
+                </h4>
+              )}
+              <div className="hse-card-icon w-10 h-10 rounded-xl bg-teal-500/10 flex items-center justify-center text-teal-600">
                 <Clock className="w-5 h-5" />
               </div>
             </div>
@@ -805,7 +855,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
       // 4. KPI: Active Work Permits (PTW)
       case 'kpi-permits':
         return (
-          <div className={`bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between relative overflow-hidden transition-all duration-300 h-full min-h-[140px] ${isClickable ? 'hover:border-amber-400 hover:shadow-md cursor-pointer group/kpi' : ''}`}>
+          <div className={`bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between relative overflow-hidden h-full min-h-[140px] ${isClickable ? 'hse-motion-card hover:border-amber-400 cursor-pointer group/kpi' : ''}`}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5">
                 <p className="text-slate-850 dark:text-slate-200 text-sm font-black tracking-tight">
@@ -816,10 +866,14 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
               {getPriorityBadge(cardId)}
             </div>
             <div className="flex items-baseline justify-between pt-2">
-              <h4 className="text-3xl sm:text-4xl font-black font-mono text-amber-600 dark:text-amber-400 leading-none">
-                {fmtInt(metrics?.permits?.active ?? 0)}
-              </h4>
-              <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center text-amber-600">
+              {showInitialKpiSkeleton ? (
+                <HseSkeleton className="h-8 w-16" />
+              ) : (
+                <h4 className="text-3xl sm:text-4xl font-black font-mono text-amber-600 dark:text-amber-400 leading-none">
+                  <AnimatedCounter value={metrics?.permits?.active ?? 0} formatter={fmtInt} />
+                </h4>
+              )}
+              <div className="hse-card-icon w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center text-amber-600">
                 <FileCheck className="w-5 h-5" />
               </div>
             </div>
@@ -835,7 +889,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
         const trainingTotalCount = (metrics?.training?.totalCourses || 0) + (metrics?.training?.totalAttendances || 0);
         const displayTrainingRate = trainingTotalCount > 0 ? `${metrics?.training?.passRate ?? 0}%` : (isFa ? '۰%' : '0%');
         return (
-          <div className={`bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between relative overflow-hidden transition-all duration-300 h-full min-h-[140px] ${isClickable ? 'hover:border-blue-400 hover:shadow-md cursor-pointer group/kpi' : ''}`}>
+          <div className={`bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between relative overflow-hidden h-full min-h-[140px] ${isClickable ? 'hse-motion-card hover:border-blue-400 cursor-pointer group/kpi' : ''}`}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5">
                 <p className="text-slate-850 dark:text-slate-200 text-sm font-black tracking-tight">
@@ -846,10 +900,17 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
               {getPriorityBadge(cardId)}
             </div>
             <div className="flex items-baseline justify-between pt-2">
-              <h4 className="text-3xl sm:text-4xl font-black font-mono text-blue-600 dark:text-blue-400 leading-none">
-                {displayTrainingRate}
-              </h4>
-              <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-600">
+              {showInitialKpiSkeleton ? (
+                <HseSkeleton className="h-8 w-16" />
+              ) : (
+                <h4 className="text-3xl sm:text-4xl font-black font-mono text-blue-600 dark:text-blue-400 leading-none">
+                  <AnimatedCounter
+                    value={trainingTotalCount > 0 ? (metrics?.training?.passRate ?? 0) : 0}
+                    formatter={(v) => `${fmtNum(v, 0)}%`}
+                  />
+                </h4>
+              )}
+              <div className="hse-card-icon w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-600">
                 <GraduationCap className="w-5 h-5" />
               </div>
             </div>
@@ -863,7 +924,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
       // 6. KPI: Open Anomalies Count
       case 'kpi-anomalies-count':
         return (
-          <div className={`bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between relative overflow-hidden transition-all duration-300 h-full min-h-[140px] ${isClickable ? 'hover:border-rose-400 hover:shadow-md cursor-pointer group/kpi' : ''}`}>
+          <div className={`bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between relative overflow-hidden h-full min-h-[140px] ${isClickable ? 'hse-motion-card hover:border-rose-400 cursor-pointer group/kpi' : ''}`}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5">
                 <p className="text-slate-850 dark:text-slate-200 text-sm font-black tracking-tight">
@@ -874,10 +935,14 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
               {getPriorityBadge(cardId)}
             </div>
             <div className="flex items-baseline justify-between pt-2">
-              <h4 className="text-3xl sm:text-4xl font-black font-mono text-rose-600 dark:text-rose-400 leading-none">
-                {fmtInt(metrics?.anomalies?.open ?? 0)}
-              </h4>
-              <div className="w-10 h-10 rounded-xl bg-rose-500/10 flex items-center justify-center text-rose-600">
+              {showInitialKpiSkeleton ? (
+                <HseSkeleton className="h-8 w-16" />
+              ) : (
+                <h4 className="text-3xl sm:text-4xl font-black font-mono text-rose-600 dark:text-rose-400 leading-none">
+                  <AnimatedCounter value={metrics?.anomalies?.open ?? 0} formatter={fmtInt} />
+                </h4>
+              )}
+              <div className="hse-card-icon w-10 h-10 rounded-xl bg-rose-500/10 flex items-center justify-center text-rose-600">
                 <AlertOctagon className="w-5 h-5" />
               </div>
             </div>
@@ -893,7 +958,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
         const auditedPermits = metrics?.permits?.auditedCount ?? 0;
         const displayPtwAuditRate = auditedPermits > 0 ? `${metrics?.permits?.auditComplianceRate ?? 0}%` : (isFa ? '۰%' : '0%');
         return (
-          <div className={`bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between relative overflow-hidden transition-all duration-300 h-full min-h-[140px] ${isClickable ? 'hover:border-indigo-400 hover:shadow-md cursor-pointer group/kpi' : ''}`}>
+          <div className={`bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between relative overflow-hidden h-full min-h-[140px] ${isClickable ? 'hse-motion-card hover:border-indigo-400 cursor-pointer group/kpi' : ''}`}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5">
                 <p className="text-slate-850 dark:text-slate-200 text-sm font-black tracking-tight">
@@ -904,10 +969,17 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
               {getPriorityBadge(cardId)}
             </div>
             <div className="flex items-baseline justify-between pt-2">
-              <h4 className="text-3xl sm:text-4xl font-black font-mono text-indigo-600 dark:text-indigo-400 leading-none">
-                {displayPtwAuditRate}
-              </h4>
-              <div className="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center text-indigo-600">
+              {showInitialKpiSkeleton ? (
+                <HseSkeleton className="h-8 w-16" />
+              ) : (
+                <h4 className="text-3xl sm:text-4xl font-black font-mono text-indigo-600 dark:text-indigo-400 leading-none">
+                  <AnimatedCounter
+                    value={auditedPermits > 0 ? (metrics?.permits?.auditComplianceRate ?? 0) : 0}
+                    formatter={(v) => `${fmtNum(v, 0)}%`}
+                  />
+                </h4>
+              )}
+              <div className="hse-card-icon w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center text-indigo-600">
                 <FileCheck2 className="w-5 h-5" />
               </div>
             </div>
@@ -923,7 +995,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
         const totalInspections = metrics?.safetyInspections?.total ?? 0;
         const displayInspectionRate = totalInspections > 0 ? `${metrics?.safetyInspections?.passRate ?? 0}%` : (isFa ? '۰%' : '0%');
         return (
-          <div className={`bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between relative overflow-hidden transition-all duration-300 h-full min-h-[140px] ${isClickable ? 'hover:border-sky-400 hover:shadow-md cursor-pointer group/kpi' : ''}`}>
+          <div className={`bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between relative overflow-hidden h-full min-h-[140px] ${isClickable ? 'hse-motion-card hover:border-sky-400 cursor-pointer group/kpi' : ''}`}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5">
                 <p className="text-slate-850 dark:text-slate-200 text-sm font-black tracking-tight">
@@ -934,10 +1006,17 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
               {getPriorityBadge(cardId)}
             </div>
             <div className="flex items-baseline justify-between pt-2">
-              <h4 className="text-3xl sm:text-4xl font-black font-mono text-sky-600 dark:text-sky-400 leading-none">
-                {displayInspectionRate}
-              </h4>
-              <div className="w-10 h-10 rounded-xl bg-sky-500/10 flex items-center justify-center text-sky-600">
+              {showInitialKpiSkeleton ? (
+                <HseSkeleton className="h-8 w-16" />
+              ) : (
+                <h4 className="text-3xl sm:text-4xl font-black font-mono text-sky-600 dark:text-sky-400 leading-none">
+                  <AnimatedCounter
+                    value={totalInspections > 0 ? (metrics?.safetyInspections?.passRate ?? 0) : 0}
+                    formatter={(v) => `${fmtNum(v, 0)}%`}
+                  />
+                </h4>
+              )}
+              <div className="hse-card-icon w-10 h-10 rounded-xl bg-sky-500/10 flex items-center justify-center text-sky-600">
                 <ClipboardCheck className="w-5 h-5" />
               </div>
             </div>
@@ -1072,7 +1151,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
       // 21. KPI: Active Heat Index (Matching Heat Stress Module Exactly)
       case 'kpi-heat-index':
         return (
-          <div className={`bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between relative overflow-hidden transition-all duration-300 h-full min-h-[140px] ${isClickable ? 'hover:border-blue-400 hover:shadow-md cursor-pointer group/kpi' : ''}`}>
+          <div className={`bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between relative overflow-hidden h-full min-h-[140px] ${isClickable ? 'hse-motion-card hover:border-blue-400 cursor-pointer group/kpi' : ''}`}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5">
                 <p className="text-slate-850 dark:text-slate-200 text-sm font-black tracking-tight">
@@ -1084,9 +1163,16 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
             </div>
             <div className="flex items-baseline justify-between pt-2">
               <h4 className="text-3xl sm:text-4xl font-black font-mono text-slate-800 dark:text-slate-100 leading-none">
-                {activeClimateRecord ? `${fmtNum(activeClimateRecord.hi, 1)}°C` : '—'}
+                {activeClimateRecord ? (
+                  <>
+                    <AnimatedCounter value={activeClimateRecord.hi} formatter={(v) => fmtNum(v, 1)} />
+                    °C
+                  </>
+                ) : (
+                  '—'
+                )}
               </h4>
-              <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-600">
+              <div className="hse-card-icon w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-600">
                 <Thermometer className="w-5 h-5" />
               </div>
             </div>
@@ -1101,7 +1187,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
       case 'kpi-wbgt':
         const wbgtVal = activeClimateRecord?.wbgt || (activeClimateRecord?.tempC ? activeClimateRecord.tempC * 0.85 : undefined);
         return (
-          <div className={`bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between relative overflow-hidden transition-all duration-300 h-full min-h-[140px] ${isClickable ? 'hover:border-sky-400 hover:shadow-md cursor-pointer group/kpi' : ''}`}>
+          <div className={`bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between relative overflow-hidden h-full min-h-[140px] ${isClickable ? 'hse-motion-card hover:border-sky-400 cursor-pointer group/kpi' : ''}`}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5">
                 <p className="text-slate-850 dark:text-slate-200 text-sm font-black tracking-tight">
@@ -1113,9 +1199,16 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
             </div>
             <div className="flex items-baseline justify-between pt-2">
               <h4 className="text-3xl sm:text-4xl font-black font-mono text-slate-800 dark:text-slate-100 leading-none">
-                {wbgtVal ? `${fmtNum(wbgtVal, 1)}°C` : '—'}
+                {wbgtVal ? (
+                  <>
+                    <AnimatedCounter value={wbgtVal} formatter={(v) => fmtNum(v, 1)} />
+                    °C
+                  </>
+                ) : (
+                  '—'
+                )}
               </h4>
-              <div className="w-10 h-10 rounded-xl bg-sky-500/10 flex items-center justify-center text-sky-500">
+              <div className="hse-card-icon w-10 h-10 rounded-xl bg-sky-500/10 flex items-center justify-center text-sky-500">
                 <Droplets className="w-5 h-5" />
               </div>
             </div>
@@ -1137,7 +1230,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
         const totalExamsCount = effectiveHealthData?.totalExams ?? 0;
         const displayHealthRate = totalExamsCount > 0 ? `${effectiveHealthData?.fitnessPercentage ?? 0}%` : (isFa ? '۰%' : '0%');
         return (
-          <div className={`bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between relative overflow-hidden transition-all duration-300 h-full min-h-[140px] ${isClickable ? 'hover:border-emerald-400 hover:shadow-md cursor-pointer group/kpi' : ''}`}>
+          <div className={`bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between relative overflow-hidden h-full min-h-[140px] ${isClickable ? 'hse-motion-card hover:border-emerald-400 cursor-pointer group/kpi' : ''}`}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5">
                 <p className="text-slate-850 dark:text-slate-200 text-sm font-black tracking-tight">
@@ -1148,10 +1241,17 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
               {getPriorityBadge(cardId)}
             </div>
             <div className="flex items-baseline justify-between pt-2">
-              <h4 className="text-3xl sm:text-4xl font-black font-mono text-emerald-600 dark:text-emerald-400 leading-none">
-                {displayHealthRate}
-              </h4>
-              <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center text-emerald-600">
+              {showInitialKpiSkeleton ? (
+                <HseSkeleton className="h-8 w-16" />
+              ) : (
+                <h4 className="text-3xl sm:text-4xl font-black font-mono text-emerald-600 dark:text-emerald-400 leading-none">
+                  <AnimatedCounter
+                    value={totalExamsCount > 0 ? (effectiveHealthData?.fitnessPercentage ?? 0) : 0}
+                    formatter={(v) => `${fmtNum(v, 0)}%`}
+                  />
+                </h4>
+              )}
+              <div className="hse-card-icon w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center text-emerald-600">
                 <HeartPulse className="w-5 h-5" />
               </div>
             </div>
@@ -1167,7 +1267,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
         const totalFireAssets = metrics?.fireSafety?.total ?? 0;
         const displayFireRate = totalFireAssets > 0 ? `${metrics?.fireSafety?.readinessRate ?? 0}%` : (isFa ? '۰%' : '0%');
         return (
-          <div className={`bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between relative overflow-hidden transition-all duration-300 h-full min-h-[140px] ${isClickable ? 'hover:border-orange-400 hover:shadow-md cursor-pointer group/kpi' : ''}`}>
+          <div className={`bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between relative overflow-hidden h-full min-h-[140px] ${isClickable ? 'hse-motion-card hover:border-orange-400 cursor-pointer group/kpi' : ''}`}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5">
                 <p className="text-slate-850 dark:text-slate-200 text-sm font-black tracking-tight">
@@ -1178,10 +1278,17 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
               {getPriorityBadge(cardId)}
             </div>
             <div className="flex items-baseline justify-between pt-2">
-              <h4 className="text-3xl sm:text-4xl font-black font-mono text-orange-600 dark:text-orange-400 leading-none">
-                {displayFireRate}
-              </h4>
-              <div className="w-10 h-10 rounded-xl bg-orange-500/10 flex items-center justify-center text-orange-600">
+              {showInitialKpiSkeleton ? (
+                <HseSkeleton className="h-8 w-16" />
+              ) : (
+                <h4 className="text-3xl sm:text-4xl font-black font-mono text-orange-600 dark:text-orange-400 leading-none">
+                  <AnimatedCounter
+                    value={totalFireAssets > 0 ? (metrics?.fireSafety?.readinessRate ?? 0) : 0}
+                    formatter={(v) => `${fmtNum(v, 0)}%`}
+                  />
+                </h4>
+              )}
+              <div className="hse-card-icon w-10 h-10 rounded-xl bg-orange-500/10 flex items-center justify-center text-orange-600">
                 <Flame className="w-5 h-5" />
               </div>
             </div>
@@ -1197,7 +1304,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
         const totalFiveSAudits = metrics?.fiveS?.total ?? 0;
         const displayFiveSScore = totalFiveSAudits > 0 ? `${metrics?.fiveS?.averageScore ?? 0}` : '۰';
         return (
-          <div className={`bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between relative overflow-hidden transition-all duration-300 h-full min-h-[140px] ${isClickable ? 'hover:border-pink-400 hover:shadow-md cursor-pointer group/kpi' : ''}`}>
+          <div className={`bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between relative overflow-hidden h-full min-h-[140px] ${isClickable ? 'hse-motion-card hover:border-pink-400 cursor-pointer group/kpi' : ''}`}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5">
                 <p className="text-slate-850 dark:text-slate-200 text-sm font-black tracking-tight">
@@ -1208,10 +1315,18 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
               {getPriorityBadge(cardId)}
             </div>
             <div className="flex items-baseline justify-between pt-2">
-              <h4 className="text-3xl sm:text-4xl font-black font-mono text-pink-600 dark:text-pink-400 leading-none">
-                {displayFiveSScore} <span className="text-sm font-normal text-slate-400">/ ۱۰۰</span>
-              </h4>
-              <div className="w-10 h-10 rounded-xl bg-pink-500/10 flex items-center justify-center text-pink-600">
+              {showInitialKpiSkeleton ? (
+                <HseSkeleton className="h-8 w-20" />
+              ) : (
+                <h4 className="text-3xl sm:text-4xl font-black font-mono text-pink-600 dark:text-pink-400 leading-none">
+                  <AnimatedCounter
+                    value={totalFiveSAudits > 0 ? (metrics?.fiveS?.averageScore ?? 0) : 0}
+                    formatter={(v) => fmtNum(v, 0)}
+                  />{' '}
+                  <span className="text-sm font-normal text-slate-400">/ ۱۰۰</span>
+                </h4>
+              )}
+              <div className="hse-card-icon w-10 h-10 rounded-xl bg-pink-500/10 flex items-center justify-center text-pink-600">
                 <Layers className="w-5 h-5" />
               </div>
             </div>
@@ -1225,7 +1340,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
       // 26. KPI: Critical High Risks
       case 'kpi-risk-high':
         return (
-          <div className={`bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between relative overflow-hidden transition-all duration-300 h-full min-h-[140px] ${isClickable ? 'hover:border-red-400 hover:shadow-md cursor-pointer group/kpi' : ''}`}>
+          <div className={`bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between relative overflow-hidden h-full min-h-[140px] ${isClickable ? 'hse-motion-card hover:border-red-400 cursor-pointer group/kpi' : ''}`}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5">
                 <p className="text-slate-850 dark:text-slate-200 text-sm font-black tracking-tight">
@@ -1236,10 +1351,14 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
               {getPriorityBadge(cardId)}
             </div>
             <div className="flex items-baseline justify-between pt-2">
-              <h4 className="text-3xl sm:text-4xl font-black font-mono text-red-600 dark:text-red-400 leading-none">
-                {fmtInt(metrics?.risks?.high ?? 0)}
-              </h4>
-              <div className="w-10 h-10 rounded-xl bg-red-500/10 flex items-center justify-center text-red-600">
+              {showInitialKpiSkeleton ? (
+                <HseSkeleton className="h-8 w-16" />
+              ) : (
+                <h4 className="text-3xl sm:text-4xl font-black font-mono text-red-600 dark:text-red-400 leading-none">
+                  <AnimatedCounter value={metrics?.risks?.high ?? 0} formatter={fmtInt} />
+                </h4>
+              )}
+              <div className="hse-card-icon w-10 h-10 rounded-xl bg-red-500/10 flex items-center justify-center text-red-600">
                 <ShieldAlert className="w-5 h-5" />
               </div>
             </div>
@@ -1253,7 +1372,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
       // 27. KPI: Active Written Warnings
       case 'kpi-warnings':
         return (
-          <div className={`bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between relative overflow-hidden transition-all duration-300 h-full min-h-[140px] ${isClickable ? 'hover:border-violet-400 hover:shadow-md cursor-pointer group/kpi' : ''}`}>
+          <div className={`bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between relative overflow-hidden h-full min-h-[140px] ${isClickable ? 'hse-motion-card hover:border-violet-400 cursor-pointer group/kpi' : ''}`}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5">
                 <p className="text-slate-850 dark:text-slate-200 text-sm font-black tracking-tight">
@@ -1264,10 +1383,14 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
               {getPriorityBadge(cardId)}
             </div>
             <div className="flex items-baseline justify-between pt-2">
-              <h4 className="text-3xl sm:text-4xl font-black font-mono text-slate-800 dark:text-slate-100 leading-none">
-                {fmtInt(activeWrittenWarningsCount)}
-              </h4>
-              <div className="w-10 h-10 rounded-xl bg-violet-500/10 flex items-center justify-center text-violet-600">
+              {showInitialKpiSkeleton ? (
+                <HseSkeleton className="h-8 w-16" />
+              ) : (
+                <h4 className="text-3xl sm:text-4xl font-black font-mono text-slate-800 dark:text-slate-100 leading-none">
+                  <AnimatedCounter value={activeWrittenWarningsCount} formatter={fmtInt} />
+                </h4>
+              )}
+              <div className="hse-card-icon w-10 h-10 rounded-xl bg-violet-500/10 flex items-center justify-center text-violet-600">
                 <AlertTriangle className="w-5 h-5" />
               </div>
             </div>
@@ -1282,8 +1405,8 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
       case 'card-notifications':
         return (
           <div 
-            onClick={() => isClickable && handleCardClick(cardId)}
-            className={`bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between space-y-3 h-full min-h-[260px] max-h-[380px] w-full max-w-full overflow-hidden ${isClickable ? 'hover:border-amber-400 hover:shadow-md cursor-pointer' : ''}`} 
+            onClick={(e) => isClickable && handleCardClick(cardId, e)}
+            className={`bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between space-y-3 h-full min-h-[260px] max-h-[380px] w-full max-w-full overflow-hidden ${isClickable ? 'hse-motion-card hover:border-amber-400 cursor-pointer' : ''}`} 
             id="dashboard-notifications"
           >
             <div className="space-y-3 overflow-hidden flex flex-col flex-1 min-h-0 w-full">
@@ -1344,11 +1467,11 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
               <button
                 type="button"
-                onClick={() => onNavigate && onNavigate('incidents')}
-                className="p-4 bg-red-50/70 hover:bg-red-100/70 dark:bg-red-950/30 dark:hover:bg-red-900/40 border border-red-200/80 dark:border-red-800/60 rounded-2xl text-start transition cursor-pointer space-y-1.5"
+                onClick={(e) => triggerNavigationWithMorph('incidents', e, 'rgba(239, 68, 68, 0.38)')}
+                className="hse-motion-card p-4 bg-red-50/70 hover:bg-red-100/70 dark:bg-red-950/30 dark:hover:bg-red-900/40 border border-red-200/80 dark:border-red-800/60 rounded-2xl text-start cursor-pointer space-y-1.5"
               >
                 <div className="flex items-center justify-between text-red-600 dark:text-red-400">
-                  <ShieldAlert className="w-5 h-5" />
+                  <ShieldAlert className="w-5 h-5 hse-card-icon" />
                   <ArrowRight className="w-4 h-4" />
                 </div>
                 <h5 className="font-black text-slate-800 dark:text-slate-100 text-sm">{isFa ? 'ثبت و گزارش حادثه جدید' : 'Report Incident'}</h5>
@@ -1359,11 +1482,11 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
 
               <button
                 type="button"
-                onClick={() => onNavigate && onNavigate('training')}
-                className="p-4 bg-blue-50/70 hover:bg-blue-100/70 dark:bg-blue-950/30 dark:hover:bg-blue-900/40 border border-blue-200/80 dark:border-blue-800/60 rounded-2xl text-start transition cursor-pointer space-y-1.5"
+                onClick={(e) => triggerNavigationWithMorph('training', e, 'rgba(37, 99, 235, 0.38)')}
+                className="hse-motion-card p-4 bg-blue-50/70 hover:bg-blue-100/70 dark:bg-blue-950/30 dark:hover:bg-blue-900/40 border border-blue-200/80 dark:border-blue-800/60 rounded-2xl text-start cursor-pointer space-y-1.5"
               >
                 <div className="flex items-center justify-between text-blue-600 dark:text-blue-400">
-                  <GraduationCap className="w-5 h-5" />
+                  <GraduationCap className="w-5 h-5 hse-card-icon" />
                   <ArrowRight className="w-4 h-4" />
                 </div>
                 <h5 className="font-black text-slate-800 dark:text-slate-100 text-sm">{isFa ? 'ثبت دوره و آزمون آموزش' : 'Register Training'}</h5>
@@ -1374,11 +1497,11 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
 
               <button
                 type="button"
-                onClick={() => onNavigate && onNavigate('safety-unit')}
-                className="p-4 bg-sky-50/70 hover:bg-sky-100/70 dark:bg-sky-950/30 dark:hover:bg-sky-900/40 border border-sky-200/80 dark:border-sky-800/60 rounded-2xl text-start transition cursor-pointer space-y-1.5"
+                onClick={(e) => triggerNavigationWithMorph('safety-unit', e, 'rgba(14, 165, 233, 0.38)')}
+                className="hse-motion-card p-4 bg-sky-50/70 hover:bg-sky-100/70 dark:bg-sky-950/30 dark:hover:bg-sky-900/40 border border-sky-200/80 dark:border-sky-800/60 rounded-2xl text-start cursor-pointer space-y-1.5"
               >
                 <div className="flex items-center justify-between text-sky-600 dark:text-sky-400">
-                  <ClipboardCheck className="w-5 h-5" />
+                  <ClipboardCheck className="w-5 h-5 hse-card-icon" />
                   <ArrowRight className="w-4 h-4" />
                 </div>
                 <h5 className="font-black text-slate-800 dark:text-slate-100 text-sm">{isFa ? 'تکمیل چک‌لیست ایمنی' : 'Fill Safety Checklist'}</h5>
@@ -1389,11 +1512,11 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
 
               <button
                 type="button"
-                onClick={() => onNavigate && onNavigate('warnings')}
-                className="p-4 bg-purple-50/70 hover:bg-purple-100/70 dark:bg-purple-950/30 dark:hover:bg-purple-900/40 border border-purple-200/80 dark:border-purple-800/60 rounded-2xl text-start transition cursor-pointer space-y-1.5"
+                onClick={(e) => triggerNavigationWithMorph('warnings', e, 'rgba(139, 92, 246, 0.38)')}
+                className="hse-motion-card p-4 bg-purple-50/70 hover:bg-purple-100/70 dark:bg-purple-950/30 dark:hover:bg-purple-900/40 border border-purple-200/80 dark:border-purple-800/60 rounded-2xl text-start cursor-pointer space-y-1.5"
               >
                 <div className="flex items-center justify-between text-purple-600 dark:text-purple-400">
-                  <AlertTriangle className="w-5 h-5" />
+                  <AlertTriangle className="w-5 h-5 hse-card-icon" />
                   <ArrowRight className="w-4 h-4" />
                 </div>
                 <h5 className="font-black text-slate-800 dark:text-slate-100 text-sm">{isFa ? 'صدور اخطار کتبی و ناهنجاری' : 'Issue Safety Warning'}</h5>
@@ -1411,9 +1534,9 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
   };
 
   return (
-    <div className="space-y-4 animate-in fade-in duration-300" id="dashboard-container" dir={isFa ? 'rtl' : 'ltr'}>
+    <div className="space-y-4" id="dashboard-container" dir={isFa ? 'rtl' : 'ltr'}>
       {/* ── TOP MANAGERIAL EXECUTIVE TOOLBAR (Auto-Layout, Auto-Sizing & Priority Controls) ── */}
-      <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 p-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
+      <div className="hse-stage-reveal-header flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 p-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
         <div className="flex items-center gap-3">
           <div className="p-2.5 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-xl">
             <LayoutGrid className="w-5 h-5" />
@@ -1570,7 +1693,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
       {/* ── UNIFIED RESPONSIVE GRID (Auto-Sized, Overlap-Free & Priority-Ordered) ── */}
       <div 
         ref={gridRef}
-        className="grid grid-cols-12 auto-rows-auto gap-4 items-stretch relative" 
+        className="hse-stagger-grid grid grid-cols-12 auto-rows-auto gap-4 items-stretch relative" 
         id="dashboard-dynamic-grid"
       >
         {sortedVisibleCards.map((cardItem) => {
@@ -1603,7 +1726,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
               onDragOver={(e) => handleDragOver(e, cardItem.id)}
               onDrop={(e) => handleDrop(e, cardItem.id)}
               onDragEnd={handleDragEnd}
-              onClick={() => isClickable && handleCardClick(cardItem.id)}
+              onClick={(e) => isClickable && handleCardClick(cardItem.id, e)}
               title={isClickable ? (isFa ? `کلیک جهت هدایت به ماژول ${moduleTitle}` : `Click to navigate to ${moduleTitle}`) : undefined}
               className={`dashboard-card-wrapper ${colSpanClass} relative group transition-all duration-150 flex flex-col ${
                 isDraggingThis ? 'opacity-40 scale-98 ring-2 ring-blue-500 rounded-2xl' : ''

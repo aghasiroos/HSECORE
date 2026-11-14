@@ -24,6 +24,7 @@ import AirWaterSoilMonitoringView from './components/AirWaterSoilMonitoringView'
 import EnvironmentReports from './components/EnvironmentReports';
 import FiveSModuleView from './components/FiveS/FiveSModuleView';
 import HealthEnvChecklistsView from './components/checklists/HealthEnvChecklistsView';
+import { SubViewTransition } from '../../motion';
 
 interface Props {
   language: 'fa' | 'en';
@@ -224,7 +225,7 @@ const NavItem: React.FC<NavItemProps> = ({
     <button
       type="button"
       onClick={() => onSelect(item.key)}
-      className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl font-bold text-xs transition-all duration-200 ease-in-out cursor-pointer group ${
+      className={`hse-motion-tab w-full flex items-center justify-between px-3 py-2.5 rounded-xl font-bold text-xs cursor-pointer group ${
         isActive
           ? 'bg-blue-50/95 dark:bg-blue-950/50 text-blue-700 dark:text-blue-400 font-black border border-blue-200/80 dark:border-blue-800/60 shadow-xs shadow-blue-500/5'
           : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100/80 dark:hover:bg-slate-800/60 hover:text-blue-600 dark:hover:text-blue-400 border border-transparent'
@@ -232,7 +233,7 @@ const NavItem: React.FC<NavItemProps> = ({
       title={`${title} - ${item.subtitleFa}`}
     >
       <div className="flex items-center gap-3 truncate">
-        <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-all duration-200 ${
+        <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-transform duration-150 group-hover:scale-105 ${
           isActive 
             ? 'bg-blue-100 dark:bg-blue-900/60 text-blue-600 dark:text-blue-400 shadow-2xs' 
             : `${item.iconBg} ${item.iconColor} group-hover:text-blue-600 dark:group-hover:text-blue-400 group-hover:bg-blue-50 dark:group-hover:bg-blue-950/40`
@@ -376,7 +377,7 @@ export default function HealthEnvModule({ language, currentUser }: Props) {
       {/* Mobile Drawer Backdrop */}
       {sidebarOpen && (
         <div
-          className="fixed inset-0 bg-slate-950/50 backdrop-blur-xs z-30 lg:hidden"
+          className="fixed inset-0 bg-slate-950/50 backdrop-blur-xs z-30 animate-fade-in lg:hidden"
           onClick={() => setSidebarOpen(false)}
           aria-hidden="true"
         />
@@ -496,49 +497,51 @@ export default function HealthEnvModule({ language, currentUser }: Props) {
 
       {/* Main Viewport Content */}
       <main className="flex-1 min-w-0 overflow-y-auto bg-slate-50 dark:bg-slate-900 flex flex-col">
-        {activeSection === 'comprehensive-dashboard' && (
-          <ComprehensiveExecutiveDashboard language={language} onNavigate={handleNavigate} />
-        )}
+        <SubViewTransition viewKey={activeSection} isFa={isFa} className="flex-1 flex flex-col">
+          {activeSection === 'comprehensive-dashboard' && (
+            <ComprehensiveExecutiveDashboard language={language} onNavigate={handleNavigate} />
+          )}
 
-        {/* HEALTH SUB-MODULES */}
-        {activeSection === 'clinic' && (
-          <ClinicSubmoduleView language={language} currentUser={currentUser} />
-        )}
-        {activeSection === 'periodic-exams' && (
-          <PeriodicMedicalExamsApp language={language} currentUser={currentUser} />
-        )}
-        {activeSection === 'non-periodic-exams' && (
-          <NonPeriodicExams language={language} currentUser={currentUser} />
-        )}
-        {activeSection === 'nutrition' && (
-          <NutritionSubmoduleView language={language} currentUser={currentUser} />
-        )}
-        {activeSection === 'health-env-checklists' && (
-          <HealthEnvChecklistsView language={language} currentUser={currentUser} />
-        )}
+          {/* HEALTH SUB-MODULES */}
+          {activeSection === 'clinic' && (
+            <ClinicSubmoduleView language={language} currentUser={currentUser} />
+          )}
+          {activeSection === 'periodic-exams' && (
+            <PeriodicMedicalExamsApp language={language} currentUser={currentUser} />
+          )}
+          {activeSection === 'non-periodic-exams' && (
+            <NonPeriodicExams language={language} currentUser={currentUser} />
+          )}
+          {activeSection === 'nutrition' && (
+            <NutritionSubmoduleView language={language} currentUser={currentUser} />
+          )}
+          {activeSection === 'health-env-checklists' && (
+            <HealthEnvChecklistsView language={language} currentUser={currentUser} />
+          )}
 
-        {/* ENVIRONMENT SUB-MODULES */}
-        {activeSection === 'env-dashboard' && (
-          <EnvironmentDashboard language={language} onNavigate={handleNavigate} />
-        )}
-        {activeSection === 'env-monitoring' && (
-          <EnvironmentalMonitoringView language={language} currentUser={currentUser} />
-        )}
-        {activeSection === 'waste-management' && (
-          <WasteManagementView language={language} currentUser={currentUser} />
-        )}
-        {activeSection === 'wastewater' && (
-          <WastewaterManagementView language={language} currentUser={currentUser} />
-        )}
-        {activeSection === 'air-water-soil' && (
-          <AirWaterSoilMonitoringView language={language} />
-        )}
-        {activeSection === 'five-s' && (
-          <FiveSModuleView language={language} currentUser={currentUser} />
-        )}
-        {activeSection === 'env-reports' && (
-          <EnvironmentReports language={language} />
-        )}
+          {/* ENVIRONMENT SUB-MODULES */}
+          {activeSection === 'env-dashboard' && (
+            <EnvironmentDashboard language={language} onNavigate={handleNavigate} />
+          )}
+          {activeSection === 'env-monitoring' && (
+            <EnvironmentalMonitoringView language={language} currentUser={currentUser} />
+          )}
+          {activeSection === 'waste-management' && (
+            <WasteManagementView language={language} currentUser={currentUser} />
+          )}
+          {activeSection === 'wastewater' && (
+            <WastewaterManagementView language={language} currentUser={currentUser} />
+          )}
+          {activeSection === 'air-water-soil' && (
+            <AirWaterSoilMonitoringView language={language} />
+          )}
+          {activeSection === 'five-s' && (
+            <FiveSModuleView language={language} currentUser={currentUser} />
+          )}
+          {activeSection === 'env-reports' && (
+            <EnvironmentReports language={language} />
+          )}
+        </SubViewTransition>
       </main>
     </div>
   );

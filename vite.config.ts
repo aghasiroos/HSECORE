@@ -35,6 +35,7 @@ export default defineConfig(() => {
         'html-to-image',
         'fast-xml-parser',
         'motion',
+        'motion/react',
       ],
     },
     server: {

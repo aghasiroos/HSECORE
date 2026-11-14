@@ -47,6 +47,7 @@ import { PsmPersonalWorkspace } from './PsmPersonalWorkspace';
 import { PsmExecutiveDashboard } from './PsmExecutiveDashboard';
 import { PsmProjectFormWizard, PsmProjectFormPayload } from './PsmProjectFormWizard';
 import PersianDatePicker from '../../components/common/PersianDatePicker';
+import { SubViewTransition, PsmSubmoduleSkeleton } from '../../motion';
 
 interface PsmManagementModuleProps {
   language?: 'fa' | 'en';
@@ -942,7 +943,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                     key={zone.key}
                     type="button"
                     onClick={() => handleSelectZone(zone.key)}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition cursor-pointer ${
+                    className={`hse-motion-tab flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap cursor-pointer ${
                       isZoneActive
                         ? 'bg-amber-500 text-slate-950 shadow-xs font-black'
                         : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/60 dark:hover:bg-slate-700/50'
@@ -992,7 +993,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                   key={tab.key}
                   type="button"
                   onClick={() => handleSelectSubTab(tab.key)}
-                  className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition cursor-pointer border ${
+                  className={`hse-motion-tab flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold whitespace-nowrap cursor-pointer border ${
                     isActive
                       ? 'bg-amber-500 text-slate-950 border-amber-500 shadow-sm font-black'
                       : 'bg-white dark:bg-slate-800/80 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700/80 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
@@ -1018,6 +1019,11 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
         </div>
       </div>
 
+      {/* Initial Skeleton Loading State when fetching PSM bootstrap */}
+      {loading && projects.length === 0 ? (
+        <PsmSubmoduleSkeleton />
+      ) : (
+        <SubViewTransition viewKey={activeSubTab} isFa={true}>
       {/* Empty State when no project exists yet (Zero Fake Data Policy) */}
       {/* Empty State when no project exists yet (on dashboard) */}
       {!loading && projects.length === 0 && activeSubTab === 'dashboard' && (
@@ -2827,11 +2833,13 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
           )}
         </>
       )}
+        </SubViewTransition>
+      )}
 
       {/* Create New PSM Project Smart Wizard Modal */}
       {showCreateProjectModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-          <div className="max-w-5xl w-full my-8">
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs animate-fade-in flex items-center justify-center p-4 overflow-y-auto">
+          <div className="max-w-5xl w-full my-8 animate-scaleIn">
             <PsmProjectFormWizard
               mode="create"
               centralOrg={centralOrg}
