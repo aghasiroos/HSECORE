@@ -1,4 +1,6 @@
 <div align="center">
+  
+<img width="1871" height="840" alt="HSECORE Industrial Safety Login Interface" src="https://github.com/user-attachments/assets/43a4f11f-01bb-40e7-998b-7fbd837a4767" />
 
 # HSECORE
 ### هسته مرکزی مدیریت ایمنی، بهداشت و محیط زیست
