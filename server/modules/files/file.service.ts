@@ -31,6 +31,19 @@ export interface DocumentVersionDTO {
   previewUrl: string;
 }
 
+export interface DocumentExtraAttachmentDTO {
+  fileId: string;
+  originalName: string;
+  mimeType: string;
+  fileSize: number;
+  role: string;
+  title: string;
+  uploadedBy: string;
+  createdAt: string;
+  downloadUrl: string;
+  previewUrl: string;
+}
+
 export interface HseDocumentDTO {
   id: number;
   documentId: string; // Logical entityId grouping versions
@@ -55,6 +68,8 @@ export interface HseDocumentDTO {
   downloadUrl: string;
   previewUrl: string;
   versions: DocumentVersionDTO[];
+  tabMetadata?: Record<string, any>;
+  extraAttachments?: DocumentExtraAttachmentDTO[];
 }
 
 export interface SystemFileDTO {
@@ -1007,7 +1022,43 @@ export class FileService {
   // HSE Instructions & Documents Management (Backed by system_files)
   // ==========================================================================
 
-  private buildHseDocumentsFromRows(rows: SystemFileDTO[]): HseDocumentDTO[] {
+  private parseTabMetadataInput(raw: any): Record<string, any> {
+    if (!raw) return {};
+    if (typeof raw === 'string') {
+      try {
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+      } catch {
+        return {};
+      }
+    }
+    if (typeof raw === 'object' && !Array.isArray(raw)) {
+      return { ...raw };
+    }
+    return {};
+  }
+
+  private mapExtraAttachmentRow(f: SystemFileDTO): DocumentExtraAttachmentDTO {
+    const meta = (f.metadata && typeof f.metadata === 'object') ? f.metadata : {};
+    const normalizedName = normalizeUploadedFilename(f.originalName);
+    return {
+      fileId: f.fileId,
+      originalName: normalizedName,
+      mimeType: f.mimeType,
+      fileSize: f.fileSize,
+      role: String(meta.attachmentRole || 'OTHER'),
+      title: String(meta.title || normalizedName),
+      uploadedBy: f.uploadedBy || 'کاربر سیستم',
+      createdAt: f.createdAt,
+      downloadUrl: `/api/v1/files/${f.fileId}/download`,
+      previewUrl: `/api/v1/files/${f.fileId}/preview`,
+    };
+  }
+
+  private buildHseDocumentsFromRows(
+    rows: SystemFileDTO[],
+    extraAttachmentsByDoc?: Map<string, DocumentExtraAttachmentDTO[]>
+  ): HseDocumentDTO[] {
     const grouped = new Map<string, SystemFileDTO[]>();
 
     for (const row of rows) {
@@ -1053,6 +1104,10 @@ export class FileService {
       });
 
       const normalizedCurrentName = normalizeUploadedFilename(current.originalName);
+      const tabMetadata =
+        meta.tabMetadata && typeof meta.tabMetadata === 'object' && !Array.isArray(meta.tabMetadata)
+          ? meta.tabMetadata
+          : {};
 
       result.push({
         id: current.id,
@@ -1078,6 +1133,8 @@ export class FileService {
         downloadUrl: `/api/v1/files/${current.fileId}/download`,
         previewUrl: `/api/v1/files/${current.fileId}/preview`,
         versions,
+        tabMetadata,
+        extraAttachments: extraAttachmentsByDoc?.get(documentId) || [],
       });
     }
 
@@ -1093,6 +1150,7 @@ export class FileService {
     status?: string;
   }): Promise<HseDocumentDTO[]> {
     let rawFiles: SystemFileDTO[] = [];
+    let rawExtraFiles: SystemFileDTO[] = [];
 
     try {
       const dbRows = await db
@@ -1124,14 +1182,54 @@ export class FileService {
         metadata: sanitizeMetadataForClient(f.metadata),
         createdAt: f.createdAt.toISOString(),
       }));
+
+      const extraRows = await db
+        .select()
+        .from(schema.systemFiles)
+        .where(
+          and(
+            eq(schema.systemFiles.entityType, 'DOCUMENT_ATTACHMENT'),
+            isNull(schema.systemFiles.deletedAt)
+          )
+        )
+        .orderBy(desc(schema.systemFiles.createdAt));
+
+      rawExtraFiles = extraRows.map((f) => ({
+        id: f.id,
+        fileId: f.fileId,
+        entityType: f.entityType,
+        entityId: f.entityId,
+        originalName: normalizeUploadedFilename(f.originalName),
+        storedName: f.storedName,
+        mimeType: f.mimeType,
+        fileSize: f.fileSize,
+        filePath: f.filePath,
+        fileUrl: f.fileUrl || undefined,
+        uploadedBy: f.uploadedBy || undefined,
+        uploaderRole: f.uploaderRole || undefined,
+        version: f.version,
+        isPublic: f.isPublic,
+        metadata: sanitizeMetadataForClient(f.metadata),
+        createdAt: f.createdAt.toISOString(),
+      }));
     } catch (e) {
       logger.warn('Fallback to inMemoryFiles for listHseDocuments', e);
       rawFiles = inMemoryFiles
         .filter((f) => f.entityType === 'DOCUMENT')
         .map((f) => ({ ...f, metadata: sanitizeMetadataForClient(f.metadata) }));
+      rawExtraFiles = inMemoryFiles
+        .filter((f) => f.entityType === 'DOCUMENT_ATTACHMENT')
+        .map((f) => ({ ...f, metadata: sanitizeMetadataForClient(f.metadata) }));
     }
 
-    let docs = this.buildHseDocumentsFromRows(rawFiles);
+    const extraByDoc = new Map<string, DocumentExtraAttachmentDTO[]>();
+    for (const ex of rawExtraFiles) {
+      const list = extraByDoc.get(ex.entityId) || [];
+      list.push(this.mapExtraAttachmentRow(ex));
+      extraByDoc.set(ex.entityId, list);
+    }
+
+    let docs = this.buildHseDocumentsFromRows(rawFiles, extraByDoc);
 
     if (filters?.status && filters.status !== 'ALL') {
       docs = docs.filter((d) => d.status === filters.status);
@@ -1150,11 +1248,29 @@ export class FileService {
           d.documentNumber.toLowerCase().includes(q) ||
           d.unitName.toLowerCase().includes(q) ||
           d.description.toLowerCase().includes(q) ||
-          d.originalName.toLowerCase().includes(q)
+          d.originalName.toLowerCase().includes(q) ||
+          JSON.stringify(d.tabMetadata || {}).toLowerCase().includes(q)
       );
     }
 
     return docs;
+  }
+
+  async getHseDocumentById(documentId: string): Promise<HseDocumentDTO> {
+    const mainFiles = await this.getFilesForEntity('DOCUMENT', documentId);
+    if (!mainFiles || mainFiles.length === 0) {
+      throw new NotFoundError('مستند مورد نظر در پایگاه داده یافت نشد.');
+    }
+    const extraFiles = await this.getFilesForEntity('DOCUMENT_ATTACHMENT', documentId);
+    const extraMap = new Map<string, DocumentExtraAttachmentDTO[]>();
+    if (extraFiles.length > 0) {
+      extraMap.set(
+        documentId,
+        extraFiles.map((ex) => this.mapExtraAttachmentRow(ex))
+      );
+    }
+    const [doc] = this.buildHseDocumentsFromRows(mainFiles, extraMap);
+    return doc;
   }
 
   async createHseDocument(params: {
@@ -1166,6 +1282,7 @@ export class FileService {
     issueDate: string;
     expiryDate?: string;
     description?: string;
+    tabMetadata?: any;
     originalName: string;
     mimeType: string;
     fileBuffer: Buffer;
@@ -1184,6 +1301,7 @@ export class FileService {
 
     const documentId = `DOC-${uuidv4()}`;
     const nowIso = new Date().toISOString();
+    const parsedTabMetadata = this.parseTabMetadataInput(params.tabMetadata);
 
     const metadata = {
       title: params.title.trim(),
@@ -1194,6 +1312,7 @@ export class FileService {
       issueDate: (params.issueDate || '').trim(),
       expiryDate: (params.expiryDate || '').trim(),
       description: (params.description || '').trim(),
+      tabMetadata: parsedTabMetadata,
       status: 'ACTIVE' as const,
       isLatest: true,
       changeNote: 'ثبت و بارگذاری نسخه اولیه مدرک',
@@ -1231,6 +1350,7 @@ export class FileService {
     category?: HseDocumentCategory;
     unitName?: string;
     description?: string;
+    tabMetadata?: any;
     uploadedBy?: string;
     uploaderRole?: string;
   }): Promise<HseDocumentDTO> {
@@ -1243,6 +1363,9 @@ export class FileService {
     const prevMeta = (latest.metadata && typeof latest.metadata === 'object') ? latest.metadata : {};
     const nextVersion = (latest.version || 1) + 1;
     const nowIso = new Date().toISOString();
+    const prevTabMeta = this.parseTabMetadataInput(prevMeta.tabMetadata);
+    const incomingTabMeta =
+      params.tabMetadata !== undefined ? this.parseTabMetadataInput(params.tabMetadata) : null;
 
     const nextMeta = {
       ...prevMeta,
@@ -1253,6 +1376,7 @@ export class FileService {
       issueDate: params.issueDate !== undefined ? params.issueDate.trim() : prevMeta.issueDate,
       expiryDate: params.expiryDate !== undefined ? params.expiryDate.trim() : prevMeta.expiryDate,
       description: params.description !== undefined ? params.description.trim() : prevMeta.description,
+      tabMetadata: incomingTabMeta ? { ...prevTabMeta, ...incomingTabMeta } : prevTabMeta,
       status: prevMeta.status || 'ACTIVE',
       isLatest: true,
       changeNote: (params.changeNote || `جایگزینی و انتشار نسخه ${nextVersion}`).trim(),
@@ -1269,6 +1393,7 @@ export class FileService {
         category: nextMeta.category,
         unitName: nextMeta.unitName,
         description: nextMeta.description,
+        tabMetadata: nextMeta.tabMetadata,
         status: nextMeta.status,
         isLatest: false,
       };
@@ -1315,9 +1440,7 @@ export class FileService {
       },
     });
 
-    const allFiles = await this.getFilesForEntity('DOCUMENT', params.documentId);
-    const [doc] = this.buildHseDocumentsFromRows(allFiles.length > 0 ? allFiles : [newFile, ...existingFiles]);
-    return doc;
+    return await this.getHseDocumentById(params.documentId);
   }
 
   async updateHseDocumentMetadata(
@@ -1331,6 +1454,7 @@ export class FileService {
       issueDate?: string;
       expiryDate?: string;
       description?: string;
+      tabMetadata?: any;
       status?: 'ACTIVE' | 'ARCHIVED';
     },
     actorName?: string
@@ -1348,10 +1472,13 @@ export class FileService {
     }
 
     const nowIso = new Date().toISOString();
+    const incomingTabMeta =
+      updates.tabMetadata !== undefined ? this.parseTabMetadataInput(updates.tabMetadata) : null;
 
     for (let i = 0; i < existingFiles.length; i++) {
       const f = existingFiles[i];
       const prevMeta = (f.metadata && typeof f.metadata === 'object') ? f.metadata : {};
+      const prevTabMeta = this.parseTabMetadataInput(prevMeta.tabMetadata);
       const nextMeta = {
         ...prevMeta,
         title: updates.title !== undefined ? updates.title.trim() : prevMeta.title,
@@ -1367,6 +1494,7 @@ export class FileService {
         expiryDate:
           i === 0 && updates.expiryDate !== undefined ? updates.expiryDate.trim() : prevMeta.expiryDate,
         description: updates.description !== undefined ? updates.description.trim() : prevMeta.description,
+        tabMetadata: incomingTabMeta ? { ...prevTabMeta, ...incomingTabMeta } : prevTabMeta,
         status: updates.status !== undefined ? updates.status : prevMeta.status || 'ACTIVE',
         updatedAt: nowIso,
         updatedBy: actorName || 'کاربر سیستم',
@@ -1400,9 +1528,69 @@ export class FileService {
       details: { updatedBy: actorName },
     });
 
-    const refreshed = await this.getFilesForEntity('DOCUMENT', documentId);
-    const [doc] = this.buildHseDocumentsFromRows(refreshed);
-    return doc;
+    return await this.getHseDocumentById(documentId);
+  }
+
+  async addDocumentAttachment(params: {
+    documentId: string;
+    fileBuffer: Buffer;
+    originalName: string;
+    mimeType: string;
+    role?: string;
+    title?: string;
+    uploadedBy?: string;
+    uploaderRole?: string;
+  }): Promise<HseDocumentDTO> {
+    const existingFiles = await this.getFilesForEntity('DOCUMENT', params.documentId);
+    if (!existingFiles || existingFiles.length === 0) {
+      throw new NotFoundError('مستند اصلی برای پیوست فایل یافت نشد.');
+    }
+
+    const saved = await this.saveFile({
+      entityType: 'DOCUMENT_ATTACHMENT',
+      entityId: params.documentId,
+      originalName: params.originalName,
+      mimeType: params.mimeType,
+      fileBuffer: params.fileBuffer,
+      uploadedBy: params.uploadedBy,
+      uploaderRole: params.uploaderRole,
+      version: 1,
+      isPublic: false,
+      metadata: {
+        attachmentRole: String(params.role || 'OTHER'),
+        title: (params.title || params.originalName).trim(),
+      },
+    });
+
+    await auditService.log({
+      action: 'ADD_DOCUMENT_ATTACHMENT',
+      module: 'DOCUMENTS',
+      entityType: 'DOCUMENT',
+      entityId: params.documentId,
+      newValue: {
+        fileId: saved.fileId,
+        originalName: saved.originalName,
+        role: params.role || 'OTHER',
+      },
+      details: { uploadedBy: params.uploadedBy },
+    });
+
+    return await this.getHseDocumentById(params.documentId);
+  }
+
+  async deleteDocumentAttachment(
+    documentId: string,
+    fileId: string,
+    actorName?: string
+  ): Promise<HseDocumentDTO> {
+    const extraFiles = await this.getFilesForEntity('DOCUMENT_ATTACHMENT', documentId);
+    const target = extraFiles.find((f) => f.fileId === fileId);
+    if (!target) {
+      throw new NotFoundError('فایل پیوست مورد نظر برای این مستند یافت نشد.');
+    }
+
+    await this.softDeleteFile(fileId, actorName);
+    return await this.getHseDocumentById(documentId);
   }
 
   async deleteHseDocument(documentId: string, actorName?: string): Promise<void> {
@@ -1424,8 +1612,8 @@ export class FileService {
         .set({ deletedAt: new Date() })
         .where(
           and(
-            eq(schema.systemFiles.entityType, 'DOCUMENT'),
-            eq(schema.systemFiles.entityId, documentId)
+            eq(schema.systemFiles.entityId, documentId),
+            sql`${schema.systemFiles.entityType} IN ('DOCUMENT', 'DOCUMENT_ATTACHMENT')`
           )
         );
     } catch (e) {

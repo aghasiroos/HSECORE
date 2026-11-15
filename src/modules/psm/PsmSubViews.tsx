@@ -37,6 +37,7 @@ import {
   PSM_CAPA_STAGES,
   PSM_STAGE_GATES,
 } from './psmStandardsCatalog';
+import { PsmDeepLinkAction } from './psmGuidedEngine';
 
 interface PsmSubViewsProps {
   activeSubTab: string;
@@ -50,6 +51,8 @@ interface PsmSubViewsProps {
     capaItems: any[];
     studies: any[];
     maturityRecords: any[];
+    stageGates?: any[];
+    gateDeviations?: any[];
   };
   centralOrg: {
     companies: any[];
@@ -59,12 +62,24 @@ interface PsmSubViewsProps {
     positions: any[];
     personnel: any[];
     linkedModulesSummary: Record<string, number>;
+    centralAutofillCatalog?: Array<{
+      sourceModule: string;
+      sourceModuleLabel: string;
+      recordId: number | string;
+      code: string;
+      title: string;
+      unitName: string;
+      validityStatus: string;
+    }>;
   };
   auditLogs: any[];
   permissions: { canWrite: boolean; canApprove: boolean };
   apiRequest: (path: string, options?: RequestInit) => Promise<any>;
   onRefresh: () => Promise<void>;
   availableUnits: string[];
+  activeDeepLinkContext?: PsmDeepLinkAction | null;
+  onClearDeepLinkContext?: () => void;
+  onExecuteDeepLink?: (deepLink: PsmDeepLinkAction) => void;
 }
 
 export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
@@ -77,12 +92,14 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
   apiRequest,
   onRefresh,
   availableUnits,
+  activeDeepLinkContext,
 }) => {
   // ==========================================================================
   // STAGE GATES GOVERNANCE & ENGINE (موتور حاکمیت و کنترل مراحل پروژه PSM)
   // ==========================================================================
-  const [stageGates, setStageGates] = useState<any[]>([]);
-  const [gateDeviations, setGateDeviations] = useState<any[]>([]);
+  const [stageGates, setStageGates] = useState<any[]>(projectData.stageGates || []);
+  const [gateDeviations, setGateDeviations] = useState<any[]>(projectData.gateDeviations || []);
+  const [gateViewRoleMode, setGateViewRoleMode] = useState<'SIMPLE_USER' | 'APPROVER_FULL'>('SIMPLE_USER');
   const [gatesSummary, setGatesSummary] = useState<any>(null);
   const [loadingGates, setLoadingGates] = useState(false);
   const [selectedGateKey, setSelectedGateKey] = useState<string>('G1');
@@ -495,6 +512,162 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
   const [auditEntityTypeFilter, setAuditEntityTypeFilter] = useState<string>('ALL');
   const [auditSearchQuery, setAuditSearchQuery] = useState<string>('');
   const [selectedAuditLog, setSelectedAuditLog] = useState<any | null>(null);
+
+  // Sync stageGates from projectData when bootstrap refreshes
+  useEffect(() => {
+    if (Array.isArray(projectData.stageGates) && projectData.stageGates.length > 0) {
+      setStageGates(projectData.stageGates);
+    }
+    if (Array.isArray(projectData.gateDeviations)) {
+      setGateDeviations(projectData.gateDeviations);
+    }
+  }, [projectData.stageGates, projectData.gateDeviations]);
+
+  // Principle 2: Automatically open and pre-fill the target form/modal when navigated via activeDeepLinkContext
+  useEffect(() => {
+    if (!activeDeepLinkContext) return;
+    const p = activeDeepLinkContext.prefillData || {};
+    const defaultPerson =
+      p.responsiblePersonName ||
+      activeProject?.projectManagerName ||
+      centralOrg.personnel[0]?.fullName ||
+      'مهندس علیرضا سلیمانی';
+    const defaultUnit = p.unitName || availableUnits[0] || 'واحد الفین';
+
+    switch (activeDeepLinkContext.actionType) {
+      case 'OPEN_GAP_FORM':
+      case 'CONVERT_GAP_TO_PLAN': {
+        if (activeDeepLinkContext.actionType === 'OPEN_GAP_FORM') {
+          setNewGap((prev) => ({
+            ...prev,
+            title: p.title || prev.title,
+            description: p.description || prev.description,
+            ccpsElementCode: p.elementCode || prev.ccpsElementCode || 'CCPS-06',
+            unitName: defaultUnit,
+            riskLevel: p.riskLevel || prev.riskLevel || 'HIGH',
+            responsiblePersonName: defaultPerson,
+          }));
+          setShowNewGapForm(true);
+        }
+        break;
+      }
+      case 'EXTEND_GAP_DEADLINE': {
+        if (p.recordId) {
+          const foundGap = projectData.gaps.find((g) => Number(g.id) === Number(p.recordId));
+          if (foundGap) {
+            setExtendingGap(foundGap);
+            setExtensionNewDate(new Date(Date.now() + 21 * 86400000).toISOString().slice(0, 10));
+          }
+        }
+        break;
+      }
+      case 'OPEN_WBS_FORM': {
+        setNewWbs((prev) => ({
+          ...prev,
+          title: p.title || prev.title,
+          elementCode: p.elementCode || prev.elementCode || 'CCPS-06',
+          unitName: defaultUnit,
+          ownerName: defaultPerson,
+          executorName: defaultPerson,
+        }));
+        setShowNewWbsForm(true);
+        break;
+      }
+      case 'OPEN_DOCUMENT_FORM': {
+        setNewDoc((prev) => ({
+          ...prev,
+          title: p.title || prev.title,
+          ccpsElementCode: p.elementCode || prev.ccpsElementCode || 'CCPS-06',
+          unitName: defaultUnit,
+          authorName: defaultPerson,
+          reviewerName: activeProject?.projectManagerName || defaultPerson,
+          approverName: activeProject?.sponsorName || activeProject?.projectSponsorName || defaultPerson,
+        }));
+        setShowNewDocForm(true);
+        break;
+      }
+      case 'REVISE_DOCUMENT':
+      case 'APPROVE_DOCUMENT': {
+        if (p.recordId) {
+          const foundDoc = projectData.documents.find((d) => Number(d.id) === Number(p.recordId));
+          if (foundDoc) {
+            setEditingDocRevision(foundDoc);
+            setDocRevisionForm({
+              title: foundDoc.title || '',
+              version: String((parseFloat(foundDoc.version || '1.0') + 0.1).toFixed(1)),
+              validityExpiryDate:
+                foundDoc.validityExpiryDate || new Date(Date.now() + 365 * 86400000).toISOString().slice(0, 10),
+              evidenceSummary: foundDoc.evidenceSummary || '',
+              changeNote: 'تکمیل شواهد اجرایی و بازنگری مدرک بر اساس راهنمای راهبر هوشمند PSM',
+            });
+          }
+        }
+        break;
+      }
+      case 'OPEN_CAPA_FORM': {
+        setNewCapa((prev) => ({
+          ...prev,
+          title: p.title || prev.title,
+          deficiencyDescription: p.description || prev.deficiencyDescription,
+          ccpsElementCode: p.elementCode || prev.ccpsElementCode || 'CCPS-10',
+          unitName: defaultUnit,
+          responsiblePersonName: defaultPerson,
+        }));
+        setShowNewCapaForm(true);
+        break;
+      }
+      case 'TRANSITION_CAPA': {
+        if (p.recordId) {
+          const foundCapa = projectData.capaItems.find((c) => Number(c.id) === Number(p.recordId));
+          if (foundCapa) {
+            const currentIdx = PSM_CAPA_STAGES.findIndex((s) => s.key === foundCapa.stage);
+            const nextStage =
+              PSM_CAPA_STAGES[Math.min(PSM_CAPA_STAGES.length - 1, currentIdx + 1)]?.key || foundCapa.stage;
+            setActiveCapaModal(foundCapa);
+            setCapaTransitionForm((prev) => ({
+              ...prev,
+              targetStage: nextStage,
+              rootCause: foundCapa.rootCause || prev.rootCause,
+              correctiveAction: foundCapa.correctiveAction || prev.correctiveAction,
+              responsiblePersonName: foundCapa.responsiblePersonName || defaultPerson,
+              dueDate: foundCapa.dueDate || prev.dueDate,
+              evidenceDescription: foundCapa.evidenceDescription || '',
+            }));
+          }
+        }
+        break;
+      }
+      case 'OPEN_STUDY_FORM': {
+        setNewStudy((prev) => ({
+          ...prev,
+          subsystemType: p.subsystemType || prev.subsystemType || 'HAZOP',
+          title: p.title || prev.title,
+          unitName: defaultUnit,
+          ownerName: defaultPerson,
+          teamLeader: activeProject?.projectManagerName || defaultPerson,
+        }));
+        setShowNewStudyForm(true);
+        break;
+      }
+      case 'OPEN_GATE_EVALUATION':
+      case 'OPEN_GATE_DECISION': {
+        if (p.gateKey) {
+          setSelectedGateKey(p.gateKey);
+          if (activeDeepLinkContext.actionType === 'OPEN_GATE_DECISION') {
+            setGateViewRoleMode('APPROVER_FULL');
+          }
+        }
+        break;
+      }
+      case 'OPEN_MATURITY_FORM': {
+        setMaturityAssessor(defaultPerson);
+        setMaturityUnitScope(defaultUnit);
+        break;
+      }
+      default:
+        break;
+    }
+  }, [activeDeepLinkContext, activeProject, availableUnits, centralOrg.personnel, projectData.capaItems, projectData.documents, projectData.gaps]);
 
   // Handlers
   const handleAutoExtractAllGaps = async () => {
@@ -1010,7 +1183,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="space-y-1">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-black bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-black bg-blue-500/10 text-blue-700 dark:text-blue-400 border border-blue-500/20">
                 <ShieldCheck className="w-3.5 h-3.5" />
                 <span>موتور حاکمیت و کنترل مراحل پروژه PSM</span>
               </div>
@@ -1022,7 +1195,33 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
               </p>
             </div>
 
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-wrap items-center gap-2.5">
+              {/* Section 10: Simplified User View vs Approver Full View Toggle */}
+              <div className="flex items-center gap-1 p-1 rounded-2xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                <button
+                  type="button"
+                  onClick={() => setGateViewRoleMode('SIMPLE_USER')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                    gateViewRoleMode === 'SIMPLE_USER'
+                      ? 'bg-blue-600 text-white font-black shadow-2xs'
+                      : 'text-slate-600 dark:text-slate-300'
+                  }`}
+                >
+                  نمای ساده کارشناسان (فقط کارهای باقی‌مانده)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setGateViewRoleMode('APPROVER_FULL')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                    gateViewRoleMode === 'APPROVER_FULL'
+                      ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900 font-black shadow-2xs'
+                      : 'text-slate-600 dark:text-slate-300'
+                  }`}
+                >
+                  نمای کامل مدیر و تأییدکننده (معیارها و تصمیم‌گیری)
+                </button>
+              </div>
+
               <button
                 type="button"
                 onClick={() => fetchStageGates()}
@@ -1049,7 +1248,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
             </div>
             <div className="bg-slate-50 dark:bg-slate-800/50 p-3.5 rounded-2xl border border-slate-200/60 dark:border-slate-700/50">
               <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400">پیشرفت حاکمیت پروژه</div>
-              <div className="text-lg font-black text-amber-600 dark:text-amber-400 mt-0.5 font-mono">
+              <div className="text-lg font-black text-blue-600 dark:text-blue-400 mt-0.5 font-mono">
                 {progressPct}٪
               </div>
             </div>
@@ -1086,7 +1285,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
               } else if (status === 'REJECTED') {
                 badgeBg = 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30';
               } else if (status === 'SUSPENDED') {
-                badgeBg = 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30';
+                badgeBg = 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/30';
               }
 
               return (
@@ -1095,7 +1294,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
                   onClick={() => setSelectedGateKey(gate.gateKey)}
                   className={`p-4 rounded-2xl border transition cursor-pointer relative flex flex-col justify-between ${
                     isSelected
-                      ? 'border-amber-500 dark:border-amber-400 bg-amber-500/5 ring-2 ring-amber-500/20 shadow-md'
+                      ? 'border-blue-500 dark:border-blue-400 bg-blue-500/5 ring-2 ring-blue-500/20 shadow-md'
                       : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-slate-300'
                   }`}
                 >
@@ -1148,6 +1347,89 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
           const catalogGate = PSM_STAGE_GATES.find((g) => g.gateKey === selectedGate.gateKey);
           const entryCriteria = selectedGate.entryCriteriaFa || catalogGate?.entryCriteriaFa || [];
           const exitCriteria = selectedGate.exitCriteriaFa || catalogGate?.exitCriteriaFa || [];
+          const gateBlockers: string[] = selectedGate.evaluation?.blockingIssues || selectedGate.blockingIssues || [];
+
+          if (gateViewRoleMode === 'SIMPLE_USER') {
+            return (
+              <div className="bg-white dark:bg-slate-900 border-2 border-blue-500/40 rounded-2xl p-6 shadow-xs space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 dark:border-slate-800 pb-4">
+                  <div>
+                    <span className="px-2.5 py-0.5 rounded-lg bg-blue-500/15 text-blue-700 dark:text-blue-300 text-xs font-black">
+                      راهنمای ساده عبور از دروازه {selectedGate.gateKey} — ویژه کارشناسان و مجریان
+                    </span>
+                    <h3 className="text-base font-black text-slate-900 dark:text-white mt-1.5">
+                      {selectedGate.titleFa}
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-0.5">{selectedGate.descriptionFa}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setGateViewRoleMode('APPROVER_FULL')}
+                    className="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-200 text-xs font-bold cursor-pointer"
+                  >
+                    مشاهده چک‌لیست کامل مدیریتی ←
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                  <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
+                    <div className="text-slate-400 font-bold">مسئول آماده‌سازی مدارک این مرحله</div>
+                    <div className="font-black text-slate-900 dark:text-white mt-1">
+                      {selectedGate.preparedByName || catalogGate?.defaultPreparerRoleFa || activeProject?.projectManagerName || 'مدیر پروژه PSM'}
+                    </div>
+                  </div>
+                  <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
+                    <div className="text-slate-400 font-bold">مقام تصویب‌کننده دروازه</div>
+                    <div className="font-black text-slate-900 dark:text-white mt-1">
+                      {selectedGate.approverName || catalogGate?.defaultApproverRoleFa || activeProject?.sponsorName || 'حامی پروژه'}
+                    </div>
+                  </div>
+                  <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
+                    <div className="text-slate-400 font-bold">وضعیت فعلی عبور از مرحله</div>
+                    <div className="font-black text-blue-600 dark:text-blue-400 mt-1">
+                      {selectedGate.status === 'APPROVED'
+                        ? 'تأیید و تکمیل شده'
+                        : gateBlockers.length > 0
+                        ? `متوقف — ${gateBlockers.length} مورد ناقص باقی‌مانده`
+                        : 'آماده ارسال برای تأیید مدیر'}
+                    </div>
+                  </div>
+                </div>
+
+                {gateBlockers.length > 0 ? (
+                  <div className="p-4 rounded-2xl bg-rose-500/5 border border-rose-500/30 space-y-2.5">
+                    <div className="text-xs font-black text-rose-700 dark:text-rose-300 flex items-center gap-1.5">
+                      <AlertTriangle className="w-4 h-4" />
+                      <span>موارد ناقص و کارهای باقی‌مانده برای باز شدن این دروازه:</span>
+                    </div>
+                    <ul className="space-y-1.5 text-xs text-slate-700 dark:text-slate-200 list-disc list-inside">
+                      {gateBlockers.map((b, idx) => (
+                        <li key={idx} className="leading-relaxed font-medium">
+                          {b}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : (
+                  <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-xs font-bold text-emerald-700 dark:text-emerald-300 flex items-center justify-between">
+                    <span>تمامی مدارک و الزامات این مرحله تکمیل شده و آماده تصویب نهایی توسط مدیر است.</span>
+                    {permissions.canApprove && selectedGate.status !== 'APPROVED' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setGateViewRoleMode('APPROVER_FULL');
+                          setShowGateDecisionModal(true);
+                        }}
+                        className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black cursor-pointer"
+                      >
+                        ثبت تأییدیه مرحله {selectedGate.gateKey}
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          }
 
           return (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -1157,7 +1439,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
               <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-xs space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <div className="text-xs font-black text-amber-600 dark:text-amber-400 uppercase tracking-wider">
+                    <div className="text-xs font-black text-blue-600 dark:text-blue-400 uppercase tracking-wider">
                       دروازه کنترلی شماره {selectedGate.gateNumber} ({selectedGate.gateKey})
                     </div>
                     <h3 className="text-lg font-black text-slate-900 dark:text-white mt-1">
@@ -1176,7 +1458,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
                           : selectedGate.status === 'REJECTED'
                           ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30'
                           : selectedGate.status === 'SUSPENDED'
-                          ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30'
+                          ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/30'
                           : selectedGate.status === 'IN_REVIEW'
                           ? 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/30'
                           : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300 border-slate-200 dark:border-slate-700'
@@ -1204,7 +1486,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
                             setGateApproverInput(selectedGate.approverName || catalogGate?.defaultApproverRoleFa || 'حامی پروژه و مدیرعامل');
                             setEditingGateRoles(true);
                           }}
-                          className="text-[11px] font-bold text-amber-600 dark:text-amber-400 hover:underline cursor-pointer"
+                          className="text-[11px] font-bold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
                         >
                           تغییر و انتصاب مسئولین
                         </button>
@@ -1236,7 +1518,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
                         <input
                           type="text"
                           required
-                          list="psm-central-personnel-list"
+                          list="psm-personnel-list"
                           value={gatePreparerInput}
                           onChange={(e) => setGatePreparerInput(e.target.value)}
                           className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
@@ -1247,7 +1529,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
                         <input
                           type="text"
                           required
-                          list="psm-central-personnel-list"
+                          list="psm-personnel-list"
                           value={gateApproverInput}
                           onChange={(e) => setGateApproverInput(e.target.value)}
                           className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
@@ -1265,7 +1547,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
                       <button
                         type="submit"
                         disabled={savingGateRoles}
-                        className="px-4 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-black cursor-pointer"
+                        className="px-4 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black cursor-pointer"
                       >
                         {savingGateRoles ? 'در حال ثبت...' : 'ذخیره مسئولین دروازه'}
                       </button>
@@ -1336,7 +1618,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
               <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-xs space-y-4">
                 <div className="flex items-center justify-between">
                   <h4 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
-                    <ListChecks className="w-4 h-4 text-amber-500" />
+                    <ListChecks className="w-4 h-4 text-blue-500" />
                     <span>چک‌لیست الزامات اجباری خروج از دروازه (Mandatory Exit Checklist)</span>
                   </h4>
                   <span className="text-[11px] font-bold text-slate-400">ارزیابی خودکار سمت سرور</span>
@@ -1371,7 +1653,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
                           className={`px-2 py-0.5 rounded text-[10px] font-black shrink-0 ${
                             isChecked
                               ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300'
-                              : 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300'
+                              : 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300'
                           }`}
                         >
                           {isChecked ? 'احراز شده' : 'در انتظار احراز'}
@@ -1434,7 +1716,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
                     type="button"
                     onClick={() => handleEvaluateGate(selectedGate.gateKey)}
                     disabled={evaluatingGateKey === selectedGate.gateKey}
-                    className="text-[11px] font-bold text-amber-600 hover:text-amber-700 cursor-pointer flex items-center gap-1"
+                    className="text-[11px] font-bold text-blue-600 hover:text-blue-700 cursor-pointer flex items-center gap-1"
                   >
                     <RefreshCw className={`w-3 h-3 ${evaluatingGateKey === selectedGate.gateKey ? 'animate-spin' : ''}`} />
                     <span>ارزیابی مجدد</span>
@@ -1520,7 +1802,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
                         setGateDecisionType('SUSPENDED');
                         setShowGateDecisionModal(true);
                       }}
-                      className="px-2.5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-[11px] font-black shadow-xs disabled:opacity-40 transition cursor-pointer flex items-center justify-center gap-1"
+                      className="px-2.5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-black shadow-xs disabled:opacity-40 transition cursor-pointer flex items-center justify-center gap-1"
                     >
                       <Clock className="w-3.5 h-3.5 shrink-0" />
                       <span>تعلیق</span>
@@ -1656,7 +1938,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
                               ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300'
                               : dev.status === 'REJECTED'
                               ? 'bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300'
-                              : 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300'
+                              : 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300'
                           }`}
                         >
                           {dev.status === 'APPROVED' ? 'تصویب‌شده' : dev.status === 'REJECTED' ? 'رد شده' : 'در انتظار بررسی'}
@@ -1881,19 +2163,19 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
                 </div>
 
                 {/* Legal / Statutory Checkbox */}
-                <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/20 space-y-1.5">
+                <div className="p-3.5 rounded-2xl bg-blue-500/10 border border-blue-500/20 space-y-1.5">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
                       checked={newDeviation.isLegalRequirement}
                       onChange={(e) => setNewDeviation({ ...newDeviation, isLegalRequirement: e.target.checked })}
-                      className="rounded border-slate-300 text-amber-600 focus:ring-amber-500 w-4 h-4"
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-4 h-4"
                     />
-                    <span className="font-bold text-amber-900 dark:text-amber-300">
+                    <span className="font-bold text-blue-900 dark:text-blue-300">
                       این مورد از الزامات قانونی، استانداردهای ملی یا مقررات اجباری است
                     </span>
                   </label>
-                  <p className="text-[10.5px] text-amber-700 dark:text-amber-400 mr-6">
+                  <p className="text-[10.5px] text-blue-700 dark:text-blue-400 mr-6">
                     توجه به قانون سوم: بر اساس قوانین حاکمیت PSM، الزامات قانونی تحت هیچ شرایطی قابل چشم‌پوشی یا انحراف نبوده و توسط سیستم مسدود خواهند شد.
                   </p>
                 </div>
@@ -1993,12 +2275,12 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 flex items-center justify-between">
             <div>
               <div className="text-[11px] font-bold text-slate-500">استثنائات خارج از دامنه مصوب</div>
-              <div className="text-xl font-black font-mono text-amber-600 dark:text-amber-400 mt-1">
+              <div className="text-xl font-black font-mono text-blue-600 dark:text-blue-400 mt-1">
                 {outOfScopeGapsCount} مورد
               </div>
               <div className="text-[11px] text-slate-400 mt-0.5">دارای توجیه فنی و تأیید مقام مجاز</div>
             </div>
-            <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-600 flex items-center justify-center">
+            <div className="w-10 h-10 rounded-xl bg-blue-500/10 text-blue-600 flex items-center justify-center">
               <ShieldCheck className="w-5 h-5" />
             </div>
           </div>
@@ -2039,9 +2321,45 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
             onSubmit={handleCreateGap}
             className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-4"
           >
-            <h4 className="text-sm font-bold text-slate-800 dark:text-slate-100">
-              ثبت شکاف جدید / ثبت مورد خارج از دامنه با توجیه فنی
-            </h4>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h4 className="text-sm font-bold text-slate-800 dark:text-slate-100">
+                ثبت شکاف جدید / ثبت مورد خارج از دامنه با توجیه فنی
+              </h4>
+              <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-lg bg-teal-500/15 text-teal-700 dark:text-teal-300">
+                متصل به بانک اطلاعات مرکزی HSECORE (تکمیل خودکار بدون دوباره‌کاری)
+              </span>
+            </div>
+
+            {Array.isArray(centralOrg.centralAutofillCatalog) && centralOrg.centralAutofillCatalog.length > 0 && (
+              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 space-y-2">
+                <div className="text-[11px] font-black text-slate-700 dark:text-slate-200">
+                  فراخوانی خودکار شکاف از سوابق واقعی بانک مرکزی HSECORE (با کلیک، فرم به صورت خودکار پر می‌شود):
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {centralOrg.centralAutofillCatalog.slice(0, 6).map((rec, idx) => (
+                    <button
+                      key={`${rec.sourceModule}-${rec.recordId}-${idx}`}
+                      type="button"
+                      onClick={() => {
+                        setNewGap((prev) => ({
+                          ...prev,
+                          title: `شکاف ناشی از ${rec.sourceModuleLabel}: ${rec.title}`,
+                          description: `استخراج خودکار از بانک اطلاعات مرکزی — منبع: ${rec.sourceModuleLabel} | شناسه رکورد: ${rec.code} | وضعیت اعتبار: ${rec.validityStatus}`,
+                          unitName: rec.unitName || prev.unitName,
+                          requiredDocument: `گزارش مستند و شواهد صحه‌گذاری ${rec.code}`,
+                        }));
+                        toast.success(`اطلاعات از ${rec.sourceModuleLabel} (${rec.code}) به صورت خودکار در فرم درج شد.`);
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:border-blue-500 text-[11px] text-slate-700 dark:text-slate-200 flex items-center gap-1.5 cursor-pointer transition"
+                    >
+                      <span className="font-mono font-black text-blue-600 dark:text-blue-400">{rec.code}</span>
+                      <span className="truncate max-w-[180px]">{rec.title}</span>
+                      <span className="text-[10px] text-emerald-600 dark:text-emerald-400">({rec.sourceModuleLabel})</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
                 <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">عنوان شکاف *</label>
@@ -2149,9 +2467,9 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
               </label>
 
               {newGap.isOutOfScope && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-3.5 rounded-xl bg-amber-50/70 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/50">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-3.5 rounded-xl bg-blue-50/70 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800/50">
                   <div>
-                    <label className="block text-xs font-bold text-amber-900 dark:text-amber-200 mb-1">
+                    <label className="block text-xs font-bold text-blue-900 dark:text-blue-200 mb-1">
                       توجیه فنی مستند خارج از دامنه بودن (حداقل ۱۵ کاراکتر) *
                     </label>
                     <textarea
@@ -2159,11 +2477,11 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
                       rows={2}
                       value={newGap.technicalJustification}
                       onChange={(e) => setNewGap({ ...newGap, technicalJustification: e.target.value })}
-                      className="w-full px-3 py-2 text-xs rounded-xl border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
+                      className="w-full px-3 py-2 text-xs rounded-xl border border-blue-300 dark:border-blue-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-bold text-amber-900 dark:text-amber-200 mb-1">
+                    <label className="block text-xs font-bold text-blue-900 dark:text-blue-200 mb-1">
                       نام مقام مجاز تأییدکننده *
                     </label>
                     <input
@@ -2171,7 +2489,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
                       list="psm-personnel-list"
                       value={newGap.justificationApprovedBy}
                       onChange={(e) => setNewGap({ ...newGap, justificationApprovedBy: e.target.value })}
-                      className="w-full px-3 py-2 text-xs rounded-xl border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
+                      className="w-full px-3 py-2 text-xs rounded-xl border border-blue-300 dark:border-blue-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
                     />
                   </div>
                 </div>
@@ -2206,7 +2524,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
                 onClick={() => setGapFilterRisk(lvl)}
                 className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer whitespace-nowrap shrink-0 ${
                   gapFilterRisk === lvl
-                    ? 'bg-amber-500 text-slate-950 font-black shadow-xs'
+                    ? 'bg-blue-600 text-white font-black shadow-xs'
                     : 'bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
@@ -2284,7 +2602,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
                         <div className="font-bold text-slate-900 dark:text-slate-100">{g.title}</div>
                         <div className="text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-2">{g.description}</div>
                         {g.isOutOfScope && (
-                          <div className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">
+                          <div className="mt-1 text-[11px] text-blue-700 dark:text-blue-300">
                             خارج از دامنه (تأیید: {g.justificationApprovedBy}) — توجیه: {g.technicalJustification}
                           </div>
                         )}
@@ -2299,7 +2617,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
                             g.riskLevel === 'CRITICAL'
                               ? 'text-red-600 dark:text-red-400'
                               : g.riskLevel === 'HIGH'
-                              ? 'text-amber-600 dark:text-amber-400'
+                              ? 'text-blue-600 dark:text-blue-400'
                               : 'text-sky-600 dark:text-sky-400'
                           }
                         >
@@ -2333,7 +2651,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
                               </span>
                             )}
                             {g.linkedCapaId && (
-                              <span className="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 text-[10px] font-bold">
+                              <span className="px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400 text-[10px] font-bold">
                                 متصل به CAPA #{g.linkedCapaId}
                               </span>
                             )}
@@ -2350,7 +2668,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
                               <button
                                 type="button"
                                 onClick={() => handleConvertGap(g.id, 'CAPA')}
-                                className="px-2 py-1 rounded bg-amber-600 hover:bg-amber-700 text-white text-[10.5px] font-bold cursor-pointer whitespace-nowrap"
+                                className="px-2 py-1 rounded bg-blue-600 hover:bg-blue-700 text-white text-[10.5px] font-bold cursor-pointer whitespace-nowrap"
                               >
                                 + پرونده CAPA
                               </button>
@@ -2458,7 +2776,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
                   <button
                     type="submit"
                     disabled={submittingExtension}
-                    className="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-black shadow-md cursor-pointer disabled:opacity-50"
+                    className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black shadow-md cursor-pointer disabled:opacity-50"
                   >
                     {submittingExtension ? 'در حال ثبت...' : 'ثبت تمدید مهلت در سیستم'}
                   </button>
@@ -2537,7 +2855,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
               </div>
               <div
                 className={`text-[11px] font-bold mt-0.5 ${
-                  weightedActual >= weightedPlanned ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'
+                  weightedActual >= weightedPlanned ? 'text-emerald-600 dark:text-emerald-400' : 'text-blue-600 dark:text-blue-400'
                 }`}
               >
                 انحراف کل: {weightedActual - weightedPlanned >= 0 ? `+${weightedActual - weightedPlanned}` : weightedActual - weightedPlanned}%
@@ -2554,7 +2872,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
               <div className="text-xl font-black font-mono text-rose-600 dark:text-rose-400 mt-1">
                 {criticalTasksCount} بحرانی
               </div>
-              <div className="text-[11px] text-amber-600 dark:text-amber-400 font-bold mt-0.5">
+              <div className="text-[11px] text-blue-600 dark:text-blue-400 font-bold mt-0.5">
                 ◆ {milestonesCount} نقطه عطف کلیدی (Milestone)
               </div>
             </div>
@@ -2573,7 +2891,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
                 {maxDelayDays > 0 ? `بیشترین تأخیر: ${maxDelayDays} روز` : 'بدون تأخیر بحرانی'}
               </div>
             </div>
-            <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-500 flex items-center justify-center">
+            <div className="w-10 h-10 rounded-xl bg-blue-500/10 text-blue-500 flex items-center justify-center">
               <Clock className="w-5 h-5" />
             </div>
           </div>
@@ -2608,7 +2926,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
                 type="button"
                 onClick={() => setWbsViewMode('SPLIT')}
                 className={`px-2.5 py-1 rounded-lg transition cursor-pointer ${
-                  wbsViewMode === 'SPLIT' ? 'bg-amber-500 text-white' : 'text-slate-600 dark:text-slate-300'
+                  wbsViewMode === 'SPLIT' ? 'bg-blue-600 text-white' : 'text-slate-600 dark:text-slate-300'
                 }`}
               >
                 نمای ترکیبی (جدول + گانت)
@@ -2617,7 +2935,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
                 type="button"
                 onClick={() => setWbsViewMode('TIMELINE')}
                 className={`px-2.5 py-1 rounded-lg transition cursor-pointer ${
-                  wbsViewMode === 'TIMELINE' ? 'bg-amber-500 text-white' : 'text-slate-600 dark:text-slate-300'
+                  wbsViewMode === 'TIMELINE' ? 'bg-blue-600 text-white' : 'text-slate-600 dark:text-slate-300'
                 }`}
               >
                 گانت تقویمی
@@ -2626,7 +2944,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
                 type="button"
                 onClick={() => setWbsViewMode('TABLE')}
                 className={`px-2.5 py-1 rounded-lg transition cursor-pointer ${
-                  wbsViewMode === 'TABLE' ? 'bg-amber-500 text-white' : 'text-slate-600 dark:text-slate-300'
+                  wbsViewMode === 'TABLE' ? 'bg-blue-600 text-white' : 'text-slate-600 dark:text-slate-300'
                 }`}
               >
                 جدول WBS
@@ -2663,7 +2981,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
                 onClick={() => setWbsFilterStatus(f.key)}
                 className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
                   wbsFilterStatus === f.key
-                    ? 'bg-amber-500 text-slate-950 font-black shadow-xs'
+                    ? 'bg-blue-600 text-white font-black shadow-xs'
                     : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
@@ -2873,7 +3191,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 dark:border-slate-800 pb-3">
               <div>
                 <h4 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
-                  <Calendar className="w-4 h-4 text-amber-500" />
+                  <Calendar className="w-4 h-4 text-blue-500" />
                   <span>نمودار گانت تقویمی و مسیر بحرانی (Interactive Timeline Gantt & Critical Path)</span>
                 </h4>
                 <p className="text-[11px] text-slate-500 mt-0.5">
@@ -2893,7 +3211,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
                   <span className="w-3 h-2 rounded-xs bg-rose-600 inline-block" />
                   مسیر بحرانی / دارای تأخیر
                 </span>
-                <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400">
+                <span className="flex items-center gap-1 text-blue-600 dark:text-blue-400">
                   ◆ نقطه عطف (Milestone)
                 </span>
               </div>
@@ -2916,14 +3234,14 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
                       <span className="font-mono font-black text-slate-700 dark:text-slate-300 ml-1.5">
                         {t.wbsCode}
                       </span>
-                      {t.isMilestone && <span className="text-amber-500 ml-1">◆</span>}
+                      {t.isMilestone && <span className="text-blue-500 ml-1">◆</span>}
                       <span className="font-bold text-slate-900 dark:text-slate-100">{t.title}</span>
                     </div>
 
                     <div className="col-span-6 sm:col-span-7 relative h-7 bg-slate-100 dark:bg-slate-800/70 rounded-lg overflow-hidden">
                       {/* Today Vertical Line */}
                       <div
-                        className="absolute top-0 bottom-0 w-0.5 bg-amber-500/70 z-10"
+                        className="absolute top-0 bottom-0 w-0.5 bg-blue-500/70 z-10"
                         style={{ right: `${todayOffsetPct}%` }}
                         title="خط زمان امروز"
                       />
@@ -2999,7 +3317,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
                             </span>
                           )}
                           {t.isMilestone && (
-                            <span className="block text-[10px] text-amber-600 dark:text-amber-400 font-sans font-black">
+                            <span className="block text-[10px] text-blue-600 dark:text-blue-400 font-sans font-black">
                               ◆ نقطه عطف
                             </span>
                           )}
@@ -3039,7 +3357,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
                                   setEditingWbsCostId(editingWbsCostId === t.id ? null : t.id);
                                   setEditingWbsCostValue(Number(t.actualCost || 0));
                                 }}
-                                className="text-amber-600 dark:text-amber-400 hover:underline font-sans font-bold cursor-pointer"
+                                className="text-blue-600 dark:text-blue-400 hover:underline font-sans font-bold cursor-pointer"
                               >
                                 [ثبت هزینه]
                               </button>
@@ -3226,7 +3544,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
               در انتظار بررسی / بازگشایی پس از ویرایش
             </div>
             <div className="mt-1.5 flex items-baseline justify-between">
-              <span className="text-2xl font-black font-mono tabular-nums text-amber-600 dark:text-amber-400">
+              <span className="text-2xl font-black font-mono tabular-nums text-blue-600 dark:text-blue-400">
                 {underReviewDocsCount}
               </span>
               <span className="text-[11px] font-bold text-slate-500">
@@ -3349,7 +3667,42 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
             onSubmit={handleCreateDocument}
             className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-4"
           >
-            <h4 className="text-sm font-bold text-slate-800 dark:text-slate-100">ثبت و بارگذاری مدرک جدید در بانک مدارک PSM</h4>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h4 className="text-sm font-bold text-slate-800 dark:text-slate-100">ثبت و بارگذاری مدرک جدید در بانک مدارک PSM</h4>
+              <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-lg bg-teal-500/15 text-teal-700 dark:text-teal-300">
+                متصل به بانک اطلاعات مرکزی HSECORE (پرسنل، واحدها، PTW، ریسک و آموزش)
+              </span>
+            </div>
+
+            {Array.isArray(centralOrg.centralAutofillCatalog) && centralOrg.centralAutofillCatalog.length > 0 && (
+              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 space-y-2">
+                <div className="text-[11px] font-black text-slate-700 dark:text-slate-200">
+                  فراخوانی خودکار مدرک و شواهد از ماژول‌های مرکزی HSECORE (منبع داده، شناسه و وضعیت اعتبار):
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {centralOrg.centralAutofillCatalog.slice(0, 6).map((rec, idx) => (
+                    <button
+                      key={`doc-autofill-${rec.sourceModule}-${rec.recordId}-${idx}`}
+                      type="button"
+                      onClick={() => {
+                        setNewDoc((prev) => ({
+                          ...prev,
+                          title: `مستند فنی ${rec.sourceModuleLabel}: ${rec.title}`,
+                          unitName: rec.unitName || prev.unitName,
+                          evidenceSummary: `فراخوانی خودکار از بانک اطلاعات مرکزی HSECORE — منبع: ${rec.sourceModuleLabel} | شناسه: ${rec.code} | وضعیت اعتبار: ${rec.validityStatus}`,
+                        }));
+                        toast.success(`مدرک و شواهد از ${rec.sourceModuleLabel} (${rec.code}) فراخوانی شد.`);
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:border-teal-500 text-[11px] text-slate-700 dark:text-slate-200 flex items-center gap-1.5 cursor-pointer transition"
+                    >
+                      <span className="font-mono font-black text-teal-600 dark:text-teal-400">{rec.code}</span>
+                      <span className="truncate max-w-[180px]">{rec.title}</span>
+                      <span className="text-[10px] text-slate-400">[{rec.validityStatus}]</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div>
                 <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">کد مدرک *</label>
@@ -3539,14 +3892,14 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
         {editingDocRevision && (
           <form
             onSubmit={handleSaveDocRevision}
-            className="bg-white dark:bg-slate-900 border-2 border-amber-500/40 rounded-2xl p-5 space-y-4 shadow-lg"
+            className="bg-white dark:bg-slate-900 border-2 border-blue-500/40 rounded-2xl p-5 space-y-4 shadow-lg"
           >
             <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
               <div>
                 <h4 className="text-sm font-black text-slate-900 dark:text-slate-100">
                   ویرایش و ثبت نسخه جدید مدرک: {editingDocRevision.docCode} (نسخه فعلی: v{editingDocRevision.version})
                 </h4>
-                <p className="text-[11px] text-amber-600 dark:text-amber-400 font-bold mt-0.5">
+                <p className="text-[11px] text-blue-600 dark:text-blue-400 font-bold mt-0.5">
                   توجه حاکمیتی (قانون ۳ / سناریو ۸): در صورت ویرایش مدرک مصوب، وضعیت آن به‌صورت خودکار به «نیازمند بررسی مجدد (UNDER_REVIEW)» تغییر یافته و در لاگ ممیزی ثبت می‌شود.
                 </p>
               </div>
@@ -3623,7 +3976,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
               </button>
               <button
                 type="submit"
-                className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold cursor-pointer"
+                className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold cursor-pointer"
               >
                 ثبت ویرایش جدید و بازگشایی چرخه بررسی
               </button>
@@ -3715,7 +4068,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
                                   : d.status === 'EXPIRED'
                                   ? 'text-red-600 dark:text-red-400'
                                   : d.status === 'UNDER_REVIEW'
-                                  ? 'text-amber-600 dark:text-amber-400'
+                                  ? 'text-blue-600 dark:text-blue-400'
                                   : 'text-slate-600 dark:text-slate-400'
                               }`}
                             >
@@ -3741,7 +4094,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
                                 <button
                                   type="button"
                                   onClick={() => handleOpenDocRevision(d)}
-                                  className="px-2 py-1 rounded bg-amber-500/15 hover:bg-amber-600 hover:text-white text-amber-700 dark:text-amber-300 text-[10.5px] font-bold transition cursor-pointer"
+                                  className="px-2 py-1 rounded bg-blue-500/15 hover:bg-blue-600 hover:text-white text-blue-700 dark:text-blue-300 text-[10.5px] font-bold transition cursor-pointer"
                                 >
                                   ویرایش / نسخه جدید
                                 </button>
@@ -3798,7 +4151,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
                     <div>
                       <span className="font-mono font-bold">نسخه {h.version}</span>
                       {h.action === 'DOCUMENT_REOPENED_AFTER_ALTERATION' && (
-                        <span className="mx-1.5 px-2 py-0.5 rounded bg-amber-500/20 text-amber-700 dark:text-amber-300 text-[10px] font-black">
+                        <span className="mx-1.5 px-2 py-0.5 rounded bg-blue-500/20 text-blue-700 dark:text-blue-300 text-[10px] font-black">
                           بازگشایی خودکار پس از ویرایش
                         </span>
                       )}
@@ -3889,7 +4242,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
               در مرحله بررسی فنی و صحه‌گذاری اثربخشی (مرحله ۶ و ۷)
             </div>
             <div className="mt-1.5 flex items-baseline justify-between">
-              <span className="text-2xl font-black font-mono tabular-nums text-amber-600 dark:text-amber-400">
+              <span className="text-2xl font-black font-mono tabular-nums text-blue-600 dark:text-blue-400">
                 {inVerificationCount}
               </span>
               <span className="text-[11px] font-bold text-slate-500">نیازمند ممیز مستقل</span>
@@ -3985,7 +4338,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
                   onClick={() => setCapaFilterRisk(rk.id)}
                   className={`px-2.5 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition ${
                     capaFilterRisk === rk.id
-                      ? 'bg-amber-500 text-slate-950 font-black shadow-xs'
+                      ? 'bg-blue-600 text-white font-black shadow-xs'
                       : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 hover:text-slate-900 dark:hover:text-white'
                   }`}
                 >
@@ -4150,7 +4503,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
         {extendingCapa && (
           <form
             onSubmit={handleExtendCapaDeadline}
-            className="bg-white dark:bg-slate-900 border-2 border-amber-500/40 rounded-2xl p-5 space-y-4 shadow-lg"
+            className="bg-white dark:bg-slate-900 border-2 border-blue-500/40 rounded-2xl p-5 space-y-4 shadow-lg"
           >
             <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
               <div>
@@ -4206,7 +4559,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
               <button
                 type="submit"
                 disabled={submittingCapaExtension}
-                className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold cursor-pointer"
+                className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold cursor-pointer"
               >
                 {submittingCapaExtension ? 'در حال ثبت...' : 'ثبت تمدید مهلت در لاگ ممیزی'}
               </button>
@@ -4263,7 +4616,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
                               c.riskLevel === 'CRITICAL'
                                 ? 'text-red-600 dark:text-red-400'
                                 : c.riskLevel === 'HIGH'
-                                ? 'text-amber-600 dark:text-amber-400'
+                                ? 'text-blue-600 dark:text-blue-400'
                                 : 'text-sky-600 dark:text-sky-400'
                             }
                           >
@@ -4322,7 +4675,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
                                   );
                                   setCapaExtensionJustification('');
                                 }}
-                                className="px-2 py-1.5 rounded-lg bg-amber-500/15 text-amber-700 dark:text-amber-300 text-[11px] font-bold cursor-pointer whitespace-nowrap"
+                                className="px-2 py-1.5 rounded-lg bg-blue-500/15 text-blue-700 dark:text-blue-300 text-[11px] font-bold cursor-pointer whitespace-nowrap"
                               >
                                 تمدید مهلت
                               </button>
@@ -4378,7 +4731,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
                       <div>
                         <span className="font-bold text-teal-700 dark:text-teal-300">{stTitle}</span>
                         {log.action === 'EXTEND_DUE_DATE' && (
-                          <span className="mx-1.5 px-2 py-0.5 rounded bg-amber-500/20 text-amber-700 dark:text-amber-300 text-[10px] font-black">
+                          <span className="mx-1.5 px-2 py-0.5 rounded bg-blue-500/20 text-blue-700 dark:text-blue-300 text-[10px] font-black">
                             تمدید مهلت رسمی
                           </span>
                         )}
@@ -4676,7 +5029,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
               توصیه‌های فنی مستخرج از مطالعات (HAZOP / LOPA / MI)
             </div>
             <div className="mt-1.5 flex items-baseline justify-between">
-              <span className="text-2xl font-black font-mono tabular-nums text-amber-600 dark:text-amber-400">
+              <span className="text-2xl font-black font-mono tabular-nums text-blue-600 dark:text-blue-400">
                 {allRecommendations.length}
               </span>
               <span className="text-[11px] font-bold text-slate-500">
@@ -4740,7 +5093,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
                   onClick={() => setStudyFilterStatus(st.id)}
                   className={`px-2.5 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition ${
                     studyFilterStatus === st.id
-                      ? 'bg-amber-500 text-slate-950 font-black shadow-xs'
+                      ? 'bg-blue-600 text-white font-black shadow-xs'
                       : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 hover:text-slate-900 dark:hover:text-white'
                   }`}
                 >
@@ -5507,7 +5860,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
                 className={`p-3.5 rounded-xl border flex items-center justify-between gap-3 ${
                   chk.passed
                     ? 'bg-emerald-50/60 dark:bg-emerald-950/20 border-emerald-300 dark:border-emerald-800/50'
-                    : 'bg-amber-50/60 dark:bg-amber-950/20 border-amber-300 dark:border-amber-800/50'
+                    : 'bg-blue-50/60 dark:bg-blue-950/20 border-blue-300 dark:border-blue-800/50'
                 }`}
               >
                 <div>
@@ -5516,7 +5869,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
                 </div>
                 <span
                   className={`text-xs font-bold shrink-0 ${
-                    chk.passed ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'
+                    chk.passed ? 'text-emerald-600 dark:text-emerald-400' : 'text-blue-600 dark:text-blue-400'
                   }`}
                 >
                   {chk.passed ? '✓ احراز شد' : 'نیازمند تکمیل'}
@@ -5879,7 +6232,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-[11px]">
               <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800">
-                <div className="font-bold text-amber-400 mb-1">وضعیت قبلی (Old Value)</div>
+                <div className="font-bold text-blue-400 mb-1">وضعیت قبلی (Old Value)</div>
                 <pre className="whitespace-pre-wrap font-mono text-[10px] text-slate-300 max-h-44 overflow-y-auto">
                   {selectedAuditLog.oldValue ? JSON.stringify(selectedAuditLog.oldValue, null, 2) : '— (ایجاد اولیه)'}
                 </pre>

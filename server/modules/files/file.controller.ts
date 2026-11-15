@@ -142,6 +142,7 @@ export class FileController {
       issueDate,
       expiryDate,
       description,
+      tabMetadata,
     } = req.body;
 
     const created = await fileService.createHseDocument({
@@ -153,6 +154,7 @@ export class FileController {
       issueDate: issueDate || '',
       expiryDate: expiryDate || '',
       description: description || '',
+      tabMetadata,
       originalName,
       mimeType,
       fileBuffer,
@@ -176,6 +178,7 @@ export class FileController {
       category,
       unitName,
       description,
+      tabMetadata,
     } = req.body;
 
     const updated = await fileService.replaceHseDocumentFile({
@@ -191,6 +194,7 @@ export class FileController {
       category: category as HseDocumentCategory | undefined,
       unitName,
       description,
+      tabMetadata,
       uploadedBy: req.user?.name || req.user?.username || 'کاربر سیستم',
       uploaderRole: req.user?.role,
     });
@@ -210,6 +214,7 @@ export class FileController {
       issueDate,
       expiryDate,
       description,
+      tabMetadata,
       status,
     } = req.body;
 
@@ -224,12 +229,44 @@ export class FileController {
         issueDate,
         expiryDate,
         description,
+        tabMetadata,
         status,
       },
       req.user?.name || req.user?.username || 'کاربر سیستم'
     );
 
     broadcastDataMutation('documents', 'update', updated);
+    return ApiResponse.success(res, updated);
+  }
+
+  async addDocumentAttachment(req: Request, res: Response) {
+    const documentId = req.params.documentId;
+    const { fileBuffer, originalName, mimeType } = extractFileFromRequest(req);
+    const { role, title } = req.body;
+
+    const updated = await fileService.addDocumentAttachment({
+      documentId,
+      fileBuffer,
+      originalName,
+      mimeType,
+      role,
+      title,
+      uploadedBy: req.user?.name || req.user?.username || 'کاربر سیستم',
+      uploaderRole: req.user?.role,
+    });
+
+    broadcastDataMutation('documents', 'attachment_add', updated);
+    return ApiResponse.success(res, updated, undefined, 201);
+  }
+
+  async deleteDocumentAttachment(req: Request, res: Response) {
+    const { documentId, fileId } = req.params;
+    const updated = await fileService.deleteDocumentAttachment(
+      documentId,
+      fileId,
+      req.user?.name || req.user?.username || 'کاربر سیستم'
+    );
+    broadcastDataMutation('documents', 'attachment_delete', updated);
     return ApiResponse.success(res, updated);
   }
 

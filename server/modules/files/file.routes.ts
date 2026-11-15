@@ -1,8 +1,13 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import { fileController } from './file.controller.ts';
-import { requireAuth, requireRole, requirePermission } from '../../core/middleware/auth.ts';
-import { ValidationError } from '../../core/errors.ts';
+import {
+  requireAuth,
+  requireRole,
+  requirePermission,
+  checkUserHasPermission,
+} from '../../core/middleware/auth.ts';
+import { ValidationError, ForbiddenError, UnauthorizedError } from '../../core/errors.ts';
 
 const router = Router();
 const upload = multer({
@@ -62,6 +67,40 @@ router.post(
   parseSingleFileUpload,
   (req, res, next) => {
     fileController.replaceDocumentFile(req, res).catch(next);
+  }
+);
+
+function requireDocumentAttachmentWrite(req: Request, _res: Response, next: NextFunction) {
+  if (!req.user) {
+    return next(new UnauthorizedError('احراز هویت الزامی است.'));
+  }
+  const allowed =
+    checkUserHasPermission(req.user, 'documents:create') ||
+    checkUserHasPermission(req.user, 'documents:update') ||
+    checkUserHasPermission(req.user, 'documents:*') ||
+    checkUserHasPermission(req.user, '*');
+  if (!allowed) {
+    return next(new ForbiddenError('شما مجوز بارگذاری پیوست برای مستندات را ندارید.'));
+  }
+  return next();
+}
+
+router.post(
+  '/documents/:documentId/attachments',
+  requireAuth,
+  requireDocumentAttachmentWrite,
+  parseSingleFileUpload,
+  (req, res, next) => {
+    fileController.addDocumentAttachment(req, res).catch(next);
+  }
+);
+
+router.delete(
+  '/documents/:documentId/attachments/:fileId',
+  requireAuth,
+  requirePermission('documents:delete'),
+  (req, res, next) => {
+    fileController.deleteDocumentAttachment(req, res).catch(next);
   }
 );
 

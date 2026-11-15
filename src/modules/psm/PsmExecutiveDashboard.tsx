@@ -46,6 +46,11 @@ import {
   OSHA_14_CLAUSES,
 } from './psmStandardsCatalog';
 import { PsmSubTabKey } from './PsmManagementModule';
+import {
+  PsmDeepLinkAction,
+  computeProjectStoppageDiagnosis,
+  computeRealVsPaperProgress,
+} from './psmGuidedEngine';
 
 interface PsmExecutiveDashboardProps {
   activeProject: any;
@@ -58,6 +63,7 @@ interface PsmExecutiveDashboardProps {
     capaItems: any[];
     studies: any[];
     maturityRecords: any[];
+    stageGates?: any[];
   };
   centralOrg: {
     companies: any[];
@@ -71,6 +77,7 @@ interface PsmExecutiveDashboardProps {
   dashboardMetrics: any;
   availableUnits: string[];
   onNavigateSubTab: (subTab: PsmSubTabKey) => void;
+  onExecuteDeepLink?: (deepLink: PsmDeepLinkAction) => void;
   onRefresh: () => void;
   onOpenCreateProjectModal?: () => void;
 }
@@ -82,6 +89,7 @@ export function PsmExecutiveDashboard({
   dashboardMetrics,
   availableUnits,
   onNavigateSubTab,
+  onExecuteDeepLink,
   onRefresh,
   onOpenCreateProjectModal,
 }: PsmExecutiveDashboardProps) {
@@ -91,6 +99,24 @@ export function PsmExecutiveDashboard({
   const [viewMode, setViewMode] = useState<'overview' | 'elements' | 'evm' | 'alerts'>('overview');
   const [showExportModal, setShowExportModal] = useState<boolean>(false);
   const [searchElementQuery, setSearchElementQuery] = useState<string>('');
+
+  const propStageGates = projectData.stageGates || [];
+
+  const stoppageDiagnosis = useMemo(() => {
+    return computeProjectStoppageDiagnosis(activeProject, projectData, propStageGates);
+  }, [activeProject, projectData, propStageGates]);
+
+  const realVsPaper = useMemo(() => {
+    return computeRealVsPaperProgress(activeProject, projectData, propStageGates);
+  }, [activeProject, projectData, propStageGates]);
+
+  const handleRunDeepLink = (deepLink: PsmDeepLinkAction) => {
+    if (onExecuteDeepLink) {
+      onExecuteDeepLink(deepLink);
+    } else {
+      onNavigateSubTab(deepLink.targetSubTab);
+    }
+  };
 
   // 1. Earned Value Management (EVM) & Schedule/Cost Metrics
   const evmCalculations = useMemo(() => {
@@ -377,13 +403,13 @@ export function PsmExecutiveDashboard({
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
-              <span className="p-2 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400">
+              <span className="p-2 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400">
                 <BarChart3 className="w-5 h-5" />
               </span>
               <div>
                 <h2 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
                   <span>داشبورد جامع کنترل و پایش استقرار PSM</span>
-                  <span className="text-xs font-mono font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-lg">
+                  <span className="text-xs font-mono font-bold text-blue-600 dark:text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded-lg">
                     {activeProject?.code || 'مجتمع پتروشیمی رجال'}
                   </span>
                 </h2>
@@ -411,7 +437,7 @@ export function PsmExecutiveDashboard({
               onClick={() => setShowExportModal(true)}
               className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 text-slate-700 dark:text-slate-200 text-xs font-bold hover:bg-slate-100 dark:hover:bg-slate-700 transition cursor-pointer"
             >
-              <Download className="w-4 h-4 text-amber-500" />
+              <Download className="w-4 h-4 text-blue-500" />
               <span>خروجی و گزارشات</span>
             </button>
 
@@ -435,7 +461,7 @@ export function PsmExecutiveDashboard({
               onClick={() => setViewMode('overview')}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
                 viewMode === 'overview'
-                  ? 'bg-amber-500 text-white shadow-xs'
+                  ? 'bg-blue-600 text-white shadow-xs'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
@@ -448,7 +474,7 @@ export function PsmExecutiveDashboard({
               onClick={() => setViewMode('elements')}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
                 viewMode === 'elements'
-                  ? 'bg-amber-500 text-white shadow-xs'
+                  ? 'bg-blue-600 text-white shadow-xs'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
@@ -461,7 +487,7 @@ export function PsmExecutiveDashboard({
               onClick={() => setViewMode('evm')}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
                 viewMode === 'evm'
-                  ? 'bg-amber-500 text-white shadow-xs'
+                  ? 'bg-blue-600 text-white shadow-xs'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
@@ -492,7 +518,7 @@ export function PsmExecutiveDashboard({
                 aria-label="فیلتر واحد عملیاتی"
                 value={selectedUnit}
                 onChange={(e) => setSelectedUnit(e.target.value)}
-                className="px-2.5 py-1 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 font-bold focus:ring-1 focus:ring-amber-500"
+                className="px-2.5 py-1 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 font-bold focus:ring-1 focus:ring-blue-500"
               >
                 <option value="ALL">همه واحدهای مشمول ({availableUnits.length})</option>
                 {availableUnits.map((u) => (
@@ -510,7 +536,7 @@ export function PsmExecutiveDashboard({
                 aria-label="فیلتر رکن CCPS"
                 value={selectedPillar}
                 onChange={(e) => setSelectedPillar(e.target.value)}
-                className="px-2.5 py-1 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 font-bold focus:ring-1 focus:ring-amber-500"
+                className="px-2.5 py-1 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 font-bold focus:ring-1 focus:ring-blue-500"
               >
                 <option value="ALL">همه ۴ رکن CCPS</option>
                 {CCPS_PILLARS.map((p) => (
@@ -520,6 +546,179 @@ export function PsmExecutiveDashboard({
                 ))}
               </select>
             </div>
+          </div>
+        </div>
+      </div>
+
+      {/* =================================================================
+          PRINCIPLE 3: MANAGER STOPPAGE DIAGNOSIS & DECISION PANEL + REAL VS PAPER PROGRESS
+         ================================================================= */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div
+          className={`lg:col-span-2 rounded-2xl border p-4 sm:p-5 space-y-3.5 ${
+            stoppageDiagnosis.isProjectStopped
+              ? 'bg-rose-500/5 border-rose-500/40 dark:bg-rose-950/20'
+              : 'bg-emerald-500/5 border-emerald-500/30 dark:bg-emerald-950/15'
+          }`}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span
+                className={`p-2 rounded-xl text-white ${
+                  stoppageDiagnosis.isProjectStopped ? 'bg-rose-600' : 'bg-emerald-600'
+                }`}
+              >
+                {stoppageDiagnosis.isProjectStopped ? (
+                  <AlertOctagon className="w-5 h-5" />
+                ) : (
+                  <ShieldCheck className="w-5 h-5" />
+                )}
+              </span>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-black text-slate-900 dark:text-white">
+                    پنل تصمیم‌یار مدیران: وضعیت توقف، گلوگاه و تصمیم موردنیاز (اصل سوم)
+                  </h3>
+                  <span
+                    className={`text-[10px] font-black px-2 py-0.5 rounded-md ${
+                      stoppageDiagnosis.isProjectStopped
+                        ? 'bg-rose-600 text-white'
+                        : 'bg-emerald-600 text-white'
+                    }`}
+                  >
+                    {stoppageDiagnosis.isProjectStopped
+                      ? `متوقف در: ${stoppageDiagnosis.stoppedAtStageTitleFa || 'دروازه جاری'}`
+                      : 'در جریان بدون توقف بحرانی'}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5">
+                  {stoppageDiagnosis.overallHealthTitleFa}
+                </p>
+              </div>
+            </div>
+
+            {stoppageDiagnosis.stopDurationDays > 0 && (
+              <div className="px-3 py-1.5 rounded-xl bg-rose-500/15 text-rose-700 dark:text-rose-300 text-xs font-black font-mono">
+                مدت توقف / تأخیر: {stoppageDiagnosis.stopDurationDays} روز
+              </div>
+            )}
+          </div>
+
+          {stoppageDiagnosis.criticalBlockers.length > 0 && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+              {stoppageDiagnosis.criticalBlockers.slice(0, 4).map((b) => (
+                <div
+                  key={b.id}
+                  className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex flex-col justify-between gap-2"
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between gap-2 text-[11px]">
+                      <span className="font-black text-rose-600 dark:text-rose-400">
+                        {b.titleFa}
+                      </span>
+                      <span className="font-mono text-slate-500">
+                        {b.stoppedDays > 0 ? `${b.stoppedDays} روز معوق` : 'اقدام فوری'}
+                      </span>
+                    </div>
+                    <div className="text-xs font-black text-slate-900 dark:text-white">
+                      {b.causeFa}
+                    </div>
+                    <div className="text-[11px] text-slate-500">
+                      مسئول پیگیری: <span className="font-bold text-slate-700 dark:text-slate-300">{b.responsiblePersonFa}</span> ({b.unitNameFa})
+                    </div>
+                    <div className="text-[11px] text-blue-700 dark:text-blue-300 font-bold">
+                      تصمیم موردنیاز: {b.requiredDecisionFa}
+                    </div>
+                  </div>
+                  <div className="flex justify-end pt-1">
+                    <button
+                      type="button"
+                      onClick={() => handleRunDeepLink(b.deepLink)}
+                      className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-blue-600 hover:text-white dark:bg-blue-600 dark:text-white text-white text-[11px] font-black transition cursor-pointer"
+                    >
+                      {b.deepLink.buttonLabelFa || 'ورود مستقیم و تعیین تکلیف'} ←
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {stoppageDiagnosis.pendingManagerDecisions.length > 0 && (
+            <div className="pt-2 border-t border-slate-200/70 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2">
+              <span className="text-xs font-black text-purple-700 dark:text-purple-300">
+                تصمیم‌های آماده امضا و تصویب مدیریت ({stoppageDiagnosis.pendingManagerDecisions.length} مورد):
+              </span>
+              <div className="flex flex-wrap gap-2">
+                {stoppageDiagnosis.pendingManagerDecisions.slice(0, 3).map((dec) => (
+                  <button
+                    key={dec.id}
+                    type="button"
+                    onClick={() => handleRunDeepLink(dec.deepLink)}
+                    className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold transition cursor-pointer"
+                  >
+                    {dec.decisionTitleFa} ←
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Real Verified Progress vs Paper Registration Progress Card (Section 11) */}
+        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 sm:p-5 flex flex-col justify-between space-y-3">
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-black text-slate-900 dark:text-white">
+                تفکیک پیشرفت واقعی از ثبت کاغذی
+              </span>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-teal-500/15 text-teal-700 dark:text-teal-300">
+                کنترل اصالت شواهد
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-500">
+              مقایسه مدارک و اقدامات دارای شواهد مصوب در برابر رکوردهای صرفاً ثبت‌شده در فرم‌ها
+            </p>
+          </div>
+
+          <div className="space-y-3">
+            <div>
+              <div className="flex items-center justify-between text-xs mb-1">
+                <span className="font-bold text-emerald-700 dark:text-emerald-400">
+                  پیشرفت واقعی و صحه‌گذاری‌شده (Real Verified)
+                </span>
+                <span className="font-mono font-black text-emerald-600">
+                  {realVsPaper.realProgressPct}%
+                </span>
+              </div>
+              <div className="w-full h-2.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                <div
+                  className="h-full bg-emerald-500 rounded-full transition-all duration-500"
+                  style={{ width: `${realVsPaper.realProgressPct}%` }}
+                />
+              </div>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between text-xs mb-1">
+                <span className="font-bold text-blue-700 dark:text-blue-400">
+                  پیشرفت کاغذی / ثبت فرم‌ها (Paper Progress)
+                </span>
+                <span className="font-mono font-black text-blue-600">
+                  {realVsPaper.paperProgressPct}%
+                </span>
+              </div>
+              <div className="w-full h-2.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                <div
+                  className="h-full bg-blue-500 rounded-full transition-all duration-500"
+                  style={{ width: `${realVsPaper.paperProgressPct}%` }}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
+            {realVsPaper.explanationFa}
           </div>
         </div>
       </div>
@@ -560,7 +759,7 @@ export function PsmExecutiveDashboard({
         {/* KPI 1: Overall Implementation Progress */}
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 space-y-1 relative overflow-hidden">
           <div className="text-[11px] font-bold text-slate-500">پیشرفت کل پروژه</div>
-          <div className="text-2xl font-black font-mono text-amber-600 dark:text-amber-400">
+          <div className="text-2xl font-black font-mono text-blue-600 dark:text-blue-400">
             {evmCalculations.actualProgress}%
           </div>
           <div className="text-[10px] text-slate-400 flex items-center justify-between">
@@ -576,7 +775,7 @@ export function PsmExecutiveDashboard({
           </div>
           <div className="w-full h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden mt-1">
             <div
-              className="h-full bg-amber-500 transition-all"
+              className="h-full bg-blue-500 transition-all"
               style={{ width: `${Math.min(100, Math.max(0, evmCalculations.actualProgress))}%` }}
             />
           </div>
@@ -615,7 +814,7 @@ export function PsmExecutiveDashboard({
               evmCalculations.spi >= 1.0
                 ? 'text-emerald-600 dark:text-emerald-400'
                 : evmCalculations.spi >= 0.85
-                ? 'text-amber-600 dark:text-amber-400'
+                ? 'text-blue-600 dark:text-blue-400'
                 : 'text-rose-600 dark:text-rose-400'
             }`}
           >
@@ -688,89 +887,56 @@ export function PsmExecutiveDashboard({
       </div>
 
       {/* =================================================================
-          STAGE-GATE G1 TO G6 ROADMAP STRIP
+          COMPACT STAGE-GATE G1 TO G6 GOVERNANCE SUMMARY STRIP
          ================================================================= */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 dark:border-slate-800 pb-3">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <div className="w-9 h-9 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+            <ShieldCheck className="w-5 h-5" />
+          </div>
           <div>
-            <h3 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-amber-500" />
-              <span>نقشه راه دروازه‌های شش‌گانه حاکمیت استقرار (Stage-Gate G1–G6)</span>
+            <h3 className="text-xs sm:text-sm font-black text-slate-900 dark:text-white">
+              وضعیت دروازه‌های شش‌گانه حاکمیت استقرار (Stage-Gate G1–G6)
             </h3>
-            <p className="text-xs text-slate-500 mt-0.5">
-              کنترل اجباری عبور از مراحل پروژه مطابق ۶ نقطه بازرسی مدیریتی
+            <p className="text-[11px] text-slate-500">
+              تصویب‌شده: {stageGates.filter((g) => g.status === 'APPROVED').length} از ۶ دروازه | مرجع کامل بررسی شواهد و تصویب در تب «دروازه‌های کنترلی G1–G6»
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => onNavigateSubTab('stage-gates')}
-            className="flex items-center gap-1 text-xs font-bold text-amber-600 dark:text-amber-400 hover:underline cursor-pointer"
-          >
-            <span>مدیریت و صحه‌گذاری دروازه‌ها</span>
-            <ArrowLeft className="w-4 h-4" />
-          </button>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
-          {stageGates.map((gate, i) => {
+        <div className="flex flex-wrap items-center gap-1.5">
+          {stageGates.map((gate) => {
             const isApproved = gate.status === 'APPROVED';
             const isInProgress = gate.status === 'IN_PROGRESS';
             const isRejected = gate.status === 'REJECTED';
-            const isSuspended = gate.status === 'SUSPENDED';
-
-            let statusBg = 'bg-slate-50 dark:bg-slate-800/60 border-slate-200/70 dark:border-slate-700/70';
-            let badgeBg = 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300';
-            let badgeText = 'در انتظار ورود';
-
-            if (isApproved) {
-              statusBg = 'bg-emerald-500/5 border-emerald-500/30';
-              badgeBg = 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400';
-              badgeText = 'تصویب‌شده';
-            } else if (isInProgress) {
-              statusBg = 'bg-amber-500/10 border-amber-500/40 ring-1 ring-amber-500/30';
-              badgeBg = 'bg-amber-500 text-white';
-              badgeText = 'دروازه فعال جاری';
-            } else if (isRejected) {
-              statusBg = 'bg-rose-500/10 border-rose-500/40';
-              badgeBg = 'bg-rose-500 text-white';
-              badgeText = 'رد شده / نیازمند اصلاح';
-            } else if (isSuspended) {
-              statusBg = 'bg-amber-500/5 border-amber-500/20';
-              badgeBg = 'bg-amber-500/20 text-amber-700 dark:text-amber-300';
-              badgeText = 'معلق';
-            }
-
             return (
-              <div
+              <button
                 key={gate.key}
-                className={`p-3 rounded-xl border flex flex-col justify-between space-y-2 transition ${statusBg}`}
+                type="button"
+                onClick={() => onNavigateSubTab('stage-gates')}
+                className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-mono font-black transition cursor-pointer ${
+                  isApproved
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
+                    : isInProgress
+                    ? 'bg-blue-600 border-blue-600 text-white shadow-2xs'
+                    : isRejected
+                    ? 'bg-rose-500/10 border-rose-500/30 text-rose-700 dark:text-rose-300'
+                    : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'
+                }`}
+                title={gate.titleFa}
               >
-                <div>
-                  <div className="flex items-center justify-between">
-                    <span className="font-mono font-black text-xs text-slate-800 dark:text-slate-100">
-                      {gate.key}
-                    </span>
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${badgeBg}`}>
-                      {badgeText}
-                    </span>
-                  </div>
-                  <h4 className="text-xs font-bold text-slate-900 dark:text-white mt-1.5 leading-snug">
-                    {gate.titleFa.replace(`${gate.key}: `, '')}
-                  </h4>
-                  <p className="text-[10px] text-slate-500 mt-1 line-clamp-2">
-                    {gate.description}
-                  </p>
-                </div>
-
-                <div className="pt-2 border-t border-slate-200/50 dark:border-slate-700/50 flex items-center justify-between text-[10px] text-slate-400">
-                  <span>تأییدکننده:</span>
-                  <span className="font-bold text-slate-600 dark:text-slate-300 truncate max-w-[90px]">
-                    {gate.approverName}
-                  </span>
-                </div>
-              </div>
+                {gate.key}
+              </button>
             );
           })}
+          <button
+            type="button"
+            onClick={() => onNavigateSubTab('stage-gates')}
+            className="px-3 py-1.5 rounded-xl bg-blue-500/10 hover:bg-blue-600 hover:text-white text-blue-600 dark:text-blue-400 text-xs font-black flex items-center gap-1 transition cursor-pointer"
+          >
+            <span>مدیریت دروازه‌ها</span>
+            <ArrowLeft className="w-3.5 h-3.5" />
+          </button>
         </div>
       </div>
 
@@ -784,7 +950,7 @@ export function PsmExecutiveDashboard({
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
-                  <Building2 className="w-4 h-4 text-amber-500" />
+                  <Building2 className="w-4 h-4 text-blue-500" />
                   <span>درصد پیشرفت به تفکیک واحدهای فرایندی و عملیاتی</span>
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
@@ -804,13 +970,13 @@ export function PsmExecutiveDashboard({
                 >
                   <div className="flex items-center justify-between text-xs">
                     <span className="font-black text-slate-900 dark:text-white">{u.unitName}</span>
-                    <span className="font-mono font-black text-amber-600 dark:text-amber-400 text-sm">
+                    <span className="font-mono font-black text-blue-600 dark:text-blue-400 text-sm">
                       {u.progress}%
                     </span>
                   </div>
                   <div className="w-full h-2 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
                     <div
-                      className="h-full bg-amber-500 transition-all"
+                      className="h-full bg-blue-500 transition-all"
                       style={{ width: `${Math.min(100, Math.max(0, u.progress))}%` }}
                     />
                   </div>
@@ -823,76 +989,66 @@ export function PsmExecutiveDashboard({
             </div>
           </div>
 
-          {/* Project Sponsor, Team, and Milestones */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 space-y-4">
-            <div>
-              <h3 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
-                <Target className="w-4 h-4 text-teal-500" />
-                <span>اطلاعات حاکمیتی و نقاط عطف پروژه</span>
-              </h3>
-              <p className="text-xs text-slate-500 mt-0.5">
-                تیم، حامی ارشد و سررسید نقاط بازرسی
-              </p>
+          {/* Project Governance Summary & Direct Charter Link */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 flex flex-col justify-between space-y-4">
+            <div className="space-y-3">
+              <div>
+                <h3 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
+                  <Target className="w-4 h-4 text-teal-500" />
+                  <span>خلاصه حاکمیتی منشور پروژه</span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  اطلاعات کلیدی مدیریت، بودجه و نقاط عطف مصوب
+                </p>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700/70 space-y-2 text-xs">
+                <div className="flex justify-between">
+                  <span className="text-slate-500">مدیر پروژه:</span>
+                  <span className="font-bold text-slate-800 dark:text-slate-100">
+                    {activeProject?.projectManagerName || 'تعیین نشده'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">حامی پروژه (Sponsor):</span>
+                  <span className="font-bold text-slate-800 dark:text-slate-100">
+                    {activeProject?.sponsorName || 'تعیین نشده'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">بودجه مصوب:</span>
+                  <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                    {Number(activeProject?.allocatedBudget || 0).toLocaleString()} ریال
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">نقاط عطف تکمیل‌شده:</span>
+                  <span className="font-mono font-bold text-blue-600 dark:text-blue-400">
+                    {Array.isArray(activeProject?.milestones)
+                      ? `${activeProject.milestones.filter((m: any) => m.status === 'COMPLETED').length} از ${activeProject.milestones.length}`
+                      : '0 از 0'}
+                  </span>
+                </div>
+              </div>
             </div>
 
-            <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700/70 space-y-2 text-xs">
-              <div className="flex justify-between">
-                <span className="text-slate-500">مدیر پروژه:</span>
-                <span className="font-bold text-slate-800 dark:text-slate-100">
-                  {activeProject?.projectManagerName || 'تعیین نشده'}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">حامی پروژه (Sponsor):</span>
-                <span className="font-bold text-slate-800 dark:text-slate-100">
-                  {activeProject?.sponsorName || 'تعیین نشده'}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">بودجه مصوب:</span>
-                <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
-                  {Number(activeProject?.allocatedBudget || 0).toLocaleString()} ریال
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">هزینه‌کرد تاکنون:</span>
-                <span className="font-mono font-bold text-amber-600 dark:text-amber-400">
-                  {Number(activeProject?.spentBudget || 0).toLocaleString()} ریال
-                </span>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <div className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center justify-between">
-                <span>نقاط عطف اصلی (Milestones):</span>
-                <button
-                  type="button"
-                  onClick={() => onNavigateSubTab('wbs-gantt')}
-                  className="text-[10px] text-amber-600 dark:text-amber-400 hover:underline"
-                >
-                  مشاهده در گانت
-                </button>
-              </div>
-
-              {Array.isArray(activeProject?.milestones) && activeProject.milestones.length > 0 ? (
-                <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                  {activeProject.milestones.map((ms: any, i: number) => (
-                    <div
-                      key={ms.id || i}
-                      className="flex items-center justify-between px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800/50 text-xs border border-slate-200/60 dark:border-slate-700/60"
-                    >
-                      <span className="font-medium truncate max-w-[200px]">{ms.title || ms}</span>
-                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400">
-                        {ms.status === 'COMPLETED' ? 'تکمیل‌شده' : 'در جریان'}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 text-center text-xs text-slate-400">
-                  نقاط عطف در شناسنامه پروژه تعریف شده‌اند.
-                </div>
-              )}
+            <div className="pt-2 border-t border-slate-200/70 dark:border-slate-800 flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => onNavigateSubTab('project')}
+                className="w-full px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black flex items-center justify-center gap-1.5 transition cursor-pointer"
+              >
+                <span>مدیریت منشور، دامنه و نقاط عطف پروژه</span>
+                <ArrowLeft className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => onNavigateSubTab('wbs-gantt')}
+                className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer"
+              >
+                <span>مشاهده برنامه اجرایی WBS و گانت</span>
+                <ArrowLeft className="w-3.5 h-3.5" />
+              </button>
             </div>
           </div>
         </div>
@@ -907,7 +1063,7 @@ export function PsmExecutiveDashboard({
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <h3 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
-                  <Layers className="w-4 h-4 text-amber-500" />
+                  <Layers className="w-4 h-4 text-blue-500" />
                   <span>ماتریس تطبیقی و پیشرفت ۲۰ عنصر CCPS RBPS</span>
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
@@ -922,7 +1078,7 @@ export function PsmExecutiveDashboard({
                   placeholder="جستجوی عنصر (کد یا عنوان)..."
                   value={searchElementQuery}
                   onChange={(e) => setSearchElementQuery(e.target.value)}
-                  className="w-full pl-3 pr-8 py-1.5 rounded-xl text-xs border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-hidden focus:ring-1 focus:ring-amber-500"
+                  className="w-full pl-3 pr-8 py-1.5 rounded-xl text-xs border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-hidden focus:ring-1 focus:ring-blue-500"
                 />
                 <Search className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-2.5" />
               </div>
@@ -932,11 +1088,11 @@ export function PsmExecutiveDashboard({
               {filteredCcpsElements.map((el: any) => (
                 <div
                   key={el.code}
-                  className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/70 dark:border-slate-700/70 space-y-2.5 hover:border-amber-500/50 transition"
+                  className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/70 dark:border-slate-700/70 space-y-2.5 hover:border-blue-500/50 transition"
                 >
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
-                      <span className="px-2 py-0.5 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 font-mono text-xs font-black">
+                      <span className="px-2 py-0.5 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 font-mono text-xs font-black">
                         {el.code}
                       </span>
                       <h4 className="text-xs font-black text-slate-900 dark:text-white truncate max-w-[220px]">
@@ -954,7 +1110,7 @@ export function PsmExecutiveDashboard({
                         el.score >= 85
                           ? 'bg-emerald-500'
                           : el.score >= 50
-                          ? 'bg-amber-500'
+                          ? 'bg-blue-500'
                           : 'bg-rose-500'
                       }`}
                       style={{ width: `${Math.min(100, Math.max(0, el.score))}%` }}
@@ -970,7 +1126,7 @@ export function PsmExecutiveDashboard({
                       <button
                         type="button"
                         onClick={() => onNavigateSubTab('assessment')}
-                        className="text-amber-600 dark:text-amber-400 hover:underline cursor-pointer"
+                        className="text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
                       >
                         ارزیابی
                       </button>
@@ -1079,7 +1235,7 @@ export function PsmExecutiveDashboard({
                 <div className="text-[11px] text-slate-500 font-bold">شاخص عملکرد هزینه (CPI)</div>
                 <div
                   className={`text-2xl font-mono font-black ${
-                    evmCalculations.cpi >= 1.0 ? 'text-emerald-500' : 'text-amber-500'
+                    evmCalculations.cpi >= 1.0 ? 'text-emerald-500' : 'text-blue-500'
                   }`}
                 >
                   {evmCalculations.cpi.toFixed(2)}
@@ -1121,13 +1277,13 @@ export function PsmExecutiveDashboard({
             <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700/70 space-y-3">
               <div className="flex items-center justify-between text-xs font-bold">
                 <span className="text-slate-800 dark:text-slate-200">وضعیت پیشرفت زمانی کل پروژه:</span>
-                <span className="font-mono text-amber-600 dark:text-amber-400">
+                <span className="font-mono text-blue-600 dark:text-blue-400">
                   {evmCalculations.elapsedDays} روز سپری‌شده از مجموع {evmCalculations.plannedDurationDays} روز
                 </span>
               </div>
               <div className="w-full h-3 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden relative">
                 <div
-                  className="h-full bg-amber-500 transition-all"
+                  className="h-full bg-blue-500 transition-all"
                   style={{
                     width: `${Math.min(
                       100,
@@ -1160,7 +1316,7 @@ export function PsmExecutiveDashboard({
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 space-y-4">
             <div>
               <h3 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 text-amber-500" />
+                <AlertTriangle className="w-4 h-4 text-blue-500" />
                 <span>هشدارهای پیش‌بینانه، تأخیرات بحرانی و گلوگاه‌های اجرایی ({predictiveAlerts.length})</span>
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
@@ -1187,7 +1343,7 @@ export function PsmExecutiveDashboard({
                       alert.level === 'CRITICAL'
                         ? 'bg-rose-500/5 border-rose-500/30'
                         : alert.level === 'WARNING'
-                        ? 'bg-amber-500/5 border-amber-500/30'
+                        ? 'bg-blue-500/5 border-blue-500/30'
                         : 'bg-sky-500/5 border-sky-500/30'
                     }`}
                   >
@@ -1197,7 +1353,7 @@ export function PsmExecutiveDashboard({
                           alert.level === 'CRITICAL'
                             ? 'bg-rose-500'
                             : alert.level === 'WARNING'
-                            ? 'bg-amber-500'
+                            ? 'bg-blue-600'
                             : 'bg-sky-500'
                         }`}
                       >
@@ -1212,7 +1368,7 @@ export function PsmExecutiveDashboard({
                             className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
                               alert.level === 'CRITICAL'
                                 ? 'bg-rose-500/20 text-rose-700 dark:text-rose-300'
-                                : 'bg-amber-500/20 text-amber-700 dark:text-amber-300'
+                                : 'bg-blue-500/20 text-blue-700 dark:text-blue-300'
                             }`}
                           >
                             {alert.count} مورد
@@ -1248,7 +1404,7 @@ export function PsmExecutiveDashboard({
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-xl">
             <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
               <h3 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
-                <Download className="w-4 h-4 text-amber-500" />
+                <Download className="w-4 h-4 text-blue-500" />
                 <span>صادرات و گزارش وضعیت پروژه PSM</span>
               </h3>
               <button
@@ -1274,7 +1430,7 @@ export function PsmExecutiveDashboard({
                 className="w-full flex items-center justify-between p-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 transition cursor-pointer text-right"
               >
                 <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                  <div className="p-2 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400">
                     <Printer className="w-5 h-5" />
                   </div>
                   <div>

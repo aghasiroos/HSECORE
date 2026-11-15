@@ -30,6 +30,7 @@ import {
 } from '../../../src/db/schema.ts';
 import { eq, desc, and, sql } from 'drizzle-orm';
 import { requireAuth, checkUserHasPermission, isGlobalAdminUser } from '../../core/middleware/auth.ts';
+import { auditService } from '../audit/audit.service.ts';
 import { broadcastDataMutation } from '../../core/socket.ts';
 import { logger } from '../../core/logger.ts';
 import {
@@ -135,17 +136,7 @@ async function writePsmAuditLog(
   details?: Record<string, any>
 ) {
   try {
-    let validUserId: number | null = null;
-    if (req.user?.id) {
-      const uId = Number(req.user.id);
-      const [u] = await db.select({ id: users.id }).from(users).where(eq(users.id, uId));
-      if (u) validUserId = u.id;
-    }
-
-    await db.insert(auditLogs).values({
-      userId: validUserId,
-      userUid: req.user?.uid || req.user?.username || 'system',
-      personnelCode: (req.user as any)?.personnelNumber || null,
+    await auditService.logFromRequest(req, {
       action,
       module: 'PSM',
       entityType,
@@ -153,13 +144,9 @@ async function writePsmAuditLog(
       oldValue: oldValue ?? null,
       newValue: newValue ?? null,
       details: {
-        actorName: req.user?.name || req.user?.username || 'کاربر سامانه',
-        actorRole: req.user?.role || 'User',
         timestamp: new Date().toISOString(),
         ...(details || {}),
       },
-      ipAddress: req.ip || '127.0.0.1',
-      userAgent: req.headers['user-agent'] || '',
       result: 'SUCCESS',
     });
   } catch (err) {
@@ -451,9 +438,11 @@ router.get('/bootstrap', requireAuth, async (req: Request, res: Response) => {
     let capaItems: any[] = [];
     let studies: any[] = [];
     let maturityRecords: any[] = [];
+    let stageGates: any[] = [];
+    let gateDeviations: any[] = [];
 
     if (activeProject) {
-      [assets, assessments, gaps, wbsTasks, documents, capaItems, studies, maturityRecords] =
+      [assets, assessments, gaps, wbsTasks, documents, capaItems, studies, maturityRecords, gateDeviations] =
         await Promise.all([
           db
             .select()
@@ -495,8 +484,82 @@ router.get('/bootstrap', requireAuth, async (req: Request, res: Response) => {
             .from(psmMaturityAssessments)
             .where(eq(psmMaturityAssessments.projectId, activeProject.id))
             .orderBy(desc(psmMaturityAssessments.id)),
+          db
+            .select()
+            .from(psmGateDeviations)
+            .where(eq(psmGateDeviations.projectId, activeProject.id))
+            .orderBy(desc(psmGateDeviations.createdAt))
+            .catch(() => []),
         ]);
+
+      try {
+        const rawGates = await bootstrapProjectGates(activeProject.id);
+        stageGates = await Promise.all(
+          rawGates.map(async (gate) => {
+            const evalResult = await evaluateProjectGate(activeProject.id, gate.gateKey);
+            return { ...gate, evaluation: evalResult };
+          })
+        );
+      } catch (_gateErr) {
+        stageGates = [];
+      }
     }
+
+    const [recentPermits, recentIncidents, recentRisks, recentTrainings, recentNcs] = await Promise.all([
+      db.select().from(workPermits).orderBy(desc(workPermits.id)).limit(8).catch(() => []),
+      db.select().from(incidents).orderBy(desc(incidents.id)).limit(8).catch(() => []),
+      db.select().from(riskAssessments).orderBy(desc(riskAssessments.id)).limit(8).catch(() => []),
+      db.select().from(hseTrainings).orderBy(desc(hseTrainings.id)).limit(8).catch(() => []),
+      db.select().from(nonConformances).orderBy(desc(nonConformances.id)).limit(8).catch(() => []),
+    ]);
+
+    const centralAutofillCatalog = [
+      ...recentRisks.map((r: any) => ({
+        sourceModule: 'RISK_ASSESSMENT',
+        sourceModuleLabel: 'مدیریت ریسک (PHA / HAZOP / JSA)',
+        recordId: r.id,
+        code: r.code || `RA-${r.id}`,
+        title: r.hazard || r.activity || r.process || `ارزیابی ریسک شماره ${r.id}`,
+        unitName: r.unit || r.area || 'واحد الفین',
+        validityStatus: 'معتبر در بانک مرکزی HSECORE',
+      })),
+      ...recentIncidents.map((inc: any) => ({
+        sourceModule: 'INCIDENTS',
+        sourceModuleLabel: 'حوادث و شبه‌حوادث فرایندی',
+        recordId: inc.id,
+        code: inc.trackingCode || `INC-${inc.id}`,
+        title: inc.title || inc.description || `گزارش حادثه شماره ${inc.id}`,
+        unitName: inc.location || inc.unit || 'مجتمع پتروشیمی رجال',
+        validityStatus: 'ثبت‌شده و معتبر در بانک مرکزی',
+      })),
+      ...recentPermits.map((wp: any) => ({
+        sourceModule: 'PTW',
+        sourceModuleLabel: 'مجوزهای کار ایمن (PTW)',
+        recordId: wp.id,
+        code: wp.permitNumber || `PTW-${wp.id}`,
+        title: wp.workDescription || wp.type || `پروانه کار شماره ${wp.id}`,
+        unitName: wp.location || wp.unit || 'واحد الفین',
+        validityStatus: wp.status === 'ACTIVE' || wp.status === 'CLOSED' ? 'معتبر و تأییدشده' : 'ثبت‌شده در PTW',
+      })),
+      ...recentTrainings.map((tr: any) => ({
+        sourceModule: 'TRAINING',
+        sourceModuleLabel: 'آموزش و صلاحیت حرفه‌ای HSE',
+        recordId: tr.id,
+        code: tr.courseCode || `TRN-${tr.id}`,
+        title: tr.title || tr.courseName || `دوره آموزشی ایمنی فرایند ${tr.id}`,
+        unitName: tr.department || tr.targetGroup || 'کل مجتمع',
+        validityStatus: 'سوابق آموزشی معتبر در بانک مرکزی',
+      })),
+      ...recentNcs.map((nc: any) => ({
+        sourceModule: 'CAPA_CENTRAL',
+        sourceModuleLabel: 'عدم انطباق‌ها و ممیزی مرکزی',
+        recordId: nc.id,
+        code: nc.code || `NCR-${nc.id}`,
+        title: nc.description || nc.title || `عدم انطباق شماره ${nc.id}`,
+        unitName: nc.department || nc.location || 'کل مجتمع',
+        validityStatus: 'معتبر در ماژول ممیزی مرکزی',
+      })),
+    ];
 
     const orgNodes = Array.isArray(orgNodesSetting[0]?.value) ? orgNodesSetting[0].value : [];
     const unitStructure =
@@ -561,6 +624,7 @@ router.get('/bootstrap', requireAuth, async (req: Request, res: Response) => {
         trainingsCount: trainingsCountRes[0]?.count || 0,
         nonConformancesCount: ncCountRes[0]?.count || 0,
       },
+      centralAutofillCatalog,
     };
 
     const projectData = {
@@ -572,6 +636,8 @@ router.get('/bootstrap', requireAuth, async (req: Request, res: Response) => {
       capaItems,
       studies,
       maturityRecords,
+      stageGates,
+      gateDeviations,
     };
 
     const permissionsObj = {
@@ -624,7 +690,7 @@ router.get('/projects/:id/full', requireAuth, async (req: Request, res: Response
     if (!projRow) {
       return res.status(404).json({ success: false, error: 'پروژه مورد نظر یافت نشد.' });
     }
-    const [assets, assessments, gaps, wbsTasks, documents, capaItems, studies, maturityRecords] =
+    const [assets, assessments, gaps, wbsTasks, documents, capaItems, studies, maturityRecords, gateDeviations] =
       await Promise.all([
         db.select().from(psmProcessAssets).where(eq(psmProcessAssets.projectId, projectId)).orderBy(desc(psmProcessAssets.id)),
         db.select().from(psmAssessments).where(eq(psmAssessments.projectId, projectId)).orderBy(psmAssessments.elementCode),
@@ -634,7 +700,21 @@ router.get('/projects/:id/full', requireAuth, async (req: Request, res: Response
         db.select().from(psmCapaItems).where(eq(psmCapaItems.projectId, projectId)).orderBy(desc(psmCapaItems.id)),
         db.select().from(psmSpecializedStudies).where(eq(psmSpecializedStudies.projectId, projectId)).orderBy(desc(psmSpecializedStudies.id)),
         db.select().from(psmMaturityAssessments).where(eq(psmMaturityAssessments.projectId, projectId)).orderBy(desc(psmMaturityAssessments.id)),
+        db.select().from(psmGateDeviations).where(eq(psmGateDeviations.projectId, projectId)).orderBy(desc(psmGateDeviations.createdAt)).catch(() => []),
       ]);
+
+    let stageGates: any[] = [];
+    try {
+      const rawGates = await bootstrapProjectGates(projectId);
+      stageGates = await Promise.all(
+        rawGates.map(async (gate) => {
+          const evalResult = await evaluateProjectGate(projectId, gate.gateKey);
+          return { ...gate, evaluation: evalResult };
+        })
+      );
+    } catch (_err) {
+      stageGates = [];
+    }
 
     const normalizedProj = normalizeProjectRecord(projRow);
     res.json({
@@ -648,6 +728,8 @@ router.get('/projects/:id/full', requireAuth, async (req: Request, res: Response
       capaItems,
       studies,
       maturityRecords,
+      stageGates,
+      gateDeviations,
       data: {
         project: normalizedProj,
         assets,
@@ -658,6 +740,8 @@ router.get('/projects/:id/full', requireAuth, async (req: Request, res: Response
         capaItems,
         studies,
         maturityRecords,
+        stageGates,
+        gateDeviations,
       },
     });
   } catch (err: any) {
@@ -1599,6 +1683,14 @@ router.post('/gaps', requireAuth, async (req: Request, res: Response) => {
       })
       .returning();
 
+    if (created.riskLevel === 'CRITICAL') {
+      await reopenDependentApprovedGatesIfInvalid(
+        projectId,
+        `ثبت شکاف بحرانی جدید (${created.gapCode}: ${created.title})`,
+        req.user?.name || req.user?.username || 'system'
+      );
+    }
+
     await writePsmAuditLog(req, 'CREATE', 'PSM_GAP', created.id, null, created);
     broadcastDataMutation('psm:gaps', 'create', created);
     res.status(201).json({ success: true, data: created });
@@ -2211,6 +2303,14 @@ router.put(['/documents/:id', '/projects/:projectId/documents/:id'], requireAuth
       .where(eq(psmDocuments.id, id))
       .returning();
 
+    if (isReopened) {
+      await reopenDependentApprovedGatesIfInvalid(
+        existing.projectId,
+        `بازگشایی و ویرایش مدرک مصوب (${existing.docCode}: ${existing.title})`,
+        actor
+      );
+    }
+
     await writePsmAuditLog(req, 'UPDATE', 'PSM_DOCUMENT', id, existing, updated);
     broadcastDataMutation('psm:documents', 'update', updated);
     res.json({ success: true, data: updated });
@@ -2296,6 +2396,14 @@ router.post(['/capa', '/projects/:id/capa'], requireAuth, async (req: Request, r
         createdBy: actor,
       })
       .returning();
+
+    if (created.riskSeverity >= 4 || created.riskLevel === 'CRITICAL') {
+      await reopenDependentApprovedGatesIfInvalid(
+        projectId,
+        `ثبت پرونده اقدام اصلاحی بحرانی جدید (${created.capaCode}: ${created.title})`,
+        actor
+      );
+    }
 
     await writePsmAuditLog(req, 'CREATE', 'PSM_CAPA', created.id, null, created);
     broadcastDataMutation('psm:capa', 'create', created);
@@ -3475,6 +3583,44 @@ async function evaluateProjectGate(projectId: number, gateKey: string) {
 
   const canPass = blockingIssues.length === 0 || approvedDeviations.length > 0;
   return { canPass, blockingIssues, warnings, checklistResults, approvedDeviations };
+}
+
+// Section 10 Governance Rule: Re-open previously APPROVED Stage Gates if criteria/documents/critical gaps become invalid
+async function reopenDependentApprovedGatesIfInvalid(projectId: number, reason: string, actor: string) {
+  if (!projectId) return;
+  try {
+    const gates = await db
+      .select()
+      .from(psmStageGates)
+      .where(and(eq(psmStageGates.projectId, projectId), eq(psmStageGates.status, 'APPROVED')));
+
+    for (const gate of gates) {
+      const evalResult = await evaluateProjectGate(projectId, gate.gateKey);
+      if (!evalResult.canPass) {
+        const prevHistory = Array.isArray(gate.changeHistory) ? [...gate.changeHistory] : [];
+        prevHistory.unshift({
+          action: 'GATE_REOPENED_AUTOMATICALLY',
+          status: 'IN_REVIEW',
+          actor: actor || 'موتور حاکمیت هوشمند PSM',
+          timestamp: new Date().toISOString(),
+          note: `بازگشایی خودکار دروازه ${gate.gateKey} به دلیل تغییر معیارهای مصوب: ${reason}`,
+        });
+
+        await db
+          .update(psmStageGates)
+          .set({
+            status: 'IN_REVIEW',
+            blockingIssues: evalResult.blockingIssues,
+            comments: `دروازه به دلیل تغییر در معیارهای مصوب (${reason}) به حالت نیازمند بررسی مجدد بازگشت.`,
+            changeHistory: prevHistory,
+            updatedAt: new Date(),
+          })
+          .where(eq(psmStageGates.id, gate.id));
+      }
+    }
+  } catch (err) {
+    logger.error('[PSM Gate Reopen Check] Error:', err);
+  }
 }
 
 // 12.1. Get all Stage Gates for a project with live computed evaluation

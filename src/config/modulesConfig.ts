@@ -215,8 +215,9 @@ export const ALL_PSM_SUBITEMS = [
 ];
 
 export const ALL_DOCUMENTS_SUBITEMS = [
-  { key: 'ORG_PROCEDURES', titleFa: 'دستورالعمل‌ها و روش‌های اجرایی سازمانی', titleEn: 'Organizational Procedures' },
+  { key: 'ORG_PROCEDURES', titleFa: 'دستورالعمل‌ها و روش‌های اجرایی', titleEn: 'Organizational Procedures' },
   { key: 'EQUIPMENT_CERTIFICATES', titleFa: 'گواهینامه‌ها و سرتیفیکیت ماشین‌آلات و تجهیزات', titleEn: 'Machinery & Equipment Certificates' },
+  { key: 'SDS', titleFa: 'SDS – برگه اطلاعات ایمنی مواد شیمیایی', titleEn: 'SDS – Safety Data Sheets' },
   { key: 'ORG_FORMS_CHECKLISTS', titleFa: 'فرم‌ها و چک‌لیست‌های سازمانی', titleEn: 'Organizational Forms & Checklists' },
   { key: 'OTHER_HSE_DOCS', titleFa: 'سایر مستندات مرتبط با HSE', titleEn: 'Other HSE Related Documents' },
 ];
@@ -243,6 +244,7 @@ export const ALL_FIRE_DEPT_SUBITEMS: FireDeptSubItemConfig[] = [
   { key: 'dashboard', titleFa: 'داشبورد و وضعیت کل', titleEn: 'Overview Dashboard', type: 'general', enabled: true, descriptionFa: 'داشبورد مدیریتی، وضعیت کلی تجهیزات آتش‌نشانی، نقص‌های باز و آمادگی عملیاتی' },
   { key: 'daily-report', titleFa: 'گزارش روزانه آتش‌نشانی', titleEn: 'Daily Station Report', type: 'general', enabled: true, descriptionFa: 'ثبت و پایش گزارش روزانه ایستگاه آتش‌نشانی معین، تجهیزات، سیستم‌های اعلام و اطفاء حریق، گازسنج‌ها و رویدادها' },
   { key: 'vehicles', titleFa: 'مدیریت و بازرسی خودروها', titleEn: 'Fire Vehicles Fleet', type: 'general', enabled: true, descriptionFa: 'ناوگان خودروهای آتش‌نشانی، چک‌لیست‌های روزانه، پمپ، تجهیزات و وضعیت فنی' },
+  { key: 'suppression-design', titleFa: 'مرکز طراحی و مهندسی سیستم‌های حفاظت در برابر حریق', titleEn: 'Fire Protection Design & Engineering Center', type: 'general', enabled: true, descriptionFa: 'محیط یکپارچه طراحی، محاسبه و جانمایی ۸ سیستم حفاظت حریق (NFPA 13, 10, 14, 11, 2001, 72, 20, 22) روی نقشه دوبعدی' },
   { key: 'Fire Extinguisher Capsol', titleFa: 'کپسول‌های اطفاء حریق (Fire Extinguisher)', titleEn: 'Fire Extinguisher Capsol', type: 'category', enabled: true, descriptionFa: 'بازرسی کپسول‌های پودر و گاز، CO2، فوم و آب با انقضا و فشارسنج' },
   { key: 'Hydrants & Monitors', titleFa: 'هایدرانت‌ها و مانیتورهای آب/فوم', titleEn: 'Hydrants & Monitors', type: 'category', enabled: true, descriptionFa: 'پایش فشار، روغن‌کاری، تست هیدرواستاتیک و کارایی هایدرانت‌ها و مانیتورها' },
   { key: 'Fire Boxs', titleFa: 'جعبه‌های هوزریل و هوزباکس آتش‌نشانی', titleEn: 'Fire Boxes & Hose Reels', type: 'category', enabled: true, descriptionFa: 'بررسی شیلنگ‌های برزنتی، نازل‌ها، هوزریل و شیرآلات جعبه‌های اطفاء حریق' },

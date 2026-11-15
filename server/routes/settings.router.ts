@@ -4,6 +4,7 @@ import { systemSettings } from '../../src/db/schema';
 import { eq } from 'drizzle-orm';
 import { logger } from '../core/logger.ts';
 import { requireAuth, requireRole, optionalAuth, isGlobalAdminUser } from '../core/middleware/auth.ts';
+import { auditService } from '../modules/audit/audit.service.ts';
 import { broadcastDataMutation } from '../core/socket.ts';
 import {
   REFERRAL_STORAGE_KEY,
@@ -180,14 +181,29 @@ settingsRouter.post('/:key', requireAuth, async (req, res) => {
   const isAdmin = checkIsAdminRequest(req);
 
   if (ADMIN_ONLY_SETTING_KEYS.includes(key) && !isAdmin) {
+    void auditService.logAccessDenied(req, `تلاش غیرمجاز برای تغییر تنظیمات سیستمی (${key})`, 'settings:admin');
     return res.status(403).json({ success: false, message: 'دسترسی غیرمجاز برای تغییر تنظیمات سیستمی' });
   }
+
+  const prevValue = memorySettingsCache[key];
 
   if (key === INTEGRATION_CONFIG_KEY) {
     try {
       const { config } = await saveIntegrationConfigToDb(value || {});
       memorySettingsCache[key] = config;
       const masked = maskIntegrationConfigForClient(config);
+      void auditService.logFromRequest(req, {
+        action: 'SETTINGS_CHANGE',
+        module: 'SETTINGS',
+        entityType: 'SYSTEM_SETTING',
+        entityId: key,
+        oldValue: prevValue ? maskIntegrationConfigForClient(prevValue) : null,
+        newValue: masked,
+        details: {
+          actionType: 'SETTINGS_CHANGE',
+          actionTitle: `تغییر پیکربندی یکپارچه‌سازی و وب‌هوک‌ها (${key})`,
+        },
+      });
       return res.json({ success: true, message: 'Setting saved successfully', key, value: masked });
     } catch (err: any) {
       return res.status(err?.statusCode || 400).json({
@@ -205,6 +221,17 @@ settingsRouter.post('/:key', requireAuth, async (req, res) => {
       await persistReferrals(merged);
       memorySettingsCache[key] = merged;
       const visible = filterReferralsForUser(req.user, merged);
+      void auditService.logFromRequest(req, {
+        action: 'UPDATE',
+        module: 'REFERRALS',
+        entityType: 'REFERRAL',
+        entityId: key,
+        details: {
+          actionType: 'UPDATE',
+          actionTitle: 'بروزرسانی کارتابل ارجاعات و مکاتبات',
+          count: Array.isArray(merged) ? merged.length : 0,
+        },
+      });
       return res.json({ success: true, message: 'Setting saved successfully', key, value: visible });
     } catch (err: any) {
       return res.status(500).json({ success: false, message: err?.message || 'Error saving referrals' });
@@ -213,8 +240,8 @@ settingsRouter.post('/:key', requireAuth, async (req, res) => {
 
   try {
     const isUnchanged =
-      memorySettingsCache[key] !== undefined &&
-      JSON.stringify(memorySettingsCache[key]) === JSON.stringify(value);
+      prevValue !== undefined &&
+      JSON.stringify(prevValue) === JSON.stringify(value);
 
     await withDbRetry(() => db.insert(systemSettings)
       .values({ key, value })
@@ -229,6 +256,22 @@ settingsRouter.post('/:key', requireAuth, async (req, res) => {
       broadcastDataMutation('settings', 'update', { key, value });
       if (key !== 'settings') {
         broadcastDataMutation(key, 'update', value);
+      }
+
+      if (key !== 'hse_heat_log') {
+        const isSysConfig = ADMIN_ONLY_SETTING_KEYS.includes(key) || key === 'settings';
+        void auditService.logFromRequest(req, {
+          action: isSysConfig ? 'SETTINGS_CHANGE' : 'UPDATE',
+          module: 'SETTINGS',
+          entityType: 'SYSTEM_SETTING',
+          entityId: key,
+          oldValue: prevValue ?? null,
+          newValue: value,
+          details: {
+            actionType: isSysConfig ? 'SETTINGS_CHANGE' : 'UPDATE',
+            actionTitle: isSysConfig ? `تغییر تنظیمات سیستمی (${key})` : `بروزرسانی داده‌های کلید (${key})`,
+          },
+        });
       }
     }
     res.json({ success: true, message: 'Setting saved successfully', key, value });
@@ -248,15 +291,29 @@ settingsRouter.delete('/:key', requireAuth, async (req, res) => {
   const isAdmin = checkIsAdminRequest(req);
 
   if (ADMIN_ONLY_SETTING_KEYS.includes(key) && !isAdmin) {
+    void auditService.logAccessDenied(req, `تلاش غیرمجاز برای حذف تنظیمات سیستمی (${key})`, 'settings:admin');
     return res.status(403).json({ success: false, message: 'دسترسی غیرمجاز برای حذف تنظیمات سیستمی' });
   }
 
   try {
+    const prevValue = memorySettingsCache[key];
     await withDbRetry(() => db.delete(systemSettings).where(eq(systemSettings.key, key)));
     delete memorySettingsCache[key];
     invalidateDashboardCache();
     broadcastDataMutation('settings', 'delete', { key });
     broadcastDataMutation(key, 'delete', null);
+    void auditService.logFromRequest(req, {
+      action: 'DELETE',
+      module: 'SETTINGS',
+      entityType: 'SYSTEM_SETTING',
+      entityId: key,
+      oldValue: prevValue ?? null,
+      newValue: null,
+      details: {
+        actionType: 'DELETE',
+        actionTitle: `حذف تنظیمات کلید (${key})`,
+      },
+    });
     res.json({ success: true, message: 'Setting deleted successfully' });
   } catch (err: any) {
     logger.error('Failed to delete setting from PostgreSQL', { key, error: err?.message });

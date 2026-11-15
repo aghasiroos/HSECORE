@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Flame, ShieldAlert, CheckCircle2, History, LayoutDashboard, 
-  Menu, X, ChevronRight, Layers, Bell, ShieldCheck, LifeBuoy, Truck, ArrowUpRight, FileText
+  Menu, X, ChevronRight, Layers, Bell, ShieldCheck, LifeBuoy, Truck, ArrowUpRight, FileText, Compass
 } from 'lucide-react';
 import { useFireDeptData } from './hooks/useFireDeptData';
 import FireDashboard from './components/FireDashboard';
 import CategoryManager from './components/CategoryManager';
 import VehicleManager from './vehicles/VehicleManager';
 import FireDailyReportView from './daily-report/FireDailyReportView';
+import FireSuppressionDesignModule from './fire-design/FireSuppressionDesignModule';
 import { CategoryIcon, getCategoryMeta } from './config/categoryIcons';
 import { getMergedFireDeptConfig, FireDeptSubItemConfig } from '../../config/modulesConfig';
 import { SubViewTransition } from '../../motion';
@@ -159,6 +160,7 @@ export default function FireDeptModule({ language }: Props) {
             const isDashboard = item.key === 'dashboard';
             const isDailyReport = item.key === 'daily-report';
             const isVehicles = item.key === 'vehicles';
+            const isSuppressionDesign = item.key === 'suppression-design';
 
             return (
               <button
@@ -190,7 +192,8 @@ export default function FireDeptModule({ language }: Props) {
                     {isDashboard && <LayoutDashboard className="w-4 h-4" />}
                     {isDailyReport && <FileText className="w-4 h-4" />}
                     {isVehicles && <Truck className="w-4 h-4" />}
-                    {!isDashboard && !isDailyReport && !isVehicles && <Layers className="w-4 h-4" />}
+                    {isSuppressionDesign && <Compass className="w-4 h-4" />}
+                    {!isDashboard && !isDailyReport && !isVehicles && !isSuppressionDesign && <Layers className="w-4 h-4" />}
                   </div>
                   {sidebarOpen && <span className="truncate">{title}</span>}
                 </div>
@@ -288,6 +291,7 @@ export default function FireDeptModule({ language }: Props) {
               onSelectCategory={(cat) => setActiveSection(cat)} 
               onSelectVehicles={() => setActiveSection('vehicles')}
               onSelectDailyReport={() => setActiveSection('daily-report')}
+              onSelectSuppressionDesign={() => setActiveSection('suppression-design')}
             />
           ) : activeSection === 'daily-report' ? (
             <div className="overflow-y-auto h-full w-full bg-slate-50 dark:bg-slate-900">
@@ -297,6 +301,8 @@ export default function FireDeptModule({ language }: Props) {
             <div className="p-4 md:p-6 overflow-y-auto h-full bg-slate-50 dark:bg-slate-900">
               <VehicleManager language={language} />
             </div>
+          ) : activeSection === 'suppression-design' ? (
+            <FireSuppressionDesignModule language={language} existingEquipment={equipment} />
           ) : (
             <CategoryManager 
               language={language}

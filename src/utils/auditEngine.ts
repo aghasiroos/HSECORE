@@ -20,7 +20,11 @@ export const MODULE_NAMES_FA: Record<string, string> = {
   trir: 'پایش نرخ رویدادها (TRIR)',
   'safety-unit': 'واحد ایمنی صنعتی',
   'fire-dept': 'واحد آتش‌نشانی و ناوگان',
+  'fire_design': 'طراحی و جانمایی حفاظت حریق',
+  'fire-design': 'طراحی و جانمایی حفاظت حریق',
+  psm: 'مدیریت استقرار ایمنی فرایند (PSM)',
   'health-env': 'واحد بهداشت و محیط زیست',
+  health: 'واحد بهداشت و طب کار',
   'medical-exams': 'معاینات ادواری طب کار',
   permit: 'پروانه کار ایمن (PTW)',
   'work-permits': 'پروانه کار ایمن (PTW)',
@@ -36,6 +40,7 @@ export const MODULE_NAMES_FA: Record<string, string> = {
   warnings: 'ثبت و مدیریت اخطارها',
   reports: 'گزارشات و آمار تحلیلی',
   documents: 'دستورالعمل‌ها و مستندات',
+  sds: 'برگه اطلاعات ایمنی مواد شیمیایی (SDS)',
   files: 'مدیریت فایل‌ها و مستندات',
   'pending-documents': 'کارتابل اسناد در انتظار امضا',
   referrals: 'کارتابل ارجاعات و مکاتبات',
@@ -51,6 +56,9 @@ export const MODULE_NAMES_FA: Record<string, string> = {
   profile: 'شناسنامه و پروفایل کاربری',
   notifications: 'مرکز اعلان‌ها و هشدارهای HSE',
   webhooks: 'وب‌هوک‌ها و یکپارچه‌سازی API',
+  backup: 'پشتیبان‌گیری و بازیابی دیتابیس',
+  ai_assistant: 'دستیار هوشمند HSECORE',
+  hse: 'مدیریت کلان HSE',
 };
 
 export const SYSTEM_SUBTABS_FA: Record<string, string> = {
@@ -204,15 +212,29 @@ const IGNORED_DIFF_KEYS = new Set([
   'updatedDate',
   'createdDate',
   'passwordHash',
+  'password',
+  'currentPassword',
+  'newPassword',
+  'secret',
+  'apiKey',
+  'privateKey',
   'hash',
   'token',
+  'refreshToken',
+  'accessToken',
   '__v',
 ]);
 
 function summarizeValue(val: any, keyName: string): any {
   if (val === undefined || val === null || val === '') return '-';
   const lowerKey = keyName.toLowerCase();
-  if (lowerKey.includes('password') || lowerKey.includes('secret')) {
+  if (
+    lowerKey.includes('password') ||
+    lowerKey.includes('secret') ||
+    lowerKey.includes('token') ||
+    lowerKey.includes('apikey') ||
+    lowerKey.includes('privatekey')
+  ) {
     return '********';
   }
   if (typeof val === 'string') {
@@ -321,7 +343,9 @@ export function classifyAuditEvent(
 
   switch (actionType) {
     case 'DELETE':
+    case 'SOFT_DELETE':
       return { category: 'DATA_MUTATION', severity: 'CRITICAL' };
+    case 'ACCESS_DENIED':
     case 'PERMISSIONS_CHANGE':
     case 'SETTINGS_CHANGE':
       return { category: 'AUTH_SECURITY', severity: 'HIGH' };
@@ -331,6 +355,7 @@ export function classifyAuditEvent(
       return { category: 'AUTH_SECURITY', severity: 'MEDIUM' };
     case 'CREATE':
     case 'APPROVE':
+    case 'REVIEW':
     case 'REJECT':
     case 'IMPORT':
     case 'UPLOAD':
@@ -420,17 +445,26 @@ export function normalizeAuditLogEntry(raw: any): AuditLogEntry {
   const userRole = raw.userRole || details.userRole || details.role || 'کاربر سامانه';
 
   const rawActionStr = String(raw.action || details.actionSummary || 'عملیات سیستم');
+  const upperAction = rawActionStr.toUpperCase();
   const rawActionType: ActionType =
     raw.actionType ||
     details.actionType ||
-    (['CREATE', 'UPDATE', 'DELETE', 'LOGIN', 'LOGOUT', 'VIEW', 'EXPORT', 'PRINT', 'IMPORT', 'APPROVE', 'REJECT', 'NAVIGATION', 'TAB_SWITCH', 'FIELD_CHANGE', 'CLICK', 'SEARCH', 'FILTER', 'MODAL_OPEN', 'SETTINGS_CHANGE', 'PERMISSIONS_CHANGE'].includes(rawActionStr.toUpperCase())
-      ? (rawActionStr.toUpperCase() as ActionType)
+    (['CREATE', 'UPDATE', 'DELETE', 'SOFT_DELETE', 'REVIEW', 'ACCESS_DENIED', 'LOGIN', 'LOGOUT', 'VIEW', 'EXPORT', 'PRINT', 'IMPORT', 'APPROVE', 'REJECT', 'NAVIGATION', 'TAB_SWITCH', 'FIELD_CHANGE', 'CLICK', 'SEARCH', 'FILTER', 'MODAL_OPEN', 'SETTINGS_CHANGE', 'PERMISSIONS_CHANGE', 'UPLOAD'].includes(upperAction)
+      ? (upperAction as ActionType)
+      : upperAction === 'DELETE_BLOCKED' || upperAction === 'RESTORE_FAILED'
+      ? 'REJECT'
       : rawActionStr.includes('حذف')
       ? 'DELETE'
       : rawActionStr.includes('ویرایش') || rawActionStr.includes('بروزرسانی') || rawActionStr.includes('تغییر')
       ? 'UPDATE'
       : rawActionStr.includes('ایجاد') || rawActionStr.includes('ثبت') || rawActionStr.includes('افزودن')
       ? 'CREATE'
+      : rawActionStr.includes('تایید') || rawActionStr.includes('تأیید')
+      ? 'APPROVE'
+      : rawActionStr.includes('بازبینی')
+      ? 'REVIEW'
+      : rawActionStr.includes('رد') || rawActionStr.includes('غیرمجاز')
+      ? 'REJECT'
       : rawActionStr.includes('ورود')
       ? 'LOGIN'
       : rawActionStr.includes('خروج')
@@ -462,18 +496,30 @@ export function normalizeAuditLogEntry(raw: any): AuditLogEntry {
       : rawResult !== 'FAILED' && !rawResult.includes('ناموفق') && !rawResult.includes('خطا');
 
   const rawModule = raw.module || details.module || raw.entityType || 'سیستم عمومی';
+  const moduleKeyNorm = String(rawModule).toLowerCase().trim();
   const moduleFa =
-    MODULE_NAMES_FA[String(rawModule).toLowerCase()] ||
+    MODULE_NAMES_FA[moduleKeyNorm] ||
+    MODULE_NAMES_FA[moduleKeyNorm.replace(/_/g, '-')] ||
     MODULE_NAMES_FA[String(raw.entityType || '').toLowerCase()] ||
     rawModule;
 
   const { category, severity } = classifyAuditEvent(rawActionType, rawActionStr, success, changes.length);
 
-  // Build readable action title if DB only stored 'CREATE' / 'UPDATE' / 'DELETE'
+  // Build readable action title if DB only stored raw action codes
   let displayAction = details.actionTitle || rawActionStr;
-  if (['CREATE', 'UPDATE', 'DELETE'].includes(displayAction)) {
-    const verb =
-      displayAction === 'CREATE' ? 'ایجاد رکورد در' : displayAction === 'UPDATE' ? 'ویرایش اطلاعات در' : 'حذف رکورد از';
+  if (['CREATE', 'UPDATE', 'DELETE', 'SOFT_DELETE', 'DELETE_BLOCKED', 'REVIEW', 'APPROVE', 'ACCESS_DENIED', 'SETTINGS_CHANGE'].includes(displayAction)) {
+    const verbMap: Record<string, string> = {
+      CREATE: 'ایجاد رکورد در',
+      UPDATE: 'ویرایش اطلاعات در',
+      DELETE: 'حذف رکورد از',
+      SOFT_DELETE: 'حذف نرم رکورد در',
+      DELETE_BLOCKED: 'جلوگیری از حذف رکورد دارای وابستگی در',
+      REVIEW: 'بازبینی مهندسی در',
+      APPROVE: 'تأیید نهایی در',
+      ACCESS_DENIED: 'تلاش دسترسی غیرمجاز در',
+      SETTINGS_CHANGE: 'تغییر تنظیمات در',
+    };
+    const verb = verbMap[displayAction] || displayAction;
     displayAction = `${verb} ${moduleFa}${raw.entityId ? ` (${raw.entityId})` : ''}`;
   }
 
@@ -511,7 +557,10 @@ export function normalizeAuditLogEntry(raw: any): AuditLogEntry {
     fromPath: raw.fromPath || details.fromPath,
     toPath: raw.toPath || details.toPath,
     changes,
-    description: raw.description || details.description || '',
+    oldValue: raw.oldValue ?? details.oldValue,
+    newValue: raw.newValue ?? details.newValue,
+    reason: raw.reason || details.reason || details.notes || details.reviewNotes || '',
+    description: raw.description || details.description || details.reason || '',
     metadata: details,
     success,
     result: success ? (rawResult === 'SUCCESS' ? 'موفق' : rawResult) : (rawResult === 'FAILED' ? 'ناموفق' : rawResult),
@@ -878,37 +927,6 @@ export function initGlobalAuditObserver(
         actionType = 'EXPORT';
         actionPrefix = 'دریافت خروجی / دانلود اطلاعات';
       } else if (
-        lower.includes('بارگذاری') ||
-        lower.includes('import') ||
-        lower.includes('ورود اطلاعات')
-      ) {
-        actionType = 'IMPORT';
-        actionPrefix = 'عملیات درون‌ریزی / بارگذاری';
-      } else if (
-        lower.includes('حذف') ||
-        lower.includes('پاکسازی') ||
-        lower.includes('بازنشانی') ||
-        lower.includes('delete')
-      ) {
-        actionType = 'DELETE';
-        actionPrefix = 'انتخاب گزینه حذف / بازنشانی';
-      } else if (
-        lower.includes('ذخیره') ||
-        lower.includes('ثبت نهایی') ||
-        lower.includes('اعمال') ||
-        lower.includes('save')
-      ) {
-        actionType = 'UPDATE';
-        actionPrefix = 'ثبت و ذخیره تغییرات';
-      } else if (
-        lower.includes('تایید') ||
-        lower.includes('امضا') ||
-        lower.includes('تصویب') ||
-        lower.includes('approve')
-      ) {
-        actionType = 'APPROVE';
-        actionPrefix = 'تایید / امضای عملیاتی';
-      } else if (
         lower.includes('جدید') ||
         lower.includes('افزودن') ||
         lower.includes('ایجاد') ||
@@ -951,6 +969,27 @@ export function initGlobalAuditObserver(
     }
   });
 
+  // Endpoints whose server-side controllers already persist authoritative audit logs into PostgreSQL
+  const SERVER_AUDITED_PREFIXES = [
+    '/fire-design',
+    '/risk-assessments',
+    '/psm',
+    '/settings',
+    '/organization',
+    '/auth',
+    '/users',
+    '/personnel',
+    '/ptw',
+    '/incidents',
+    '/health-exams',
+    '/workflows',
+    '/files',
+    '/sds',
+    '/bpmn',
+    '/hse',
+    '/backup',
+  ];
+
   // 8. Global API Data Mutation Interceptor (POST / PUT / DELETE / PATCH)
   window.addEventListener('hse_api_mutation_completed', (e: any) => {
     const detail = e?.detail;
@@ -967,6 +1006,11 @@ export function initGlobalAuditObserver(
     ) {
       return;
     }
+
+    const normalizedPath = cleanUrl.replace(/^\/api(\/v1)?/, '');
+    const isServerAudited = SERVER_AUDITED_PREFIXES.some((prefix) =>
+      normalizedPath.startsWith(prefix)
+    );
 
     const { moduleFa, recordType } = resolveModuleFromEndpoint(cleanUrl);
     const upperMethod = String(method || 'POST').toUpperCase();
@@ -1031,6 +1075,7 @@ export function initGlobalAuditObserver(
         durationMs,
         changes,
         success: !!ok,
+        skipRemotePersist: Boolean(ok && isServerAudited),
         description: `درخواست ${upperMethod} به مسیر ${cleanUrl} در مدت ${durationMs || 0} میلی‌ثانیه با کد وضعیت ${status} انجام شد.`,
       }
     );

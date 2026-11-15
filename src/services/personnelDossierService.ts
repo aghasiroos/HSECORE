@@ -305,7 +305,6 @@ class PersonnelDossierService {
       
       riskAssessments = allAssessments.filter(a => {
         if (this.matchPersonnel(personnel, '', a.assessorName)) return true;
-        if (this.matchPersonnel(personnel, '', a.hseEngineerName)) return true;
         if (this.matchPersonnel(personnel, '', a.approverName)) return true;
         if (a.teamMembers && Array.isArray(a.teamMembers)) {
           if (a.teamMembers.some((m: string) => this.matchPersonnel(personnel, '', m))) return true;

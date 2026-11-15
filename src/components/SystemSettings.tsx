@@ -1389,6 +1389,8 @@ export default function SystemSettings({ language, currentUser, onUserUpdateTrig
   const canAccessUsers = isAdmin || hasPermission(currentUser, 'User Management', 'view');
   const canAccessNotifications = isAdmin || hasPermission(currentUser, 'Notifications', 'view');
   const canAccessAudit = isAdmin || hasPermission(currentUser, 'Audit Logs', 'view');
+  const canExportAudit = isAdmin || hasPermission(currentUser, 'Audit Logs', 'export');
+  const canPrintAudit = isAdmin || hasPermission(currentUser, 'Audit Logs', 'print');
   const canAccessUiConfig = isAdmin || hasPermission(currentUser, 'UI Config & Branding', 'view');
   const canAccessApi = isAdmin || hasPermission(currentUser, 'API & Webhooks', 'view');
   const canAccessBackup = isAdmin || hasPermission(currentUser, 'Database Backup', 'view');
@@ -1692,7 +1694,7 @@ export default function SystemSettings({ language, currentUser, onUserUpdateTrig
 
       {/* System Audit Logs Section */}
       {activeSubTab === 'audit' && canAccessAudit && (
-        <GlobalAuditLogSystem isFa={isFa} />
+        <GlobalAuditLogSystem isFa={isFa} canExport={canExportAudit} canPrint={canPrintAudit} />
       )}
       </SubViewTransition>
 

@@ -471,12 +471,18 @@ export class AIToolsRegistry {
 
       return {
         toolName: 'risk_assessment_summary',
-        titleFa: 'ماژول ارزیابی ریسک و شناسایی مخاطرات (JSA / HAZID)',
+        titleFa: 'ماژول ارزیابی ریسک (JSA / FMEA / FTA / HHA)',
         summary: [
           `• کل ارزیابی‌های ریسک ثبت‌شده: ${total} مورد (${highRisks} ریسک بالا/بحرانی، ${mediumRisks} ریسک متوسط، ${lowRisks} ریسک پایین/کنترل‌شده)`,
           topHazards.length > 0 ? `• نمونه مخاطرات ثبت‌شده: ${topHazards.join(' | ')}` : '',
         ].filter(Boolean).join('\n'),
-        data: { totalRisks: total, highRisks, mediumRisks, lowRisks, topHazards },
+        data: {
+          totalRisks: total,
+          highRisks,
+          mediumRisks,
+          lowRisks,
+          topHazards,
+        },
         timestamp: new Date().toISOString(),
       };
     } catch {

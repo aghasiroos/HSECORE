@@ -31,6 +31,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
   HSE_MANAGER: [
     'ptw:*',
     'incidents:*',
+    'risks:*',
     'health:*',
     'workflow:*',
     'audit:read',
@@ -46,6 +47,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
   EXECUTIVE_MANAGER: [
     'ptw:*',
     'incidents:*',
+    'risks:*',
     'health:*',
     'workflow:*',
     'audit:read',
@@ -60,6 +62,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
   EXECUTIVEMANAGER: [
     'ptw:*',
     'incidents:*',
+    'risks:*',
     'health:*',
     'workflow:*',
     'audit:read',
@@ -74,6 +77,9 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
   FIRE_OFFICER: [
     'fire_equipment:*',
     'ptw:read',
+    'risks:read',
+    'risks:create',
+    'risks:update',
     'incidents:create',
     'incidents:read',
     'incidents:update',
@@ -87,6 +93,9 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
   ],
   PROCESS_MANAGER: [
     'workflow:*',
+    'risks:read',
+    'risks:create',
+    'risks:update',
     'reports:*',
     'documents:*',
     'notifications:read',
@@ -95,6 +104,10 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'ptw:read',
     'ptw:create',
     'ptw:sign',
+    'risks:read',
+    'risks:create',
+    'risks:update',
+    'risks:delete',
     'incidents:create',
     'incidents:read',
     'incidents:update',
@@ -113,6 +126,9 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'ptw:read',
     'ptw:create',
     'ptw:sign',
+    'risks:read',
+    'risks:create',
+    'risks:update',
     'incidents:create',
     'incidents:read',
     'incidents:update',
@@ -129,6 +145,9 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'ptw:read',
     'ptw:create',
     'ptw:sign',
+    'risks:read',
+    'risks:create',
+    'risks:update',
     'incidents:create',
     'incidents:read',
     'incidents:update',
@@ -143,6 +162,9 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
   ],
   DOCTOR_OCCUPATIONAL: [
     'health:*',
+    'risks:read',
+    'risks:create',
+    'risks:update',
     'personnel:read',
     'workflow:action',
     'documents:read',
@@ -408,7 +430,9 @@ export function checkUserHasPermission(user: UserContext | undefined, permission
         (cleanReqMod.includes('report') && (cleanModKey.includes('report') || cleanModKey.includes('trir'))) ||
         (cleanReqMod.includes('document') && !cleanReqMod.includes('pending') && !isPendingDocsKey && (cleanModKey.includes('document') || cleanModKey.includes('مستند'))) ||
         (cleanReqMod.includes('notification') && (cleanModKey.includes('notification') || cleanModKey.includes('اعلان') || cleanModKey.includes('alert'))) ||
-        (cleanReqMod.includes('orgstructure') && (cleanModKey.includes('orgstructure') || cleanModKey.includes('organization') || cleanModKey.includes('ساختار')));
+        (cleanReqMod.includes('orgstructure') && (cleanModKey.includes('orgstructure') || cleanModKey.includes('organization') || cleanModKey.includes('ساختار'))) ||
+        (cleanReqMod.includes('audit') && (cleanModKey.includes('audit') || cleanModKey.includes('لاگ') || cleanModKey.includes('ممیزی'))) ||
+        (cleanReqMod.includes('risk') && (cleanModKey.includes('risk') || cleanModKey.includes('ریسک')));
 
       if (matches && typeof actions === 'object' && actions !== null) {
         if (actions['all'] === true) return true;
@@ -642,7 +666,11 @@ export function requireRole(...allowedRoles: string[]) {
       return next();
     }
 
-    return next(new ForbiddenError(`نقش کاربری شما (${req.user.role}) مجاز به دسترسی به این بخش نمی‌باشد.`));
+    const denyReason = `نقش کاربری شما (${req.user.role}) مجاز به دسترسی به این بخش نمی‌باشد.`;
+    import('../../modules/audit/audit.service.ts')
+      .then(({ auditService }) => auditService.logAccessDenied(req, denyReason, allowedRoles.join(',')))
+      .catch(() => {});
+    return next(new ForbiddenError(denyReason));
   };
 }
 
@@ -668,7 +696,11 @@ export function requirePermission(permission: string) {
         return next();
       }
 
-      return next(new ForbiddenError(`مجوز امنیتی '${permission}' برای کاربر شما صادر نشده است.`));
+      const denyReason = `مجوز امنیتی '${permission}' برای کاربر شما صادر نشده است.`;
+      import('../../modules/audit/audit.service.ts')
+        .then(({ auditService }) => auditService.logAccessDenied(req, denyReason, permission))
+        .catch(() => {});
+      return next(new ForbiddenError(denyReason));
     } catch (err) {
       return next(err);
     }

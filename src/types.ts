@@ -446,6 +446,9 @@ export type ActionType =
   | 'UPLOAD'
   | 'CLIPBOARD'
   | 'SESSION'
+  | 'SOFT_DELETE'
+  | 'REVIEW'
+  | 'ACCESS_DENIED'
   | 'OTHER';
 
 export type AuditSeverity = 'INFO' | 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
@@ -504,6 +507,9 @@ export interface AuditLogEntry {
   
   // Changes
   changes?: AuditLogChange[];
+  oldValue?: any;
+  newValue?: any;
+  reason?: string;
   description?: string;
   metadata?: Record<string, any>;
   

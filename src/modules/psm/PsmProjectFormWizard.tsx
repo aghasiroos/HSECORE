@@ -2778,7 +2778,7 @@ export const PsmProjectFormWizard: React.FC<PsmProjectFormWizardProps> = ({
                                 ms.status === 'COMPLETED'
                                   ? 'bg-emerald-100 text-emerald-800'
                                   : ms.status === 'IN_PROGRESS'
-                                  ? 'bg-amber-100 text-amber-800'
+                                  ? 'bg-blue-100 text-blue-800'
                                   : 'bg-slate-100 text-slate-700'
                               }`}
                             >
@@ -3187,9 +3187,9 @@ export const PsmProjectFormWizard: React.FC<PsmProjectFormWizardProps> = ({
             type="button"
             disabled={submittingMode !== 'NONE'}
             onClick={() => handleFinalSubmit(true)}
-            className="px-4 py-2.5 rounded-xl border border-amber-400 bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-bold flex items-center gap-1.5 transition disabled:opacity-50"
+            className="px-4 py-2.5 rounded-xl border border-blue-400 bg-blue-50 hover:bg-blue-100 text-blue-900 text-xs font-bold flex items-center gap-1.5 transition disabled:opacity-50"
           >
-            <Save className="w-4 h-4 text-amber-700" />
+            <Save className="w-4 h-4 text-blue-700" />
             {submittingMode === 'DRAFT' ? 'در حال ذخیره پیش‌نویس...' : 'ذخیره پیش‌نویس (Draft)'}
           </button>
 

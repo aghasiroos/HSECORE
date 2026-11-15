@@ -2039,6 +2039,7 @@ export interface AuditLogOptions {
   hash?: string;
   sessionId?: string;
   ip?: string;
+  skipRemotePersist?: boolean;
 }
 
 // Generate a simple hash for integrity (basic implementation for client-side)
@@ -2171,8 +2172,9 @@ export function addAuditLog(
     window.dispatchEvent(new CustomEvent('hse_audit_log_added', { detail: newLog }));
   }
 
-  // Only persist actual mutations, security events, or failed actions to PostgreSQL to prevent HTTP flood on passive UI clicks
-  if (!PERSISTED_AUDIT_ACTION_TYPES.has(actionType) && success) {
+  // Only persist actual mutations, security events, or failed actions to PostgreSQL to prevent HTTP flood on passive UI clicks,
+  // and skip remote POST if the backend route already persisted an authoritative audit record.
+  if (options.skipRemotePersist || (!PERSISTED_AUDIT_ACTION_TYPES.has(actionType) && success)) {
     return;
   }
 

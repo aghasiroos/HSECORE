@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   Award,
   BarChart3,
+  BookOpen,
   Bot,
   Building2,
   Calendar,
@@ -46,6 +47,9 @@ import { PsmSubViews } from './PsmSubViews';
 import { PsmPersonalWorkspace } from './PsmPersonalWorkspace';
 import { PsmExecutiveDashboard } from './PsmExecutiveDashboard';
 import { PsmProjectFormWizard, PsmProjectFormPayload } from './PsmProjectFormWizard';
+import { PsmCommandCenter } from './PsmCommandCenter';
+import { PsmComprehensiveGuide } from './PsmComprehensiveGuide';
+import { PsmDeepLinkAction } from './psmGuidedEngine';
 import PersianDatePicker from '../../components/common/PersianDatePicker';
 import { SubViewTransition, PsmSubmoduleSkeleton } from '../../motion';
 
@@ -55,6 +59,7 @@ interface PsmManagementModuleProps {
 }
 
 export type PsmSubTabKey =
+  | 'command-center'
   | 'my-workspace'
   | 'dashboard'
   | 'project'
@@ -68,9 +73,10 @@ export type PsmSubTabKey =
   | 'studies'
   | 'maturity'
   | 'handover'
-  | 'ai-audit';
+  | 'ai-audit'
+  | 'comprehensive-guide';
 
-export type PsmZoneKey = 'workspace' | 'command' | 'planning' | 'compliance' | 'closeout' | 'all';
+export type PsmZoneKey = 'workspace' | 'command' | 'planning' | 'compliance' | 'closeout' | 'guide';
 
 export interface PsmZoneMeta {
   key: PsmZoneKey;
@@ -83,14 +89,14 @@ export interface PsmZoneMeta {
 export const PSM_ZONES: PsmZoneMeta[] = [
   {
     key: 'workspace',
-    titleFa: 'میز کار من',
-    titleEn: 'My Workspace',
+    titleFa: 'راهبر و کارهای من',
+    titleEn: 'Guided Hub & My Tasks',
     icon: UserCheck,
-    subTabs: ['my-workspace'],
+    subTabs: ['command-center', 'my-workspace'],
   },
   {
     key: 'command',
-    titleFa: 'فرماندهی و پایش',
+    titleFa: 'فرماندهی و پایش مدیران',
     titleEn: 'Command & Governance',
     icon: BarChart3,
     subTabs: ['dashboard', 'stage-gates', 'maturity'],
@@ -117,26 +123,11 @@ export const PSM_ZONES: PsmZoneMeta[] = [
     subTabs: ['documents', 'capa', 'handover', 'ai-audit'],
   },
   {
-    key: 'all',
-    titleFa: 'همه بخش‌ها (نمای کامل)',
-    titleEn: 'All Sub-modules',
-    icon: Layers,
-    subTabs: [
-      'my-workspace',
-      'dashboard',
-      'project',
-      'stage-gates',
-      'org-assets',
-      'assessment',
-      'gap-analysis',
-      'wbs-gantt',
-      'documents',
-      'capa',
-      'studies',
-      'maturity',
-      'handover',
-      'ai-audit',
-    ],
+    key: 'guide',
+    titleFa: 'راهنمای جامع',
+    titleEn: 'Comprehensive Guide',
+    icon: BookOpen,
+    subTabs: ['comprehensive-guide'],
   },
 ];
 
@@ -147,8 +138,9 @@ export const PSM_NAVIGATION_TABS: Array<{
   badgeText?: string;
   icon: any;
 }> = [
-  { key: 'my-workspace', titleFa: 'میز کار من', titleEn: 'My Workspace', badgeText: 'شخصی', icon: UserCheck },
-  { key: 'dashboard', titleFa: 'داشبورد کنترل و پایش', titleEn: 'Control & Monitoring', icon: BarChart3 },
+  { key: 'command-center', titleFa: 'مسیر استقرار PSM (راهبر هوشمند)', titleEn: 'Guided PSM Roadmap', badgeText: 'مرکز راهبر', icon: Sparkles },
+  { key: 'my-workspace', titleFa: 'کارهای من (کارتابل عملیاتی)', titleEn: 'My Action Center', badgeText: '۸ دسته', icon: UserCheck },
+  { key: 'dashboard', titleFa: 'داشبورد کنترل و پایش مدیران', titleEn: 'Control & Monitoring', icon: BarChart3 },
   { key: 'project', titleFa: 'مدیریت پروژه و دامنه', titleEn: 'Project & Scope', icon: Target },
   { key: 'stage-gates', titleFa: 'موتور حاکمیت و دروازه‌های کنترلی (G1–G6)', titleEn: 'Stage Gate Governance', badgeText: '6 Gates', icon: ShieldCheck },
   { key: 'org-assets', titleFa: 'ساختار سازمانی و تجهیزات', titleEn: 'Org & Process Assets', icon: Building2 },
@@ -161,11 +153,13 @@ export const PSM_NAVIGATION_TABS: Array<{
   { key: 'maturity', titleFa: 'مدل بلوغ ۵ سطحی PSM', titleEn: '5-Level Maturity Model', icon: Award },
   { key: 'handover', titleFa: 'تحویل نهایی و نگهداشت', titleEn: 'Final Handover Gate', icon: FileCheck2 },
   { key: 'ai-audit', titleFa: 'هوش مصنوعی محلی و Audit Log', titleEn: 'Local AI & Audit Trail', icon: Bot },
+  { key: 'comprehensive-guide', titleFa: 'راهنمای جامع استقرار PSM (مرجع آموزشی و عملیاتی)', titleEn: 'Comprehensive PSM User Guide', badgeText: '۱۲ بخش', icon: BookOpen },
 ];
 
 export default function PsmManagementModule({ currentUser }: PsmManagementModuleProps) {
-  const [activeZone, setActiveZone] = useState<PsmZoneKey>('command');
-  const [activeSubTab, setActiveSubTab] = useState<PsmSubTabKey>('dashboard');
+  const [activeZone, setActiveZone] = useState<PsmZoneKey>('workspace');
+  const [activeSubTab, setActiveSubTab] = useState<PsmSubTabKey>('command-center');
+  const [activeDeepLinkContext, setActiveDeepLinkContext] = useState<PsmDeepLinkAction | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [projects, setProjects] = useState<any[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
@@ -177,6 +171,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
     positions: any[];
     personnel: any[];
     linkedModulesSummary: Record<string, number>;
+    centralAutofillCatalog?: any[];
   }>({
     companies: [],
     sites: [],
@@ -185,6 +180,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
     positions: [],
     personnel: [],
     linkedModulesSummary: {},
+    centralAutofillCatalog: [],
   });
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [permissions, setPermissions] = useState<{ canWrite: boolean; canApprove: boolean }>({
@@ -201,6 +197,8 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
     capaItems: any[];
     studies: any[];
     maturityRecords: any[];
+    stageGates: any[];
+    gateDeviations: any[];
   }>({
     assets: [],
     assessments: [],
@@ -210,28 +208,13 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
     capaItems: [],
     studies: [],
     maturityRecords: [],
+    stageGates: [],
+    gateDeviations: [],
   });
 
-  // Modals & Forms State
+  // Modals & Forms State (Unified on PsmProjectFormWizard)
   const [showCreateProjectModal, setShowCreateProjectModal] = useState(false);
   const [creatingProject, setCreatingProject] = useState(false);
-  const [newProjectForm, setNewProjectForm] = useState({
-    code: 'RJL-PSM-1404-01',
-    name: 'پروژه جامع استقرار و ارتقای بلوغ ایمنی فرایند (PSM) مجتمع پتروشیمی رجال',
-    scope: 'استقرار، انطباق و ممیزی ۲۰ عنصر CCPS RBPS و ۱۴ الزام OSHA 1910.119 در تمام واحدهای فرایندی، یوتیلیتی و عملیاتی مجتمع پتروشیمی رجال',
-    startDate: new Date().toISOString().slice(0, 10),
-    endDate: new Date(Date.now() + 365 * 86400000).toISOString().slice(0, 10),
-    projectManagerName: 'مهندس علیرضا سلیمانی',
-    sponsorName: 'مدیریت ارشد مجتمع پتروشیمی رجال',
-    coveredUnitsText: 'واحد پلیمریزاسیون، واحد یوتیلیتی، پایانه بارگیری و مخازن ذخیره، آزمایشگاه کنترل کیفیت',
-    teamMembersText: 'مهندس سلیمانی (مدیر پروژه)، مهندس کاظمی (رئیس HSE)، مهندس محمدی (سرپرست فرایند)، مهندس رضایی (بازرسی فنی)',
-    quantitativeGoalsText: 'تکمیل ۱۰۰٪ ارزیابی‌های اولیه و تحلیل شکاف ۲۰ عنصر CCPS\nبستن ۱۰۰٪ شکاف‌های بحرانی و پرخطر قبل از Gate 4\nتکمیل ۱۰۰٪ بازنگری مدارک PSI و مطالعات HAZOP/LOPA',
-    qualitativeGoalsText: 'ارتقای بلوغ ایمنی فرایند از سطح ۲ به سطح ۴\nنهادینه‌سازی حاکمیت Stage-Gate در تغییرات فرایندی (MOC) و پیش‌راه‌اندازی (PSSR)\nیکپارچه‌سازی گردش کار شواهد فنی و اقدامات اصلاحی CAPA',
-    allocatedBudget: 15000000000,
-    spentBudget: 0,
-    resourcesSummary: 'تیم تخصصی مهندسی فرایند و ایمنی، مشاور ارشد PSM، نرم‌افزار HSECORE، تجهیزات بازرسی دوره‌ای',
-    milestonesText: 'پایان ارزیابی اولیه و تعیین دامنه (Gate 1)\nتصویب تحلیل شکاف و فهرست نواقص (Gate 2)\nتصویب برنامه اجرایی WBS و تخصیص منابع (Gate 3)\nتکمیل مدارک فنی و خروجی‌های اجرایی (Gate 4)\nتأیید اثربخشی کنترل‌ها و بستن CAPAها (Gate 5)\nتصویب نهایی و تحویل کامل سیستم PSM (Gate 6)',
-  });
 
   // Tab 2: Edit Active Project State
   const [editingProject, setEditingProject] = useState(false);
@@ -360,6 +343,16 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
             capaItems: Array.isArray(detail.capaItems) ? detail.capaItems : [],
             studies: Array.isArray(detail.studies) ? detail.studies : [],
             maturityRecords: Array.isArray(detail.maturityRecords) ? detail.maturityRecords : [],
+            stageGates: Array.isArray(detail.stageGates)
+              ? detail.stageGates
+              : Array.isArray(data.projectData?.stageGates)
+              ? data.projectData.stageGates
+              : [],
+            gateDeviations: Array.isArray(detail.gateDeviations)
+              ? detail.gateDeviations
+              : Array.isArray(data.projectData?.gateDeviations)
+              ? data.projectData.gateDeviations
+              : [],
           });
         }
       } else {
@@ -373,6 +366,8 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
           capaItems: [],
           studies: [],
           maturityRecords: [],
+          stageGates: [],
+          gateDeviations: [],
         });
       }
     } catch (err: any) {
@@ -400,6 +395,8 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
         capaItems: Array.isArray(detail.capaItems) ? detail.capaItems : [],
         studies: Array.isArray(detail.studies) ? detail.studies : [],
         maturityRecords: Array.isArray(detail.maturityRecords) ? detail.maturityRecords : [],
+        stageGates: Array.isArray(detail.stageGates) ? detail.stageGates : [],
+        gateDeviations: Array.isArray(detail.gateDeviations) ? detail.gateDeviations : [],
       });
     } catch (err: any) {
       toast.error(err?.message || 'خطا در بارگذاری جزئیات پروژه');
@@ -414,26 +411,22 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
   const handleSelectZone = (zoneKey: PsmZoneKey) => {
     setActiveZone(zoneKey);
     const zoneMeta = PSM_ZONES.find((z) => z.key === zoneKey);
-    if (zoneMeta && zoneKey !== 'all' && !zoneMeta.subTabs.includes(activeSubTab)) {
+    if (zoneMeta && !zoneMeta.subTabs.includes(activeSubTab)) {
       setActiveSubTab(zoneMeta.subTabs[0]);
     }
   };
 
   const handleSelectSubTab = (subTabKey: PsmSubTabKey) => {
     setActiveSubTab(subTabKey);
-    // Keep activeZone in sync if subTab belongs to another zone and zone is not 'all'
-    const currentZoneMeta = PSM_ZONES.find((z) => z.key === activeZone);
-    if (activeZone !== 'all' && currentZoneMeta && !currentZoneMeta.subTabs.includes(subTabKey)) {
-      const parentZone = PSM_ZONES.find((z) => z.key !== 'all' && z.subTabs.includes(subTabKey));
-      if (parentZone) {
-        setActiveZone(parentZone.key);
-      }
+    const parentZone = PSM_ZONES.find((z) => z.subTabs.includes(subTabKey));
+    if (parentZone && parentZone.key !== activeZone) {
+      setActiveZone(parentZone.key);
     }
   };
 
   const visibleSubTabs = useMemo(() => {
     const zoneMeta = PSM_ZONES.find((z) => z.key === activeZone);
-    if (!zoneMeta || activeZone === 'all') {
+    if (!zoneMeta) {
       return PSM_NAVIGATION_TABS;
     }
     return PSM_NAVIGATION_TABS.filter((tab) => zoneMeta.subTabs.includes(tab.key));
@@ -801,6 +794,27 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
     setShowAssessmentForm(true);
   };
 
+  // Principle 2: Execute Context-Carrying Deep Link (Direct Navigation + Form Pre-Filling)
+  const handleExecuteDeepLink = (deepLink: PsmDeepLinkAction) => {
+    setActiveDeepLinkContext(deepLink);
+    handleSelectSubTab(deepLink.targetSubTab);
+
+    const p = deepLink.prefillData || {};
+    if (deepLink.actionType === 'OPEN_CREATE_PROJECT') {
+      setShowCreateProjectModal(true);
+    } else if (deepLink.actionType === 'OPEN_EDIT_PROJECT') {
+      if (activeProject) {
+        setEditProjectForm({ ...activeProject });
+        setEditingProject(true);
+      }
+    } else if (deepLink.actionType === 'OPEN_ASSESSMENT_FORM') {
+      const std = p.standardType || 'CCPS_RBPS';
+      const elCode = p.elementCode || 'CCPS-01';
+      const existing = projectData.assessments.find((a) => a.elementCode === elCode);
+      handleOpenQuickAssessment(std, elCode, existing);
+    }
+  };
+
   const handleSaveAssessment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeProject) return;
@@ -878,12 +892,12 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
           <div className="space-y-1.5">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="px-2.5 py-0.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-[11px] font-black">
+              <span className="px-2.5 py-0.5 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-600 dark:text-blue-400 text-[11px] font-black">
                 CCPS RBPS (20 Elements) & OSHA 29 CFR 1910.119 (14 Clauses)
               </span>
             </div>
             <h2 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white flex items-center gap-2">
-              <ShieldCheck className="w-6 h-6 text-amber-500 shrink-0" />
+              <ShieldCheck className="w-6 h-6 text-blue-500 shrink-0" />
               <span>سیستم جامع مدیریت پروژه استقرار و بلوغ ایمنی فرایند (PSM)</span>
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">
@@ -915,13 +929,27 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
               className="p-2 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition cursor-pointer"
               title="همگام‌سازی زنده با پایگاه داده"
             >
-              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-amber-500' : ''}`} />
+              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-blue-500' : ''}`} />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleSelectSubTab('comprehensive-guide')}
+              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl border text-xs font-black transition cursor-pointer ${
+                activeSubTab === 'comprehensive-guide'
+                  ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+                  : 'border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300'
+              }`}
+              title="مشاهده راهنمای جامع استقرار PSM (۱۲ بخش آموزشی و عملیاتی)"
+            >
+              <BookOpen className="w-4 h-4" />
+              <span>راهنمای جامع</span>
             </button>
 
             <button
               type="button"
               onClick={() => setShowCreateProjectModal(true)}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-black shadow-sm transition cursor-pointer"
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black shadow-sm transition cursor-pointer"
             >
               <Plus className="w-4 h-4" />
               <span>تعریف پروژه جدید استقرار PSM</span>
@@ -945,7 +973,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                     onClick={() => handleSelectZone(zone.key)}
                     className={`hse-motion-tab flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap cursor-pointer ${
                       isZoneActive
-                        ? 'bg-amber-500 text-slate-950 shadow-xs font-black'
+                        ? 'bg-blue-600 text-white shadow-xs font-black'
                         : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/60 dark:hover:bg-slate-700/50'
                     }`}
                   >
@@ -954,7 +982,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                     <span
                       className={`text-[10px] font-mono px-1 py-0.2 rounded font-bold ${
                         isZoneActive
-                          ? 'bg-slate-950/20 text-slate-950'
+                          ? 'bg-white/20 text-white'
                           : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
                       }`}
                     >
@@ -972,7 +1000,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                 aria-label="پرش سریع به زیرماژول"
                 value={activeSubTab}
                 onChange={(e) => handleSelectSubTab(e.target.value as PsmSubTabKey)}
-                className="px-2.5 py-1 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 font-bold focus:ring-1 focus:ring-amber-500"
+                className="px-2.5 py-1 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 font-bold focus:ring-1 focus:ring-blue-500"
               >
                 {PSM_NAVIGATION_TABS.map((t) => (
                   <option key={t.key} value={t.key}>
@@ -995,7 +1023,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                   onClick={() => handleSelectSubTab(tab.key)}
                   className={`hse-motion-tab flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold whitespace-nowrap cursor-pointer border ${
                     isActive
-                      ? 'bg-amber-500 text-slate-950 border-amber-500 shadow-sm font-black'
+                      ? 'bg-blue-600 text-white border-blue-600 shadow-sm font-black'
                       : 'bg-white dark:bg-slate-800/80 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700/80 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
                   }`}
                 >
@@ -1003,10 +1031,10 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                   <span>{tab.titleFa}</span>
                   {tab.badgeText && (
                     <span
-                      className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold ${
+                      className={`px-1.5 py-0.5 rounded text-[10px] font-sans font-bold ${
                         isActive
-                          ? 'bg-slate-950/20 text-slate-950'
-                          : 'bg-amber-500/15 text-amber-700 dark:text-amber-400'
+                          ? 'bg-white/20 text-white'
+                          : 'bg-blue-500/15 text-blue-700 dark:text-blue-400'
                       }`}
                     >
                       {tab.badgeText}
@@ -1019,38 +1047,111 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
         </div>
       </div>
 
+      {/* Sticky Guided Action Context & 1-Click Return Banner (Principle 2) */}
+      {activeDeepLinkContext && activeSubTab !== 'command-center' && activeSubTab !== 'my-workspace' && (
+        <div className="bg-gradient-to-l from-blue-500/15 via-white to-teal-500/15 dark:from-blue-950/40 dark:via-slate-900 dark:to-teal-950/30 border-2 border-blue-500/50 rounded-2xl p-3.5 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="space-y-0.5">
+            <div className="flex items-center gap-2 text-xs font-black text-blue-800 dark:text-blue-300">
+              <Sparkles className="w-4 h-4 text-blue-500 shrink-0" />
+              <span>هدایت هوشمند سیستم (اصل دوم): اطلاعات پایه پروژه، واحد و مسئول به صورت خودکار در فرم آماده شد</span>
+            </div>
+            <p className="text-[11px] text-slate-600 dark:text-slate-300">
+              {activeDeepLinkContext.contextHintFa}
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                setActiveDeepLinkContext(null);
+                handleSelectSubTab('command-center');
+              }}
+              className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-blue-600 dark:text-white text-white text-xs font-black transition cursor-pointer"
+            >
+              بازگشت به مسیر استقرار PSM
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveDeepLinkContext(null);
+                handleSelectSubTab('my-workspace');
+              }}
+              className="px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs font-bold transition cursor-pointer"
+            >
+              بازگشت به کارهای من
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveDeepLinkContext(null)}
+              className="px-2 py-1.5 rounded-lg text-[11px] text-slate-500 hover:text-slate-800 cursor-pointer"
+            >
+              بستن راهنما
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Initial Skeleton Loading State when fetching PSM bootstrap */}
       {loading && projects.length === 0 ? (
         <PsmSubmoduleSkeleton />
       ) : (
         <SubViewTransition viewKey={activeSubTab} isFa={true}>
-      {/* Empty State when no project exists yet (Zero Fake Data Policy) */}
-      {/* Empty State when no project exists yet (on dashboard) */}
-      {!loading && projects.length === 0 && activeSubTab === 'dashboard' && (
+      {/* =================================================================
+          GUIDED PSM COMMAND CENTER: مسیر استقرار PSM (فاز ۲، ۵، ۶، ۸، ۹)
+         ================================================================= */}
+      {activeSubTab === 'command-center' && (
+        <PsmCommandCenter
+          currentUser={currentUser}
+          activeProject={activeProject}
+          projectData={projectData}
+          stageGates={projectData.stageGates || []}
+          centralOrg={centralOrg}
+          permissions={permissions}
+          onExecuteDeepLink={handleExecuteDeepLink}
+          onNavigateSubTab={handleSelectSubTab}
+          onRefresh={() => fetchBootstrap(selectedProjectId)}
+        />
+      )}
+
+      {/* =================================================================
+          COMPREHENSIVE GUIDE TAB: راهنمای جامع استقرار PSM (۱۲ بخش)
+         ================================================================= */}
+      {activeSubTab === 'comprehensive-guide' && (
+        <PsmComprehensiveGuide
+          activeProject={activeProject}
+          projectData={projectData}
+          onNavigateSubTab={handleSelectSubTab}
+          onExecuteDeepLink={handleExecuteDeepLink}
+          onOpenCreateProjectModal={() => setShowCreateProjectModal(true)}
+        />
+      )}
+
+      {/* Unified Empty State when no project exists yet (Zero Fake Data Policy) */}
+      {!loading && projects.length === 0 && activeSubTab !== 'command-center' && activeSubTab !== 'project' && activeSubTab !== 'my-workspace' && activeSubTab !== 'comprehensive-guide' && (
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-8 text-center space-y-4">
-          <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center mx-auto text-amber-500">
+          <div className="w-14 h-14 rounded-2xl bg-blue-500/10 border border-blue-500/30 flex items-center justify-center mx-auto text-blue-500">
             <ShieldCheck className="w-7 h-7" />
           </div>
           <div className="max-w-xl mx-auto space-y-1.5">
             <h3 className="text-base font-black text-slate-900 dark:text-white">
-              هیچ پروژه استقرار PSM در پایگاه داده ثبت نشده است
+              نیاز به تعریف یا انتخاب پروژه استقرار PSM در پایگاه داده
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-              مطابق الزامات سخت‌گیرانه سامانه، هیچ‌گونه داده آزمایشی یا جعلی به عنوان پروژه واقعی ایجاد نشده است. برای شروع چرخه استقرار ایمنی فرایند در مجتمع پتروشیمی رجال، اولین پروژه استقرار PSM را با تعیین دامنه، مدیر پروژه، حامی و واحدهای مشمول ایجاد نمایید.
+              مطابق سیاست داده واقعی سامانه، هیچ پروژه آزمایشی به صورت خودکار ایجاد نشده است. جهت پایش و ثبت اطلاعات در این زیرماژول، ابتدا اولین پروژه استقرار PSM مجتمع پتروشیمی رجال را با تعیین دامنه، مدیر پروژه، حامی و واحدهای مشمول تعریف نمایید.
             </p>
           </div>
           <div className="flex flex-wrap items-center justify-center gap-3">
             <button
               type="button"
               onClick={() => setShowCreateProjectModal(true)}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-black shadow-md transition cursor-pointer"
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black shadow-md transition cursor-pointer"
             >
               <Plus className="w-4 h-4" />
-              <span>ایجاد اولین پروژه استقرار PSM</span>
+              <span>تعریف پروژه جدید استقرار PSM</span>
             </button>
             <button
               type="button"
-              onClick={() => setActiveSubTab('project')}
+              onClick={() => handleSelectSubTab('project')}
               className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold transition cursor-pointer"
             >
               <Layers className="w-4 h-4" />
@@ -1060,44 +1161,8 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
         </div>
       )}
 
-      {/* Guide card when no project exists and user selects any other subtab except dashboard, project, and my-workspace */}
-      {!loading && projects.length === 0 && activeSubTab !== 'dashboard' && activeSubTab !== 'project' && activeSubTab !== 'my-workspace' && (
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-8 text-center space-y-4">
-          <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center mx-auto text-amber-500">
-            <Layers className="w-7 h-7" />
-          </div>
-          <div className="max-w-xl mx-auto space-y-1.5">
-            <h3 className="text-base font-black text-slate-900 dark:text-white">
-              نیاز به تعریف یا انتخاب پروژه استقرار PSM
-            </h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-              جهت کار با این بخش و ثبت یا پایش اطلاعات، ابتدا باید یک پروژه استقرار PSM در سامانه تعریف یا فعال نمایید.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center justify-center gap-3">
-            <button
-              type="button"
-              onClick={() => setShowCreateProjectModal(true)}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-black shadow-md transition cursor-pointer"
-            >
-              <Plus className="w-4 h-4" />
-              <span>تعریف پروژه جدید استقرار PSM</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveSubTab('project')}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold transition cursor-pointer"
-            >
-              <Layers className="w-4 h-4" />
-              <span>ورود به تب مدیریت پروژه و دامنه</span>
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* =================================================================
-          PERSONAL WORKSPACE: میز کار و اقدامات من (فاز ۱)
-          نمای متمرکز وظایف WBS، اقدامات اصلاحی CAPA، اسناد و دروازه‌ها
+          PERSONAL WORKSPACE: کارهای من (کارتابل عملیاتی یکپارچه - بخش ۴)
          ================================================================= */}
       {activeSubTab === 'my-workspace' && (
         <PsmPersonalWorkspace
@@ -1105,6 +1170,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
           activeProject={activeProject}
           projectData={projectData}
           onNavigateSubTab={handleSelectSubTab}
+          onExecuteDeepLink={handleExecuteDeepLink}
           onRefresh={() => fetchBootstrap(selectedProjectId)}
           onRequestCreateGap={() => handleSelectSubTab('gap-analysis')}
           onRequestCreateDoc={() => handleSelectSubTab('documents')}
@@ -1122,7 +1188,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-200 dark:border-slate-800 pb-4">
               <div>
                 <h3 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
-                  <Layers className="w-5 h-5 text-amber-500" />
+                  <Layers className="w-5 h-5 text-blue-500" />
                   <span>مدیریت پروژه و دامنه شمول استقرار PSM (Project & Scope Governance)</span>
                 </h3>
                 <p className="text-xs text-slate-500 mt-1">
@@ -1133,7 +1199,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                 <button
                   type="button"
                   onClick={() => setShowCreateProjectModal(true)}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-black shadow-sm transition cursor-pointer"
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black shadow-sm transition cursor-pointer"
                 >
                   <Plus className="w-4 h-4" />
                   <span>+ تعریف پروژه جدید استقرار PSM</span>
@@ -1165,14 +1231,14 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
               </div>
 
               {projects.length === 0 ? (
-                <div className="p-6 rounded-xl bg-amber-500/5 border border-dashed border-amber-500/30 text-center space-y-3">
-                  <p className="text-xs font-bold text-amber-700 dark:text-amber-400">
+                <div className="p-6 rounded-xl bg-blue-500/5 border border-dashed border-blue-500/30 text-center space-y-3">
+                  <p className="text-xs font-bold text-blue-700 dark:text-blue-400">
                     در حال حاضر هیچ پروژه‌ای در پایگاه داده ثبت نشده است. می‌توانید با زدن دکمه زیر، اولین پروژه را تعریف و فعال نمایید:
                   </p>
                   <button
                     type="button"
                     onClick={() => setShowCreateProjectModal(true)}
-                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-black shadow-sm transition cursor-pointer"
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black shadow-sm transition cursor-pointer"
                   >
                     <Plus className="w-4 h-4" />
                     <span>تعریف و ایجاد اولین پروژه استقرار PSM</span>
@@ -1187,7 +1253,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                         key={p.id}
                         className={`p-3.5 rounded-xl border transition flex flex-col justify-between gap-3 ${
                           isCurrent
-                            ? 'bg-amber-500/5 dark:bg-amber-500/10 border-amber-500/50 ring-1 ring-amber-500/30'
+                            ? 'bg-blue-500/5 dark:bg-blue-500/10 border-blue-500/50 ring-1 ring-blue-500/30'
                             : 'bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700/70 hover:border-slate-300'
                         }`}
                       >
@@ -1200,7 +1266,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                               className={`text-[10px] font-black px-2 py-0.5 rounded ${
                                 p.status === 'ACTIVE_SYSTEM'
                                   ? 'bg-emerald-500/10 text-emerald-600'
-                                  : 'bg-amber-500/10 text-amber-600'
+                                  : 'bg-blue-500/10 text-blue-600'
                               }`}
                             >
                               {p.status === 'ACTIVE_SYSTEM' ? 'سیستم فعال' : 'در حال استقرار'}
@@ -1220,7 +1286,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                             </div>
                             <div className="w-full h-1.5 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
                               <div
-                                className="h-full bg-amber-500 transition-all"
+                                className="h-full bg-blue-500 transition-all"
                                 style={{ width: `${p.overallProgress || 0}%` }}
                               />
                             </div>
@@ -1229,7 +1295,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
 
                         <div className="pt-2 border-t border-slate-200/60 dark:border-slate-700/60 flex items-center justify-between">
                           {isCurrent ? (
-                            <span className="text-[11px] font-black text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                            <span className="text-[11px] font-black text-blue-600 dark:text-blue-400 flex items-center gap-1">
                               <CheckCircle2 className="w-3.5 h-3.5" />
                               پروژه فعال کنونی
                             </span>
@@ -1237,7 +1303,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                             <button
                               type="button"
                               onClick={() => handleSelectProject(p.id)}
-                              className="text-[11px] font-bold text-amber-600 hover:text-amber-700 dark:text-amber-400 cursor-pointer"
+                              className="text-[11px] font-bold text-blue-600 hover:text-blue-700 dark:text-blue-400 cursor-pointer"
                             >
                               انتخاب این پروژه ←
                             </button>
@@ -1261,7 +1327,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                       شناسنامه و منشور پروژه فعال (PSM Charter)
                     </h3>
                     {(activeProject.overallStatus === 'DRAFT' || activeProject.status === 'DRAFT') && (
-                      <span className="px-2.5 py-0.5 rounded-md bg-amber-100 text-amber-800 border border-amber-300 text-xs font-black">
+                      <span className="px-2.5 py-0.5 rounded-md bg-blue-100 text-blue-800 border border-blue-300 text-xs font-black">
                         پیش‌نویس (Draft)
                       </span>
                     )}
@@ -1284,7 +1350,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                     <button
                       type="button"
                       onClick={handleStartEditProject}
-                      className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-black transition cursor-pointer"
+                      className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black transition cursor-pointer"
                     >
                       ویرایش هوشمند منشور پروژه
                     </button>
@@ -1337,7 +1403,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                               className={`px-2.5 py-1 rounded-lg font-bold flex items-center gap-1.5 ${
                                 isPrimary
                                   ? 'bg-teal-600 text-white'
-                                  : 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20'
+                                  : 'bg-blue-500/10 text-blue-700 dark:text-blue-400 border border-blue-500/20'
                               }`}
                             >
                               <span>{unitLabel}</span>
@@ -1394,7 +1460,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                     <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700/70 space-y-2.5">
                       <div className="flex items-center justify-between">
                         <span className="font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
-                          <Target className="w-4 h-4 text-amber-500" />
+                          <Target className="w-4 h-4 text-blue-500" />
                           <span>اهداف کمی پروژه استقرار PSM ({Array.isArray(activeProject.quantitativeGoals) ? activeProject.quantitativeGoals.length : 0} شاخص)</span>
                         </span>
                         <span className="text-[10px] text-slate-400 font-mono">Quantitative Objectives</span>
@@ -1505,7 +1571,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                                   type="checkbox"
                                   checked={isDone}
                                   onChange={() => handleToggleMilestone(idx)}
-                                  className="rounded text-amber-500 focus:ring-amber-500"
+                                  className="rounded text-blue-500 focus:ring-blue-500"
                                 />
                                 <div>
                                   <div
@@ -1538,7 +1604,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                                   className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                                     isDone
                                       ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                                      : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                                      : 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
                                   }`}
                                 >
                                   {isDone ? 'تکمیل‌شده (100%)' : `در جریان (${ms.progressPct ?? 0}%)`}
@@ -1576,7 +1642,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                         type="button"
                         onClick={() => handleAddMilestone(newMilestoneTitle, newMilestoneDate)}
                         disabled={!newMilestoneTitle.trim()}
-                        className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white text-xs font-black transition cursor-pointer shrink-0"
+                        className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-black transition cursor-pointer shrink-0"
                       >
                         + افزودن نقطه عطف
                       </button>
@@ -1621,6 +1687,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
               dashboardMetrics={dashboardMetrics}
               availableUnits={availableUnits}
               onNavigateSubTab={handleSelectSubTab}
+              onExecuteDeepLink={handleExecuteDeepLink}
               onRefresh={() => fetchBootstrap(selectedProjectId)}
               onOpenCreateProjectModal={() => setShowCreateProjectModal(true)}
             />
@@ -1682,7 +1749,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                     <div className="text-[10px] font-bold text-slate-500">پرسنل مرکزی</div>
                   </div>
                   <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/60 dark:border-slate-700/60">
-                    <div className="text-lg font-black font-mono text-amber-600 dark:text-amber-400">
+                    <div className="text-lg font-black font-mono text-blue-600 dark:text-blue-400">
                       {centralOrg.linkedModulesSummary?.workPermits || 0}
                     </div>
                     <div className="text-[10px] font-bold text-slate-500">پروانه‌های کار (PTW)</div>
@@ -1707,7 +1774,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <h3 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
-                      <Cpu className="w-4 h-4 text-amber-500" />
+                      <Cpu className="w-4 h-4 text-blue-500" />
                       <span>ساختار واحدهای فرایندی، نواحی عملیاتی، تجهیزات بحرانی ایمنی (SCE) و مسئولان</span>
                     </h3>
                     <p className="text-xs text-slate-500">
@@ -1718,7 +1785,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                     <button
                       type="button"
                       onClick={() => setShowNewAssetForm(!showNewAssetForm)}
-                      className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-black transition cursor-pointer"
+                      className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black transition cursor-pointer"
                     >
                       <Plus className="w-4 h-4" />
                       <span>ثبت تجهیز / ناحیه عملیاتی جدید</span>
@@ -1735,7 +1802,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                       <label className="block font-bold mb-1">واحد فرایندی *</label>
                       <input
                         type="text"
-                        list="psm-units-datalist"
+                        list="psm-units-list"
                         value={newAssetForm.processUnitName}
                         onChange={(e) => setNewAssetForm({ ...newAssetForm, processUnitName: e.target.value })}
                         placeholder="مثلاً: واحد پلیمریزاسیون"
@@ -1805,7 +1872,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                       <label className="block font-bold mb-1">مسئول تجهیز (از پرسنل مرکزی)</label>
                       <input
                         type="text"
-                        list="psm-central-personnel-list"
+                        list="psm-personnel-list"
                         value={newAssetForm.responsiblePersonName}
                         onChange={(e) => setNewAssetForm({ ...newAssetForm, responsiblePersonName: e.target.value })}
                         placeholder="انتخاب مسئول..."
@@ -1830,7 +1897,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                           type="checkbox"
                           checked={newAssetForm.psiCompleted}
                           onChange={(e) => setNewAssetForm({ ...newAssetForm, psiCompleted: e.target.checked })}
-                          className="rounded text-amber-500"
+                          className="rounded text-blue-500"
                         />
                         <span className="font-bold">بسته اطلاعات ایمنی فرایند (PSI: PFD, P&ID, SDS) این تجهیز کامل است</span>
                       </label>
@@ -1844,7 +1911,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                         </button>
                         <button
                           type="submit"
-                          className="px-4 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-black cursor-pointer"
+                          className="px-4 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black cursor-pointer"
                         >
                           ثبت تجهیز در ساختار PSM
                         </button>
@@ -1862,7 +1929,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                         placeholder="جستجوی تگ (مثلاً R-201)، نام تجهیز یا ناحیه..."
                         value={assetSearchQuery}
                         onChange={(e) => setAssetSearchQuery(e.target.value)}
-                        className="w-full pl-3 pr-8 py-1.5 rounded-xl text-xs border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:ring-1 focus:ring-amber-500"
+                        className="w-full pl-3 pr-8 py-1.5 rounded-xl text-xs border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:ring-1 focus:ring-blue-500"
                       />
                       <Search className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-2.5" />
                     </div>
@@ -1871,7 +1938,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                       aria-label="فیلتر واحد عملیاتی"
                       value={assetUnitFilter}
                       onChange={(e) => setAssetUnitFilter(e.target.value)}
-                      className="px-2.5 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 font-bold focus:ring-1 focus:ring-amber-500"
+                      className="px-2.5 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 font-bold focus:ring-1 focus:ring-blue-500"
                     >
                       <option value="ALL">همه واحدهای فرایندی ({availableUnits.length})</option>
                       {availableUnits.map((u) => (
@@ -1885,7 +1952,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                       aria-label="فیلتر سطح بحرانی"
                       value={assetCriticalityFilter}
                       onChange={(e) => setAssetCriticalityFilter(e.target.value)}
-                      className="px-2.5 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 font-bold focus:ring-1 focus:ring-amber-500"
+                      className="px-2.5 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 font-bold focus:ring-1 focus:ring-blue-500"
                     >
                       <option value="ALL">همه سطوح بحرانی</option>
                       <option value="CRITICAL">بحرانی ایمنی (SCE)</option>
@@ -1932,7 +1999,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                       <tbody className="divide-y divide-slate-200/60 dark:divide-slate-800">
                         {filteredAssets.map((asset) => (
                           <tr key={asset.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition">
-                            <td className="py-2.5 px-3 font-mono font-black text-amber-600 dark:text-amber-400">
+                            <td className="py-2.5 px-3 font-mono font-black text-blue-600 dark:text-blue-400">
                               {asset.equipmentTag}
                             </td>
                             <td className="py-2.5 px-3">
@@ -1957,7 +2024,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                                   asset.safetyCriticality === 'CRITICAL'
                                     ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/30'
                                     : asset.safetyCriticality === 'HIGH'
-                                    ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/30'
+                                    ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/30'
                                     : 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/30'
                                 }`}
                               >
@@ -1987,7 +2054,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                                 className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                                   asset.psiCompleted
                                     ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                                    : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                                    : 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
                                 }`}
                               >
                                 {asset.psiCompleted ? 'PSI تکمیل‌شده' : 'در دست تکمیل PSI'}
@@ -2057,11 +2124,11 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                         <div className="text-xl font-black font-mono text-slate-900 dark:text-white mt-1">
                           {ccpsAssessedSet.size} / 20
                         </div>
-                        <div className="text-[11px] font-bold text-amber-600 dark:text-amber-400 mt-0.5">
+                        <div className="text-[11px] font-bold text-blue-600 dark:text-blue-400 mt-0.5">
                           میانگین انطباق: {ccpsAvgScore}%
                         </div>
                       </div>
-                      <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-500 flex items-center justify-center">
+                      <div className="w-10 h-10 rounded-xl bg-blue-500/10 text-blue-500 flex items-center justify-center">
                         <ClipboardCheck className="w-5 h-5" />
                       </div>
                     </div>
@@ -2126,7 +2193,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                     onClick={() => setAssessmentStandardFilter('CCPS_RBPS')}
                     className={`px-3.5 py-2 rounded-xl text-xs font-black transition cursor-pointer ${
                       assessmentStandardFilter === 'CCPS_RBPS'
-                        ? 'bg-amber-500 text-white'
+                        ? 'bg-blue-600 text-white'
                         : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
                     }`}
                   >
@@ -2175,7 +2242,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                     <button
                       type="button"
                       onClick={() => setShowAssessmentForm(!showAssessmentForm)}
-                      className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-black transition cursor-pointer"
+                      className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black transition cursor-pointer"
                     >
                       <Plus className="w-4 h-4" />
                       <span>ثبت / به‌روزرسانی ارزیابی عنصر</span>
@@ -2188,7 +2255,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
               {showAssessmentForm && (
                 <form
                   onSubmit={handleSaveAssessment}
-                  className="bg-white dark:bg-slate-900 border-2 border-amber-500/40 rounded-2xl p-5 space-y-4 text-xs"
+                  className="bg-white dark:bg-slate-900 border-2 border-blue-500/40 rounded-2xl p-5 space-y-4 text-xs"
                 >
                   <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
                     <h4 className="text-sm font-black text-slate-900 dark:text-white">
@@ -2248,7 +2315,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                       <label className="block font-bold mb-1">واحد فرایندی / عملیاتی</label>
                       <input
                         type="text"
-                        list="psm-units-datalist"
+                        list="psm-units-list"
                         value={assessmentForm.unitName}
                         onChange={(e) => setAssessmentForm({ ...assessmentForm, unitName: e.target.value })}
                         className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
@@ -2372,7 +2439,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                       <label className="block font-bold mb-1">نام ارزیاب (از پرسنل مرکزی)</label>
                       <input
                         type="text"
-                        list="psm-central-personnel-list"
+                        list="psm-personnel-list"
                         value={assessmentForm.assessorName}
                         onChange={(e) => setAssessmentForm({ ...assessmentForm, assessorName: e.target.value })}
                         className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
@@ -2381,21 +2448,21 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                   </div>
 
                   {/* Out-of-Scope Gate with Mandatory Technical Justification */}
-                  <div className="p-3.5 rounded-xl bg-amber-500/5 border border-amber-500/30 space-y-2">
+                  <div className="p-3.5 rounded-xl bg-blue-500/5 border border-blue-500/30 space-y-2">
                     <label className="flex items-center gap-2 cursor-pointer">
                       <input
                         type="checkbox"
                         checked={assessmentForm.isOutOfScope}
                         onChange={(e) => setAssessmentForm({ ...assessmentForm, isOutOfScope: e.target.checked })}
                       />
-                      <span className="font-black text-amber-700 dark:text-amber-300">
+                      <span className="font-black text-blue-700 dark:text-blue-300">
                         خارج از دامنه شمول (Out-of-Scope) — نیازمند ثبت توجیه فنی مستند و تأیید رسمی
                       </span>
                     </label>
                     {assessmentForm.isOutOfScope && (
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
                         <div className="md:col-span-2">
-                          <label className="block font-bold mb-1 text-amber-700 dark:text-amber-300">
+                          <label className="block font-bold mb-1 text-blue-700 dark:text-blue-300">
                             توجیه فنی مستند (حداقل ۱۵ کاراکتر الزامی) *
                           </label>
                           <input
@@ -2405,23 +2472,23 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                               setAssessmentForm({ ...assessmentForm, outOfScopeJustification: e.target.value })
                             }
                             placeholder="علت فنی عدم موضوعیت این الزام در واحد مورد نظر را به صورت مستند وارد کنید..."
-                            className="w-full px-3 py-2 rounded-xl border border-amber-500/40 bg-white dark:bg-slate-900"
+                            className="w-full px-3 py-2 rounded-xl border border-blue-500/40 bg-white dark:bg-slate-900"
                             required
                           />
                         </div>
                         <div>
-                          <label className="block font-bold mb-1 text-amber-700 dark:text-amber-300">
+                          <label className="block font-bold mb-1 text-blue-700 dark:text-blue-300">
                             مقام تأییدکننده توجیه فنی *
                           </label>
                           <input
                             type="text"
-                            list="psm-central-personnel-list"
+                            list="psm-personnel-list"
                             value={assessmentForm.outOfScopeApprovedBy}
                             onChange={(e) =>
                               setAssessmentForm({ ...assessmentForm, outOfScopeApprovedBy: e.target.value })
                             }
                             placeholder="نام مدیر فنی / HSE..."
-                            className="w-full px-3 py-2 rounded-xl border border-amber-500/40 bg-white dark:bg-slate-900"
+                            className="w-full px-3 py-2 rounded-xl border border-blue-500/40 bg-white dark:bg-slate-900"
                             required
                           />
                         </div>
@@ -2439,7 +2506,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                     </button>
                     <button
                       type="submit"
-                      className="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-black cursor-pointer"
+                      className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black cursor-pointer"
                     >
                       ثبت ارزیابی و استخراج خودکار شکاف‌ها
                     </button>
@@ -2459,7 +2526,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                       >
                         <div className="flex items-center justify-between border-b border-slate-200/70 dark:border-slate-800 pb-2.5">
                           <div>
-                            <span className="px-2 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 font-mono text-[10px] font-black ml-2">
+                            <span className="px-2 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400 font-mono text-[10px] font-black ml-2">
                               {pillar.id}
                             </span>
                             <span className="text-sm font-black text-slate-900 dark:text-white">
@@ -2491,7 +2558,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                                   <div className="flex items-start justify-between gap-2">
                                     <div>
                                       <div className="flex items-center gap-1.5">
-                                        <span className="px-2 py-0.5 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400 font-mono text-[10px] font-black">
+                                        <span className="px-2 py-0.5 rounded bg-blue-500/15 text-blue-600 dark:text-blue-400 font-mono text-[10px] font-black">
                                           {el.code}
                                         </span>
                                         <span className="text-xs font-black text-slate-900 dark:text-white">
@@ -2510,7 +2577,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                                             : scoreVal >= reqScoreVal
                                             ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
                                             : scoreVal >= 50
-                                            ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                                            ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
                                             : 'bg-rose-500/10 text-rose-600 dark:text-rose-400'
                                         }`}
                                       >
@@ -2536,7 +2603,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                                         </div>
                                       )}
                                       {isOut && latest.outOfScopeJustification && (
-                                        <div className="text-amber-700 dark:text-amber-300">
+                                        <div className="text-blue-700 dark:text-blue-300">
                                           توجیه خارج از دامنه: {latest.outOfScopeJustification} (تأیید: {latest.outOfScopeApprovedBy})
                                         </div>
                                       )}
@@ -2552,7 +2619,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                                     <button
                                       type="button"
                                       onClick={() => handleOpenQuickAssessment('CCPS_RBPS', el.code, latest)}
-                                      className="px-2.5 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500 hover:text-white text-amber-600 dark:text-amber-400 text-[10.5px] font-black transition cursor-pointer shrink-0"
+                                      className="px-2.5 py-1 rounded-lg bg-blue-500/10 hover:bg-blue-600 hover:text-white text-blue-600 dark:text-blue-400 text-[10.5px] font-black transition cursor-pointer shrink-0"
                                     >
                                       {latest ? 'ویرایش ارزیابی عنصر' : '+ ثبت ارزیابی عنصر'}
                                     </button>
@@ -2609,7 +2676,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                                     : scoreVal >= reqScoreVal
                                     ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
                                     : scoreVal >= 50
-                                    ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                                    ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
                                     : 'bg-rose-500/10 text-rose-600 dark:text-rose-400'
                                 }`}
                               >
@@ -2697,8 +2764,8 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                         onClick={() => setMatrixFilterRelation('INDIRECT')}
                         className={`px-2.5 py-1 rounded-lg border cursor-pointer ${
                           matrixFilterRelation === 'INDIRECT'
-                            ? 'bg-amber-500 text-white border-amber-500'
-                            : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30'
+                            ? 'bg-blue-600 text-white border-blue-600'
+                            : 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/30'
                         }`}
                       >
                         غیرمستقیم (INDIRECT): {CCPS_OSHA_TRACEABILITY_MATRIX.filter((m) => m.relationType === 'INDIRECT').length} رابطه
@@ -2755,7 +2822,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                               <td className="py-2.5 px-3">
                                 <div className="flex items-center justify-between gap-2">
                                   <div>
-                                    <span className="font-mono font-black text-amber-600 dark:text-amber-400 ml-1.5">
+                                    <span className="font-mono font-black text-blue-600 dark:text-blue-400 ml-1.5">
                                       {link.ccpsCode}
                                     </span>
                                     <span className="font-bold text-slate-800 dark:text-slate-100">
@@ -2763,7 +2830,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                                     </span>
                                   </div>
                                   {ccpsScore !== null && (
-                                    <span className="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 font-mono text-[10px] font-bold">
+                                    <span className="px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400 font-mono text-[10px] font-bold">
                                       {ccpsScore}%
                                     </span>
                                   )}
@@ -2791,7 +2858,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
                                   className={`px-2.5 py-0.5 rounded-md text-[10px] font-black ${
                                     link.relationType === 'DIRECT'
                                       ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
-                                      : 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                                      : 'bg-blue-500/15 text-blue-600 dark:text-blue-400'
                                   }`}
                                 >
                                   {link.relationType === 'DIRECT'
@@ -2829,6 +2896,9 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
               apiRequest={apiRequest}
               onRefresh={() => fetchBootstrap(activeProject.id)}
               availableUnits={availableUnits}
+              activeDeepLinkContext={activeDeepLinkContext}
+              onClearDeepLinkContext={() => setActiveDeepLinkContext(null)}
+              onExecuteDeepLink={handleExecuteDeepLink}
             />
           )}
         </>
@@ -2850,15 +2920,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
         </div>
       )}
 
-      {/* Shared Datalists for Central Personnel and Central Organizational Units */}
-      <datalist id="psm-central-personnel-list">
-        {centralOrg.personnel.map((p: any) => (
-          <option
-            key={p.id || p.personnelCode}
-            value={p.fullName}
-          >{`${p.fullName} (${p.personnelCode || ''} - ${p.unit || p.department || ''})`}</option>
-        ))}
-      </datalist>
+      {/* Single Canonical Datalists for Central Personnel and Central Organizational Units */}
       <datalist id="psm-personnel-list">
         {centralOrg.personnel.map((p: any) => (
           <option
@@ -2868,11 +2930,6 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
         ))}
       </datalist>
 
-      <datalist id="psm-units-datalist">
-        {availableUnits.map((u) => (
-          <option key={u} value={u} />
-        ))}
-      </datalist>
       <datalist id="psm-units-list">
         {availableUnits.map((u) => (
           <option key={u} value={u} />

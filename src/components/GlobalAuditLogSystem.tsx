@@ -33,18 +33,22 @@ import {
   PlayCircle,
   Terminal,
   Lock,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import moment from 'moment-jalaali';
 import { printService } from '../services/printService';
 import { getSystemBrandingConfig } from '../utils/systemBrandingHelper';
 import { apiDb } from '../services/apiDatabaseClient';
-import { getAuditLogs, addAuditLog, getCurrentUser } from '../utils/authHelper';
+import { getAuditLogs, addAuditLog, getCurrentUser, isUserAdmin, hasPermission } from '../utils/authHelper';
 import { mergeAndDeduplicateAuditLogs } from '../utils/auditEngine';
 import { downloadCsvFile } from '../utils/fileHelpers';
 import { VirtualizedDataTable, VirtualizedColumn } from './common/virtualized/VirtualizedDataTable';
 
 interface GlobalAuditLogSystemProps {
   isFa: boolean;
+  canExport?: boolean;
+  canPrint?: boolean;
 }
 
 type ViewMode = 'table' | 'journey' | 'diffs';
@@ -159,6 +163,26 @@ const ACTION_META: Record<
     labelEn: 'SESSION',
     badgeClass: 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700',
   },
+  SOFT_DELETE: {
+    labelFa: 'حذف نرم',
+    labelEn: 'SOFT DELETE',
+    badgeClass: 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800',
+  },
+  REVIEW: {
+    labelFa: 'بازبینی مهندسی',
+    labelEn: 'REVIEW',
+    badgeClass: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800',
+  },
+  ACCESS_DENIED: {
+    labelFa: 'عدم دسترسی (امنیتی)',
+    labelEn: 'ACCESS DENIED',
+    badgeClass: 'bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-800',
+  },
+  UPLOAD: {
+    labelFa: 'بارگذاری فایل',
+    labelEn: 'UPLOAD',
+    badgeClass: 'bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-950/40 dark:text-sky-300 dark:border-sky-800',
+  },
 };
 
 const SEVERITY_META: Record<
@@ -203,12 +227,32 @@ const CATEGORY_META: Record<AuditCategory, { labelFa: string; labelEn: string }>
   SYSTEM: { labelFa: 'عملیات سیستمی و پس‌زمینه', labelEn: 'System Events' },
 };
 
-export const GlobalAuditLogSystem: React.FC<GlobalAuditLogSystemProps> = ({ isFa }) => {
+export const GlobalAuditLogSystem: React.FC<GlobalAuditLogSystemProps> = ({
+  isFa,
+  canExport,
+  canPrint,
+}) => {
+  const currentUser = getCurrentUser();
+  const effectiveCanExport =
+    canExport !== undefined
+      ? canExport
+      : isUserAdmin(currentUser) || hasPermission(currentUser, 'Audit Logs', 'export');
+  const effectiveCanPrint =
+    canPrint !== undefined
+      ? canPrint
+      : isUserAdmin(currentUser) || hasPermission(currentUser, 'Audit Logs', 'print');
+
   const [logs, setLogs] = useState<AuditLogEntry[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isLiveStream, setIsLiveStream] = useState(true);
   const [includeMicroMovements, setIncludeMicroMovements] = useState(true);
   const [viewMode, setViewMode] = useState<ViewMode>('table');
+
+  // Pagination state (server-backed)
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(100);
+  const [totalServerRecords, setTotalServerRecords] = useState(0);
+  const [totalServerPages, setTotalServerPages] = useState(1);
 
   // Multi-dimensional filters
   const [searchTerm, setSearchTerm] = useState('');
@@ -218,30 +262,46 @@ export const GlobalAuditLogSystem: React.FC<GlobalAuditLogSystemProps> = ({ isFa
   const [moduleFilter, setModuleFilter] = useState('ALL');
   const [severityFilter, setSeverityFilter] = useState('ALL');
   const [timeRangeFilter, setTimeRangeFilter] = useState<TimeRangeFilter>('ALL');
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
 
   // Forensic modal state
   const [selectedLog, setSelectedLog] = useState<AuditLogEntry | null>(null);
   const [showRawJson, setShowRawJson] = useState(false);
 
-  const loadAndMergeLogs = useCallback(async (showSpinner = false) => {
-    if (showSpinner) setIsLoading(true);
-    try {
-      const dbRows = await apiDb.getAuditLogs(500).catch(() => []);
-      const memRows = getAuditLogs();
-      const merged = mergeAndDeduplicateAuditLogs(dbRows, memRows);
-      setLogs(merged);
-    } finally {
-      if (showSpinner) setIsLoading(false);
-    }
-  }, []);
+  const loadAndMergeLogs = useCallback(
+    async (showSpinner = false, targetPage = page) => {
+      if (showSpinner) setIsLoading(true);
+      try {
+        const res = await apiDb.getAuditLogsPaged({
+          page: targetPage,
+          limit: pageSize,
+          from: fromDate || undefined,
+          to: toDate || undefined,
+          result: statusFilter === 'FAIL' ? 'FAILED' : statusFilter !== 'ALL' ? statusFilter : undefined,
+        });
+        setTotalServerRecords(res.pagination?.total ?? res.data.length);
+        setTotalServerPages(Math.max(1, res.pagination?.totalPages ?? 1));
+        if (targetPage === 1 && !fromDate && !toDate) {
+          const memRows = getAuditLogs();
+          setLogs(mergeAndDeduplicateAuditLogs(res.data, memRows));
+        } else {
+          setLogs(mergeAndDeduplicateAuditLogs(res.data, []));
+        }
+      } finally {
+        if (showSpinner) setIsLoading(false);
+      }
+    },
+    [page, pageSize, fromDate, toDate, statusFilter]
+  );
 
   useEffect(() => {
-    loadAndMergeLogs(true);
-  }, [loadAndMergeLogs]);
+    void loadAndMergeLogs(true, page);
+  }, [loadAndMergeLogs, page]);
 
   useEffect(() => {
-    if (!isLiveStream) return;
+    if (!isLiveStream || page !== 1 || fromDate || toDate) return;
     const handleLogUpdate = () => {
       const memRows = getAuditLogs();
       setLogs((prev) => mergeAndDeduplicateAuditLogs(prev, memRows));
@@ -250,7 +310,7 @@ export const GlobalAuditLogSystem: React.FC<GlobalAuditLogSystemProps> = ({ isFa
     return () => {
       window.removeEventListener('hse_audit_log_added', handleLogUpdate);
     };
-  }, [isLiveStream]);
+  }, [isLiveStream, page, fromDate, toDate]);
 
   const uniqueUsers = useMemo(() => {
     const map = new Map<string, string>();
@@ -283,12 +343,20 @@ export const GlobalAuditLogSystem: React.FC<GlobalAuditLogSystemProps> = ({ isFa
       }
 
       // Time range filter
+      const logTime = new Date(log.ts).getTime();
       if (timeRangeFilter !== 'ALL') {
-        const logTime = new Date(log.ts).getTime();
         if (timeRangeFilter === '1H' && nowMs - logTime > 3600 * 1000) return false;
         if (timeRangeFilter === 'TODAY' && logTime < startOfToday.getTime()) return false;
         if (timeRangeFilter === '7D' && nowMs - logTime > 7 * 86400 * 1000) return false;
         if (timeRangeFilter === '30D' && nowMs - logTime > 30 * 86400 * 1000) return false;
+      }
+      if (fromDate) {
+        const fMs = new Date(`${fromDate}T00:00:00`).getTime();
+        if (!isNaN(fMs) && logTime < fMs) return false;
+      }
+      if (toDate) {
+        const tMs = new Date(`${toDate}T23:59:59.999`).getTime();
+        if (!isNaN(tMs) && logTime > tMs) return false;
       }
 
       if (userFilter !== 'ALL' && log.username !== userFilter) return false;
@@ -336,6 +404,8 @@ export const GlobalAuditLogSystem: React.FC<GlobalAuditLogSystemProps> = ({ isFa
     logs,
     includeMicroMovements,
     timeRangeFilter,
+    fromDate,
+    toDate,
     userFilter,
     categoryFilter,
     actionTypeFilter,
@@ -434,6 +504,8 @@ export const GlobalAuditLogSystem: React.FC<GlobalAuditLogSystemProps> = ({ isFa
     moduleFilter !== 'ALL' ||
     severityFilter !== 'ALL' ||
     timeRangeFilter !== 'ALL' ||
+    fromDate !== '' ||
+    toDate !== '' ||
     statusFilter !== 'ALL';
 
   const resetFilters = () => {
@@ -444,14 +516,17 @@ export const GlobalAuditLogSystem: React.FC<GlobalAuditLogSystemProps> = ({ isFa
     setModuleFilter('ALL');
     setSeverityFilter('ALL');
     setTimeRangeFilter('ALL');
+    setFromDate('');
+    setToDate('');
     setStatusFilter('ALL');
+    setPage(1);
   };
 
   const exportToCsv = () => {
-    if (filteredLogs.length === 0) return;
-    const currentUser = getCurrentUser();
+    if (!effectiveCanExport || filteredLogs.length === 0) return;
+    const actor = getCurrentUser();
     addAuditLog(
-      currentUser?.username || 'admin',
+      actor?.username || 'admin',
       `استخراج خروجی CSV/Excel از لاگ ممیزی (${filteredLogs.length} رکورد)`,
       'موفق',
       { actionType: 'EXPORT', module: 'لاگ عملیات و ممیزی' }
@@ -515,10 +590,10 @@ export const GlobalAuditLogSystem: React.FC<GlobalAuditLogSystemProps> = ({ isFa
   };
 
   const exportToJson = () => {
-    if (filteredLogs.length === 0) return;
-    const currentUser = getCurrentUser();
+    if (!effectiveCanExport || filteredLogs.length === 0) return;
+    const actor = getCurrentUser();
     addAuditLog(
-      currentUser?.username || 'admin',
+      actor?.username || 'admin',
       `استخراج خروجی JSON کالبدشکافی لاگ ممیزی (${filteredLogs.length} رکورد)`,
       'موفق',
       { actionType: 'EXPORT', module: 'لاگ عملیات و ممیزی' }
@@ -536,9 +611,10 @@ export const GlobalAuditLogSystem: React.FC<GlobalAuditLogSystemProps> = ({ isFa
   };
 
   const printLogs = () => {
-    const currentUser = getCurrentUser();
+    if (!effectiveCanPrint || filteredLogs.length === 0) return;
+    const actor = getCurrentUser();
     addAuditLog(
-      currentUser?.username || 'admin',
+      actor?.username || 'admin',
       `چاپ گزارش رسمی ممیزی و ریزحرکات سیستم (${filteredLogs.length} رکورد)`,
       'موفق',
       { actionType: 'PRINT', module: 'لاگ عملیات و ممیزی' }
@@ -1006,38 +1082,52 @@ export const GlobalAuditLogSystem: React.FC<GlobalAuditLogSystemProps> = ({ isFa
             {/* Refresh */}
             <button
               type="button"
-              onClick={() => loadAndMergeLogs(true)}
+              onClick={() => void loadAndMergeLogs(true, page)}
               className="p-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl border border-slate-200 dark:border-slate-700 transition cursor-pointer"
               title={isFa ? 'بروزرسانی از پایگاه داده' : 'Refresh from DB'}
             >
               <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin text-indigo-600' : ''}`} />
             </button>
 
-            {/* Exports */}
-            <button
-              type="button"
-              onClick={exportToCsv}
-              className="px-3 py-1.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-300 font-bold text-xs rounded-xl flex items-center gap-1.5 transition border border-emerald-200 dark:border-emerald-800 cursor-pointer"
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5" />
-              <span>{isFa ? 'Excel / CSV' : 'CSV'}</span>
-            </button>
-            <button
-              type="button"
-              onClick={exportToJson}
-              className="px-3 py-1.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:text-indigo-300 font-bold text-xs rounded-xl flex items-center gap-1.5 transition border border-indigo-200 dark:border-indigo-800 cursor-pointer"
-            >
-              <FileJson className="w-3.5 h-3.5" />
-              <span>JSON</span>
-            </button>
-            <button
-              type="button"
-              onClick={printLogs}
-              className="px-3 py-1.5 bg-slate-900 text-white hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-700 font-bold text-xs rounded-xl flex items-center gap-1.5 transition cursor-pointer"
-            >
-              <Printer className="w-3.5 h-3.5" />
-              <span>{isFa ? 'چاپ رسمی / PDF' : 'Print / PDF'}</span>
-            </button>
+            {/* RBAC-Gated Exports */}
+            {effectiveCanExport ? (
+              <>
+                <button
+                  type="button"
+                  onClick={exportToCsv}
+                  className="px-3 py-1.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-300 font-bold text-xs rounded-xl flex items-center gap-1.5 transition border border-emerald-200 dark:border-emerald-800 cursor-pointer"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5" />
+                  <span>{isFa ? 'Excel / CSV' : 'CSV'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={exportToJson}
+                  className="px-3 py-1.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:text-indigo-300 font-bold text-xs rounded-xl flex items-center gap-1.5 transition border border-indigo-200 dark:border-indigo-800 cursor-pointer"
+                >
+                  <FileJson className="w-3.5 h-3.5" />
+                  <span>JSON</span>
+                </button>
+              </>
+            ) : (
+              <span
+                className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 text-slate-400 font-bold text-xs rounded-xl flex items-center gap-1.5 border border-slate-200 dark:border-slate-700"
+                title={isFa ? 'مجوز خروجی گرفتن از لاگ برای نقش شما فعال نیست' : 'Export requires permission'}
+              >
+                <Lock className="w-3.5 h-3.5" />
+                <span>{isFa ? 'خروجی محدود' : 'Export Locked'}</span>
+              </span>
+            )}
+            {effectiveCanPrint && (
+              <button
+                type="button"
+                onClick={printLogs}
+                className="px-3 py-1.5 bg-slate-900 text-white hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-700 font-bold text-xs rounded-xl flex items-center gap-1.5 transition cursor-pointer"
+              >
+                <Printer className="w-3.5 h-3.5" />
+                <span>{isFa ? 'چاپ رسمی / PDF' : 'Print / PDF'}</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -1163,13 +1253,40 @@ export const GlobalAuditLogSystem: React.FC<GlobalAuditLogSystemProps> = ({ isFa
 
             <select
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
+              onChange={(e) => {
+                setStatusFilter(e.target.value);
+                setPage(1);
+              }}
               className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-lg py-1 px-2 text-[11px] font-bold"
             >
               <option value="ALL">{isFa ? 'وضعیت: همه' : 'Status: All'}</option>
               <option value="SUCCESS">{isFa ? 'فقط موفق' : 'Success Only'}</option>
               <option value="FAIL">{isFa ? 'فقط ناموفق / خطا' : 'Failed Only'}</option>
             </select>
+
+            {/* Explicit Date Range Inputs */}
+            <div className="flex items-center gap-1.5 mr-1">
+              <span className="text-[11px] font-bold text-slate-400">{isFa ? 'از:' : 'From:'}</span>
+              <input
+                type="date"
+                value={fromDate}
+                onChange={(e) => {
+                  setFromDate(e.target.value);
+                  setPage(1);
+                }}
+                className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-lg py-1 px-2 text-[11px] font-mono font-bold"
+              />
+              <span className="text-[11px] font-bold text-slate-400">{isFa ? 'تا:' : 'To:'}</span>
+              <input
+                type="date"
+                value={toDate}
+                onChange={(e) => {
+                  setToDate(e.target.value);
+                  setPage(1);
+                }}
+                className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-lg py-1 px-2 text-[11px] font-mono font-bold"
+              />
+            </div>
           </div>
 
           <div className="flex items-center gap-2">
@@ -1201,13 +1318,13 @@ export const GlobalAuditLogSystem: React.FC<GlobalAuditLogSystemProps> = ({ isFa
         </div>
       </div>
 
-      {/* 3. VIEW MODE 1: FORENSIC LOG TABLE */}
+      {/* 3. VIEW MODE 1: FORENSIC LOG TABLE + PAGINATION BAR */}
       {viewMode === 'table' && (
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-sm">
           <VirtualizedDataTable
             data={filteredLogs}
             columns={auditColumns}
-            height={620}
+            height={580}
             isFa={isFa}
             emptyMessage={
               isFa
@@ -1215,6 +1332,54 @@ export const GlobalAuditLogSystem: React.FC<GlobalAuditLogSystemProps> = ({ isFa
                 : 'No audit logs match the selected filters'
             }
           />
+          <div className="px-4 py-3 border-t border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900 flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-3 text-slate-600 dark:text-slate-300 font-bold tabular-nums">
+              <span>
+                {isFa
+                  ? `صفحه ${page} از ${totalServerPages} · مجموع سوابق پایگاه داده: ${totalServerRecords.toLocaleString()}`
+                  : `Page ${page} of ${totalServerPages} · Total DB Records: ${totalServerRecords.toLocaleString()}`}
+              </span>
+              <span className="text-slate-400">|</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-slate-500">{isFa ? 'تعداد در صفحه:' : 'Page size:'}</span>
+                <select
+                  value={pageSize}
+                  onChange={(e) => {
+                    setPageSize(Number(e.target.value));
+                    setPage(1);
+                  }}
+                  className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1 text-xs font-mono font-bold"
+                >
+                  {[25, 50, 100, 200, 500].map((sz) => (
+                    <option key={sz} value={sz}>
+                      {sz}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                disabled={page <= 1 || isLoading}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-bold flex items-center gap-1 disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+              >
+                <ChevronRight className="w-3.5 h-3.5" />
+                <span>{isFa ? 'صفحه قبل' : 'Prev'}</span>
+              </button>
+              <button
+                type="button"
+                disabled={page >= totalServerPages || isLoading}
+                onClick={() => setPage((p) => Math.min(totalServerPages, p + 1))}
+                className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-bold flex items-center gap-1 disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+              >
+                <span>{isFa ? 'صفحه بعد' : 'Next'}</span>
+                <ChevronLeft className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1522,6 +1687,11 @@ export const GlobalAuditLogSystem: React.FC<GlobalAuditLogSystemProps> = ({ isFa
                         {selectedLog.description}
                       </div>
                     )}
+                    {selectedLog.reason && selectedLog.reason !== selectedLog.description && (
+                      <div className="text-xs text-amber-700 dark:text-amber-300 font-bold pt-1">
+                        {isFa ? `دلیل / یادداشت: ${selectedLog.reason}` : `Reason / Notes: ${selectedLog.reason}`}
+                      </div>
+                    )}
                   </div>
 
                   {/* Metadata Grid: Actor + Context/Telemetry */}
@@ -1586,9 +1756,9 @@ export const GlobalAuditLogSystem: React.FC<GlobalAuditLogSystemProps> = ({ isFa
                           {selectedLog.ts}
                         </div>
 
-                        <div className="text-slate-500">{isFa ? 'ماژول و صفحه:' : 'Module / Page:'}</div>
+                        <div className="text-slate-500">{isFa ? 'ماژول و زیربخش:' : 'Module / SubSection:'}</div>
                         <div className="font-bold text-slate-800 dark:text-slate-200">
-                          {selectedLog.module} ({selectedLog.page})
+                          {selectedLog.module} ({selectedLog.subSection || selectedLog.page})
                         </div>
 
                         <div className="text-slate-500">{isFa ? 'عنصر هدف / اندپوینت:' : 'Target / Endpoint:'}</div>
@@ -1669,6 +1839,33 @@ export const GlobalAuditLogSystem: React.FC<GlobalAuditLogSystemProps> = ({ isFa
                       </div>
                     </div>
                   )}
+
+                  {/* Raw Before / After Payloads when available */}
+                  {(selectedLog.oldValue !== undefined && selectedLog.oldValue !== null) ||
+                  (selectedLog.newValue !== undefined && selectedLog.newValue !== null) ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div className="p-3 rounded-2xl border border-rose-200 dark:border-rose-900/60 bg-rose-50/30 dark:bg-rose-950/20">
+                        <div className="text-[11px] font-black text-rose-700 dark:text-rose-300 mb-1.5">
+                          {isFa ? 'مقدار / وضعیت قبلی (Old Value)' : 'Old Value Snapshot'}
+                        </div>
+                        <pre dir="ltr" className="text-[11px] font-mono text-slate-700 dark:text-slate-300 overflow-x-auto max-h-48">
+                          {selectedLog.oldValue !== undefined && selectedLog.oldValue !== null
+                            ? JSON.stringify(selectedLog.oldValue, null, 2)
+                            : '—'}
+                        </pre>
+                      </div>
+                      <div className="p-3 rounded-2xl border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/30 dark:bg-emerald-950/20">
+                        <div className="text-[11px] font-black text-emerald-700 dark:text-emerald-300 mb-1.5">
+                          {isFa ? 'مقدار / وضعیت جدید (New Value)' : 'New Value Snapshot'}
+                        </div>
+                        <pre dir="ltr" className="text-[11px] font-mono text-slate-700 dark:text-slate-300 overflow-x-auto max-h-48">
+                          {selectedLog.newValue !== undefined && selectedLog.newValue !== null
+                            ? JSON.stringify(selectedLog.newValue, null, 2)
+                            : '—'}
+                        </pre>
+                      </div>
+                    </div>
+                  ) : null}
 
                   {/* User's Surrounding Movement Chain */}
                   {selectedUserTrail.length > 1 && (

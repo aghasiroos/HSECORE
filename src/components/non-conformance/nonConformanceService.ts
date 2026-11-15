@@ -10,6 +10,7 @@ import moment from 'moment-jalaali';
 
 export type NonConformanceSourceModule = 
   | 'safety_inspection' 
+  | 'risk_assessment'
   | 'ptw' 
   | 'incident' 
   | 'ptw_audit' 
@@ -114,6 +115,7 @@ export interface NonConformanceRecord {
 
 export const SOURCE_MODULE_LABELS: Record<NonConformanceSourceModule, { fa: string; en: string; color: string }> = {
   safety_inspection: { fa: 'چک‌لیست و بازرسی ایمنی', en: 'Safety Inspection', color: 'bg-amber-500/10 text-amber-600 border-amber-500/30' },
+  risk_assessment: { fa: 'ارزیابی ریسک (CAPA)', en: 'Risk Assessment', color: 'bg-indigo-500/10 text-indigo-600 border-indigo-500/30' },
   ptw: { fa: 'پروانه کار ایمن (PTW)', en: 'Permit to Work', color: 'bg-blue-500/10 text-blue-600 border-blue-500/30' },
   incident: { fa: 'گزارش شبه‌حادثه و حوادث', en: 'Incidents & Anomalies', color: 'bg-rose-500/10 text-rose-600 border-rose-500/30' },
   ptw_audit: { fa: 'ممیزی پروانه کار (PTW Audit)', en: 'PTW Audit System', color: 'bg-cyan-500/10 text-cyan-600 border-cyan-500/30' },
@@ -176,6 +178,7 @@ export function getNextWorkflowStatus(current: NonConformanceWorkflowStatus): No
 
 export const SOURCE_MODULE_TAB_MAP: Record<NonConformanceSourceModule, string> = {
   safety_inspection: 'safety-unit',
+  risk_assessment: 'risk',
   ptw: 'permit',
   incident: 'incidents',
   ptw_audit: 'ptw-audit',

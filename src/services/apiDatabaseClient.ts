@@ -1754,23 +1754,53 @@ export const apiDb = {
   },
 
   async saveRiskAssessment(data: any): Promise<any> {
-    try {
-      invalidateCacheKeys('risk-assessments', 'sync:full');
-      const res = await authFetch('/api/v1/risk-assessments', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      });
-      const json: ApiResponse = await res.json();
-      return json.data;
-    } catch {
-      return null;
+    invalidateCacheKeys('risk-assessments', 'sync:full', 'dashboard');
+    const numericId = Number(data?.dbId || data?.id);
+    const isExisting = Number.isInteger(numericId) && numericId > 0;
+    const url = isExisting ? `/api/v1/risk-assessments/${numericId}` : '/api/v1/risk-assessments';
+    const res = await authFetch(url, {
+      method: isExisting ? 'PUT' : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    const json: ApiResponse = await res.json();
+    if (!res.ok || !json.success) {
+      throw new Error(json.error || 'خطا در ذخیره‌سازی ارزیابی ریسک');
     }
+    return json.data;
+  },
+
+  async updateRiskAssessment(id: string | number, data: any): Promise<any> {
+    invalidateCacheKeys('risk-assessments', 'sync:full', 'dashboard');
+    const res = await authFetch(`/api/v1/risk-assessments/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    const json: ApiResponse = await res.json();
+    if (!res.ok || !json.success) {
+      throw new Error(json.error || 'خطا در بروزرسانی ارزیابی ریسک');
+    }
+    return json.data;
+  },
+
+  async transitionRiskWorkflow(id: string | number, payload: { status?: string; workflowStage?: string; notes?: string; approverName?: string }): Promise<any> {
+    invalidateCacheKeys('risk-assessments', 'sync:full', 'dashboard');
+    const res = await authFetch(`/api/v1/risk-assessments/${id}/workflow`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const json: ApiResponse = await res.json();
+    if (!res.ok || !json.success) {
+      throw new Error(json.error || 'خطا در تغییر وضعیت گردش کار ارزیابی ریسک');
+    }
+    return json.data;
   },
 
   async deleteRiskAssessment(id: string | number): Promise<boolean> {
     try {
-      invalidateCacheKeys('risk-assessments', 'sync:full');
+      invalidateCacheKeys('risk-assessments', 'sync:full', 'dashboard');
       const res = await authFetch(`/api/v1/risk-assessments/${id}`, {
         method: 'DELETE',
       });
@@ -1893,6 +1923,47 @@ export const apiDb = {
         return [];
       }
     }, 1500);
+  },
+
+  async getAuditLogsPaged(params: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    module?: string;
+    actionType?: string;
+    result?: string;
+    user?: string;
+    from?: string;
+    to?: string;
+  } = {}): Promise<{ data: any[]; pagination: { page: number; limit: number; total: number; totalPages: number } }> {
+    const qs = new URLSearchParams();
+    if (params.page) qs.set('page', String(params.page));
+    if (params.limit) qs.set('limit', String(params.limit));
+    if (params.search?.trim()) qs.set('search', params.search.trim());
+    if (params.module && params.module !== 'ALL') qs.set('module', params.module);
+    if (params.actionType && params.actionType !== 'ALL') qs.set('actionType', params.actionType);
+    if (params.result && params.result !== 'ALL') qs.set('result', params.result);
+    if (params.user && params.user !== 'ALL') qs.set('user', params.user);
+    if (params.from) qs.set('from', params.from);
+    if (params.to) qs.set('to', params.to);
+    try {
+      const res = await authFetch(`/api/v1/audit-logs?${qs.toString()}`);
+      if (!res.ok) {
+        return { data: [], pagination: { page: 1, limit: params.limit || 50, total: 0, totalPages: 1 } };
+      }
+      const json: any = await res.json();
+      return {
+        data: json.data || [],
+        pagination: json.pagination || {
+          page: params.page || 1,
+          limit: params.limit || 50,
+          total: (json.data || []).length,
+          totalPages: 1,
+        },
+      };
+    } catch {
+      return { data: [], pagination: { page: 1, limit: params.limit || 50, total: 0, totalPages: 1 } };
+    }
   },
 
   async logAudit(entry: any): Promise<boolean> {
@@ -2129,6 +2200,7 @@ export const apiDb = {
       issueDate?: string;
       expiryDate?: string;
       description?: string;
+      tabMetadata?: Record<string, any>;
       status?: 'ACTIVE' | 'ARCHIVED';
     }
   ): Promise<{ success: boolean; data?: any; error?: string }> {
@@ -2160,6 +2232,43 @@ export const apiDb = {
       formData,
       'خطا در جایگزینی فایل و ثبت نسخه جدید'
     );
+  },
+
+  async addDocumentAttachment(
+    documentId: string,
+    formData: FormData
+  ): Promise<{ success: boolean; data?: any; error?: string }> {
+    return sendDocumentWithJsonFallback(
+      `/api/v1/files/documents/${encodeURIComponent(documentId)}/attachments`,
+      formData,
+      'خطا در بارگذاری فایل پیوست مستند'
+    );
+  },
+
+  async deleteDocumentAttachment(
+    documentId: string,
+    fileId: string
+  ): Promise<{ success: boolean; data?: any; error?: string }> {
+    try {
+      invalidateCacheKeys('documents');
+      const res = await authFetch(
+        `/api/v1/files/documents/${encodeURIComponent(documentId)}/attachments/${encodeURIComponent(fileId)}`,
+        { method: 'DELETE' }
+      );
+      const parsed = await parseJsonSafely<any>(res);
+      invalidateCacheKeys('documents');
+      if (!parsed.ok || !parsed.data?.success) {
+        const errMsg =
+          parsed.data?.error?.message ||
+          parsed.data?.message ||
+          parsed.error ||
+          'خطا در حذف فایل پیوست';
+        return { success: false, error: errMsg };
+      }
+      return { success: true, data: parsed.data.data };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'خطا در ارتباط با سرور' };
+    }
   },
 
   async deleteDocument(documentId: string): Promise<{ success: boolean; error?: string }> {

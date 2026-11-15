@@ -1,8 +1,9 @@
 import { Router, Request, Response } from 'express';
 import * as dbServices from '../db-services.ts';
-import { requireAuth, requireRole, requirePermission, isGlobalAdminUser } from '../core/middleware/auth.ts';
+import { requireAuth, requireRole, requirePermission, isGlobalAdminUser, checkUserHasPermission } from '../core/middleware/auth.ts';
 import { getClientIp } from '../core/ip.ts';
 import { broadcastDataMutation, registerSSEClient } from '../core/socket.ts';
+import { auditService } from '../modules/audit/audit.service.ts';
 import {
   REFERRAL_STORAGE_KEY,
   filterReferralsForUser,
@@ -373,6 +374,18 @@ router.delete('/work-permits/:id', requireAuth, requireRole('ADMIN', 'ADMINISTRA
 // ============================================================================
 // 5. RISK ASSESSMENTS & INCIDENTS
 // ============================================================================
+const canMutateRiskAssessment = (user: any, perm: 'create' | 'update' | 'delete' | 'approve') => {
+  if (!user) return false;
+  if (isGlobalAdminUser(user)) return true;
+  if (checkUserHasPermission(user, `risks:${perm}`) || checkUserHasPermission(user, 'risks:*')) return true;
+  const role = String(user.role || '').toUpperCase().replace(/[\s-]+/g, '_');
+  if (['ADMIN', 'ADMINISTRATOR', 'HSE_MANAGER', 'EXECUTIVE_MANAGER', 'EXECUTIVEMANAGER'].includes(role)) return true;
+  if (perm !== 'approve' && ['SAFETY_OFFICER', 'SAFETY_INSPECTOR', 'SAFETYINSPECTOR', 'FIRE_OFFICER', 'DOCTOR_OCCUPATIONAL', 'PROCESS_MANAGER'].includes(role)) {
+    return perm === 'delete' ? role === 'SAFETY_OFFICER' : true;
+  }
+  return false;
+};
+
 router.get('/risk-assessments', requireAuth, async (req: Request, res: Response) => {
   try {
     const risks = await dbServices.getAllRiskAssessments();
@@ -382,20 +395,130 @@ router.get('/risk-assessments', requireAuth, async (req: Request, res: Response)
   }
 });
 
-router.post('/risk-assessments', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR', 'HSE_MANAGER', 'SAFETY_OFFICER'), async (req: Request, res: Response) => {
+router.get('/risk-assessments/:id', requireAuth, async (req: Request, res: Response) => {
   try {
-    const risk = await dbServices.createRiskAssessment(req.body);
-    broadcastDataMutation('risks', 'create', risk);
+    const risk = await dbServices.getRiskAssessmentById(req.params.id);
+    if (!risk) return res.status(404).json({ success: false, error: 'پرونده ارزیابی ریسک یافت نشد.' });
     res.json({ success: true, data: risk });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-router.delete('/risk-assessments/:id', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR', 'HSE_MANAGER', 'SAFETY_OFFICER'), async (req: Request, res: Response) => {
+router.post('/risk-assessments', requireAuth, async (req: Request, res: Response) => {
   try {
+    if (!canMutateRiskAssessment(req.user, 'create')) {
+      void auditService.logAccessDenied(req, 'تلاش غیرمجاز برای ثبت ارزیابی ریسک', 'risks:create');
+      return res.status(403).json({ success: false, error: 'شما مجوز ثبت یا ویرایش ارزیابی ریسک را ندارید.' });
+    }
+    const risk = await dbServices.createRiskAssessment(req.body);
+    invalidateDashboardCache();
+    broadcastDataMutation('risks', 'create', risk);
+    void auditService.logFromRequest(req, {
+      action: 'CREATE',
+      module: 'risk',
+      entityType: 'RISK_ASSESSMENT',
+      entityId: risk?.id || risk?.code,
+      newValue: { code: risk?.code, title: risk?.title, method: risk?.method, status: risk?.status, overallRiskLevel: risk?.overallRiskLevel },
+      details: { actionTitle: `ثبت/ذخیره ارزیابی ریسک ${risk?.method || ''} (${risk?.code || ''})`, description: risk?.title },
+    });
+    res.json({ success: true, data: risk });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+router.put('/risk-assessments/:id', requireAuth, async (req: Request, res: Response) => {
+  try {
+    if (!canMutateRiskAssessment(req.user, 'update')) {
+      void auditService.logAccessDenied(req, 'تلاش غیرمجاز برای ویرایش ارزیابی ریسک', 'risks:update');
+      return res.status(403).json({ success: false, error: 'شما مجوز ویرایش ارزیابی ریسک را ندارید.' });
+    }
+    const oldRisk = await dbServices.getRiskAssessmentById(req.params.id);
+    if (!oldRisk) return res.status(404).json({ success: false, error: 'پرونده ارزیابی ریسک یافت نشد.' });
+    const risk = await dbServices.updateRiskAssessment(req.params.id, req.body);
+    invalidateDashboardCache();
+    broadcastDataMutation('risks', 'update', risk);
+    void auditService.logFromRequest(req, {
+      action: 'UPDATE',
+      module: 'risk',
+      entityType: 'RISK_ASSESSMENT',
+      entityId: risk?.id || req.params.id,
+      oldValue: { status: oldRisk.status, workflowStage: oldRisk.workflowStage, overallRiskLevel: oldRisk.overallRiskLevel },
+      newValue: { status: risk?.status, workflowStage: risk?.workflowStage, overallRiskLevel: risk?.overallRiskLevel },
+      details: { actionTitle: `بروزرسانی ارزیابی ریسک ${risk?.code || req.params.id}`, description: risk?.title },
+    });
+    res.json({ success: true, data: risk });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+router.patch('/risk-assessments/:id/workflow', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const targetStatus = String(req.body?.status || '').toUpperCase();
+    const needsApprovalPerm = targetStatus === 'APPROVED' || targetStatus === 'ARCHIVED';
+    if (!canMutateRiskAssessment(req.user, needsApprovalPerm ? 'approve' : 'update')) {
+      void auditService.logAccessDenied(req, 'تلاش غیرمجاز برای تغییر وضعیت گردش کار ارزیابی ریسک', needsApprovalPerm ? 'risks:approve' : 'risks:update');
+      return res.status(403).json({ success: false, error: 'شما مجوز تغییر وضعیت یا تأیید نهایی این مرحله را ندارید.' });
+    }
+    const oldRisk = await dbServices.getRiskAssessmentById(req.params.id);
+    if (!oldRisk) return res.status(404).json({ success: false, error: 'پرونده ارزیابی ریسک یافت نشد.' });
+
+    const history = Array.isArray(oldRisk.reviewHistory) ? [...oldRisk.reviewHistory] : [];
+    history.unshift({
+      id: `rev-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      actor: req.user?.name || req.user?.username || 'کاربر سامانه',
+      actorRole: req.user?.role || '',
+      fromStatus: oldRisk.status,
+      toStatus: targetStatus || oldRisk.status,
+      fromStage: oldRisk.workflowStage,
+      toStage: req.body?.workflowStage || oldRisk.workflowStage,
+      notes: req.body?.notes || '',
+    });
+
+    const updated = await dbServices.updateRiskAssessment(req.params.id, {
+      ...(req.body?.status ? { status: targetStatus } : {}),
+      ...(req.body?.workflowStage ? { workflowStage: req.body.workflowStage } : {}),
+      ...(req.body?.approverName ? { approverName: req.body.approverName } : {}),
+      reviewHistory: history,
+    });
+    invalidateDashboardCache();
+    broadcastDataMutation('risks', 'update', updated);
+    void auditService.logFromRequest(req, {
+      action: targetStatus === 'APPROVED' ? 'APPROVE' : 'UPDATE',
+      module: 'risk',
+      entityType: 'RISK_ASSESSMENT',
+      entityId: updated?.id || req.params.id,
+      oldValue: { status: oldRisk.status, workflowStage: oldRisk.workflowStage },
+      newValue: { status: updated?.status, workflowStage: updated?.workflowStage },
+      details: { actionTitle: `تغییر وضعیت گردش کار ارزیابی ریسک ${updated?.code || req.params.id}`, notes: req.body?.notes },
+    });
+    res.json({ success: true, data: updated });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+router.delete('/risk-assessments/:id', requireAuth, async (req: Request, res: Response) => {
+  try {
+    if (!canMutateRiskAssessment(req.user, 'delete')) {
+      void auditService.logAccessDenied(req, 'تلاش غیرمجاز برای حذف ارزیابی ریسک', 'risks:delete');
+      return res.status(403).json({ success: false, error: 'شما مجوز حذف پرونده ارزیابی ریسک را ندارید.' });
+    }
+    const oldRisk = await dbServices.getRiskAssessmentById(req.params.id);
     const result = await dbServices.deleteRiskAssessment(req.params.id);
+    invalidateDashboardCache();
     broadcastDataMutation('risks', 'delete', { id: req.params.id });
+    void auditService.logFromRequest(req, {
+      action: 'DELETE',
+      module: 'risk',
+      entityType: 'RISK_ASSESSMENT',
+      entityId: req.params.id,
+      oldValue: oldRisk ? { code: oldRisk.code, title: oldRisk.title, method: oldRisk.method } : { id: req.params.id },
+      details: { actionTitle: `حذف پرونده ارزیابی ریسک ${oldRisk?.code || req.params.id}` },
+    });
     res.json({ success: true, data: result });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
@@ -1213,12 +1336,34 @@ router.delete('/settings/:key', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR
   }
 });
 
-// Audit Logs
-router.get('/audit-logs', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR', 'HSE_MANAGER'), async (req: Request, res: Response) => {
+// Audit Logs (Centralized & Append-Only)
+router.get('/audit-logs', requireAuth, requirePermission('audit:read'), async (req: Request, res: Response) => {
   try {
-    const limit = req.query.limit ? parseInt(req.query.limit as string) : 200;
-    const logs = await dbServices.getAuditLogsList(limit);
-    res.json({ success: true, data: logs, count: logs.length });
+    const { auditService } = await import('../modules/audit/audit.service.ts');
+    const page = req.query.page ? parseInt(String(req.query.page), 10) : 1;
+    const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : 200;
+    const result = await auditService.getLogsPaginated({
+      page,
+      limit,
+      search: typeof req.query.search === 'string' ? req.query.search : undefined,
+      module: typeof req.query.module === 'string' ? req.query.module : undefined,
+      actionType: typeof req.query.actionType === 'string' ? req.query.actionType : undefined,
+      result: typeof req.query.result === 'string' ? req.query.result : undefined,
+      user: typeof req.query.user === 'string' ? req.query.user : undefined,
+      from: typeof req.query.from === 'string' ? req.query.from : undefined,
+      to: typeof req.query.to === 'string' ? req.query.to : undefined,
+    });
+    res.json({
+      success: true,
+      data: result.rows,
+      count: result.rows.length,
+      pagination: {
+        page: result.page,
+        limit: result.limit,
+        total: result.total,
+        totalPages: result.totalPages,
+      },
+    });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -1226,14 +1371,19 @@ router.get('/audit-logs', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR', 'HS
 
 router.post('/audit-logs', requireAuth, async (req: Request, res: Response) => {
   try {
-    const realIp = getClientIp(req);
-    const payload = {
-      ...req.body,
-      ipAddress: realIp,
-      userUid: req.user?.uid || req.body.userUid,
-      userId: req.user?.id || req.body.userId,
-    };
-    await dbServices.logAudit(payload);
+    const { auditService } = await import('../modules/audit/audit.service.ts');
+    const body = req.body || {};
+    await auditService.logFromRequest(req, {
+      action: String(body.action || 'OTHER'),
+      module: String(body.module || 'SYSTEM'),
+      entityType: String(body.entityType || body.module || 'SYSTEM'),
+      entityId: body.entityId,
+      oldValue: body.oldValue,
+      newValue: body.newValue,
+      details: body.details,
+      reason: body.reason,
+      result: body.result === 'FAILED' ? 'FAILED' : body.result === 'WARNING' ? 'WARNING' : 'SUCCESS',
+    });
     res.json({ success: true });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });

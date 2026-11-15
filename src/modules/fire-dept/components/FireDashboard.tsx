@@ -3,7 +3,7 @@ import { FireEquipment } from '../types';
 import { 
   Flame, CheckCircle2, AlertTriangle, ShieldAlert,
   ClipboardList, Wrench, XCircle, ArrowUpRight, Activity, Bell, FileSpreadsheet, ShieldCheck, Truck,
-  SlidersHorizontal, Hash, BarChart3, LineChart as LineIcon
+  SlidersHorizontal, Hash, BarChart3, LineChart as LineIcon, Compass
 } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LabelList, LineChart, Line, AreaChart, Area, CartesianGrid, Legend 
@@ -16,6 +16,7 @@ interface Props {
   onSelectCategory: (cat: string) => void;
   onSelectVehicles?: () => void;
   onSelectDailyReport?: () => void;
+  onSelectSuppressionDesign?: () => void;
 }
 
 const FIRE_CATEGORIES = [
@@ -29,7 +30,7 @@ const FIRE_CATEGORIES = [
   'دوش و چشم شوی اضطراری'
 ] as const;
 
-export default function FireDashboard({ language, equipment, onSelectCategory, onSelectVehicles, onSelectDailyReport }: Props) {
+export default function FireDashboard({ language, equipment, onSelectCategory, onSelectVehicles, onSelectDailyReport, onSelectSuppressionDesign }: Props) {
   const isFa = language === 'fa';
   const [chartType, setChartType] = useState<'bar' | 'line' | 'area'>('bar');
   const [chartMetric, setChartMetric] = useState<'both' | 'count' | 'defects'>('both');
@@ -152,8 +153,8 @@ export default function FireDashboard({ language, equipment, onSelectCategory, o
         />
       </div>
 
-      {/* Featured Banners: Daily Report & Vehicles */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {/* Featured Banners: Daily Report, Vehicles & NFPA Suppression Design */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* Daily Report Banner */}
         {onSelectDailyReport && (
           <div 
@@ -201,6 +202,32 @@ export default function FireDashboard({ language, equipment, onSelectCategory, o
             </div>
             <div className="flex items-center justify-between text-xs font-bold text-blue-400 group-hover:text-blue-300 transition-colors pt-2 border-t border-slate-700/60">
               <span>{isFa ? 'ورود به مدیریت ناوگان' : 'Open Fleet Manager'}</span>
+              <ArrowUpRight className="w-4 h-4" />
+            </div>
+          </div>
+        )}
+
+        {/* NFPA Suppression Design & 2D Layout Banner */}
+        {onSelectSuppressionDesign && (
+          <div 
+            onClick={onSelectSuppressionDesign}
+            className="bg-linear-to-r from-emerald-950 via-slate-900 to-slate-900 dark:from-emerald-950/80 dark:to-slate-800 text-white p-5 rounded-2xl border border-emerald-800/60 shadow-md hover:border-emerald-400 transition-all cursor-pointer flex flex-col justify-between gap-4 group"
+          >
+            <div className="flex items-center gap-3.5">
+              <div className="p-3 bg-emerald-600 rounded-2xl shadow-xs group-hover:scale-110 transition-transform">
+                <Compass className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h3 className="text-sm md:text-base font-black text-white">
+                  {isFa ? 'مرکز طراحی و مهندسی سیستم‌های حفاظت در برابر حریق' : 'Fire Protection Design & Engineering Center'}
+                </h3>
+                <p className="text-slate-300 text-xs mt-1">
+                  {isFa ? 'طراحی یکپارچه ۸ سیستم NFPA (اسپرینکلر، کپسول، هیدرانت، فوم، گاز پاک، اعلام، پمپ و مخزن) روی نقشه ۲بعدی' : 'Unified 8-system NFPA engineering workspace & 2D floor layout'}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center justify-between text-xs font-bold text-emerald-400 group-hover:text-emerald-300 transition-colors pt-2 border-t border-slate-700/60">
+              <span>{isFa ? 'ورود به مرکز طراحی یکپارچه' : 'Open Unified Design Center'}</span>
               <ArrowUpRight className="w-4 h-4" />
             </div>
           </div>

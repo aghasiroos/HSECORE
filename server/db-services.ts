@@ -942,22 +942,319 @@ export async function addPermitSignature(signatureData: {
 // ============================================================================
 // 5. RISK ASSESSMENTS & INCIDENTS
 // ============================================================================
+function normalizeRiskLevelServer(val?: string | null, score?: number): 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' {
+  const upper = String(val || '').toUpperCase().trim();
+  if (upper === 'CRITICAL' || upper === 'EXTREME') return 'CRITICAL';
+  if (upper === 'HIGH') return 'HIGH';
+  if (upper === 'MEDIUM' || upper === 'MODERATE') return 'MEDIUM';
+  if (upper === 'LOW') return 'LOW';
+  const s = Number(score || 0);
+  if (s >= 15) return 'CRITICAL';
+  if (s >= 10) return 'HIGH';
+  if (s >= 5) return 'MEDIUM';
+  return 'LOW';
+}
+
+function summarizeAssessmentForDb(data: any) {
+  const method = String(data.method || data.methodology || 'JSA').toUpperCase();
+  const payload = { ...(data.payload && typeof data.payload === 'object' ? data.payload : {}) };
+
+  // Copy rich method fields into payload safely without duplicating DB columns
+  const richKeys = [
+    'clientId', 'teamMembers', 'approverName', 'contractorName', 'contractorId',
+    'jobTitle', 'permitRefNumber', 'requiredPpe', 'steps',
+    'equipmentTag', 'systemName', 'rows',
+    'topEventTitle', 'topEventProbability', 'nodes',
+    'assessedDepartment', 'headcountExposed', 'items',
+    'studyScope', 'processSubject', 'questions',
+    'bowtie', 'hazardSource', 'topEvent',
+    'jobPosition', 'exposedPersonnel', 'exposureConditions', 'hazardsList', 'reviewCycle', 'nextReviewDate',
+    'matrixConfigId', 'notes', 'attachments',
+  ];
+  for (const k of richKeys) {
+    if (data[k] !== undefined) {
+      payload[k] = data[k];
+    }
+  }
+  if (!payload.clientId && data.id && parseValidPgSerialId(data.id) === null) {
+    payload.clientId = String(data.id);
+  }
+
+  // Derive flat summary fields for dashboard, AI tools & legacy compatibility
+  let hazardDescription = String(data.hazardDescription || '').trim();
+  let consequences = String(data.consequences || '').trim();
+  let existingControls = String(data.existingControls || '').trim();
+  let proposedControls = String(data.proposedControls || '').trim();
+  let severity = Number(data.severity || 0);
+  let probability = Number(data.probability || 0);
+  let initialRiskScore = Number(data.initialRiskScore || 0);
+  let residualSeverity = Number(data.residualSeverity || 0);
+  let residualProbability = Number(data.residualProbability || 0);
+  let residualRiskScore = Number(data.residualRiskScore || 0);
+  let responsiblePerson = String(data.responsiblePerson || '').trim();
+  let deadline = String(data.deadline || '').trim();
+
+  if (Array.isArray(data.steps) && data.steps.length > 0) {
+    if (!hazardDescription) hazardDescription = data.steps.map((s: any) => s.hazards).filter(Boolean).slice(0, 3).join(' | ');
+    if (!consequences) consequences = data.steps.map((s: any) => s.potentialConsequences).filter(Boolean).slice(0, 3).join(' | ');
+    if (!proposedControls) proposedControls = data.steps.map((s: any) => s.controlMeasures).filter(Boolean).slice(0, 3).join(' | ');
+    const maxStep = data.steps.reduce((best: any, cur: any) => (Number(cur.initialRiskScore || 0) > Number(best?.initialRiskScore || 0) ? cur : best), data.steps[0]);
+    severity = severity || Number(maxStep?.initialSeverity || 3);
+    probability = probability || Number(maxStep?.initialProbability || 3);
+    initialRiskScore = initialRiskScore || Number(maxStep?.initialRiskScore || severity * probability);
+    residualSeverity = residualSeverity || Number(maxStep?.residualSeverity || 1);
+    residualProbability = residualProbability || Number(maxStep?.residualProbability || 1);
+    residualRiskScore = residualRiskScore || Number(maxStep?.residualRiskScore || residualSeverity * residualProbability);
+    responsiblePerson = responsiblePerson || String(maxStep?.actionOwner || '');
+    deadline = deadline || String(maxStep?.actionDeadline || '');
+  } else if (Array.isArray(data.rows) && data.rows.length > 0) {
+    if (!hazardDescription) hazardDescription = data.rows.map((r: any) => r.failureMode).filter(Boolean).slice(0, 3).join(' | ');
+    if (!consequences) consequences = data.rows.map((r: any) => r.failureEffects).filter(Boolean).slice(0, 3).join(' | ');
+    if (!existingControls) existingControls = data.rows.map((r: any) => r.currentControls).filter(Boolean).slice(0, 3).join(' | ');
+    if (!proposedControls) proposedControls = data.rows.map((r: any) => r.recommendedActions).filter(Boolean).slice(0, 3).join(' | ');
+    const maxRow = data.rows.reduce((best: any, cur: any) => (Number(cur.rpn || 0) > Number(best?.rpn || 0) ? cur : best), data.rows[0]);
+    severity = severity || Math.min(5, Math.ceil(Number(maxRow?.severity || 2) / 2));
+    probability = probability || Math.min(5, Math.ceil(Number(maxRow?.occurrence || 2) / 2));
+    initialRiskScore = initialRiskScore || Number(maxRow?.rpn || 10);
+    residualRiskScore = residualRiskScore || Number(maxRow?.revisedRpn || 0);
+    responsiblePerson = responsiblePerson || String(maxRow?.responsibility || '');
+    deadline = deadline || String(maxRow?.targetDate || '');
+  } else if (Array.isArray(data.nodes) && data.nodes.length > 0) {
+    if (!hazardDescription) hazardDescription = String(data.topEventTitle || data.nodes[0]?.description || data.title || 'رویداد راس درخت خطا');
+    const prob = Number(data.topEventProbability ?? 0.05);
+    severity = severity || 4;
+    probability = probability || (prob >= 0.2 ? 5 : prob >= 0.05 ? 4 : prob >= 0.01 ? 3 : 2);
+    initialRiskScore = initialRiskScore || severity * probability;
+  } else if (Array.isArray(data.items) && data.items.length > 0) {
+    if (!hazardDescription) hazardDescription = data.items.map((i: any) => i.agentName || i.errorType).filter(Boolean).slice(0, 3).join(' | ');
+    if (!consequences) consequences = data.items.map((i: any) => i.healthEffect).filter(Boolean).slice(0, 3).join(' | ');
+    if (!existingControls) existingControls = data.items.map((i: any) => i.existingControls).filter(Boolean).slice(0, 3).join(' | ');
+    if (!proposedControls) proposedControls = data.items.map((i: any) => i.proposedControls).filter(Boolean).slice(0, 3).join(' | ');
+  } else if (Array.isArray(data.questions) && data.questions.length > 0) {
+    if (!hazardDescription) hazardDescription = data.questions.map((q: any) => q.question || q.hazards).filter(Boolean).slice(0, 3).join(' | ');
+    if (!consequences) consequences = data.questions.map((q: any) => q.consequences).filter(Boolean).slice(0, 3).join(' | ');
+    if (!proposedControls) proposedControls = data.questions.map((q: any) => q.recommendations).filter(Boolean).slice(0, 3).join(' | ');
+  } else if (data.bowtie) {
+    const bt = data.bowtie;
+    if (!hazardDescription) hazardDescription = String(bt.topEvent || bt.hazard || data.title || 'رویداد مرکزی پاپیون');
+    if (!consequences) consequences = Array.isArray(bt.consequences) ? bt.consequences.map((c: any) => c.title).join(' | ') : '';
+  } else if (Array.isArray(data.hazardsList) && data.hazardsList.length > 0) {
+    if (!hazardDescription) hazardDescription = data.hazardsList.map((h: any) => h.hazardTitle).filter(Boolean).slice(0, 3).join(' | ');
+    if (!consequences) consequences = data.hazardsList.map((h: any) => h.consequence).filter(Boolean).slice(0, 3).join(' | ');
+    const maxHz = data.hazardsList.reduce((best: any, cur: any) => (Number(cur.initialScore || 0) > Number(best?.initialScore || 0) ? cur : best), data.hazardsList[0]);
+    severity = severity || Number(maxHz?.initialSeverity || 3);
+    probability = probability || Number(maxHz?.initialProbability || 3);
+    initialRiskScore = initialRiskScore || Number(maxHz?.initialScore || severity * probability);
+    residualRiskScore = residualRiskScore || Number(maxHz?.residualScore || 0);
+  }
+
+  const actions = Array.isArray(data.controlActions) ? data.controlActions : [];
+  if (!responsiblePerson && actions.length > 0) {
+    responsiblePerson = String(actions[0]?.owner || '');
+  }
+  if (!deadline && actions.length > 0) {
+    deadline = String(actions[0]?.deadline || '');
+  }
+
+  const finalInitialLevel = normalizeRiskLevelServer(data.overallRiskLevel || data.initialRiskLevel, initialRiskScore);
+  const finalResidualLevel = data.residualRiskLevel
+    ? normalizeRiskLevelServer(data.residualRiskLevel, residualRiskScore)
+    : undefined;
+
+  const fallbackScoreMap: Record<string, number> = { CRITICAL: 20, HIGH: 12, MEDIUM: 8, LOW: 3 };
+  const safeInitialScore = initialRiskScore > 0 ? initialRiskScore : (fallbackScoreMap[finalInitialLevel] || 6);
+
+  return {
+    assessmentCode: data.code || data.assessmentCode || `${method}-${Date.now()}`,
+    activityTitle: String(data.title || data.activityTitle || 'ارزیابی ریسک').trim(),
+    unitId: parseValidPgSerialId(data.unitId),
+    siteName: String(data.site || data.siteName || 'مجتمع پتروشیمی رجال').trim(),
+    unitName: String(data.unit || data.unitName || 'عمومی').trim(),
+    areaLocation: String(data.areaLocation || '').trim(),
+    assessorName: String(data.assessorName || '').trim(),
+    assessmentDate: String(data.assessmentDate || '').trim(),
+    methodology: method,
+    hazardDescription: hazardDescription || String(data.title || 'شرح خطر ثبت‌شده'),
+    consequences: consequences || null,
+    existingControls: existingControls || null,
+    severity: Math.max(1, Math.min(10, severity || 2)),
+    probability: Math.max(1, Math.min(10, probability || 2)),
+    initialRiskScore: safeInitialScore,
+    initialRiskLevel: finalInitialLevel,
+    proposedControls: proposedControls || null,
+    residualSeverity: residualSeverity > 0 ? residualSeverity : null,
+    residualProbability: residualProbability > 0 ? residualProbability : null,
+    residualRiskScore: residualRiskScore > 0 ? residualRiskScore : null,
+    residualRiskLevel: finalResidualLevel || null,
+    responsiblePerson: responsiblePerson || null,
+    deadline: deadline || null,
+    status: String(data.status || 'DRAFT').toUpperCase(),
+    workflowStage: String(data.workflowStage || 'INITIAL_INFO'),
+    payload,
+    controlActions: actions,
+    reviewHistory: Array.isArray(data.reviewHistory) ? data.reviewHistory : [],
+    linkedRefs: data.linkedRefs && typeof data.linkedRefs === 'object' ? data.linkedRefs : {},
+  };
+}
+
+export function mapRiskRowToClient(row: any) {
+  if (!row) return null;
+  const payload = row.payload && typeof row.payload === 'object' ? row.payload : {};
+  const method = String(row.methodology || payload.method || 'JSA').toUpperCase();
+  const overallRiskLevel = normalizeRiskLevelServer(row.initialRiskLevel, row.initialRiskScore);
+  const residualRiskLevel = row.residualRiskLevel
+    ? normalizeRiskLevelServer(row.residualRiskLevel, row.residualRiskScore)
+    : undefined;
+
+  // Synthesize minimal step/item for legacy flat DB rows that don't yet have payload arrays
+  const fallbackSteps =
+    method === 'JSA' && (!Array.isArray(payload.steps) || payload.steps.length === 0)
+      ? [
+          {
+            id: `legacy-step-${row.id}`,
+            stepNumber: 1,
+            taskDescription: row.activityTitle || 'شرح فعالیت',
+            hazards: row.hazardDescription || '',
+            potentialConsequences: row.consequences || '',
+            initialProbability: Number(row.probability || 2),
+            initialSeverity: Number(row.severity || 2),
+            initialRiskScore: Number(row.initialRiskScore || 4),
+            initialRiskLevel: overallRiskLevel,
+            hierarchyControl: 'ENGINEERING',
+            controlMeasures: row.proposedControls || row.existingControls || '',
+            residualProbability: Number(row.residualProbability || 1),
+            residualSeverity: Number(row.residualSeverity || 1),
+            residualRiskScore: Number(row.residualRiskScore || 1),
+            residualRiskLevel: residualRiskLevel || 'LOW',
+            actionOwner: row.responsiblePerson || '',
+            actionDeadline: row.deadline || '',
+          },
+        ]
+      : undefined;
+
+  return {
+    ...payload,
+    id: String(row.id),
+    dbId: row.id,
+    code: row.assessmentCode || `${method}-${String(row.id).padStart(4, '0')}`,
+    title: row.activityTitle,
+    site: row.siteName || payload.site || 'مجتمع پتروشیمی رجال',
+    unit: row.unitName || payload.unit || 'عمومی',
+    unitId: row.unitId ?? payload.unitId ?? null,
+    areaLocation: row.areaLocation || payload.areaLocation || '',
+    assessorName: row.assessorName || payload.assessorName || '',
+    assessmentDate: row.assessmentDate || payload.assessmentDate || '',
+    method,
+    status: row.status === 'ACTIVE' ? 'APPROVED' : (row.status || 'DRAFT'),
+    workflowStage: row.workflowStage || 'INITIAL_INFO',
+    overallRiskLevel,
+    initialRiskScore: Number(row.initialRiskScore || 0),
+    residualRiskScore: row.residualRiskScore !== null && row.residualRiskScore !== undefined ? Number(row.residualRiskScore) : undefined,
+    residualRiskLevel,
+    hazardDescription: row.hazardDescription,
+    consequences: row.consequences,
+    existingControls: row.existingControls,
+    proposedControls: row.proposedControls,
+    responsiblePerson: row.responsiblePerson,
+    deadline: row.deadline,
+    controlActions: Array.isArray(row.controlActions) ? row.controlActions : [],
+    reviewHistory: Array.isArray(row.reviewHistory) ? row.reviewHistory : [],
+    linkedRefs: row.linkedRefs && typeof row.linkedRefs === 'object' ? row.linkedRefs : {},
+    ...(fallbackSteps ? { steps: fallbackSteps } : {}),
+    createdAt: row.createdAt ? new Date(row.createdAt).toISOString() : new Date().toISOString(),
+    updatedAt: row.updatedAt ? new Date(row.updatedAt).toISOString() : new Date().toISOString(),
+  };
+}
+
 export async function getAllRiskAssessments() {
   try {
-    return await db.select().from(schema.riskAssessments).orderBy(desc(schema.riskAssessments.createdAt));
+    const rows = await db.select().from(schema.riskAssessments).orderBy(desc(schema.riskAssessments.updatedAt));
+    return rows.map(mapRiskRowToClient);
   } catch (error) {
     console.error('Failed to fetch risk assessments:', error);
     throw new Error('Failed to fetch risk assessments', { cause: error });
   }
 }
 
+export async function getRiskAssessmentById(id: string | number) {
+  try {
+    const numId = parseValidPgSerialId(id);
+    if (numId !== null) {
+      const rows = await db.select().from(schema.riskAssessments).where(eq(schema.riskAssessments.id, numId));
+      return rows[0] ? mapRiskRowToClient(rows[0]) : null;
+    }
+    const byCode = await db.select().from(schema.riskAssessments).where(eq(schema.riskAssessments.assessmentCode, String(id)));
+    return byCode[0] ? mapRiskRowToClient(byCode[0]) : null;
+  } catch (error) {
+    console.error('Failed to fetch risk assessment by id:', error);
+    throw new Error('Failed to fetch risk assessment', { cause: error });
+  }
+}
+
 export async function createRiskAssessment(data: any) {
   try {
-    const res = await db.insert(schema.riskAssessments).values(data).returning();
-    return res[0];
+    const dbValues = summarizeAssessmentForDb(data);
+    const numId = parseValidPgSerialId(data.dbId ?? data.id);
+    if (numId !== null) {
+      const existing = await db.select().from(schema.riskAssessments).where(eq(schema.riskAssessments.id, numId));
+      if (existing.length > 0) {
+        const updated = await db
+          .update(schema.riskAssessments)
+          .set({ ...dbValues, updatedAt: new Date() })
+          .where(eq(schema.riskAssessments.id, numId))
+          .returning();
+        return mapRiskRowToClient(updated[0]);
+      }
+    }
+    if (dbValues.assessmentCode) {
+      const byCode = await db
+        .select()
+        .from(schema.riskAssessments)
+        .where(eq(schema.riskAssessments.assessmentCode, dbValues.assessmentCode));
+      if (byCode.length > 0) {
+        const updated = await db
+          .update(schema.riskAssessments)
+          .set({ ...dbValues, updatedAt: new Date() })
+          .where(eq(schema.riskAssessments.id, byCode[0].id))
+          .returning();
+        return mapRiskRowToClient(updated[0]);
+      }
+    }
+    const res = await db.insert(schema.riskAssessments).values(dbValues).returning();
+    return mapRiskRowToClient(res[0]);
   } catch (error) {
-    console.error('Failed to create risk assessment:', error);
+    console.error('Failed to create/upsert risk assessment:', error);
     throw new Error('Failed to create risk assessment', { cause: error });
+  }
+}
+
+export async function updateRiskAssessment(id: string | number, data: any) {
+  try {
+    const numId = parseValidPgSerialId(id);
+    let targetId = numId;
+    if (targetId === null) {
+      const byCode = await db
+        .select()
+        .from(schema.riskAssessments)
+        .where(eq(schema.riskAssessments.assessmentCode, String(id)));
+      if (byCode.length > 0) targetId = byCode[0].id;
+    }
+    if (targetId === null) return null;
+
+    const existingRows = await db.select().from(schema.riskAssessments).where(eq(schema.riskAssessments.id, targetId));
+    if (existingRows.length === 0) return null;
+
+    const mergedClient = { ...mapRiskRowToClient(existingRows[0]), ...data };
+    const dbValues = summarizeAssessmentForDb(mergedClient);
+    const updated = await db
+      .update(schema.riskAssessments)
+      .set({ ...dbValues, updatedAt: new Date() })
+      .where(eq(schema.riskAssessments.id, targetId))
+      .returning();
+    return mapRiskRowToClient(updated[0]);
+  } catch (error) {
+    console.error('Failed to update risk assessment:', error);
+    throw new Error('Failed to update risk assessment', { cause: error });
   }
 }
 
@@ -967,7 +1264,15 @@ export async function deleteRiskAssessment(id: string | number) {
     if (numId !== null) {
       return await db.delete(schema.riskAssessments).where(eq(schema.riskAssessments.id, numId)).returning();
     }
-    return [];
+    const byCode = await db
+      .delete(schema.riskAssessments)
+      .where(eq(schema.riskAssessments.assessmentCode, String(id)))
+      .returning();
+    if (byCode.length > 0) return byCode;
+    return await db
+      .delete(schema.riskAssessments)
+      .where(sql`${schema.riskAssessments.payload}->>'clientId' = ${String(id)}`)
+      .returning();
   } catch (error) {
     console.error('Failed to delete risk assessment:', error);
     throw new Error('Failed to delete risk assessment', { cause: error });
@@ -2241,57 +2546,33 @@ export async function clearAllNotificationsRecords() {
 export async function logAudit(entry: {
   userId?: number;
   userUid?: string;
+  personnelCode?: string;
   action: string;
+  module?: string;
   entityType: string;
   entityId?: string;
+  oldValue?: any;
+  newValue?: any;
   details?: any;
   ipAddress?: string;
+  userAgent?: string;
+  result?: 'SUCCESS' | 'FAILED' | 'WARNING';
 }) {
   try {
-    let validUserId: number | null = null;
-    if (typeof entry.userId === 'number' && Number.isInteger(entry.userId) && entry.userId > 0) {
-      try {
-        const userExists = await db
-          .select({ id: schema.users.id })
-          .from(schema.users)
-          .where(eq(schema.users.id, entry.userId))
-          .limit(1);
-        if (userExists && userExists.length > 0) {
-          validUserId = entry.userId;
-        }
-      } catch {
-        validUserId = null;
-      }
-    }
-
-    await db.insert(schema.auditLogs).values({
+    const { auditService } = await import('./modules/audit/audit.service.ts');
+    await auditService.log({
       ...entry,
-      userId: validUserId,
-      createdAt: new Date(),
+      module: entry.module || 'SYSTEM',
     });
   } catch (error) {
-    try {
-      // Fallback with userId = null in case of constraint failure
-      await db.insert(schema.auditLogs).values({
-        ...entry,
-        userId: null,
-        createdAt: new Date(),
-      });
-    } catch (fallbackError) {
-      console.error('Audit log failed silently:', fallbackError);
-    }
+    console.error('Audit log failed silently:', error);
   }
 }
 
 export async function getAuditLogsList(limit: number = 200) {
   try {
-    return await withDbRetry(() =>
-      db
-        .select()
-        .from(schema.auditLogs)
-        .orderBy(desc(schema.auditLogs.createdAt))
-        .limit(limit)
-    );
+    const { auditService } = await import('./modules/audit/audit.service.ts');
+    return await auditService.getRecentLogs(limit);
   } catch (error) {
     console.error('Failed to get audit logs:', error);
     return [];

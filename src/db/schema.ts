@@ -424,16 +424,22 @@ export const permitSignatures = pgTable('permit_signatures', {
 // ==========================================
 export const riskAssessments = pgTable('risk_assessments', {
   id: serial('id').primaryKey(),
+  assessmentCode: text('assessment_code'),
   activityTitle: text('activity_title').notNull(),
   unitId: integer('unit_id').references(() => orgUnits.id, { onDelete: 'set null' }),
-  methodology: text('methodology').default('JSA').notNull(), // JSA, FMEA, HAZOP, WHAT_IF
+  siteName: text('site_name'),
+  unitName: text('unit_name'),
+  areaLocation: text('area_location'),
+  assessorName: text('assessor_name'),
+  assessmentDate: text('assessment_date'),
+  methodology: text('methodology').default('JSA').notNull(), // JSA, FMEA, FTA, HHA, WHAT_IF, BOWTIE, MATRIX, JOB_ACTIVITY
   hazardDescription: text('hazard_description').notNull(),
   consequences: text('consequences'),
   existingControls: text('existing_controls'),
   severity: integer('severity').default(1).notNull(),
   probability: integer('probability').default(1).notNull(),
   initialRiskScore: integer('initial_risk_score').notNull(),
-  initialRiskLevel: text('initial_risk_level').notNull(), // LOW, MEDIUM, HIGH, EXTREME
+  initialRiskLevel: text('initial_risk_level').notNull(), // LOW, MEDIUM, HIGH, CRITICAL
   proposedControls: text('proposed_controls'),
   residualSeverity: integer('residual_severity'),
   residualProbability: integer('residual_probability'),
@@ -441,7 +447,12 @@ export const riskAssessments = pgTable('risk_assessments', {
   residualRiskLevel: text('residual_risk_level'),
   responsiblePerson: text('responsible_person'),
   deadline: text('deadline'),
-  status: text('status').default('ACTIVE').notNull(),
+  status: text('status').default('DRAFT').notNull(), // DRAFT, UNDER_REVIEW, APPROVED, ARCHIVED
+  workflowStage: text('workflow_stage').default('INITIAL_INFO'),
+  payload: jsonb('payload').$type<Record<string, any>>().default({}),
+  controlActions: jsonb('control_actions').$type<any[]>().default([]),
+  reviewHistory: jsonb('review_history').$type<any[]>().default([]),
+  linkedRefs: jsonb('linked_refs').$type<Record<string, any>>().default({}),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
@@ -1598,6 +1609,295 @@ export const psmGateDeviations = pgTable(
     index('idx_psm_gate_deviations_project').on(table.projectId),
     index('idx_psm_gate_deviations_gate').on(table.gateKey),
     index('idx_psm_gate_deviations_status').on(table.status),
+  ]
+);
+
+// ==========================================
+// 17. Fire Suppression Systems Design & 2D Layout (NFPA 13 / NFPA 10)
+// ==========================================
+export const fireDesignBuildings = pgTable(
+  'fire_design_buildings',
+  {
+    id: serial('id').primaryKey(),
+    code: text('code').notNull().unique(),
+    name: text('name').notNull(),
+    companyName: text('company_name').default('مجتمع پتروشیمی رجال').notNull(),
+    unitId: integer('unit_id'),
+    unitName: text('unit_name').notNull(),
+    occupancyType: text('occupancy_type').default('INDUSTRIAL_PROCESS').notNull(),
+    nfpa13Edition: text('nfpa13_edition').default('2022').notNull(),
+    nfpa10Edition: text('nfpa10_edition').default('2022').notNull(),
+    floorsAboveGround: integer('floors_above_ground').default(1).notNull(),
+    basementFloors: integer('basement_floors').default(0).notNull(),
+    structureType: text('structure_type').default('CONCRETE').notNull(),
+    ceilingType: text('ceiling_type').default('FLAT_UNOBSTRUCTED').notNull(),
+    storedMaterials: text('stored_materials').default('').notNull(),
+    hazardNature: jsonb('hazard_nature').default([]).notNull(),
+    riskLevelOverride: text('risk_level_override').default('AUTO').notNull(),
+    occupantLoad: integer('occupant_load').default(0).notNull(),
+    activityType: text('activity_type').default('').notNull(),
+    waterSourceType: text('water_source_type'),
+    waterSupply: jsonb('water_supply').default({}).notNull(),
+    currentSuppressionNotes: text('current_suppression_notes'),
+    status: text('status').default('DRAFT').notNull(),
+    isDeleted: boolean('is_deleted').default(false).notNull(),
+    deletedAt: timestamp('deleted_at'),
+    deletedBy: text('deleted_by'),
+    createdBy: text('created_by'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_fire_design_buildings_code').on(table.code),
+    index('idx_fire_design_buildings_unit').on(table.unitName),
+    index('idx_fire_design_buildings_status').on(table.status),
+    index('idx_fire_design_buildings_is_deleted').on(table.isDeleted),
+  ]
+);
+
+export const fireDesignFloors = pgTable(
+  'fire_design_floors',
+  {
+    id: serial('id').primaryKey(),
+    buildingId: integer('building_id')
+      .references(() => fireDesignBuildings.id, { onDelete: 'cascade' })
+      .notNull(),
+    floorCode: text('floor_code').notNull(),
+    floorLabel: text('floor_label').notNull(),
+    floorOrder: integer('floor_order').default(0).notNull(),
+    isBasement: boolean('is_basement').default(false).notNull(),
+    lengthM: doublePrecision('length_m').default(0).notNull(),
+    widthM: doublePrecision('width_m').default(0).notNull(),
+    ceilingHeightM: doublePrecision('ceiling_height_m').default(0).notNull(),
+    areaSqm: doublePrecision('area_sqm').default(0).notNull(),
+    falseCeilingHeightM: doublePrecision('false_ceiling_height_m').default(0).notNull(),
+    beamDepthM: doublePrecision('beam_depth_m').default(0).notNull(),
+    beamSpacingM: doublePrecision('beam_spacing_m').default(0).notNull(),
+    spaces: jsonb('spaces').default([]).notNull(),
+    obstacles: jsonb('obstacles').default([]).notNull(),
+    floorPlanFileId: text('floor_plan_file_id'),
+    floorPlanFileName: text('floor_plan_file_name'),
+    floorPlanMimeType: text('floor_plan_mime_type'),
+    floorPlanWidthPx: integer('floor_plan_width_px'),
+    floorPlanHeightPx: integer('floor_plan_height_px'),
+    scaleMetersPerPixel: doublePrecision('scale_meters_per_pixel'),
+    calibrationLine: jsonb('calibration_line'),
+    notes: text('notes'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_fire_design_floors_building').on(table.buildingId),
+    index('idx_fire_design_floors_order').on(table.buildingId, table.floorOrder),
+  ]
+);
+
+export const fireDesignLayouts = pgTable(
+  'fire_design_layouts',
+  {
+    id: serial('id').primaryKey(),
+    buildingId: integer('building_id')
+      .references(() => fireDesignBuildings.id, { onDelete: 'cascade' })
+      .notNull(),
+    floorId: integer('floor_id')
+      .references(() => fireDesignFloors.id, { onDelete: 'cascade' })
+      .notNull(),
+    revision: integer('revision').default(1).notNull(),
+    nfpa13Edition: text('nfpa13_edition').default('2022').notNull(),
+    nfpa10Edition: text('nfpa10_edition').default('2022').notNull(),
+    sprinklerConfig: jsonb('sprinkler_config').default({}).notNull(),
+    extinguisherConfig: jsonb('extinguisher_config').default({}).notNull(),
+    placedItems: jsonb('placed_items').default([]).notNull(),
+    calculationSnapshot: jsonb('calculation_snapshot').default({}).notNull(),
+    complianceSummary: jsonb('compliance_summary').default({}).notNull(),
+    status: text('status').default('DRAFT').notNull(),
+    calculatedBy: text('calculated_by'),
+    reviewedBy: text('reviewed_by'),
+    reviewedAt: timestamp('reviewed_at'),
+    approvedBy: text('approved_by'),
+    approvedAt: timestamp('approved_at'),
+    reviewNotes: text('review_notes'),
+    notes: text('notes'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_fire_design_layouts_building').on(table.buildingId),
+    index('idx_fire_design_layouts_floor').on(table.floorId),
+    index('idx_fire_design_layouts_status').on(table.status),
+  ]
+);
+
+export const fireDesignSystems = pgTable(
+  'fire_design_systems',
+  {
+    id: serial('id').primaryKey(),
+    buildingId: integer('building_id')
+      .references(() => fireDesignBuildings.id, { onDelete: 'cascade' })
+      .notNull(),
+    floorId: integer('floor_id').references(() => fireDesignFloors.id, { onDelete: 'cascade' }),
+    systemType: text('system_type').notNull(),
+    standardCode: text('standard_code').notNull(),
+    standardEdition: text('standard_edition').notNull(),
+    localCodeNotes: text('local_code_notes'),
+    designInputs: jsonb('design_inputs').default({}).notNull(),
+    calculationOutput: jsonb('calculation_output').default({}).notNull(),
+    complianceStatus: text('compliance_status').default('INCOMPLETE').notNull(),
+    designStage: text('design_stage').default('PRELIMINARY').notNull(),
+    version: integer('version').default(1).notNull(),
+    isActive: boolean('is_active').default(true).notNull(),
+    updatedBy: text('updated_by'),
+    reviewedBy: text('reviewed_by'),
+    reviewedAt: timestamp('reviewed_at'),
+    approvedBy: text('approved_by'),
+    approvedAt: timestamp('approved_at'),
+    reviewNotes: text('review_notes'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_fire_design_systems_building').on(table.buildingId),
+    index('idx_fire_design_systems_floor').on(table.floorId),
+    index('idx_fire_design_systems_type').on(table.systemType),
+  ]
+);
+
+export const fireDesignGapActions = pgTable(
+  'fire_design_gap_actions',
+  {
+    id: serial('id').primaryKey(),
+    buildingId: integer('building_id')
+      .references(() => fireDesignBuildings.id, { onDelete: 'cascade' })
+      .notNull(),
+    floorId: integer('floor_id').references(() => fireDesignFloors.id, { onDelete: 'cascade' }),
+    actionCode: text('action_code').notNull().unique(),
+    systemType: text('system_type').notNull(),
+    gapType: text('gap_type').default('DEFICIT').notNull(),
+    title: text('title').notNull(),
+    description: text('description').notNull(),
+    riskPriority: text('risk_priority').default('HIGH').notNull(),
+    recommendedAction: text('recommended_action').notNull(),
+    responsiblePerson: text('responsible_person'),
+    dueDate: text('due_date'),
+    status: text('status').default('OPEN').notNull(),
+    resolutionNotes: text('resolution_notes'),
+    createdBy: text('created_by'),
+    resolvedAt: timestamp('resolved_at'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_fire_design_gap_building').on(table.buildingId),
+    index('idx_fire_design_gap_status').on(table.status),
+    index('idx_fire_design_gap_priority').on(table.riskPriority),
+  ]
+);
+
+// ==========================================
+// 20. Chemical Safety Data Sheets (SDS / GHS / ISO 11014)
+// ==========================================
+export const sdsRecords = pgTable(
+  'sds_records',
+  {
+    id: serial('id').primaryKey(),
+    sdsUid: text('sds_uid').notNull().unique(),
+    documentNumber: text('document_number').notNull(),
+    materialNameFa: text('material_name_fa').notNull(),
+    materialNameEn: text('material_name_en').notNull(),
+    materialNameNormalized: text('material_name_normalized').notNull(),
+    tradeName: text('trade_name'),
+    casNumber: text('cas_number'),
+    casNumberNormalized: text('cas_number_normalized'),
+    unNumber: text('un_number'),
+    manufacturer: text('manufacturer'),
+    supplier: text('supplier'),
+    unitId: integer('unit_id').references(() => orgUnits.id, { onDelete: 'set null' }),
+    unitName: text('unit_name').default('عمومی مجتمع').notNull(),
+    storageLocation: text('storage_location'),
+    physicalState: text('physical_state').default('LIQUID').notNull(), // GAS, LIQUID, SOLID, POWDER, MIXTURE, OTHER
+    revisionNumber: integer('revision_number').default(1).notNull(),
+    preparedDate: text('prepared_date').notNull(),
+    lastRevisionDate: text('last_revision_date'),
+    revisionTriggerReason: text('revision_trigger_reason'),
+    needsRevision: boolean('needs_revision').default(false).notNull(),
+    reviewAlertMessage: text('review_alert_message'),
+    status: text('status').default('DRAFT').notNull(), // DRAFT, UNDER_REVIEW, APPROVED, PUBLISHED, OBSOLETE
+    ghsData: jsonb('ghs_data').default({}).notNull(),
+    sections: jsonb('sections').default({}).notNull(), // 16 standardized GHS/ISO 11014 sections
+    primaryFileId: text('primary_file_id'),
+    aiExtractionMetadata: jsonb('ai_extraction_metadata').default({}).notNull(), // Extensibility hook for future AI/OCR extraction & incompatibility checks
+    linkedRiskRefs: jsonb('linked_refs').default({}).notNull(), // Future links to Risk Assessment, HAZOP, Warehouse, Emergency
+    createdBy: text('created_by'),
+    createdByRole: text('created_by_role'),
+    updatedBy: text('updated_by'),
+    reviewedBy: text('reviewed_by'),
+    reviewedAt: timestamp('reviewed_at'),
+    approvedBy: text('approved_by'),
+    approvedAt: timestamp('approved_at'),
+    publishedBy: text('published_by'),
+    publishedAt: timestamp('published_at'),
+    obsoleteReason: text('obsolete_reason'),
+    deletedAt: timestamp('deleted_at'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_sds_records_cas').on(table.casNumberNormalized),
+    index('idx_sds_records_name_norm').on(table.materialNameNormalized),
+    index('idx_sds_records_status').on(table.status),
+    index('idx_sds_records_unit').on(table.unitName),
+    index('idx_sds_records_deleted').on(table.deletedAt),
+  ]
+);
+
+export const sdsRevisions = pgTable(
+  'sds_revisions',
+  {
+    id: serial('id').primaryKey(),
+    sdsId: integer('sds_id')
+      .references(() => sdsRecords.id, { onDelete: 'cascade' })
+      .notNull(),
+    revisionNumber: integer('revision_number').notNull(),
+    statusAtSnapshot: text('status_at_snapshot').notNull(),
+    changeSummary: text('change_summary'),
+    triggerReason: text('trigger_reason'),
+    snapshot: jsonb('snapshot').notNull(),
+    createdBy: text('created_by'),
+    editorName: text('editor_name'),
+    approverName: text('approver_name'),
+    approvedAt: timestamp('approved_at'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_sds_revisions_sds').on(table.sdsId),
+    index('idx_sds_revisions_num').on(table.sdsId, table.revisionNumber),
+  ]
+);
+
+export const sdsAttachments = pgTable(
+  'sds_attachments',
+  {
+    id: serial('id').primaryKey(),
+    sdsId: integer('sds_id')
+      .references(() => sdsRecords.id, { onDelete: 'cascade' })
+      .notNull(),
+    fileId: text('file_id').notNull(), // Links to system_files.file_id
+    attachmentRole: text('attachment_role').default('OTHER').notNull(), // PRIMARY_SDS_PDF, TECHNICAL_SPEC, COA, STORAGE_INSTRUCTION, TRANSPORT_DOC, OTHER
+    title: text('title'),
+    originalName: text('original_name').notNull(),
+    mimeType: text('mime_type').notNull(),
+    fileSize: integer('file_size').notNull(),
+    isPrimary: boolean('is_primary').default(false).notNull(),
+    notes: text('notes'),
+    uploadedBy: text('uploaded_by'),
+    uploaderRole: text('uploader_role'),
+    deletedAt: timestamp('deleted_at'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_sds_attachments_sds').on(table.sdsId),
+    index('idx_sds_attachments_file').on(table.fileId),
+    index('idx_sds_attachments_deleted').on(table.deletedAt),
   ]
 );
 

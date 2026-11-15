@@ -1,7 +1,7 @@
 import React from 'react';
 import { BaseRiskAssessment } from '../types';
 import CentralPersonnelSelector from '../../../components/CentralPersonnelSelector';
-import { X, Users, UserCheck, ShieldAlert, PenTool } from 'lucide-react';
+import { X, Users, UserCheck, PenTool } from 'lucide-react';
 import { ComplexPersonnel, PersonnelOrgDetails, getPersonnelSignature } from '../../../utils/personnelHelper';
 
 interface RiskPersonnelSignaturesProps {
@@ -21,14 +21,6 @@ export default function RiskPersonnelSignatures({ formData, onChange, isFa }: Ri
       onChange({ assessorName: formatPersonnelString(person, org) });
     } else {
       onChange({ assessorName: '' });
-    }
-  };
-
-  const handleSelectHse = (person: ComplexPersonnel | null, org: PersonnelOrgDetails) => {
-    if (person) {
-      onChange({ hseEngineerName: formatPersonnelString(person, org) });
-    } else {
-      onChange({ hseEngineerName: '' });
     }
   };
 
@@ -76,7 +68,7 @@ export default function RiskPersonnelSignatures({ formData, onChange, isFa }: Ri
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Assessor / Team Leader */}
         <div className="bg-slate-50 dark:bg-slate-800/40 p-4 rounded-xl border border-slate-200 dark:border-slate-700">
           <div className="flex items-center gap-2 mb-3">
@@ -101,35 +93,6 @@ export default function RiskPersonnelSignatures({ formData, onChange, isFa }: Ri
                   </button>
                 </div>
                 {renderSignaturePreview(formData.assessorName)}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* HSE Engineer */}
-        <div className="bg-slate-50 dark:bg-slate-800/40 p-4 rounded-xl border border-slate-200 dark:border-slate-700">
-          <div className="flex items-center gap-2 mb-3">
-            <ShieldAlert className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-            <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">
-              {isFa ? 'سرپرست ایمنی فرآیند' : 'Process Safety / HSE Engineer'}
-            </h4>
-          </div>
-          <div className="space-y-3">
-            <CentralPersonnelSelector
-              language={isFa ? 'fa' : 'en'}
-              placeholder={isFa ? 'جستجوی پرسنل...' : 'Search Personnel...'}
-              onSelectPersonnel={handleSelectHse}
-              compact
-            />
-            {formData.hseEngineerName && (
-              <div>
-                <div className="flex items-center justify-between p-2.5 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-300">
-                  <span>{formData.hseEngineerName}</span>
-                  <button type="button" onClick={() => onChange({ hseEngineerName: '' })} className="p-1 rounded-md text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40 transition cursor-pointer">
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-                {renderSignaturePreview(formData.hseEngineerName)}
               </div>
             )}
           </div>

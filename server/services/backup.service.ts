@@ -448,6 +448,11 @@ const MODULE_TABLES_MAP: Record<string, string[]> = {
     'training_attendances',
     'ppe_issuances',
     'fire_equipment',
+    'fire_design_buildings',
+    'fire_design_floors',
+    'fire_design_layouts',
+    'fire_design_systems',
+    'fire_design_gap_actions',
     'safety_templates',
     'safety_inspections',
     'environmental_logs',
@@ -465,7 +470,7 @@ const MODULE_TABLES_MAP: Record<string, string[]> = {
     'automation_events_outbox',
     'automation_execution_logs',
   ],
-  files_documents: ['system_files', 'system_releases'],
+  files_documents: ['system_files', 'system_releases', 'sds_records', 'sds_revisions', 'sds_attachments'],
   system_settings: ['system_settings'],
   audit_logs: ['audit_logs'],
 };
@@ -505,14 +510,24 @@ async function writeAuditLogEntry(
   details: any
 ): Promise<void> {
   try {
-    await db.insert(schema.auditLogs).values({
-      action,
+    const { auditService } = await import('../modules/audit/audit.service.ts');
+    await auditService.log({
+      userUid: username,
+      username,
+      action: action.includes('RESTORE') || action.includes('بازیابی') ? 'IMPORT' : 'EXPORT',
+      module: 'BACKUP',
       entityType,
       entityId,
       newValue: {
         username,
         timestamp: new Date().toISOString(),
-        ...details,
+        ...(details && typeof details === 'object' ? details : {}),
+      },
+      details: {
+        username,
+        actorName: username,
+        actionTitle: action,
+        ...(details && typeof details === 'object' ? details : {}),
       },
       ipAddress: '127.0.0.1',
     });

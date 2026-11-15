@@ -6,11 +6,11 @@ import { pool, db } from '../../src/db/index.ts';
 import {
   systemSettings,
   personnel,
-  auditLogs,
 } from '../../src/db/schema.ts';
 import { eq } from 'drizzle-orm';
 import { logger } from '../core/logger.ts';
 import { requireAuth, requireRole } from '../core/middleware/auth.ts';
+import { auditService } from '../modules/audit/audit.service.ts';
 import { broadcastDataMutation } from '../core/socket.ts';
 import { getBackupDirectory } from '../services/backup.service.ts';
 
@@ -107,13 +107,24 @@ async function logOrgAudit(
   details: Record<string, any>
 ): Promise<void> {
   try {
-    await db.insert(auditLogs).values({
-      action,
+    const isFailed = Boolean(details?.error) || action.includes('خطا');
+    await auditService.log({
+      userUid: username,
+      username,
+      action: isFailed ? 'RESTORE_FAILED' : 'UPDATE',
+      module: 'ORGANIZATION',
       entityType: 'ORG_STRUCTURE_BACKUP_RESTORE',
       entityId,
+      result: isFailed ? 'FAILED' : 'SUCCESS',
       newValue: {
         username,
         timestamp: new Date().toISOString(),
+        ...details,
+      },
+      details: {
+        username,
+        actorName: username,
+        actionTitle: action,
         ...details,
       },
       ipAddress: '127.0.0.1',
@@ -574,10 +585,23 @@ organizationRouter.post(
           .json({ success: false, message: 'Invalid payload: expected an array of organization nodes.' });
       }
 
+      const prevNodes = await getSettingValue<any[]>('org_nodes', []);
       const pList = await db.select().from(personnel);
       const { sortedNodes } = sanitizeAndSortOrgNodesTopologically(value, pList);
 
       await saveSettingValue('org_nodes', sortedNodes);
+
+      void auditService.logFromRequest(req, {
+        action: 'UPDATE',
+        module: 'ORGANIZATION',
+        entityType: 'ORG_HIERARCHY',
+        entityId: 'org_nodes',
+        oldValue: { nodesCount: Array.isArray(prevNodes) ? prevNodes.length : 0 },
+        newValue: { nodesCount: sortedNodes.length },
+        details: {
+          actionTitle: `بروزرسانی ساختار و چارت سازمانی (${sortedNodes.length} گره)`,
+        },
+      });
 
       broadcastDataMutation('organization:nodes', 'update', sortedNodes);
       broadcastDataMutation('departments', 'update', sortedNodes);
