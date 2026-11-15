@@ -56,7 +56,8 @@ import {
   BookOpen,
   Workflow,
   Bot,
-  Layers
+  Layers,
+  Anchor
 } from 'lucide-react';
 import LoginScreen from './components/LoginScreen';
 import { HseLogo } from './components/HseLogo';
@@ -262,6 +263,7 @@ const InstructionsDocumentsModule = lazyWithRetry(() => import('./components/Ins
 const SystemNotificationsTab = lazyWithRetry(() => import('./components/system-settings/SystemNotificationsTab'), 'notifications');
 const AiAssistantApp = lazyWithRetry(() => import('./modules/ai/AiAssistantApp'), 'ai-assistant');
 const PsmManagementModule = lazyWithRetry(() => import('./modules/psm/PsmManagementModule'), 'psm');
+const LiftingPlanModule = lazyWithRetry(() => import('./modules/lifting-plan/LiftingPlanModule'), 'lifting-plan');
 
 // Seed data definitions for first-time mount
 const JALALI_MONTH_NAMES = ['فروردین','اردیبهشت','خرداد','تیر','مرداد','شهریور','مهر','آبان','آذر','دی','بهمن','اسفند'];
@@ -743,6 +745,9 @@ export default function App() {
     }
     if (isAdmin || hasPermission(currentUser, 'Risk Assessment', 'view')) {
       tabs.push({ key: 'risk', icon: ShieldAlert, titleFa: 'ارزیابی ریسک', titleEn: 'AI Risk Assessment' });
+    }
+    if (isAdmin || hasPermission(currentUser, 'Lifting Plan', 'view') || hasPermission(currentUser, 'Safety Unit', 'view') || hasPermission(currentUser, 'Permit To Work', 'view') || hasPermission(currentUser, 'Risk Assessment', 'view')) {
+      tabs.push({ key: 'lifting-plan', icon: Anchor, titleFa: 'مدیریت و مهندسی عملیات باربرداری (Lifting Plan)', titleEn: 'Lifting Plan Management & Engineering' });
     }
 
     // 4. Training, Warnings & Workflows
@@ -1391,6 +1396,10 @@ export default function App() {
 
                         {activeTab === 'risk' && (
               <RiskAssessment currentUser={currentUser} isFa={isFa} />
+            )}
+
+            {activeTab === 'lifting-plan' && (
+              <LiftingPlanModule isFa={isFa} currentUser={currentUser} />
             )}
 
             {activeTab === 'training' && (

@@ -41,7 +41,8 @@ import {
   BookOpen,
   ChevronsUpDown,
   Bell,
-  Bot
+  Bot,
+  Anchor
 } from 'lucide-react';
 import { UserProfile } from '../types';
 import {
@@ -81,7 +82,8 @@ export type MainTabKey =
   | 'documents'
   | 'notifications'
   | 'ai-assistant'
-  | 'psm';
+  | 'psm'
+  | 'lifting-plan';
 
 export interface TabItemConfig {
   key: MainTabKey;
@@ -272,6 +274,7 @@ const MODULE_META: Record<MainTabKey, { icon: any; tone: ToneKey }> = {
   permit: { icon: FileText, tone: 'amber' },
   'ptw-audit': { icon: ClipboardCheck, tone: 'orange' },
   risk: { icon: BrainCircuit, tone: 'purple' },
+  'lifting-plan': { icon: Anchor, tone: 'amber' },
   ppe: { icon: HardHat, tone: 'sky' },
   incidents: { icon: AlertOctagon, tone: 'rose' },
   warnings: { icon: AlertTriangle, tone: 'red' },

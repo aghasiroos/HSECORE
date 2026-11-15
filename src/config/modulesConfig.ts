@@ -172,6 +172,7 @@ export const ALL_SYSTEM_MODULES: SystemModuleConfig[] = [
   { key: 'permit', titleFa: 'پروانه کار ایمن (PTW)', titleEn: 'Permit to Work (PTW)', groupId: 'safety_permits', category: 'مجوزهای کار و کنترل ریسک', enabled: true, descriptionFa: 'صدور و گردش کار دیجیتال پروانه‌های کار گرم، سرد، حفاری و فضاهای بسته' },
   { key: 'ptw-audit', titleFa: 'ممیزی پروانه‌های کار (PTW Audit)', titleEn: 'Permit to Work Audit System', groupId: 'safety_permits', category: 'مجوزهای کار و کنترل ریسک', enabled: true, descriptionFa: 'ممیزی جامع و چک‌لیست ۳۰ گانه انطباق سیستم صدور پروانه کار ایمن' },
   { key: 'risk', titleFa: 'ارزیابی ریسک هوشمند (AI JSA)', titleEn: 'AI Risk Assessment (JSA/FMEA)', groupId: 'safety_permits', category: 'مجوزهای کار و کنترل ریسک', enabled: true, descriptionFa: 'شناسایی خطرات و ارزیابی ریسک با هوش مصنوعی بر اساس JSA / FMEA' },
+  { key: 'lifting-plan', titleFa: 'مدیریت و مهندسی عملیات باربرداری (Lifting Plan)', titleEn: 'Lifting Plan Management & Engineering', groupId: 'safety_permits', category: 'مجوزهای کار و کنترل ریسک', enabled: true, descriptionFa: 'سامانه جامع طراحی، محاسبات مهندسی ASME/WRC، مدل‌سازی سه‌بعدی، Load Chart، عملیات ویژه و گردش کار ۹ مرحله‌ای باربرداری' },
   { key: 'ppe', titleFa: 'تجهیزات حفاظت فردی (PPE)', titleEn: 'PPE Matrix Management (OSHA)', groupId: 'safety_permits', category: 'مجوزهای کار و کنترل ریسک', enabled: true, descriptionFa: 'مدیریت تحویل، انقضا و استاندارد تجهیزات حفاظت فردی' },
 
   // 4. Incidents & Compliance

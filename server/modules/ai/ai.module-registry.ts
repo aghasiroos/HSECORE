@@ -127,6 +127,7 @@ export class AIModuleRegistry {
       permit: { tools: ['ptw_summary'], perm: 'ptw:read', tables: ['work_permits', 'permit_signatures'] },
       'ptw-audit': { tools: ['ptw_summary'], perm: 'ptw:read', tables: ['work_permits', 'system_settings'] },
       risk: { tools: ['risk_assessment_summary'], perm: 'risks:read', tables: ['risk_assessments'] },
+      'lifting-plan': { tools: ['lifting_plan_summary', 'risk_assessment_summary'], perm: 'safety:read', tables: ['lifting_plans', 'lifting_cranes', 'lifting_rigging_equipment', 'lifting_calculations'] },
       ppe: { tools: ['ppe_summary'], perm: 'ppe:read', tables: ['ppe_issuances'] },
       incidents: { tools: ['incidents_summary'], perm: 'incidents:read', tables: ['incidents'] },
       warnings: { tools: ['warnings_anomalies_summary'], perm: 'warnings:read', tables: ['safety_warnings'] },

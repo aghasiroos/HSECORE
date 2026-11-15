@@ -32,48 +32,61 @@ const MODULE_LOADERS: Record<string, DynamicModuleFactory> = {
   notifications: () => import('../components/system-settings/SystemNotificationsTab'),
   'ai-assistant': () => import('../modules/ai/AiAssistantApp'),
   psm: () => import('../modules/psm/PsmManagementModule'),
+  'lifting-plan': () => import('../modules/lifting-plan/LiftingPlanModule'),
 };
 
 const prefetchedModules = new Set<string>();
+const inFlightPrefetches = new Map<string, Promise<void>>();
 
 /**
- * Proactively prefetches a module chunk into the browser cache
+ * Proactively prefetches a module chunk into the browser cache (best-effort)
  */
-export function prefetchModule(key: string): void {
-  if (prefetchedModules.has(key)) return;
-  const loader = MODULE_LOADERS[key];
-  if (!loader) return;
+export function prefetchModule(key: string): Promise<void> {
+  if (prefetchedModules.has(key)) return Promise.resolve();
+  const existing = inFlightPrefetches.get(key);
+  if (existing) return existing;
 
-  prefetchedModules.add(key);
-  try {
-    loader().catch((err) => {
+  const loader = MODULE_LOADERS[key];
+  if (!loader) return Promise.resolve();
+
+  const task = loader()
+    .then(() => {
+      prefetchedModules.add(key);
+    })
+    .catch(() => {
       prefetchedModules.delete(key);
-      console.warn(`[Prefetch] Note on prefetching module '${key}':`, err);
+    })
+    .finally(() => {
+      inFlightPrefetches.delete(key);
     });
-  } catch (_) {
-    prefetchedModules.delete(key);
-  }
+
+  inFlightPrefetches.set(key, task);
+  return task;
 }
 
 /**
- * Pre-warms the top primary modules during browser idle time after login
+ * Pre-warms the top primary modules sequentially during browser idle time after login
+ * so concurrent unbundled dev fetches never saturate the proxy or trigger transient network errors.
  */
 export function prewarmCoreModules(): void {
   if (typeof window === 'undefined') return;
 
   const coreKeys = ['dashboard', 'heat', 'health-env', 'safety-unit', 'fire-dept', 'permit', 'ptw-audit', 'user-mgmt'];
 
-  const runWarm = () => {
-    coreKeys.forEach((k, idx) => {
-      setTimeout(() => {
-        prefetchModule(k);
-      }, idx * 150);
-    });
+  const runWarm = async () => {
+    for (const k of coreKeys) {
+      await prefetchModule(k);
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
   };
 
   if ('requestIdleCallback' in window) {
-    (window as any).requestIdleCallback(() => runWarm());
+    (window as any).requestIdleCallback(() => {
+      void runWarm();
+    });
   } else {
-    setTimeout(runWarm, 600);
+    setTimeout(() => {
+      void runWarm();
+    }, 800);
   }
 }

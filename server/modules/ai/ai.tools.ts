@@ -1526,6 +1526,54 @@ export class AIToolsRegistry {
   }
 
   /**
+   * Tool 21b: Lifting Plan Management & Engineering Summary (طرح‌های باربرداری و جرثقیل‌ها)
+   */
+  async getLiftingPlanSummary(): Promise<AIToolResult> {
+    try {
+      const [plans, cranes, rigging] = await Promise.all([
+        db.select().from(schema.liftingPlans).where(eq(schema.liftingPlans.isDeleted, false)).catch(() => []),
+        db.select().from(schema.liftingCranes).where(eq(schema.liftingCranes.isDeleted, false)).catch(() => []),
+        db.select().from(schema.liftingRiggingEquipment).where(eq(schema.liftingRiggingEquipment.isDeleted, false)).catch(() => []),
+      ]);
+
+      const activePlans = plans.filter((p: any) => ['APPROVED', 'ACTIVE_EXECUTION', 'UNDER_REVIEW'].includes(String(p.status || '').toUpperCase())).length;
+      const failedCalcs = plans.filter((p: any) => String(p.engineeringStatus || '').toUpperCase() === 'FAIL').length;
+      const reapprovalNeeded = plans.filter((p: any) => Boolean(p.requiresReapproval)).length;
+      const criticalLifts = plans.filter((p: any) => ['CRITICAL', 'HEAVY', 'TANDEM', 'BLIND', 'LIFT_AND_TURN'].includes(String(p.liftCategory || '').toUpperCase())).length;
+      const recentPlans = plans.slice(0, 4).map((p: any) => `${p.planCode}: ${p.title} (${p.netLoadWeightTon}t - وضعیت مهندسی: ${p.engineeringStatus})`);
+
+      return {
+        toolName: 'lifting_plan_summary',
+        titleFa: 'ماژول مدیریت و مهندسی عملیات باربرداری (Lifting Plan)',
+        summary: [
+          `• کل طرح‌های باربرداری ثبت‌شده: ${plans.length} طرح (${activePlans} طرح فعال/در جریان، ${criticalLifts} عملیات حساس/ویژه)`,
+          `• وضعیت انطباق مهندسی: ${failedCalcs} طرح دارای خطای محاسباتی (FAIL) | ${reapprovalNeeded} طرح نیازمند بازتأیید پس از تغییر نسخه`,
+          `• ناوگان جرثقیل ثبت‌شده: ${cranes.length} دستگاه | بانک ادوات Rigging: ${rigging.length} تجهیز`,
+          recentPlans.length > 0 ? `• آخرین طرح‌ها: ${recentPlans.join(' | ')}` : '',
+        ].filter(Boolean).join('\n'),
+        data: {
+          totalPlans: plans.length,
+          activePlans,
+          criticalLifts,
+          failedCalcs,
+          reapprovalNeeded,
+          totalCranes: cranes.length,
+          totalRigging: rigging.length,
+        },
+        timestamp: new Date().toISOString(),
+      };
+    } catch {
+      return {
+        toolName: 'lifting_plan_summary',
+        titleFa: 'ماژول مدیریت عملیات باربرداری (Lifting Plan)',
+        summary: 'اطلاعات طرح‌های باربرداری در دسترس نیست.',
+        data: {},
+        timestamp: new Date().toISOString(),
+      };
+    }
+  }
+
+  /**
    * Tool 24: Comprehensive Multi-Module Cross Analysis (تحلیل یکپارچه و مقطعی تمام ماژول‌های سامانه برای دستور /ALL)
    */
   async getAllModulesCrossAnalysis(userContext?: UserContext): Promise<AIToolResult> {
@@ -1550,6 +1598,7 @@ export class AIToolsRegistry {
       canHealth ? this.getNutritionHighRiskSummary().then(r => ({ name: 'پایش تغذیه و بیماران پرخطر', res: r })) : Promise.resolve({ name: 'پایش تغذیه و بیماران پرخطر', res: null }),
       canSafety ? this.getRiskAssessmentsSummary().then(r => ({ name: 'ارزیابی ریسک و مخاطرات (JSA)', res: r })) : Promise.resolve({ name: 'ارزیابی ریسک و مخاطرات (JSA)', res: null }),
       canSafety ? this.getPsmSummary().then(r => ({ name: 'مدیریت ایمنی فرآیند (PSM)', res: r })) : Promise.resolve({ name: 'مدیریت ایمنی فرآیند (PSM)', res: null }),
+      canSafety ? this.getLiftingPlanSummary().then(r => ({ name: 'مدیریت و مهندسی باربرداری (Lifting Plan)', res: r })) : Promise.resolve({ name: 'مدیریت و مهندسی باربرداری (Lifting Plan)', res: null }),
       canSafety ? this.get5SAndInspectionsSummary().then(r => ({ name: 'نظام آراستگی ۵S و بازرسی‌ها', res: r })) : Promise.resolve({ name: 'نظام آراستگی ۵S و بازرسی‌ها', res: null }),
       canFire ? this.getFireSafetySummary().then(r => ({ name: 'آتش‌نشانی و تجهیزات اطفاء حریق', res: r })) : Promise.resolve({ name: 'آتش‌نشانی و تجهیزات اطفاء حریق', res: null }),
       canSafety ? this.getWarningsAndAnomaliesSummary().then(r => ({ name: 'اخطارهای ایمنی و عدم انطباق‌ها', res: r })) : Promise.resolve({ name: 'اخطارهای ایمنی و عدم انطباق‌ها', res: null }),

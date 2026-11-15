@@ -30,6 +30,7 @@ const AI_TOOL_REQUIRED_PERMISSIONS: Record<string, string> = {
   nutrition_high_risk_summary: 'health:read',
   risk_assessment_summary: 'reports:read',
   psm_summary: 'safety:read',
+  lifting_plan_summary: 'safety:read',
   five_s_inspections_summary: 'five_s:read',
   fire_safety_summary: 'fire_equipment:read',
   warnings_anomalies_summary: 'warnings:read',
@@ -118,6 +119,7 @@ const ALL_MODULE_TOOLS = [
   'nutrition_high_risk_summary',
   'risk_assessment_summary',
   'psm_summary',
+  'lifting_plan_summary',
   'five_s_inspections_summary',
   'fire_safety_summary',
   'warnings_anomalies_summary',
@@ -261,6 +263,7 @@ export class AIOrchestrator {
       'hse-ms': ['reports'],
       'safety-unit': ['five_s'],
       'safety-checklists': ['five_s'],
+      'lifting-plan': ['lifting'],
       'fire-dashboard': ['fire'],
       'fire-dept': ['fire'],
       'health-env': ['health', 'environment'],
@@ -580,6 +583,11 @@ export class AIOrchestrator {
       await checkAndExecute('psm_summary', () => aiToolsRegistry.getPsmSummary());
     }
 
+    // 19c. Lifting Plan Management & Engineering (ASME / MecaLug)
+    if (isSelected('lifting') || hasAnyTerm(['باربرداری', 'جرثقیل', 'lifting', 'rigging', 'ریگینگ', 'اسلینگ', 'padeye', 'trunnion', 'tandem', 'blind lift'])) {
+      await checkAndExecute('lifting_plan_summary', () => aiToolsRegistry.getLiftingPlanSummary());
+    }
+
     // 20. Dynamically registered modules in AIModuleRegistry
     if (selected.size > 0) {
       const dynamicExecutors: Record<string, () => Promise<AIToolResult>> = {
@@ -590,6 +598,7 @@ export class AIOrchestrator {
         nutrition_high_risk_summary: () => aiToolsRegistry.getNutritionHighRiskSummary(),
         risk_assessment_summary: () => aiToolsRegistry.getRiskAssessmentsSummary(),
         psm_summary: () => aiToolsRegistry.getPsmSummary(),
+        lifting_plan_summary: () => aiToolsRegistry.getLiftingPlanSummary(),
         five_s_inspections_summary: () => aiToolsRegistry.get5SAndInspectionsSummary(),
         fire_safety_summary: () => aiToolsRegistry.getFireSafetySummary(),
         warnings_anomalies_summary: () => aiToolsRegistry.getWarningsAndAnomaliesSummary(),
@@ -1419,6 +1428,7 @@ export class AIOrchestrator {
       { moduleId: 'daily-report', moduleNameFa: 'گزارش روزانه آتش‌نشانی', connected: true, tools: toolMap.fire, assistantIds: ['GENERAL_HSE'] },
       { moduleId: 'vehicles', moduleNameFa: 'مدیریت و بازرسی خودروهای آتش‌نشانی', connected: true, tools: toolMap.fire, assistantIds: ['GENERAL_HSE'] },
       { moduleId: 'safety-unit', moduleNameFa: 'واحد ایمنی و بازرسی‌ها', connected: true, tools: toolMap.five_s, assistantIds: ['GENERAL_HSE'] },
+      { moduleId: 'lifting-plan', moduleNameFa: 'مدیریت و مهندسی عملیات باربرداری (Lifting Plan)', connected: true, tools: toolMap.lifting, assistantIds: ['GENERAL_HSE'] },
       { moduleId: 'pending-documents', moduleNameFa: 'کارتابل و اسناد در انتظار اقدام', connected: true, tools: toolMap.workflows, assistantIds: ['GENERAL_HSE'] },
       { moduleId: 'process-management', moduleNameFa: 'مدیریت فرآیندها (BPMN)', connected: true, tools: toolMap.workflows, assistantIds: ['GENERAL_HSE'] },
       { moduleId: 'non-periodic-exams', moduleNameFa: 'معاینات غیر دوره‌ای', connected: true, tools: toolMap.health, assistantIds: ['GENERAL_HSE'] },

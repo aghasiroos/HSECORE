@@ -34,6 +34,7 @@ export const MODULE_NAMES_FA: Record<string, string> = {
   'non-conformances': 'مدیریت عدم انطباق‌ها (CAPA)',
   ppe: 'تجهیزات حفاظت فردی (PPE)',
   risk: 'ارزیابی ریسک هوشمند',
+  'lifting-plan': 'مدیریت و مهندسی عملیات باربرداری (Lifting Plan)',
   'personnel-history': 'سوابق جامع پرسنل ۳۶۰°',
   personnel: 'اطلاعات پرسنل مجتمع',
   training: 'مدیریت و آمار آموزش',

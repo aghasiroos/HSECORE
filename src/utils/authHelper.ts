@@ -203,6 +203,16 @@ export const PERMISSION_MODULES_REGISTRY: PermissionModuleMeta[] = [
     iconName: 'Zap',
     descriptionFa: 'شناسایی خطرات، ارزیابی کمی ریسک ماتریسی، دستورالعمل‌های کنترلی با هوش مصنوعی'
   },
+  {
+    id: 'Lifting Plan',
+    titleFa: 'مدیریت و مهندسی عملیات باربرداری (Lifting Plan)',
+    titleEn: 'Lifting Plan Management & Engineering',
+    category: 'safety',
+    categoryTitleFa: 'عملیات ایمنی، پروانه‌های کار و ریسک',
+    categoryTitleEn: 'Safety Operations & Risk',
+    iconName: 'Anchor',
+    descriptionFa: 'طراحی مهندسی و محاسبات ASME/WRC، مدل‌سازی سه‌بعدی، Load Chart، ریگینگ و گردش کار عملیات باربرداری'
+  },
 
   // 4. Personnel History, Training & Records
   {
@@ -1217,14 +1227,14 @@ export function createRolePresetPermissions(presetType: 'admin' | 'complex_direc
 
       case 'safety_officer':
         // Safety Officer / Inspector
-        const isSafetyCore = m.id === 'Safety Unit' || m.id === 'Permit To Work' || m.id === 'PTW Audit' || m.id === 'Incidents' || m.id === 'Non-Conformances' || m.id === 'PPE' || m.id === 'Risk Assessment' || m.id === 'Safety Warnings' || m.id === 'Documents' || m.id === 'Notifications';
+        const isSafetyCore = m.id === 'Safety Unit' || m.id === 'Permit To Work' || m.id === 'PTW Audit' || m.id === 'Incidents' || m.id === 'Non-Conformances' || m.id === 'PPE' || m.id === 'Risk Assessment' || m.id === 'Lifting Plan' || m.id === 'Safety Warnings' || m.id === 'Documents' || m.id === 'Notifications';
         const isSafetyViewable = isSafetyCore || m.category === 'dashboards' || m.id === 'Fire Department' || m.id === 'Health & Environment' || m.id === 'Personnel 360' || m.id === 'Training' || m.id === 'Reports';
         perms[m.id] = {
           view: isSafetyViewable,
           create: isSafetyCore,
           edit: isSafetyCore,
           delete: false,
-          approve: m.id === 'Safety Unit' || m.id === 'Permit To Work' || m.id === 'PTW Audit' || m.id === 'Safety Warnings' || m.id === 'Non-Conformances' || m.id === 'Documents',
+          approve: m.id === 'Safety Unit' || m.id === 'Permit To Work' || m.id === 'PTW Audit' || m.id === 'Lifting Plan' || m.id === 'Safety Warnings' || m.id === 'Non-Conformances' || m.id === 'Documents',
           print: isSafetyViewable,
           export: isSafetyViewable,
           import: m.id === 'Safety Unit' || m.id === 'Documents'

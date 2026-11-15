@@ -21,20 +21,29 @@ export default function SafetyUnitModule({ isFa = true, currentUser }: Props) {
   const [reinspectAuditForTrigger, setReinspectAuditForTrigger] = useState<OperationalSafetyInspection | null>(null);
   const [scheduleFilterForChecklists, setScheduleFilterForChecklists] = useState<string>('ALL');
 
-  // Load data
+  // Load data & handle cross-module subtab navigation
   useEffect(() => {
     const refreshData = () => {
       setInspections(safetyDeptService.getAllInspections());
       setTemplates(safetyDeptService.getAllTemplates());
     };
 
+    const handleSubTabNav = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ moduleKey?: string; subTabKey?: string }>).detail;
+      if (detail?.moduleKey === 'safety-unit' && detail.subTabKey) {
+        setActiveTab(detail.subTabKey);
+      }
+    };
+
     refreshData();
     window.addEventListener('hse_safety_inspections_updated', refreshData);
     window.addEventListener('hse_safety_templates_updated', refreshData);
+    window.addEventListener('hse-navigate-subtab', handleSubTabNav as EventListener);
 
     return () => {
       window.removeEventListener('hse_safety_inspections_updated', refreshData);
       window.removeEventListener('hse_safety_templates_updated', refreshData);
+      window.removeEventListener('hse-navigate-subtab', handleSubTabNav as EventListener);
     };
   }, []);
 

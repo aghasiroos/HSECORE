@@ -58,7 +58,8 @@ import {
   User as UserIcon,
   Bell,
   Zap,
-  Bot
+  Bot,
+  Anchor
 } from 'lucide-react';
 import { UserProfile } from '../types';
 import UserManagement from './UserManagement';
@@ -168,6 +169,7 @@ function UiConfigPanel({ language, currentUser }: { language: 'en' | 'fa', curre
       case 'permit': return FileText;
       case 'ptw-audit': return ClipboardCheck;
       case 'risk': return BrainCircuit;
+      case 'lifting-plan': return Anchor;
       case 'ppe': return HardHat;
       case 'incidents': return AlertOctagon;
       case 'warnings': return AlertTriangle;

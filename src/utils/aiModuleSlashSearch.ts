@@ -166,6 +166,12 @@ export const MODULE_METADATA_DIRECTORY: Record<
     iconName: 'ShieldAlert',
     aliases: ['risk', 'jsa', 'fmea', 'hazid', 'ارزیابی ریسک', 'شناسایی خطرات', 'مخاطرات', 'ماتریس ریسک'],
   },
+  'lifting-plan': {
+    titleEn: 'Lifting Plan Management & Engineering (ASME / MecaLug)',
+    groupTitleFa: 'مجوزهای کار و کنترل ریسک',
+    iconName: 'Anchor',
+    aliases: ['lifting-plan', 'lifting', 'crane', 'rigging', 'mecalug', 'باربرداری', 'عملیات باربرداری', 'جرثقیل', 'لیفتینگ پلن', 'ریگینگ'],
+  },
   ppe: {
     titleEn: 'Personal Protective Equipment (PPE)',
     groupTitleFa: 'مجوزهای کار و کنترل ریسک',

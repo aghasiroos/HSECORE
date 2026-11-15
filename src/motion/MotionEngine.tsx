@@ -88,6 +88,7 @@ const HSE_MODULE_ORDER = [
   'permit',
   'ptw-audit',
   'risk',
+  'lifting-plan',
   'ppe',
   'incidents',
   'warnings',

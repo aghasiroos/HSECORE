@@ -1901,3 +1901,298 @@ export const sdsAttachments = pgTable(
   ]
 );
 
+// ==========================================
+// 21. Lifting Plan Management & Engineering (MecaLug-inspired / ASME Compliant)
+// ==========================================
+export const liftingStandardsConfig = pgTable(
+  'lifting_standards_config',
+  {
+    id: serial('id').primaryKey(),
+    standardCode: text('standard_code').notNull().unique(), // ASME_P30_1, ASME_B30_20, ASME_B30_5, ASME_B30_9, ASME_B30_10, ASME_B30_16, ASME_B30_26, ASME_B30_30
+    titleFa: text('title_fa').notNull(),
+    titleEn: text('title_en').notNull(),
+    edition: text('edition').notNull(),
+    category: text('category').default('ASME').notNull(), // ASME, WRC, INTERNAL
+    activeClauses: jsonb('active_clauses').$type<Record<string, any>>().default({}).notNull(),
+    engineeringFactors: jsonb('engineering_factors').$type<Record<string, any>>().default({}).notNull(),
+    notes: text('notes'),
+    isActive: boolean('is_active').default(true).notNull(),
+    updatedBy: text('updated_by'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_lifting_standards_code').on(table.standardCode),
+    index('idx_lifting_standards_active').on(table.isActive),
+  ]
+);
+
+export const liftingCranes = pgTable(
+  'lifting_cranes',
+  {
+    id: serial('id').primaryKey(),
+    craneCode: text('crane_code').notNull().unique(),
+    name: text('name').notNull(),
+    craneType: text('crane_type').default('MOBILE_ALL_TERRAIN').notNull(), // MOBILE_ALL_TERRAIN, CRAWLER, ROUGH_TERRAIN, TRUCK_MOUNTED, TOWER, OVERHEAD_GANTRY
+    manufacturer: text('manufacturer'),
+    model: text('model').notNull(),
+    serialNumber: text('serial_number'),
+    plateNumber: text('plate_number'),
+    maxRatedCapacityTon: doublePrecision('max_rated_capacity_ton').notNull(),
+    minBoomLengthM: doublePrecision('min_boom_length_m').default(10).notNull(),
+    maxBoomLengthM: doublePrecision('max_boom_length_m').default(60).notNull(),
+    maxRadiusM: doublePrecision('max_radius_m').default(45).notNull(),
+    counterweightTon: doublePrecision('counterweight_ton').default(0).notNull(),
+    outriggerSpreadM: doublePrecision('outrigger_spread_m').default(7.5).notNull(),
+    deadWeightTon: doublePrecision('dead_weight_ton'),
+    defaultOutriggerPadAreaM2: doublePrecision('default_outrigger_pad_area_m2'),
+    hookBlockWeightTon: doublePrecision('hook_block_weight_ton').default(0.6).notNull(),
+    ownershipType: text('ownership_type').default('COMPANY').notNull(), // COMPANY, CONTRACTOR, RENTAL
+    contractorName: text('contractor_name'),
+    unitId: integer('unit_id').references(() => orgUnits.id, { onDelete: 'set null' }),
+    unitName: text('unit_name'),
+    certificateNumber: text('certificate_number'),
+    certificateDocId: text('certificate_doc_id'),
+    certificateIssueDate: text('certificate_issue_date'),
+    certificateExpiryDate: text('certificate_expiry_date'),
+    lastInspectionDate: text('last_inspection_date'),
+    nextInspectionDate: text('next_inspection_date'),
+    latestInspectionId: integer('latest_inspection_id'),
+    status: text('status').default('ACTIVE').notNull(), // ACTIVE, EXPIRED_CERT, MAINTENANCE, OUT_OF_SERVICE
+    notes: text('notes'),
+    createdBy: text('created_by'),
+    updatedBy: text('updated_by'),
+    isDeleted: boolean('is_deleted').default(false).notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_lifting_cranes_code').on(table.craneCode),
+    index('idx_lifting_cranes_status').on(table.status),
+    index('idx_lifting_cranes_deleted').on(table.isDeleted),
+  ]
+);
+
+export const liftingCraneLoadCharts = pgTable(
+  'lifting_crane_load_charts',
+  {
+    id: serial('id').primaryKey(),
+    craneId: integer('crane_id')
+      .references(() => liftingCranes.id, { onDelete: 'cascade' })
+      .notNull(),
+    chartName: text('chart_name').default('Main Boom - 100% Outriggers').notNull(),
+    outriggerConfig: text('outrigger_config').default('100_OUTRIGGERS').notNull(), // 100_OUTRIGGERS, 75_OUTRIGGERS, ON_TIRES, CRAWLER_360
+    counterweightTon: doublePrecision('counterweight_ton').default(0).notNull(),
+    boomLengthM: doublePrecision('boom_length_m').notNull(),
+    radiusM: doublePrecision('radius_m').notNull(),
+    ratedCapacityTon: doublePrecision('rated_capacity_ton').notNull(),
+    maxTipHeightM: doublePrecision('max_tip_height_m'),
+    boomAngleDeg: doublePrecision('boom_angle_deg'),
+    fallsOfRope: integer('falls_of_rope').default(6),
+    notes: text('notes'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_crane_chart_crane').on(table.craneId),
+    index('idx_crane_chart_lookup').on(table.craneId, table.boomLengthM, table.radiusM),
+  ]
+);
+
+export const liftingRiggingEquipment = pgTable(
+  'lifting_rigging_equipment',
+  {
+    id: serial('id').primaryKey(),
+    assetCode: text('asset_code').notNull().unique(),
+    name: text('name').notNull(),
+    category: text('category').notNull(), // WIRE_ROPE_SLING, WEB_SLING, CHAIN_SLING, SHACKLE, HOOK, SPREADER_BEAM, LIFTING_BEAM, EYEBOLT, TURNBUCKLE, MASTER_LINK
+    standardRef: text('standard_ref').default('ASME B30.9').notNull(),
+    wllTon: doublePrecision('wll_ton').notNull(),
+    safetyFactor: doublePrecision('safety_factor').default(5).notNull(),
+    selfWeightKg: doublePrecision('self_weight_kg').default(10).notNull(),
+    lengthM: doublePrecision('length_m'),
+    diameterMm: doublePrecision('diameter_mm'),
+    minSlingAngleDeg: doublePrecision('min_sling_angle_deg').default(45),
+    serialNumber: text('serial_number'),
+    manufacturer: text('manufacturer'),
+    ownerType: text('owner_type').default('COMPANY').notNull(),
+    contractorName: text('contractor_name'),
+    unitName: text('unit_name'),
+    storageLocation: text('storage_location'),
+    certificateNumber: text('certificate_number'),
+    certificateDocId: text('certificate_doc_id'),
+    certificateExpiryDate: text('certificate_expiry_date'),
+    lastInspectionDate: text('last_inspection_date'),
+    nextInspectionDate: text('next_inspection_date'),
+    safetyLatchOk: boolean('safety_latch_ok').default(true).notNull(),
+    conditionStatus: text('condition_status').default('SERVICEABLE').notNull(), // SERVICEABLE, WARNING_DUE, EXPIRED_CERT, DEFECTIVE, QUARANTINED
+    notes: text('notes'),
+    createdBy: text('created_by'),
+    updatedBy: text('updated_by'),
+    isDeleted: boolean('is_deleted').default(false).notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_rigging_code').on(table.assetCode),
+    index('idx_rigging_category').on(table.category),
+    index('idx_rigging_status').on(table.conditionStatus),
+    index('idx_rigging_deleted').on(table.isDeleted),
+  ]
+);
+
+export const liftingPlans = pgTable(
+  'lifting_plans',
+  {
+    id: serial('id').primaryKey(),
+    planCode: text('plan_code').notNull().unique(),
+    title: text('title').notNull(),
+    revisionNumber: integer('revision_number').default(1).notNull(),
+    liftCategory: text('lift_category').default('STANDARD').notNull(), // STANDARD, CRITICAL, HEAVY, TANDEM, BLIND, LIFT_AND_TURN
+    companyId: integer('company_id').references(() => orgCompanies.id, { onDelete: 'set null' }),
+    unitId: integer('unit_id').references(() => orgUnits.id, { onDelete: 'set null' }),
+    unitName: text('unit_name').default('عمومی مجتمع').notNull(),
+    areaLocation: text('area_location').notNull(),
+    plannedDate: text('planned_date').notNull(),
+    contractorName: text('contractor_name'),
+    loadName: text('load_name').notNull(),
+    loadShape: text('load_shape').default('VESSEL_HORIZONTAL').notNull(), // BOX, CYLINDER_VERTICAL, VESSEL_HORIZONTAL, EXCHANGER, SKID, CUSTOM
+    netLoadWeightTon: doublePrecision('net_load_weight_ton').notNull(),
+    riggingAccessoryWeightTon: doublePrecision('rigging_accessory_weight_ton').default(0).notNull(),
+    hookBlockWeightTon: doublePrecision('hook_block_weight_ton').default(0.6).notNull(),
+    dynamicFactor: doublePrecision('dynamic_factor').default(1.1).notNull(),
+    loadDimensions: jsonb('load_dimensions').$type<Record<string, any>>().default({}).notNull(), // { lengthM, widthM, heightM, diameterM }
+    cogOffset: jsonb('cog_offset').$type<Record<string, any>>().default({ x: 0, y: 0, z: 0 }).notNull(),
+    craneSetup: jsonb('crane_setup').$type<Record<string, any>>().default({}).notNull(), // { primaryCraneId, tailCraneId, boomLengthM, radiusM, outriggerConfig, windSpeedMs, groundBearingKpa }
+    riggingSetup: jsonb('rigging_setup').$type<Record<string, any>>().default({}).notNull(), // { hitchType, legCount, slingIds, shackleIds, spreaderId, hookHeightM, slingLengthM, attachmentPoints }
+    tandemConfig: jsonb('tandem_config').$type<Record<string, any>>().default({}).notNull(),
+    blindConfig: jsonb('blind_config').$type<Record<string, any>>().default({}).notNull(),
+    turningConfig: jsonb('turning_config').$type<Record<string, any>>().default({}).notNull(),
+    personnelAssignment: jsonb('personnel_assignment').$type<Record<string, any>>().default({}).notNull(), // planner, operator, rigger, signaler, safetySupervisor
+    linkedRiskAssessmentId: integer('linked_risk_assessment_id').references(() => riskAssessments.id, { onDelete: 'set null' }),
+    linkedPermitId: integer('linked_permit_id').references(() => workPermits.id, { onDelete: 'set null' }),
+    linkedNonConformanceId: integer('linked_non_conformance_id').references(() => nonConformances.id, { onDelete: 'set null' }),
+    linkedInspectionIds: jsonb('linked_inspection_ids').$type<number[]>().default([]).notNull(),
+    linkedDocumentIds: jsonb('linked_document_ids').$type<string[]>().default([]).notNull(),
+    engineeringStatus: text('engineering_status').default('NOT_VERIFIED').notNull(), // PASS, FAIL, WARNING, NOT_VERIFIED
+    workflowStage: text('workflow_stage').default('REQUEST').notNull(), // REQUEST, PLAN_DRAFT, ENG_REVIEW, HSE_EVAL, EQUIP_INSPECT, AUTHORIZED_APPROVAL, PERMIT_ISSUANCE, EXECUTION, CLOSEOUT
+    status: text('status').default('DRAFT').notNull(), // DRAFT, UNDER_REVIEW, APPROVED, REAPPROVAL_REQUIRED, ACTIVE_EXECUTION, CLOSED, REJECTED
+    requiresReapproval: boolean('requires_reapproval').default(false).notNull(),
+    unitPreferences: jsonb('unit_preferences').$type<Record<string, any>>().default({ massUnit: 'ton', lengthUnit: 'm', pressureUnit: 'kPa', windUnit: 'm/s' }).notNull(),
+    engineeringChecklist: jsonb('engineering_checklist').$type<Record<string, any>>().default({}).notNull(),
+    hseChecklist: jsonb('hse_checklist').$type<Record<string, any>>().default({}).notNull(),
+    fieldConditionsVerification: jsonb('field_conditions_verification').$type<Record<string, any>>().default({}).notNull(),
+    engineVersion: text('engine_version').default('2.1.0-core').notNull(),
+    latestCalculationSummary: jsonb('latest_calculation_summary').$type<Record<string, any>>().default({}).notNull(),
+    aiAnalysisSnapshot: jsonb('ai_analysis_snapshot').$type<Record<string, any>>().default({}).notNull(),
+    notes: text('notes'),
+    createdBy: text('created_by'),
+    updatedBy: text('updated_by'),
+    approvedBy: text('approved_by'),
+    approvedAt: timestamp('approved_at'),
+    isDeleted: boolean('is_deleted').default(false).notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_lifting_plans_code').on(table.planCode),
+    index('idx_lifting_plans_status').on(table.status),
+    index('idx_lifting_plans_stage').on(table.workflowStage),
+    index('idx_lifting_plans_unit').on(table.unitName),
+    index('idx_lifting_plans_deleted').on(table.isDeleted),
+  ]
+);
+
+export const liftingPlanRevisions = pgTable(
+  'lifting_plan_revisions',
+  {
+    id: serial('id').primaryKey(),
+    planId: integer('plan_id')
+      .references(() => liftingPlans.id, { onDelete: 'cascade' })
+      .notNull(),
+    revisionNumber: integer('revision_number').notNull(),
+    changeReason: text('change_reason').notNull(),
+    changedBy: text('changed_by').notNull(),
+    statusAtSnapshot: text('status_at_snapshot').notNull(),
+    engineeringStatusAtSnapshot: text('engineering_status_at_snapshot').notNull(),
+    planSnapshot: jsonb('plan_snapshot').$type<Record<string, any>>().notNull(),
+    calculationSnapshot: jsonb('calculation_snapshot').$type<Record<string, any>>().default({}).notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_lifting_revisions_plan').on(table.planId),
+    index('idx_lifting_revisions_num').on(table.planId, table.revisionNumber),
+  ]
+);
+
+export const liftingCalculations = pgTable(
+  'lifting_calculations',
+  {
+    id: serial('id').primaryKey(),
+    planId: integer('plan_id')
+      .references(() => liftingPlans.id, { onDelete: 'cascade' })
+      .notNull(),
+    revisionNumber: integer('revision_number').default(1).notNull(),
+    calculationType: text('calculation_type').notNull(), // GENERAL_LIFT, TANDEM_LIFT, LIFT_AND_TURN, FULL_BUNDLE
+    overallStatus: text('overall_status').default('NOT_VERIFIED').notNull(), // PASS, FAIL, WARNING, NOT_VERIFIED, NOT_APPLICABLE
+    standardReferences: jsonb('standard_references').$type<any[]>().default([]).notNull(),
+    inputsSnapshot: jsonb('inputs_snapshot').$type<Record<string, any>>().default({}).notNull(),
+    resultsSnapshot: jsonb('results_snapshot').$type<Record<string, any>>().default({}).notNull(),
+    blockers: jsonb('blockers').$type<string[]>().default([]).notNull(),
+    warnings: jsonb('warnings').$type<string[]>().default([]).notNull(),
+    calculatedBy: text('calculated_by'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_lifting_calcs_plan').on(table.planId),
+    index('idx_lifting_calcs_type').on(table.calculationType),
+    index('idx_lifting_calcs_status').on(table.overallStatus),
+  ]
+);
+
+export const liftingWorkflowApprovals = pgTable(
+  'lifting_workflow_approvals',
+  {
+    id: serial('id').primaryKey(),
+    planId: integer('plan_id')
+      .references(() => liftingPlans.id, { onDelete: 'cascade' })
+      .notNull(),
+    revisionNumber: integer('revision_number').default(1).notNull(),
+    stageKey: text('stage_key').notNull(), // REQUEST, PLAN_DRAFT, ENG_REVIEW, HSE_EVAL, EQUIP_INSPECT, AUTHORIZED_APPROVAL, PERMIT_ISSUANCE, EXECUTION, CLOSEOUT
+    stageTitleFa: text('stage_title_fa').notNull(),
+    decision: text('decision').default('PENDING').notNull(), // PENDING, APPROVED, REJECTED, RETURNED, RESET_ON_REVISION
+    signerName: text('signer_name'),
+    signerRole: text('signer_role'),
+    signerPersonnelCode: text('signer_personnel_code'),
+    checklistState: jsonb('checklist_state').$type<Record<string, boolean>>().default({}).notNull(),
+    blockingReasons: jsonb('blocking_reasons').$type<string[]>().default([]).notNull(),
+    comments: text('comments'),
+    decidedAt: timestamp('decided_at'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_lifting_wf_plan').on(table.planId),
+    index('idx_lifting_wf_stage').on(table.planId, table.stageKey),
+  ]
+);
+
+export const liftingStageGates = pgTable(
+  'lifting_stage_gates',
+  {
+    id: serial('id').primaryKey(),
+    gateCode: text('gate_code').notNull().unique(), // G1, G2, G3, G4, G5, G6
+    titleFa: text('title_fa').notNull(),
+    criteriaFa: text('criteria_fa').notNull(),
+    status: text('status').default('PENDING').notNull(), // PENDING, VERIFIED, FAILED
+    evidenceSummary: jsonb('evidence_summary').$type<Record<string, any>>().default({}).notNull(),
+    verifiedBy: text('verified_by'),
+    verifiedAt: timestamp('verified_at'),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_lifting_gates_code').on(table.gateCode),
+  ]
+);
+
+
