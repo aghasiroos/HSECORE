@@ -43,6 +43,8 @@ import NutritionRecordDetailModal from './NutritionRecordDetailModal';
 import NutritionCarePlanPrintModal from './NutritionCarePlanPrintModal';
 import HighRiskPersonnelTab from './HighRiskPersonnelTab';
 import { downloadCsvFile } from '../../../../utils/fileHelpers';
+import { toast } from 'react-hot-toast';
+import { showConfirmDialog } from '../../../../components/common/ConfirmDialogModal';
 
 interface Props {
   language: 'fa' | 'en';
@@ -222,15 +224,20 @@ export default function NutritionSubmoduleView({ language, currentUser }: Props)
 
   // Delete handler
   const handleDelete = async (id: string, name: string) => {
-    if (!window.confirm(`آیا از حذف پرونده مشاوره تغذیه پرسنل «${name}» اطمینان دارید؟ این عمل غیرقابل بازگشت است.`)) {
-      return;
-    }
+    const ok = await showConfirmDialog({
+      title: 'حذف پرونده مشاوره تغذیه',
+      message: `آیا از حذف پرونده مشاوره تغذیه پرسنل «${name}» اطمینان دارید؟ این عمل غیرقابل بازگشت است.`,
+      confirmLabel: 'حذف',
+      cancelLabel: 'انصراف',
+      tone: 'danger',
+    });
+    if (!ok) return;
 
     try {
       await nutritionService.deleteRecord(id);
       await loadRecords();
-    } catch (err) {
-      alert('خطا در حذف پرونده از سرور.');
+    } catch (err: any) {
+      toast.error(err?.message || 'خطا در حذف پرونده از سرور.');
     }
   };
 

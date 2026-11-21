@@ -56,6 +56,8 @@ import { HseCoreBrandText } from './common/HseCoreBrandText';
 import { prefetchModule } from '../utils/modulePrefetcher';
 import { LayoutGroup, motion } from 'motion/react';
 import { HSE_MOTION_CONFIG, HseThemeToggleButton } from '../motion';
+import { apiDb, getAuthToken } from '../services/apiDatabaseClient';
+import { toast } from 'react-hot-toast';
 
 export type MainTabKey =
   | 'dashboard'
@@ -302,8 +304,19 @@ const GROUP_META: Record<string, { icon: any; tone: ToneKey }> = {
   system: { icon: SlidersHorizontal, tone: 'slate' }
 };
 
-const PINNED_STORAGE_KEY = 'hsecore_sidebar_pinned_tabs_v3';
-const OPEN_GROUPS_STORAGE_KEY = 'hsecore_sidebar_open_groups_v2';
+const PREF_PINNED_TABS = 'sidebar_pinned_tabs';
+const PREF_OPEN_GROUPS = 'sidebar_open_groups';
+
+const DEFAULT_OPEN_GROUPS: Record<string, boolean> = {
+  dashboards: true,
+  departments: true,
+  safety_permits: true,
+  incidents_compliance: true,
+  human_capital: true,
+  workflows: true,
+  intelligent_analytics: true,
+  system: true
+};
 
 export default function AppSidebar({
   activeTab,
@@ -324,29 +337,58 @@ export default function AppSidebar({
   const { status, syncNow } = useSync();
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Pinned favorite tabs: No modules pinned by default. Pinned items are strictly user-selected.
-  const [pinnedKeys, setPinnedKeys] = useState<MainTabKey[]>(() => {
-    try {
-      // Clear legacy hardcoded defaults
-      localStorage.removeItem('hsecore_sidebar_pinned_tabs_v2');
-      localStorage.removeItem('hsecore_sidebar_pinned_tabs');
+  // Pinned favorite tabs persisted per-user in PostgreSQL (user_preferences)
+  const [pinnedKeys, setPinnedKeys] = useState<MainTabKey[]>([]);
 
-      const saved = localStorage.getItem(PINNED_STORAGE_KEY);
-      if (saved !== null) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed as MainTabKey[];
+  useEffect(() => {
+    if (!currentUser?.id || !getAuthToken()) {
+      setPinnedKeys([]);
+      return;
+    }
+    let mounted = true;
+    const loadSidebarPrefs = () => {
+      apiDb.userPreferences
+        .getAll()
+        .then(({ data }) => {
+          if (!mounted) return;
+          if (Array.isArray(data?.[PREF_PINNED_TABS])) {
+            setPinnedKeys(data[PREF_PINNED_TABS] as MainTabKey[]);
+          }
+          if (data?.[PREF_OPEN_GROUPS] && typeof data[PREF_OPEN_GROUPS] === 'object') {
+            setOpenGroupIds({ ...DEFAULT_OPEN_GROUPS, ...data[PREF_OPEN_GROUPS] });
+          }
+        })
+        .catch(() => {});
+    };
+    loadSidebarPrefs();
+
+    const handlePrefSync = (e: any) => {
+      const prefKey = e?.detail?.prefKey || e?.detail?.key;
+      if (prefKey === PREF_PINNED_TABS && Array.isArray(e?.detail?.value)) {
+        setPinnedKeys(e.detail.value as MainTabKey[]);
+      } else if (prefKey === PREF_OPEN_GROUPS && e?.detail?.value && typeof e.detail.value === 'object') {
+        setOpenGroupIds({ ...DEFAULT_OPEN_GROUPS, ...e.detail.value });
+      } else if (!prefKey) {
+        apiDb.invalidateCache('user-prefs');
+        loadSidebarPrefs();
       }
-    } catch {}
-    return [] as MainTabKey[];
-  });
+    };
+    window.addEventListener('hse_user_preferences_updated', handlePrefSync);
+    return () => {
+      mounted = false;
+      window.removeEventListener('hse_user_preferences_updated', handlePrefSync);
+    };
+  }, [currentUser?.id]);
 
   const togglePinTab = (e: React.MouseEvent, key: MainTabKey) => {
     e.stopPropagation();
     setPinnedKeys(prev => {
       const next = prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key];
-      try {
-        localStorage.setItem(PINNED_STORAGE_KEY, JSON.stringify(next));
-      } catch {}
+      if (currentUser?.id && getAuthToken()) {
+        apiDb.userPreferences.set(PREF_PINNED_TABS, next).catch((err: any) => {
+          toast.error(err?.message || 'خطا در ذخیره دسترسی سریع در پایگاه داده');
+        });
+      }
       return next;
     });
   };
@@ -459,45 +501,33 @@ export default function AppSidebar({
     }).filter(g => g.tabs.length > 0);
   }, [uiConfig, allowedTabs]);
 
-  // Collapsible groups persistence (In expanded mode: keep it clean, active group auto-opened)
-  const [openGroupIds, setOpenGroupIds] = useState<Record<string, boolean>>(() => {
-    try {
-      const saved = sessionStorage.getItem(OPEN_GROUPS_STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (typeof parsed === 'object' && parsed !== null) {
-          return { intelligent_analytics: true, ...parsed };
-        }
-      }
-    } catch {}
-    return {
-      dashboards: true,
-      departments: true,
-      safety_permits: true,
-      incidents_compliance: true,
-      human_capital: true,
-      workflows: true,
-      intelligent_analytics: true,
-      system: true
-    };
-  });
+  // Collapsible groups persisted in PostgreSQL user_preferences
+  const [openGroupIds, setOpenGroupIds] = useState<Record<string, boolean>>(() => ({ ...DEFAULT_OPEN_GROUPS }));
+
+  const persistOpenGroups = (next: Record<string, boolean>) => {
+    if (currentUser?.id && getAuthToken()) {
+      apiDb.userPreferences.set(PREF_OPEN_GROUPS, next).catch(() => {});
+    }
+  };
 
   // Auto-expand active group when activeTab changes
   useEffect(() => {
     const activeGroup = structuredGroups.find(g => g.tabs.some(t => t.key === activeTab));
     if (activeGroup && !(openGroupIds[activeGroup.id] ?? true)) {
-      setOpenGroupIds(prev => ({ ...prev, [activeGroup.id]: true }));
+      setOpenGroupIds(prev => {
+        const next = { ...prev, [activeGroup.id]: true };
+        persistOpenGroups(next);
+        return next;
+      });
     }
   }, [activeTab, structuredGroups]);
 
-  useEffect(() => {
-    try {
-      sessionStorage.setItem(OPEN_GROUPS_STORAGE_KEY, JSON.stringify(openGroupIds));
-    } catch {}
-  }, [openGroupIds]);
-
   const toggleGroup = (groupId: string) => {
-    setOpenGroupIds(prev => ({ ...prev, [groupId]: !(prev[groupId] ?? true) }));
+    setOpenGroupIds(prev => {
+      const next = { ...prev, [groupId]: !(prev[groupId] ?? true) };
+      persistOpenGroups(next);
+      return next;
+    });
   };
 
   const areAllGroupsOpen = useMemo(() => {
@@ -511,6 +541,7 @@ export default function AppSidebar({
       next[g.id] = targetState;
     });
     setOpenGroupIds(next);
+    persistOpenGroups(next);
   };
 
   // Filtered groups based on search query

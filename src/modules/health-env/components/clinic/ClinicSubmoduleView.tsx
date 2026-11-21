@@ -29,6 +29,8 @@ import { clinicService } from '../../services/clinicService';
 import ClinicVisitModal from './ClinicVisitModal';
 import ClinicVisitDetailModal from './ClinicVisitDetailModal';
 import { downloadCsvFile } from '../../../../utils/fileHelpers';
+import { toast } from 'react-hot-toast';
+import { showConfirmDialog } from '../../../../components/common/ConfirmDialogModal';
 
 interface Props {
   language: 'fa' | 'en';
@@ -155,9 +157,20 @@ export default function ClinicSubmoduleView({ language, currentUser }: Props) {
   };
 
   const handleDeleteVisit = async (id: string, name: string) => {
-    if (window.confirm(`آیا از حذف پرونده مراجعه بهداری پرسنل "${name}" اطمینان دارید؟`)) {
-      await clinicService.deleteVisit(id);
-      await loadVisits();
+    const ok = await showConfirmDialog({
+      title: 'حذف پرونده مراجعه بهداری',
+      message: `آیا از حذف پرونده مراجعه بهداری پرسنل "${name}" اطمینان دارید؟`,
+      confirmLabel: 'حذف',
+      cancelLabel: 'انصراف',
+      tone: 'danger',
+    });
+    if (ok) {
+      try {
+        await clinicService.deleteVisit(id);
+        await loadVisits();
+      } catch (err: any) {
+        toast.error(err?.message || 'خطا در حذف پرونده از پایگاه داده');
+      }
     }
   };
 

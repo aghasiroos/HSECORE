@@ -246,8 +246,8 @@ class CentralSyncService {
         return true;
       } else {
         this.updateState({
-          status: 'offline',
-          errorMessage: 'Server unavailable',
+          status: 'error',
+          errorMessage: 'پاسخ معتبری از پایگاه داده مرکزی دریافت نشد',
         });
         return false;
       }
@@ -255,7 +255,7 @@ class CentralSyncService {
       console.error('Full sync error:', err);
       this.updateState({
         status: 'error',
-        errorMessage: err.message || 'Sync failed',
+        errorMessage: err.message || 'خطا در همگام‌سازی با پایگاه داده مرکزی',
       });
       return false;
     } finally {
@@ -264,84 +264,49 @@ class CentralSyncService {
   }
 
   // --------------------------------------------------------------------------
-  // Instant Persistence Helpers
+  // Instant Persistence Helpers (Strict Error Propagation)
   // --------------------------------------------------------------------------
   public async persistUser(user: UserProfile): Promise<boolean> {
-    try {
-      const res = await apiDb.saveUser(user);
-      if (res) {
-        this.notifyDataUpdate('user_saved', res);
-        return true;
-      }
-      return false;
-    } catch (e) {
-      console.error('Failed to persist user to central DB:', e);
-      return false;
-    }
+    const res = await apiDb.saveUser(user);
+    this.notifyDataUpdate('user_saved', res);
+    return true;
   }
 
   public async persistNotification(notif: NotificationEntry): Promise<boolean> {
-    try {
-      const res = await apiDb.saveNotification(notif);
-      if (res) {
-        this.notifyDataUpdate('notification_saved', res);
-        return true;
-      }
-      return false;
-    } catch (e) {
-      console.error('Failed to persist notification:', e);
-      return false;
-    }
+    const res = await apiDb.saveNotification(notif);
+    this.notifyDataUpdate('notification_saved', res);
+    return true;
   }
 
-  public async persistSetting(key: string, value: any, description?: string): Promise<boolean> {
-    try {
-      const res = await apiDb.saveSetting(key, value, description);
-      if (res) {
-        this.notifyDataUpdate('setting_saved', { key, value });
-        return true;
-      }
-      return false;
-    } catch (e) {
-      console.error('Failed to persist setting:', e);
-      return false;
-    }
+  public async persistSetting(
+    key: string,
+    value: any,
+    description?: string,
+    expectedVersion?: number
+  ): Promise<boolean> {
+    await apiDb.saveSetting(key, value, description, expectedVersion);
+    this.notifyDataUpdate('setting_saved', { key, value });
+    return true;
   }
 
   public async persistAuditLog(entry: any): Promise<boolean> {
     try {
       return await apiDb.logAudit(entry);
-    } catch (e) {
+    } catch {
       return false;
     }
   }
 
   public async persistTrirRecord(record: any): Promise<boolean> {
-    try {
-      const res = await apiDb.saveTrirRecord(record);
-      if (res) {
-        this.notifyDataUpdate('trir_saved', res);
-        return true;
-      }
-      return false;
-    } catch (e) {
-      console.error('Failed to persist TRIR record:', e);
-      return false;
-    }
+    const res = await apiDb.saveTrirRecord(record);
+    this.notifyDataUpdate('trir_saved', res);
+    return true;
   }
 
   public async persistTrirRecords(records: any[]): Promise<boolean> {
-    try {
-      const res = await apiDb.saveTrirBatch(records);
-      if (res) {
-        this.notifyDataUpdate('trir_batch_saved', res);
-        return true;
-      }
-      return false;
-    } catch (e) {
-      console.error('Failed to persist TRIR records batch:', e);
-      return false;
-    }
+    const res = await apiDb.saveTrirBatch(records);
+    this.notifyDataUpdate('trir_batch_saved', res);
+    return true;
   }
 }
 

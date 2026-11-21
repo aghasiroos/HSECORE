@@ -41,6 +41,7 @@ import { useUnifiedOrgUnits } from '../../../utils/orgUnitsHelper';
 import ChartCustomizationModal, { 
   ChartSettings, 
   loadSavedChartSettings, 
+  fetchSavedChartSettings,
   saveChartSettingsToStorage 
 } from './ChartCustomizationModal';
 import PtwHistoricalStatsModal from './PtwHistoricalStatsModal';
@@ -85,7 +86,7 @@ export default function PtwAuditDashboard({
   // Active sub-tab for Top 10 personnel
   const [activeRoleTab, setActiveRoleTab] = useState<RoleType>('areaResponsible');
 
-  // Chart Customization State (loaded and persisted to localStorage)
+  // Chart Customization State (stored per user in PostgreSQL userPreferences)
   const [chartSettings, setChartSettings] = useState<ChartSettings>(() => loadSavedChartSettings());
   const [isChartSettingsOpen, setIsChartSettingsOpen] = useState(false);
 
@@ -98,6 +99,15 @@ export default function PtwAuditDashboard({
   };
 
   useEffect(() => {
+    let mounted = true;
+    const syncPrefs = () => {
+      const cached = loadSavedChartSettings();
+      if (mounted) setChartSettings(cached);
+    };
+    fetchSavedChartSettings().then((s) => {
+      if (mounted) setChartSettings(s);
+    }).catch(() => {});
+
     const handleStorageUpdate = (e: any) => {
       if (e.detail && Array.isArray(e.detail)) {
         setHistoricalStats(e.detail);
@@ -106,8 +116,13 @@ export default function PtwAuditDashboard({
       }
     };
     window.addEventListener('hse_ptw_historical_years_updated', handleStorageUpdate);
+    window.addEventListener('hse_user_preferences_updated', syncPrefs);
+    window.addEventListener('hse_auth_state_changed', syncPrefs);
     return () => {
+      mounted = false;
       window.removeEventListener('hse_ptw_historical_years_updated', handleStorageUpdate);
+      window.removeEventListener('hse_user_preferences_updated', syncPrefs);
+      window.removeEventListener('hse_auth_state_changed', syncPrefs);
     };
   }, []);
 

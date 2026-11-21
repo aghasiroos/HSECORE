@@ -15,7 +15,9 @@ import {
   XCircle,
 } from 'lucide-react';
 import StatusBadge from './StatusBadge';
+import LiftingFormModalShell from './LiftingFormModalShell';
 import CentralPersonnelSelector from '../../../components/CentralPersonnelSelector';
+import PersianDatePicker from '../../../components/common/PersianDatePicker';
 import { liftingApi } from '../services/liftingApi';
 import type {
   LiftingIntegrationContext,
@@ -196,7 +198,11 @@ export default function WorkflowApprovalsTab({
   const [submittingStage, setSubmittingStage] = useState<string | null>(null);
 
   const [selectedPtwId, setSelectedPtwId] = useState('');
+  const [showPtwModal, setShowPtwModal] = useState(false);
   const [newPtwType, setNewPtwType] = useState<'COLD' | 'HOT'>('COLD');
+  const [newPtwTitle, setNewPtwTitle] = useState('');
+  const [newPtwValidFrom, setNewPtwValidFrom] = useState('');
+  const [newPtwValidTo, setNewPtwValidTo] = useState('');
   const [ptwBusy, setPtwBusy] = useState(false);
 
   // Governance Checklists (Engineering 7 + HSE 8 + Field Conditions 10)
@@ -335,16 +341,26 @@ export default function WorkflowApprovalsTab({
     }
   };
 
-  const handleCreateNewPtw = async () => {
+  const openNewPtwModal = () => {
+    setNewPtwType('COLD');
+    setNewPtwTitle(`مجوز باربرداری ${plan.planCode} - ${plan.title}`);
+    setNewPtwValidFrom(plan.plannedDate || '');
+    setNewPtwValidTo(plan.plannedDate || '');
+    setShowPtwModal(true);
+  };
+
+  const handleCreateNewPtw = async (e?: React.FormEvent) => {
+    e?.preventDefault();
     setPtwBusy(true);
     try {
       await liftingApi.linkOrCreatePtw(plan.id, {
         permitType: newPtwType,
-        title: `مجوز باربرداری ${plan.planCode} - ${plan.title}`,
-        validFrom: plan.plannedDate,
-        validTo: plan.plannedDate,
+        title: newPtwTitle.trim() || `مجوز باربرداری ${plan.planCode} - ${plan.title}`,
+        validFrom: newPtwValidFrom || plan.plannedDate,
+        validTo: newPtwValidTo || plan.plannedDate,
       });
       onToast('پروانه کار ایمن جدید در ماژول مرکزی PTW ثبت و متصل شد.', 'success');
+      setShowPtwModal(false);
       await onRefresh();
     } catch (err: any) {
       onToast(err?.message || 'خطا در ایجاد PTW جدید', 'error');
@@ -1029,28 +1045,92 @@ export default function WorkflowApprovalsTab({
                 <Plus className="w-3.5 h-3.5 text-emerald-600" />
                 <span>صدور مستقیم PTW باربرداری (VEHICLE_CRANE) و اتصال</span>
               </div>
-              <div className="flex gap-2">
-                <select
-                  value={newPtwType}
-                  onChange={(e) => setNewPtwType(e.target.value as 'COLD' | 'HOT')}
-                  className="px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900"
-                >
-                  <option value="COLD">مجوز کار سرد (COLD)</option>
-                  <option value="HOT">مجوز کار گرم (HOT)</option>
-                </select>
+              <div className="flex items-center justify-between gap-3 p-3 rounded-lg border border-emerald-200 dark:border-emerald-800/60 bg-emerald-50/40 dark:bg-emerald-950/10">
+                <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
+                  ثبت مجوز کار جدید در ماژول مرکزی PTW و اتصال خودکار به این طرح باربرداری.
+                </p>
                 <button
                   type="button"
                   disabled={ptwBusy}
-                  onClick={handleCreateNewPtw}
-                  className="flex-1 px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold cursor-pointer"
+                  onClick={openNewPtwModal}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold cursor-pointer whitespace-nowrap shrink-0"
                 >
-                  ایجاد و اتصال خودکار PTW برای این طرح
+                  <Plus className="w-4 h-4" />
+                  <span>صدور PTW جدید</span>
                 </button>
               </div>
             </div>
           </div>
         )}
       </div>
+
+      {/* Modal for creating and linking new PTW */}
+      <LiftingFormModalShell
+        isOpen={showPtwModal}
+        title="صدور مستقیم پروانه کار ایمن (PTW) و اتصال به طرح باربرداری"
+        subtitle={`طرح ${plan.planCode} — ثبت در جدول مرکزی work_permits سامانه`}
+        icon={FileCheck2}
+        maxWidthClass="max-w-xl"
+        submitting={ptwBusy}
+        submitLabel="ثبت و اتصال پروانه کار ایمن"
+        submittingLabel="در حال صدور PTW..."
+        onClose={() => !ptwBusy && setShowPtwModal(false)}
+        onSubmit={handleCreateNewPtw}
+      >
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="md:col-span-2">
+            <label className="block font-bold mb-1 text-slate-700 dark:text-slate-200">
+              عنوان پروانه کار (PTW) *
+            </label>
+            <input
+              type="text"
+              required
+              value={newPtwTitle}
+              onChange={(e) => setNewPtwTitle(e.target.value)}
+              placeholder={`مجوز باربرداری ${plan.planCode}`}
+              className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-950"
+            />
+          </div>
+
+          <div>
+            <label className="block font-bold mb-1 text-slate-700 dark:text-slate-200">
+              نوع مجوز کار *
+            </label>
+            <select
+              value={newPtwType}
+              onChange={(e) => setNewPtwType(e.target.value as 'COLD' | 'HOT')}
+              className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-950"
+            >
+              <option value="COLD">مجوز کار سرد (COLD — باربرداری استاندارد)</option>
+              <option value="HOT">مجوز کار گرم (HOT — مجاور تجهیزات/منابع جرقه)</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block font-bold mb-1 text-slate-700 dark:text-slate-200">
+              شروع اعتبار
+            </label>
+            <PersianDatePicker
+              value={newPtwValidFrom}
+              onChange={(jalali) => setNewPtwValidFrom(jalali)}
+              placeholder="انتخاب تاریخ شروع..."
+              isFa={true}
+            />
+          </div>
+
+          <div>
+            <label className="block font-bold mb-1 text-slate-700 dark:text-slate-200">
+              پایان اعتبار
+            </label>
+            <PersianDatePicker
+              value={newPtwValidTo}
+              onChange={(jalali) => setNewPtwValidTo(jalali)}
+              placeholder="انتخاب تاریخ پایان..."
+              isFa={true}
+            />
+          </div>
+        </div>
+      </LiftingFormModalShell>
     </div>
   );
 }

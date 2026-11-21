@@ -22,6 +22,7 @@ import {
   parseWarningsExcelFile,
   ParsedWarningRow
 } from './warningsExcelService';
+import { showConfirmDialog } from '../common/ConfirmDialogModal';
 
 interface WarningsExcelImportModalProps {
   isOpen: boolean;
@@ -132,11 +133,15 @@ export default function WarningsExcelImportModal({
     if (validRows.length === 0) return;
 
     if (importMode === 'replace') {
-      const conf = window.confirm(
-        isFa
+      const conf = await showConfirmDialog({
+        title: isFa ? 'جایگزینی کامل سوابق اخطارها' : 'Replace All Warning Records',
+        message: isFa
           ? `هشدار قطعی: حالت "جایگزینی کامل" انتخاب شده است.\nتمام ${existingRecords.length} اخطار قبلی ثبت‌شده در سیستم پاکسازی شده و با ${validRows.length} ردیف جدید از اکسل جایگزین خواهند شد.\n\nآیا از انجام این عملیات اطمینان دارید؟`
-          : `Warning: "Replace All" mode is selected. All ${existingRecords.length} existing records will be cleared and replaced with ${validRows.length} new records. Do you wish to continue?`
-      );
+          : `Warning: "Replace All" mode is selected. All ${existingRecords.length} existing records will be cleared and replaced with ${validRows.length} new records. Do you wish to continue?`,
+        confirmLabel: isFa ? 'جایگزینی کامل' : 'Replace All',
+        cancelLabel: isFa ? 'انصراف' : 'Cancel',
+        tone: 'danger',
+      });
       if (!conf) return;
     }
 

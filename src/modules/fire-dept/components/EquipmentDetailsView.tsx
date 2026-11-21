@@ -39,6 +39,7 @@ import {
 } from '../config/columns';
 import DefectModal from './DefectModal';
 import ConfirmDeleteModal from '../../../components/common/ConfirmDeleteModal';
+import { getCurrentUser } from '../../../utils/authHelper';
 
 interface Props {
   language: 'fa' | 'en';
@@ -78,15 +79,8 @@ const MONTHS_EN = [
 ];
 
 function getCurrentActorDisplayName(): string {
-  if (typeof window === 'undefined') return 'کارشناس آتش‌نشانی';
-  try {
-    const raw = sessionStorage.getItem('hse_current_user') || localStorage.getItem('hse_current_user');
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      return parsed?.fullName || parsed?.name || parsed?.username || 'کارشناس آتش‌نشانی';
-    }
-  } catch {}
-  return 'کارشناس آتش‌نشانی';
+  const parsed = getCurrentUser();
+  return parsed?.fullName || parsed?.username || 'کارشناس آتش‌نشانی';
 }
 
 export default function EquipmentDetailsView({

@@ -238,33 +238,25 @@ export class LabReferenceRangeService {
 
   constructor() {
     this.loadRanges();
+    if (typeof window !== 'undefined') {
+      window.addEventListener('hse_auth_state_changed', () => this.loadRanges());
+      window.addEventListener('app_data_mutated', (e: any) => {
+        const key = String(e?.detail?.key || e?.detail?.entityType || '');
+        if (!key || key === STORAGE_KEY || key === 'settings') {
+          this.loadRanges();
+        }
+      });
+    }
   }
 
   private loadRanges(): void {
-    // One-time zero-loss uplink of any legacy localStorage customizations
-    let legacyRanges: GlobalLabReferenceRange[] | null = null;
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = localStorage.getItem(STORAGE_KEY);
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            legacyRanges = parsed;
-          }
-          localStorage.removeItem(STORAGE_KEY);
-        }
-      } catch (_) {}
-    }
-
-    // Hydrate from central PostgreSQL database
     apiDb.getSetting(STORAGE_KEY).then((dbRanges) => {
       if (Array.isArray(dbRanges) && dbRanges.length > 0) {
         this.ranges = dbRanges;
-      } else if (legacyRanges) {
-        this.ranges = legacyRanges;
-        this.saveRanges();
       }
-    }).catch(() => {});
+    }).catch((err) => {
+      console.warn('Lab reference ranges fetch skipped:', err);
+    });
   }
 
   public saveRanges(): void {

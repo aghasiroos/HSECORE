@@ -1,6 +1,7 @@
 import { eq, desc, asc } from 'drizzle-orm';
 import { db, schema, withTransaction } from '../../core/db.ts';
 import { logger } from '../../core/logger.ts';
+import { assertVersionMatch, extractExpectedVersion, extractExpectedUpdatedAt } from '../../core/occ.ts';
 import { localAIProvider } from '../ai/ai.local-provider.ts';
 import {
   DEFAULT_LIFTING_STANDARDS,
@@ -829,8 +830,11 @@ export class LiftingService {
   async updatePlan(planId: number, payload: any, actorName: string) {
     const [existing] = await db.select().from(schema.liftingPlans).where(eq(schema.liftingPlans.id, planId));
     if (!existing || existing.isDeleted) {
-      throw new Error('طرح باربرداری مورد نظر یافت نشد.');
+      const err: any = new Error('طرح باربرداری مورد نظر یافت نشد.');
+      err.statusCode = 404;
+      throw err;
     }
+    assertVersionMatch(existing, extractExpectedVersion(payload), extractExpectedUpdatedAt(payload));
 
     const criticalFieldsChanged =
       (payload.netLoadWeightTon !== undefined && Number(payload.netLoadWeightTon) !== existing.netLoadWeightTon) ||
@@ -927,6 +931,7 @@ export class LiftingService {
           status: needsRevisionBump ? 'REAPPROVAL_REQUIRED' : existing.status,
           workflowStage: needsRevisionBump ? 'ENG_REVIEW' : existing.workflowStage,
           notes: payload.notes !== undefined ? payload.notes : existing.notes,
+          version: Number(existing.version ?? 1) + 1,
           updatedBy: actorName,
           updatedAt: new Date(),
         })
@@ -946,11 +951,18 @@ export class LiftingService {
       engineeringChecklist?: Record<string, any>;
       hseChecklist?: Record<string, any>;
       fieldConditionsVerification?: Record<string, any>;
+      expectedVersion?: number;
+      expectedUpdatedAt?: string;
     },
     actorName: string
   ) {
     const [existing] = await db.select().from(schema.liftingPlans).where(eq(schema.liftingPlans.id, planId));
-    if (!existing || existing.isDeleted) throw new Error('طرح باربرداری یافت نشد.');
+    if (!existing || existing.isDeleted) {
+      const err: any = new Error('طرح باربرداری یافت نشد.');
+      err.statusCode = 404;
+      throw err;
+    }
+    assertVersionMatch(existing, extractExpectedVersion(payload), extractExpectedUpdatedAt(payload));
 
     const [updated] = await db
       .update(schema.liftingPlans)
@@ -958,6 +970,7 @@ export class LiftingService {
         engineeringChecklist: payload.engineeringChecklist ?? existing.engineeringChecklist,
         hseChecklist: payload.hseChecklist ?? existing.hseChecklist,
         fieldConditionsVerification: payload.fieldConditionsVerification ?? existing.fieldConditionsVerification,
+        version: Number(existing.version ?? 1) + 1,
         updatedBy: actorName,
         updatedAt: new Date(),
       })
@@ -1200,6 +1213,7 @@ export class LiftingService {
           requiresReapproval: stageKey === 'AUTHORIZED_APPROVAL' && decision === 'APPROVED' ? false : freshPlan.requiresReapproval,
           approvedBy: stageKey === 'AUTHORIZED_APPROVAL' && decision === 'APPROVED' ? actor.name : freshPlan.approvedBy,
           approvedAt: stageKey === 'AUTHORIZED_APPROVAL' && decision === 'APPROVED' ? new Date() : freshPlan.approvedAt,
+          version: Number(freshPlan.version ?? 1) + 1,
           updatedBy: actor.name,
           updatedAt: new Date(),
         })

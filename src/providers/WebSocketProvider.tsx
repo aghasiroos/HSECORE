@@ -1,13 +1,15 @@
-import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState, ReactNode } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { toast } from 'react-hot-toast';
-import { apiDb } from '../services/apiDatabaseClient';
+import { apiDb, getAuthToken } from '../services/apiDatabaseClient';
 import { getCurrentUser, refreshCurrentUserFromServer } from '../utils/authHelper';
 import { fetchCentralPersonnelList } from '../utils/personnelHelper';
+import { centralSync } from '../services/centralSyncService';
 
 interface WebSocketContextType {
   socket: Socket | null;
   isConnected: boolean;
+  lastEventSeq: number;
   subscribe: (room: string) => void;
   unsubscribe: (room: string) => void;
 }
@@ -15,6 +17,7 @@ interface WebSocketContextType {
 const WebSocketContext = createContext<WebSocketContextType>({
   socket: null,
   isConnected: false,
+  lastEventSeq: 0,
   subscribe: () => {},
   unsubscribe: () => {},
 });
@@ -25,30 +28,64 @@ interface ProviderProps {
   children: ReactNode;
 }
 
-/**
- * Universal client-side mutation dispatcher.
- * Invalidates cache and dispatches module-specific custom events instantly across the entire application.
- */
+// Bounded event deduplication across Socket.IO + SSE + reconnect catchup
+const SEEN_EVENT_IDS_CAP = 500;
+const seenEventIds: string[] = [];
+const seenEventIdSet = new Set<string>();
+let globalLastEventSeq = 0;
+
+function trackIncomingEvent(payload: any): boolean {
+  if (payload && typeof payload === 'object') {
+    const eid = typeof payload.eventId === 'string' ? payload.eventId : '';
+    if (eid) {
+      if (seenEventIdSet.has(eid)) {
+        return false;
+      }
+      seenEventIdSet.add(eid);
+      seenEventIds.push(eid);
+      if (seenEventIds.length > SEEN_EVENT_IDS_CAP) {
+        const evicted = seenEventIds.shift();
+        if (evicted) seenEventIdSet.delete(evicted);
+      }
+    }
+    if (typeof payload.seq === 'number' && payload.seq > globalLastEventSeq) {
+      globalLastEventSeq = payload.seq;
+    }
+  }
+  return true;
+}
+
 let lastMutationSig = '';
 let lastMutationTime = 0;
 
 export function dispatchGlobalDataMutation(payload: any) {
+  if (!trackIncomingEvent(payload)) {
+    return;
+  }
+
   const settingKey = String(payload?.key || payload?.data?.key || '').trim();
-  const rawType = String(settingKey || payload?.entityType || payload?.entity || '').toLowerCase();
+  const rawType = String(settingKey || payload?.entityType || payload?.entity || payload?.module || '').toLowerCase();
   const now = Date.now();
-  const sig = `${rawType}:${payload?.action || ''}`;
-  if (sig && sig === lastMutationSig && now - lastMutationTime < 500) {
+  const sig = `${rawType}:${payload?.action || payload?.operation || ''}:${payload?.recordId || ''}`;
+  if (!payload?.eventId && sig && sig === lastMutationSig && now - lastMutationTime < 300) {
     return;
   }
   lastMutationSig = sig;
   lastMutationTime = now;
 
   if (settingKey) {
-    apiDb.invalidateCache(`settings:${settingKey}`, 'settings:all', settingKey, 'sync:full');
+    apiDb.invalidateCache(
+      `settings:${settingKey}`,
+      `settings-meta:${settingKey}`,
+      `collection:${settingKey}`,
+      'settings:all',
+      'sync:full',
+      'dashboard'
+    );
   } else if (rawType && rawType !== 'settings') {
-    apiDb.invalidateCache(rawType, `${rawType}s`, `${rawType}:list`, 'sync:full');
+    apiDb.invalidateCache(rawType, `${rawType}s`, `${rawType}:list`, `collection:${rawType}`, 'sync:full', 'dashboard');
   } else if (rawType === 'settings') {
-    apiDb.invalidateCache('settings:all', 'sync:full');
+    apiDb.invalidateCache('settings:all', 'sync:full', 'dashboard');
   } else {
     apiDb.invalidateCache();
   }
@@ -59,38 +96,40 @@ export function dispatchGlobalDataMutation(payload: any) {
 
   // Real-time User-to-Personnel Assignment & Lifecycle Propagation across all open browsers/sessions
   if (rawType.includes('user_assignment') || rawType.includes('user') || rawType.includes('personnel')) {
-    apiDb.invalidateCache();
-    const curUser = getCurrentUser();
-    const targetUid = payload?.data?.uid || payload?.uid;
-    const affectedUids: string[] = Array.isArray(payload?.data?.affectedUserUids)
-      ? payload.data.affectedUserUids
-      : [];
-    const isTargetingCurrentUser =
-      !targetUid ||
-      (curUser &&
-        (String(curUser.id) === String(targetUid) ||
-          String((curUser as any).uid) === String(targetUid) ||
-          curUser.username === payload?.data?.username ||
-          affectedUids.includes(String(curUser.id)) ||
-          affectedUids.includes(String((curUser as any).uid))));
+    if (!rawType.includes('user_preference')) {
+      apiDb.invalidateCache();
+      const curUser = getCurrentUser();
+      const targetUid = payload?.data?.uid || payload?.uid;
+      const affectedUids: string[] = Array.isArray(payload?.data?.affectedUserUids)
+        ? payload.data.affectedUserUids
+        : [];
+      const isTargetingCurrentUser =
+        !targetUid ||
+        (curUser &&
+          (String(curUser.id) === String(targetUid) ||
+            String((curUser as any).uid) === String(targetUid) ||
+            curUser.username === payload?.data?.username ||
+            affectedUids.includes(String(curUser.id)) ||
+            affectedUids.includes(String((curUser as any).uid))));
 
-    refreshCurrentUserFromServer()
-      .then((freshUser) => {
-        return fetchCentralPersonnelList(true).then((freshPersonnel) => {
-          window.dispatchEvent(new CustomEvent('hse_personnel_updated', { detail: freshPersonnel }));
-          window.dispatchEvent(new CustomEvent('hse_user_assignments_updated', { detail: freshUser }));
-          window.dispatchEvent(new CustomEvent('hse_permits_updated', { detail: payload }));
-          window.dispatchEvent(new CustomEvent('hse_incidents_updated', { detail: payload }));
-          window.dispatchEvent(new CustomEvent('hse_medical_data_updated', { detail: payload }));
-          window.dispatchEvent(new CustomEvent('hse_warnings_updated', { detail: payload }));
-          if (rawType.includes('user_assignment') && isTargetingCurrentUser) {
-            toast.success('دسترسی اشخاص مرتبط حساب کاربری شما به‌صورت آنی بروزرسانی شد.', {
-              id: 'user-assignments-live-sync',
-            });
-          }
-        });
-      })
-      .catch(() => {});
+      refreshCurrentUserFromServer()
+        .then((freshUser) => {
+          return fetchCentralPersonnelList(true).then((freshPersonnel) => {
+            window.dispatchEvent(new CustomEvent('hse_personnel_updated', { detail: freshPersonnel }));
+            window.dispatchEvent(new CustomEvent('hse_user_assignments_updated', { detail: freshUser }));
+            window.dispatchEvent(new CustomEvent('hse_permits_updated', { detail: payload }));
+            window.dispatchEvent(new CustomEvent('hse_incidents_updated', { detail: payload }));
+            window.dispatchEvent(new CustomEvent('hse_medical_data_updated', { detail: payload }));
+            window.dispatchEvent(new CustomEvent('hse_warnings_updated', { detail: payload }));
+            if (rawType.includes('user_assignment') && isTargetingCurrentUser) {
+              toast.success('دسترسی اشخاص مرتبط حساب کاربری شما به‌صورت آنی بروزرسانی شد.', {
+                id: 'user-assignments-live-sync',
+              });
+            }
+          });
+        })
+        .catch(() => {});
+    }
   }
 
   // Universal mutation events
@@ -98,10 +137,14 @@ export function dispatchGlobalDataMutation(payload: any) {
   window.dispatchEvent(new CustomEvent('hse_data_mutated', { detail: enrichedPayload }));
 
   // Module-specific instant dispatches
+  if (rawType.includes('user_preference')) {
+    apiDb.invalidateCache('user-prefs');
+    window.dispatchEvent(new CustomEvent('hse_user_preferences_updated', { detail: payload }));
+  }
   if (rawType.includes('personnel')) {
     window.dispatchEvent(new CustomEvent('hse_personnel_updated', { detail: payload }));
   }
-  if (rawType.includes('user')) {
+  if (rawType.includes('user') && !rawType.includes('user_preference')) {
     window.dispatchEvent(new CustomEvent('hse_users_updated', { detail: payload }));
   }
   if (rawType.includes('permit') || rawType.includes('ptw')) {
@@ -116,18 +159,29 @@ export function dispatchGlobalDataMutation(payload: any) {
     window.dispatchEvent(new CustomEvent('hse_occ_health_data_updated', { detail: payload }));
     window.dispatchEvent(new CustomEvent('hse_health_env_updated', { detail: payload }));
   }
+  if (rawType.includes('clinic')) {
+    window.dispatchEvent(new CustomEvent('hse_clinic_visits_updated', { detail: payload }));
+    window.dispatchEvent(new CustomEvent('hse_health_env_updated', { detail: payload }));
+  }
+  if (rawType.includes('nutrition')) {
+    window.dispatchEvent(new CustomEvent('hse_nutrition_records_updated', { detail: payload }));
+    window.dispatchEvent(new CustomEvent('hse_health_env_updated', { detail: payload }));
+  }
   if (rawType.includes('department') || rawType.includes('org') || rawType.includes('node') || rawType.includes('unit')) {
     window.dispatchEvent(new CustomEvent('hse_org_nodes_updated', { detail: payload }));
     window.dispatchEvent(new CustomEvent('hse_org_jobs_updated', { detail: payload }));
     window.dispatchEvent(new CustomEvent('hse_departments_updated', { detail: payload }));
     window.dispatchEvent(new CustomEvent('hse_unit_structure_updated', { detail: payload }));
   }
-  if (rawType.includes('setting') || rawType.includes('brand')) {
+  if (rawType.includes('setting') || rawType.includes('brand') || rawType.includes('ui_config')) {
     window.dispatchEvent(new CustomEvent('hse_system_branding_updated', { detail: payload }));
     window.dispatchEvent(new CustomEvent('hse_ui_config_updated', { detail: payload }));
   }
   if (rawType.includes('notif')) {
     window.dispatchEvent(new CustomEvent('hse_notifications_updated', { detail: payload }));
+  }
+  if (rawType.includes('fire_design')) {
+    window.dispatchEvent(new CustomEvent('hse_fire_design_updated', { detail: payload }));
   }
   if (rawType.includes('fire')) {
     window.dispatchEvent(new CustomEvent('hse_fire_daily_reports_updated', { detail: payload }));
@@ -138,6 +192,18 @@ export function dispatchGlobalDataMutation(payload: any) {
   }
   if (rawType.includes('risk') || rawType.includes('jsa') || rawType.includes('fmea') || rawType.includes('fta') || rawType.includes('hha')) {
     window.dispatchEvent(new CustomEvent('hse_risks_updated', { detail: payload }));
+  }
+  if (rawType.includes('lifting')) {
+    window.dispatchEvent(new CustomEvent('hse_lifting_updated', { detail: payload }));
+  }
+  if (rawType.includes('sds')) {
+    window.dispatchEvent(new CustomEvent('hse_sds_updated', { detail: payload }));
+  }
+  if (rawType.includes('psm')) {
+    window.dispatchEvent(new CustomEvent('hse_psm_updated', { detail: payload }));
+  }
+  if (rawType.includes('non_conform') || rawType.includes('nonconform') || rawType.includes('capa')) {
+    window.dispatchEvent(new CustomEvent('hse_non_conformances_updated', { detail: payload }));
   }
   if (rawType.includes('warn')) {
     window.dispatchEvent(new CustomEvent('hse_warnings_updated', { detail: payload }));
@@ -166,7 +232,10 @@ export function dispatchGlobalDataMutation(payload: any) {
   if (rawType.includes('referral') || rawType.includes('cartable') || rawType.includes('document')) {
     window.dispatchEvent(new CustomEvent('hse_document_referrals_updated', { detail: payload }));
   }
-  if (rawType.includes('dashboard')) {
+  if (rawType.includes('environment')) {
+    window.dispatchEvent(new CustomEvent('hse_environmental_logs_updated', { detail: payload }));
+  }
+  if (rawType.includes('dashboard') || rawType.includes('trir') || rawType.includes('incident') || rawType.includes('permit') || rawType.includes('risk') || rawType.includes('non_conform')) {
     window.dispatchEvent(new CustomEvent('hse_dashboard_updated', { detail: payload }));
   }
   if (rawType.includes('heat')) {
@@ -177,65 +246,121 @@ export function dispatchGlobalDataMutation(payload: any) {
 export const WebSocketProvider: React.FC<ProviderProps> = ({ children }) => {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
+  const [lastEventSeq, setLastEventSeq] = useState(0);
+  const socketRef = useRef<Socket | null>(null);
 
   useEffect(() => {
-    // Connect to the same origin with fallback to polling for reverse proxies / VPS
-    const socketInstance = io(window.location.origin, {
-      path: '/socket.io',
-      transports: ['websocket', 'polling'],
-      reconnectionAttempts: Infinity,
-      reconnectionDelay: 4000,
-      reconnectionDelayMax: 12000,
-      timeout: 20000,
-      autoConnect: true,
-    });
-
-    socketInstance.on('connect', () => {
-      setIsConnected(true);
-    });
-
-    socketInstance.on('connect_error', (_err) => {
-      // Gracefully handle connect error; socket.io will auto-retry via polling
-      setIsConnected(false);
-    });
-
-    socketInstance.on('disconnect', () => {
-      setIsConnected(false);
-    });
-
-    socketInstance.on('system_notification', (data) => {
-      if (data.message) {
-        toast(data.message);
+    const createAuthenticatedSocket = () => {
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current = null;
       }
-    });
 
-    // Handle incoming broadcast events for automatic cache invalidation
-    // When any user changes data on another machine, immediately invalidate cache and refresh UI
-    socketInstance.on('data_mutated', (payload) => {
-      dispatchGlobalDataMutation(payload);
-    });
+      const token = getAuthToken();
+      const socketInstance = io(window.location.origin, {
+        path: '/socket.io',
+        transports: ['websocket', 'polling'],
+        withCredentials: true,
+        auth: token ? { token } : undefined,
+        reconnectionAttempts: Infinity,
+        reconnectionDelay: 2500,
+        reconnectionDelayMax: 10000,
+        timeout: 20000,
+        autoConnect: true,
+      });
 
-    setSocket(socketInstance);
+      socketInstance.on('connect', () => {
+        setIsConnected(true);
+      });
+
+      socketInstance.on('sync:hello', (hello: { authenticated?: boolean; latestSeq?: number }) => {
+        if (!hello?.authenticated || typeof hello.latestSeq !== 'number') return;
+
+        if (globalLastEventSeq > 0 && hello.latestSeq > globalLastEventSeq) {
+          socketInstance.emit('sync:catchup', { sinceSeq: globalLastEventSeq }, async (res: any) => {
+            if (res?.success && Array.isArray(res.events) && !res.resyncRequired) {
+              for (const ev of res.events) {
+                dispatchGlobalDataMutation(ev);
+              }
+              setLastEventSeq(globalLastEventSeq);
+            } else {
+              try {
+                const httpCatchup = await apiDb.getMissedSyncEvents(globalLastEventSeq);
+                if (httpCatchup.resyncRequired) {
+                  await centralSync.syncFull(false);
+                } else {
+                  httpCatchup.events.forEach((ev) => dispatchGlobalDataMutation(ev));
+                }
+                if (httpCatchup.latestSeq > globalLastEventSeq) {
+                  globalLastEventSeq = httpCatchup.latestSeq;
+                }
+                setLastEventSeq(globalLastEventSeq);
+              } catch {
+                await centralSync.syncFull(false);
+              }
+            }
+          });
+        } else if (hello.latestSeq > globalLastEventSeq) {
+          globalLastEventSeq = hello.latestSeq;
+          setLastEventSeq(globalLastEventSeq);
+        }
+      });
+
+      socketInstance.on('connect_error', () => {
+        setIsConnected(false);
+      });
+
+      socketInstance.on('disconnect', () => {
+        setIsConnected(false);
+      });
+
+      socketInstance.on('system_notification', (data) => {
+        if (data?.message) {
+          toast(data.message);
+        }
+      });
+
+      socketInstance.on('data_mutated', (payload) => {
+        dispatchGlobalDataMutation(payload);
+        if (typeof payload?.seq === 'number') {
+          setLastEventSeq(globalLastEventSeq);
+        }
+      });
+
+      socketRef.current = socketInstance;
+      setSocket(socketInstance);
+    };
+
+    createAuthenticatedSocket();
+
+    const handleAuthChanged = () => {
+      createAuthenticatedSocket();
+    };
+    window.addEventListener('hse_auth_state_changed', handleAuthChanged);
 
     return () => {
-      socketInstance.disconnect();
+      window.removeEventListener('hse_auth_state_changed', handleAuthChanged);
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current = null;
+      }
     };
   }, []);
 
   const subscribe = (room: string) => {
-    if (socket && isConnected) {
-      socket.emit('subscribe', room);
+    if (socketRef.current && isConnected) {
+      socketRef.current.emit('subscribe', room);
     }
   };
 
   const unsubscribe = (room: string) => {
-    if (socket && isConnected) {
-      socket.emit('unsubscribe', room);
+    if (socketRef.current && isConnected) {
+      socketRef.current.emit('unsubscribe', room);
     }
   };
 
   return (
-    <WebSocketContext.Provider value={{ socket, isConnected, subscribe, unsubscribe }}>
+    <WebSocketContext.Provider value={{ socket, isConnected, lastEventSeq, subscribe, unsubscribe }}>
       {children}
     </WebSocketContext.Provider>
   );

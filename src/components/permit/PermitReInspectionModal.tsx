@@ -6,6 +6,7 @@ import {
   Check
 } from 'lucide-react';
 import { WorkPermit, InspectionCycle, UserProfile } from '../../types';
+import { toast } from 'react-hot-toast';
 
 interface PermitReInspectionModalProps {
   permit: WorkPermit;
@@ -71,7 +72,7 @@ export const PermitReInspectionModal: React.FC<PermitReInspectionModalProps> = (
     e.preventDefault();
 
     if (!findings.trim()) {
-      alert(isFa ? 'لطفاً مشاهدات و نتایج بازرسی را وارد کنید.' : 'Please enter inspection findings.');
+      toast.error(isFa ? 'لطفاً مشاهدات و نتایج بازرسی را وارد کنید.' : 'Please enter inspection findings.');
       return;
     }
 

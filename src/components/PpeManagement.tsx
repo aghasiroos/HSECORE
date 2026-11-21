@@ -35,6 +35,7 @@ import { DocumentWorkflowTrackerModal } from './referral/DocumentWorkflowTracker
 import { PrintDocumentSignaturesBox } from './referral/PrintDocumentSignaturesBox';
 import { printService } from '../services/printService';
 import { apiDb } from '../services/apiDatabaseClient';
+import { toast } from 'react-hot-toast';
 
 interface PpeManagementProps {
   isFa: boolean;
@@ -287,7 +288,7 @@ export default function PpeManagement({ isFa, currentUser }: PpeManagementProps)
   // Delete Catalog Item
   const handleDeleteCatalogItem = (itemId: string, nameFa: string) => {
     if (currentUser?.role !== 'Administrator') {
-      alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
+      toast.error(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
       return;
     }
     setDeleteConfirm({
@@ -307,7 +308,7 @@ export default function PpeManagement({ isFa, currentUser }: PpeManagementProps)
   // Delete Issuance Record
   const handleDeleteIssuanceRecord = (record: PpeIssuanceRecord) => {
     if (currentUser?.role !== 'Administrator') {
-      alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
+      toast.error(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
       return;
     }
     setDeleteConfirm({
@@ -444,12 +445,18 @@ export default function PpeManagement({ isFa, currentUser }: PpeManagementProps)
   // Save changes helper
   const saveIssuanceToStorage = (records: PpeIssuanceRecord[]) => {
     setIssuanceRecords(records);
-    apiDb.savePpeIssuance(records).catch(console.error);
+    apiDb.savePpeIssuance(records).catch((err: any) => {
+      console.error(err);
+      toast.error(err?.message || (isFa ? 'خطا در ذخیره‌سازی تخصیص PPE در پایگاه داده' : 'Failed to save PPE issuance'));
+    });
   };
 
   const saveCatalogToStorage = (items: PpeItem[]) => {
     setPpeItems(items);
-    apiDb.savePpeItems(items).catch(console.error);
+    apiDb.savePpeItems(items).catch((err: any) => {
+      console.error(err);
+      toast.error(err?.message || (isFa ? 'خطا در ذخیره‌سازی کاتالوگ PPE در پایگاه داده' : 'Failed to save PPE catalog'));
+    });
   };
 
   // KPI Calculations
@@ -485,7 +492,7 @@ export default function PpeManagement({ isFa, currentUser }: PpeManagementProps)
     if (!selectedItem) return;
 
     if (selectedItem.availableStock < newIssuance.quantity) {
-      alert(isFa ? 'موجودی انبار برای این تجهیز کافی نیست!' : 'Insufficient stock!');
+      toast.error(isFa ? 'موجودی انبار برای این تجهیز کافی نیست!' : 'Insufficient stock!');
       return;
     }
 
@@ -793,7 +800,7 @@ export default function PpeManagement({ isFa, currentUser }: PpeManagementProps)
                           <button
                             onClick={() => {
                               if (currentUser?.role !== 'Administrator') {
-                                alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
+                                toast.error(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
                                 return;
                               }
                               const updated = issuanceRecords.map(item => 
@@ -1447,7 +1454,7 @@ export default function PpeManagement({ isFa, currentUser }: PpeManagementProps)
           onClose={() => setReferralTargetPpe(null)}
           onSuccess={() => {
             setReferralTargetPpe(null);
-            alert(isFa ? 'سند با موفقیت جهت تأیید و امضا ارجاع شد.' : 'PPE slip referred successfully.');
+            toast.success(isFa ? 'سند با موفقیت جهت تأیید و امضا ارجاع شد.' : 'PPE slip referred successfully.');
           }}
         />
       )}

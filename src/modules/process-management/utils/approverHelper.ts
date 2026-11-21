@@ -122,20 +122,7 @@ export function getRolesWithActiveCount(): DynamicOrgRole[] {
 
   const roleTitles = new Set<string>();
 
-  // 1. From hse_org_jobs localStorage
-  try {
-    const savedJobs = localStorage.getItem('hse_org_jobs');
-    if (savedJobs) {
-      const parsed = JSON.parse(savedJobs);
-      if (Array.isArray(parsed)) {
-        parsed.forEach(j => {
-          if (typeof j === 'string' && j.trim()) roleTitles.add(j.trim());
-        });
-      }
-    }
-  } catch {}
-
-  // 2. From getJobTitles()
+  // 1. From getJobTitles() (authoritative PostgreSQL settings)
   getJobTitles().forEach(j => {
     if (j && j.trim()) roleTitles.add(j.trim());
   });

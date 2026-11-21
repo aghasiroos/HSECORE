@@ -1,8 +1,9 @@
 import { Router, Request, Response } from 'express';
-import { db } from '../../src/db/index.ts';
+import { db, withDbRetry } from '../../src/db/index.ts';
 import * as schema from '../../src/db/schema.ts';
-import { and, desc, eq, gte, lte, sql } from 'drizzle-orm';
-import { requireAuth, requireRole } from '../core/middleware/auth.ts';
+import { desc, eq } from 'drizzle-orm';
+import { requireAuth, isGlobalAdminUser } from '../core/middleware/auth.ts';
+import { personnelAccessService } from '../core/personnelAccess.service.ts';
 import { weatherService } from '../weather/service.ts';
 import { isWeatherRecordStale } from '../weather/physics.ts';
 import { logger } from '../core/logger.ts';
@@ -18,73 +19,86 @@ export const CANONICAL_DEFAULT_DASHBOARD_LAYOUT = {
   updatedBy: 'Production Default Standard',
 };
 
-// In-memory micro-cache for ultra-fast response (<3ms)
-let cachedMetricsData: any = null;
-let lastMetricsCacheTime = 0;
-const CACHE_TTL_MS = 10000; // 10 seconds cache for dashboard metrics
+// Scoped short-TTL micro-cache keyed per permission boundary
+const scopedMetricsCache = new Map<string, { summary: any; timestamp: number }>();
+const CACHE_TTL_MS = 10000;
 
 export function invalidateDashboardCache() {
-  cachedMetricsData = null;
-  lastMetricsCacheTime = 0;
+  scopedMetricsCache.clear();
 }
 
-dashboardRouter.get('/metrics', async (req: Request, res: Response) => {
+dashboardRouter.get('/metrics', requireAuth, async (req: Request, res: Response) => {
   try {
     const now = Date.now();
     const bypassCache = req.query.refresh === 'true';
+    const accessCtx = await personnelAccessService.resolveAccessContext(req.user);
+    const scopeKey = accessCtx.canAccessAll ? 'ADMIN_ALL' : `USER_${accessCtx.userUid || req.user?.uid || 'anon'}`;
 
-    if (!bypassCache && cachedMetricsData && (now - lastMetricsCacheTime < CACHE_TTL_MS)) {
-      res.setHeader('Cache-Control', 'public, max-age=10');
+    const cachedEntry = scopedMetricsCache.get(scopeKey);
+    if (!bypassCache && cachedEntry && (now - cachedEntry.timestamp < CACHE_TTL_MS)) {
+      res.setHeader('Cache-Control', 'private, max-age=10');
       return res.json({
         success: true,
         cached: true,
-        timestamp: new Date(lastMetricsCacheTime).toISOString(),
-        summary: cachedMetricsData,
+        timestamp: new Date(cachedEntry.timestamp).toISOString(),
+        summary: cachedEntry.summary,
       });
     }
 
-    // Execute all پایگاه داده queries in parallel with complete schema safety
+    // Execute all PostgreSQL queries cleanly without swallowing DB outages
     const [
       trirRows,
-      allIncidents,
-      allPermits,
-      allExams,
+      rawIncidents,
+      rawPermits,
+      rawExams,
       allRisks,
-      allWarnings,
+      rawWarnings,
       allFireEq,
       allFiveS,
-      allPersonnel,
+      rawPersonnel,
       allDepts,
       targetSetting,
       allNotifs,
       allTrainings,
-      allAttendances,
+      rawAttendances,
       allInspections,
       allEnvLogs,
-      allAudiometry,
-      allSpirometry,
-      allPpeIssuances
-    ] = await Promise.all([
-      db.select().from(schema.trirMonthlyRecords).orderBy(desc(schema.trirMonthlyRecords.year), desc(schema.trirMonthlyRecords.monthIndex)).catch(() => []),
-      db.select().from(schema.incidents).orderBy(desc(schema.incidents.createdAt)).catch(() => []),
-      db.select().from(schema.workPermits).orderBy(desc(schema.workPermits.createdAt)).catch(() => []),
-      db.select().from(schema.periodicMedicalExams).orderBy(desc(schema.periodicMedicalExams.createdAt)).catch(() => []),
-      db.select().from(schema.riskAssessments).catch(() => []),
-      db.select().from(schema.safetyWarnings).orderBy(desc(schema.safetyWarnings.createdAt)).catch(() => []),
-      db.select().from(schema.fireEquipment).catch(() => []),
-      db.select().from(schema.fiveSAudits).orderBy(desc(schema.fiveSAudits.createdAt)).catch(() => []),
-      db.select().from(schema.personnel).catch(() => []),
-      db.select().from(schema.orgDepartments).catch(() => []),
-      db.select().from(schema.systemSettings).catch(() => []),
-      db.select().from(schema.notifications).where(eq(schema.notifications.isDeleted, false)).orderBy(desc(schema.notifications.createdAt)).limit(10).catch(() => []),
-      db.select().from(schema.hseTrainings).catch(() => []),
-      db.select().from(schema.trainingAttendances).catch(() => []),
-      db.select().from(schema.safetyInspections).orderBy(desc(schema.safetyInspections.createdAt)).catch(() => []),
-      db.select().from(schema.environmentalLogs).catch(() => []),
-      db.select().from(schema.audiometryRecords).catch(() => []),
-      db.select().from(schema.spirometryRecords).catch(() => []),
-      db.select().from(schema.ppeIssuances).catch(() => []),
-    ]);
+      rawAudiometry,
+      rawSpirometry,
+      rawPpeIssuances
+    ] = await withDbRetry(() =>
+      Promise.all([
+        db.select().from(schema.trirMonthlyRecords).orderBy(desc(schema.trirMonthlyRecords.year), desc(schema.trirMonthlyRecords.monthIndex)),
+        db.select().from(schema.incidents).orderBy(desc(schema.incidents.createdAt)),
+        db.select().from(schema.workPermits).orderBy(desc(schema.workPermits.createdAt)),
+        db.select().from(schema.periodicMedicalExams).orderBy(desc(schema.periodicMedicalExams.createdAt)),
+        db.select().from(schema.riskAssessments),
+        db.select().from(schema.safetyWarnings).orderBy(desc(schema.safetyWarnings.createdAt)),
+        db.select().from(schema.fireEquipment),
+        db.select().from(schema.fiveSAudits).orderBy(desc(schema.fiveSAudits.createdAt)),
+        db.select().from(schema.personnel),
+        db.select().from(schema.orgDepartments),
+        db.select().from(schema.systemSettings),
+        db.select().from(schema.notifications).where(eq(schema.notifications.isDeleted, false)).orderBy(desc(schema.notifications.createdAt)).limit(10),
+        db.select().from(schema.hseTrainings),
+        db.select().from(schema.trainingAttendances),
+        db.select().from(schema.safetyInspections).orderBy(desc(schema.safetyInspections.createdAt)),
+        db.select().from(schema.environmentalLogs),
+        db.select().from(schema.audiometryRecords),
+        db.select().from(schema.spirometryRecords),
+        db.select().from(schema.ppeIssuances),
+      ])
+    );
+
+    const allIncidents = accessCtx.canAccessAll ? rawIncidents : personnelAccessService.filterModuleRecords(accessCtx, rawIncidents);
+    const allPermits = accessCtx.canAccessAll ? rawPermits : personnelAccessService.filterModuleRecords(accessCtx, rawPermits);
+    const allExams = accessCtx.canAccessAll ? rawExams : personnelAccessService.filterModuleRecords(accessCtx, rawExams);
+    const allWarnings = accessCtx.canAccessAll ? rawWarnings : personnelAccessService.filterModuleRecords(accessCtx, rawWarnings);
+    const allPersonnel = accessCtx.canAccessAll ? rawPersonnel : personnelAccessService.filterPersonnelList(accessCtx, rawPersonnel);
+    const allAttendances = accessCtx.canAccessAll ? rawAttendances : personnelAccessService.filterModuleRecords(accessCtx, rawAttendances);
+    const allAudiometry = accessCtx.canAccessAll ? rawAudiometry : personnelAccessService.filterModuleRecords(accessCtx, rawAudiometry);
+    const allSpirometry = accessCtx.canAccessAll ? rawSpirometry : personnelAccessService.filterModuleRecords(accessCtx, rawSpirometry);
+    const allPpeIssuances = accessCtx.canAccessAll ? rawPpeIssuances : personnelAccessService.filterModuleRecords(accessCtx, rawPpeIssuances);
 
     // Fast lookup map for all systemSettings persistent storage
     const settingsMap = new Map<string, any>();
@@ -261,18 +275,21 @@ dashboardRouter.get('/metrics', async (req: Request, res: Response) => {
       return [];
     };
 
-    const settingExams = [
+    const rawSettingExams = [
       ...extractArrayFromSetting(settingsMap.get('hse_medical_exams_v4')),
       ...extractArrayFromSetting(settingsMap.get('hse_medical_exams_v3')),
       ...extractArrayFromSetting(settingsMap.get('hse_medical_exams')),
     ];
 
-    const occExams = [
+    const rawOccExams = [
       ...extractArrayFromSetting(settingsMap.get('OCC_HEALTH_EXAMS_DATA_V2')),
       ...extractArrayFromSetting(settingsMap.get('occ_health_exams_data_v2')),
       ...extractArrayFromSetting(settingsMap.get('OCC_HEALTH_EXAMS_DATA')),
       ...extractArrayFromSetting(settingsMap.get('occ_health_exams_data')),
     ];
+
+    const settingExams = accessCtx.canAccessAll ? rawSettingExams : personnelAccessService.filterModuleRecords(accessCtx, rawSettingExams);
+    const occExams = accessCtx.canAccessAll ? rawOccExams : personnelAccessService.filterModuleRecords(accessCtx, rawOccExams);
 
     const examMap = new Map<string, any>();
     [...sqlExams, ...settingExams, ...occExams].forEach((e, idx) => {
@@ -681,9 +698,8 @@ dashboardRouter.get('/metrics', async (req: Request, res: Response) => {
       notifications: allNotifs as any[],
     };
 
-    // Cache summary in memory
-    cachedMetricsData = summary;
-    lastMetricsCacheTime = now;
+    // Cache summary in memory per scope
+    scopedMetricsCache.set(scopeKey, { summary, timestamp: now });
 
     res.json({
       success: true,
@@ -692,104 +708,129 @@ dashboardRouter.get('/metrics', async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     logger.error('Failed to aggregate dashboard metrics', { error: error.message });
-    res.status(500).json({ success: false, error: 'Database aggregation error' });
+    res.status(503).json({
+      success: false,
+      code: 'DATABASE_READ_FAILED',
+      error: 'خطا در بازیابی شاخص‌های داشبورد از پایگاه داده PostgreSQL.',
+    });
   }
 });
 
-// Layout & Dashboard Settings (Persistent in پایگاه داده - Supports Per-User and System Defaults)
-dashboardRouter.get('/layout', async (req: Request, res: Response) => {
+// Layout & Dashboard Settings (Persistent in PostgreSQL - Supports Per-User and System Defaults)
+dashboardRouter.get('/layout', requireAuth, async (req: Request, res: Response) => {
   try {
-    const userId = req.query.userId as string;
+    const isAdmin = isGlobalAdminUser(req.user) || ['ADMIN', 'ADMINISTRATOR'].includes(String(req.user?.role || '').toUpperCase());
+    const requestedUserId = String(req.query.userId || '').trim();
+    const userId = (requestedUserId && isAdmin) ? requestedUserId : (req.user?.uid || req.user?.username || '');
     if (userId) {
       const userLayoutKey = `dashboard_layout_user_${userId}`;
-      const userRecord = await db.select().from(schema.systemSettings).where(eq(schema.systemSettings.key, userLayoutKey)).catch(() => []);
+      const userRecord = await withDbRetry(() => db.select().from(schema.systemSettings).where(eq(schema.systemSettings.key, userLayoutKey)));
       if (userRecord.length > 0 && (userRecord[0] as any).value) {
         return res.json({ success: true, data: (userRecord[0] as any).value, isUserCustom: true });
       }
     }
 
     const layoutKey = 'dashboard_executive_layout';
-    const record = await db.select().from(schema.systemSettings).where(eq(schema.systemSettings.key, layoutKey)).catch(() => []);
+    const record = await withDbRetry(() => db.select().from(schema.systemSettings).where(eq(schema.systemSettings.key, layoutKey)));
     if (record.length > 0 && (record[0] as any).value) {
       return res.json({ success: true, data: (record[0] as any).value, isUserCustom: false });
     }
 
-    // Auto-seed permanent default layout into پایگاه داده
-    await db
-      .insert(schema.systemSettings)
-      .values({
-        key: layoutKey,
-        value: CANONICAL_DEFAULT_DASHBOARD_LAYOUT,
-        description: 'Permanent Production Default Dashboard Layout',
-        updatedAt: new Date(),
-      })
-      .onConflictDoNothing()
-      .catch(() => {});
+    // Auto-seed permanent default layout into PostgreSQL
+    await withDbRetry(() =>
+      db
+        .insert(schema.systemSettings)
+        .values({
+          key: layoutKey,
+          value: CANONICAL_DEFAULT_DASHBOARD_LAYOUT,
+          description: 'Permanent Production Default Dashboard Layout',
+          updatedAt: new Date(),
+        })
+        .onConflictDoNothing()
+    );
 
     return res.json({ success: true, data: CANONICAL_DEFAULT_DASHBOARD_LAYOUT, isUserCustom: false });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+    logger.error('Failed to load dashboard layout', { error: err?.message });
+    res.status(503).json({ success: false, code: 'DATABASE_READ_FAILED', error: err.message });
   }
 });
 
 dashboardRouter.post('/layout', requireAuth, async (req: Request, res: Response) => {
   try {
     const layoutData = req.body;
-    const userId = req.body.userId || req.user?.uid || req.user?.username;
     const userRole = (req.user?.role || '').toUpperCase();
-    const isAdmin = userRole === 'ADMIN' || userRole === 'ADMINISTRATOR';
+    const isAdmin = isGlobalAdminUser(req.user) || userRole === 'ADMIN' || userRole === 'ADMINISTRATOR';
+    const requestedUserId = String(req.body?.userId || '').trim();
+    const userId = (requestedUserId && isAdmin) ? requestedUserId : (req.user?.uid || req.user?.username);
     const saveAsGlobal = req.body.saveAsGlobal === true && isAdmin;
 
     const layoutKey = saveAsGlobal ? 'dashboard_executive_layout' : (userId ? `dashboard_layout_user_${userId}` : 'dashboard_executive_layout');
 
-    await db
-      .insert(schema.systemSettings)
-      .values({
-        key: layoutKey,
-        value: layoutData,
-        description: saveAsGlobal 
-          ? 'Executive Management Dashboard Layout & Widget Coordinates' 
-          : `Personal Dashboard Layout for User ${userId}`,
-        updatedAt: new Date(),
-      })
-      .onConflictDoUpdate({
-        target: schema.systemSettings.key,
-        set: {
+    await withDbRetry(() =>
+      db
+        .insert(schema.systemSettings)
+        .values({
+          key: layoutKey,
           value: layoutData,
-          description: saveAsGlobal 
-            ? 'Executive Management Dashboard Layout & Widget Coordinates' 
+          description: saveAsGlobal
+            ? 'Executive Management Dashboard Layout & Widget Coordinates'
             : `Personal Dashboard Layout for User ${userId}`,
+          updatedBy: req.user?.username || req.user?.uid || 'system',
           updatedAt: new Date(),
-        },
-      });
+        })
+        .onConflictDoUpdate({
+          target: schema.systemSettings.key,
+          set: {
+            value: layoutData,
+            description: saveAsGlobal
+              ? 'Executive Management Dashboard Layout & Widget Coordinates'
+              : `Personal Dashboard Layout for User ${userId}`,
+            updatedBy: req.user?.username || req.user?.uid || 'system',
+            updatedAt: new Date(),
+          },
+        })
+    );
 
     invalidateDashboardCache();
-    broadcastDataMutation('dashboard_layout', 'update', { layoutKey, layoutData });
-    res.json({ 
-      success: true, 
-      message: saveAsGlobal 
-        ? 'چیدمان پیش‌فرض سازمانی در پایگاه داده ذخیره گردید.' 
+    broadcastDataMutation(
+      'dashboard_layout',
+      'update',
+      { layoutKey, layoutData, userUid: saveAsGlobal ? null : req.user?.uid },
+      { module: 'DASHBOARD', recordId: layoutKey, actorId: req.user?.uid, targetUserUid: saveAsGlobal ? null : req.user?.uid }
+    );
+    res.json({
+      success: true,
+      message: saveAsGlobal
+        ? 'چیدمان پیش‌فرض سازمانی در پایگاه داده ذخیره گردید.'
         : 'چیدمان اختصاصی کاربر در پایگاه داده ذخیره گردید.',
       isUserCustom: !saveAsGlobal
     });
   } catch (err: any) {
     logger.error('Failed to save dashboard layout', { error: err.message });
-    res.status(500).json({ success: false, error: 'خطا در ذخیره چیدمان داشبورد در سرور' });
+    res.status(503).json({ success: false, code: 'DATABASE_WRITE_FAILED', error: 'خطا در ذخیره چیدمان داشبورد در سرور' });
   }
 });
 
 dashboardRouter.post('/layout/reset', requireAuth, async (req: Request, res: Response) => {
   try {
-    const userId = req.body.userId || req.user?.uid || req.user?.username;
+    const isAdmin = isGlobalAdminUser(req.user) || ['ADMIN', 'ADMINISTRATOR'].includes(String(req.user?.role || '').toUpperCase());
+    const requestedUserId = String(req.body?.userId || '').trim();
+    const userId = (requestedUserId && isAdmin) ? requestedUserId : (req.user?.uid || req.user?.username);
     if (userId) {
       const userLayoutKey = `dashboard_layout_user_${userId}`;
-      await db.delete(schema.systemSettings).where(eq(schema.systemSettings.key, userLayoutKey)).catch(() => {});
+      await withDbRetry(() => db.delete(schema.systemSettings).where(eq(schema.systemSettings.key, userLayoutKey)));
     }
     invalidateDashboardCache();
-    broadcastDataMutation('dashboard_layout', 'reset', { userId });
+    broadcastDataMutation(
+      'dashboard_layout',
+      'reset',
+      { userId },
+      { module: 'DASHBOARD', recordId: userId, actorId: req.user?.uid, targetUserUid: req.user?.uid }
+    );
     res.json({ success: true, message: 'چیدمان با موفقیت به حالت پیش‌فرض سازمانی بازنشانی شد.' });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+    res.status(503).json({ success: false, code: 'DATABASE_DELETE_FAILED', error: err.message });
   }
 });
 

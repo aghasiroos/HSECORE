@@ -66,6 +66,8 @@ import { getCurrentUser, addAuditLog } from '../utils/authHelper';
 import { CentralNotificationService } from '../services/notificationService';
 import UniversalOrgUnitSelect from './common/UniversalOrgUnitSelect';
 import { getUnifiedOrgUnits } from '../utils/orgUnitsHelper';
+import { toast } from 'react-hot-toast';
+import { showConfirmDialog } from './common/ConfirmDialogModal';
 
 interface WarningsManagerProps {
   warnings: WarningRecord[];
@@ -160,17 +162,7 @@ export default function WarningsManager({
   const [isExcelImportModalOpen, setIsExcelImportModalOpen] = useState(false);
   const activeUser = useMemo(() => {
     if (currentUser) return currentUser;
-    try {
-      if (typeof getCurrentUser === 'function') {
-        const u = getCurrentUser();
-        if (u) return u;
-      }
-      const stored = sessionStorage.getItem('hse_current_user');
-      if (stored) return JSON.parse(stored);
-      const remember = localStorage.getItem('hse_remember_user');
-      if (remember) return JSON.parse(remember);
-    } catch {}
-    return null;
+    return getCurrentUser();
   }, [currentUser]);
 
   // Track if user manually adjusted extracted org info
@@ -240,11 +232,11 @@ export default function WarningsManager({
       } catch {}
 
       if (removedCount > 0) {
-        alert(isFa 
+        toast.success(isFa 
           ? `✅ تعداد ${removedCount} رکورد تکراری با موفقیت شناسایی، ادغام و از سامانه حذف گردید.`
           : `✅ Successfully purged ${removedCount} duplicate records.`);
       } else {
-        alert(isFa 
+        toast.success(isFa 
           ? '✅ بازبینی کامل انجام شد: هیچ رکورد تکراری در سامانه اخطارها وجود ندارد.'
           : '✅ Verification complete: No duplicate records found.');
       }
@@ -260,18 +252,26 @@ export default function WarningsManager({
       ? 'آیا از پاکسازی و حذف کامل تمامی سوابق اخطارهای کتبی اطمینان دارید؟ تمام رکوردهای ثبت‌شده حذف خواهند شد و هیچ داده پیش‌فرضی باقی نخواهد ماند.'
       : 'Are you sure you want to completely clear all warning records? No default data will remain.';
     
-    if (!window.confirm(confirmMsg)) return;
+    const confirmed = await showConfirmDialog({
+      title: isFa ? 'پاکسازی کامل سوابق اخطارها' : 'Clear All Warning Records',
+      message: confirmMsg,
+      confirmLabel: isFa ? 'پاکسازی کامل' : 'Clear All',
+      cancelLabel: isFa ? 'انصراف' : 'Cancel',
+      tone: 'danger',
+    });
+    if (!confirmed) return;
 
     setIsClearingAll(true);
     try {
       onWarningsUpdated([]);
       await clearWarningsFromStorage();
       await apiDb.clearAllSafetyWarnings();
-      alert(isFa 
+      toast.success(isFa 
         ? '✅ تمامی سوابق اخطارها با موفقیت پاکسازی شد و هیچ داده پیش‌فرضی در سامانه قرار ندارد.'
         : '✅ All warning records have been permanently cleared. Zero default records exist.');
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error clearing warning records:', err);
+      toast.error(err?.message || (isFa ? 'خطا در پاکسازی سوابق اخطارها' : 'Failed to clear warnings'));
     } finally {
       setIsClearingAll(false);
     }
@@ -649,7 +649,7 @@ export default function WarningsManager({
                       Boolean(currentUser?.permissions?.Warnings?.edit || currentUser?.permissions?.['Safety Warnings']?.edit);
 
     if (!canManage) {
-      alert(isFa ? 'تنها مدیر ارشد و سرپرستان مجاز سیستم دسترسی ویرایش این اطلاعات را دارند.' : 'Only authorized managers and administrators can edit this information.');
+      toast.error(isFa ? 'تنها مدیر ارشد و سرپرستان مجاز سیستم دسترسی ویرایش این اطلاعات را دارند.' : 'Only authorized managers and administrators can edit this information.');
       return;
     }
 
@@ -702,7 +702,7 @@ export default function WarningsManager({
                       Boolean(currentUser?.permissions?.Warnings?.delete || currentUser?.permissions?.['Safety Warnings']?.delete);
 
     if (!canManage) {
-      alert(isFa ? 'تنها مدیر ارشد و سرپرستان مجاز سیستم دسترسی حذف این اطلاعات را دارند.' : 'Only authorized managers and administrators can delete this information.');
+      toast.error(isFa ? 'تنها مدیر ارشد و سرپرستان مجاز سیستم دسترسی حذف این اطلاعات را دارند.' : 'Only authorized managers and administrators can delete this information.');
       return;
     }
     setDeleteConfirm({
@@ -2301,7 +2301,7 @@ export default function WarningsManager({
           onClose={() => setReferralWarning(null)}
           onSuccess={() => {
             setReferralWarning(null);
-            alert(isFa ? 'سند اخطار با موفقیت جهت بررسی، تأیید و امضا ارجاع گردید.' : 'Warning referred successfully.');
+            toast.success(isFa ? 'سند اخطار با موفقیت جهت بررسی، تأیید و امضا ارجاع گردید.' : 'Warning referred successfully.');
           }}
         />
       )}

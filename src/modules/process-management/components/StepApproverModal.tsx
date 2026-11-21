@@ -31,6 +31,7 @@ import {
   saveSystemApprover
 } from '../utils/approverHelper';
 import { addAuditLog } from '../../../utils/authHelper';
+import { toast } from 'react-hot-toast';
 
 interface Props {
   isOpen: boolean;
@@ -160,7 +161,7 @@ export default function StepApproverModal({
 
   const toggleUserSelection = (userId: string, isUserActive: boolean) => {
     if (!isUserActive) {
-      alert(isFa ? 'امکان تخصیص کاربران غیرفعال وجود ندارد. لطفا از کاربران فعال سیستم انتخاب نمایید.' : 'Inactive users cannot be assigned.');
+      toast.error(isFa ? 'امکان تخصیص کاربران غیرفعال وجود ندارد. لطفا از کاربران فعال سیستم انتخاب نمایید.' : 'Inactive users cannot be assigned.');
       return;
     }
 
@@ -231,7 +232,7 @@ export default function StepApproverModal({
 
   const handleCreateUser = () => {
     if (!newUser.username || !newUser.fullName) {
-      alert(isFa ? 'لطفاً نام کامل و نام کاربری را وارد کنید.' : 'Please enter full name and username.');
+      toast.error(isFa ? 'لطفاً نام کامل و نام کاربری را وارد کنید.' : 'Please enter full name and username.');
       return;
     }
     

@@ -1,5 +1,6 @@
 import { getStoredOrgNodes, getComplexPersonnelList } from './personnelHelper';
 import { apiDb } from '../services/apiDatabaseClient';
+import { toast } from 'react-hot-toast';
 import {
   DEFAULT_INCIDENT_TYPES,
   DEFAULT_PPE_CATEGORIES,
@@ -64,22 +65,10 @@ function normalizeStructureMap(rawObj: any): OrgUnitsDataMap {
 }
 
 /**
- * Purges any legacy organizational structure or config keys from browser storage.
+ * Legacy browser storage purge hook retained as no-op (100% PostgreSQL backed).
  */
 export function clearLegacyOrgBrowserStorage(): void {
-  if (typeof window === 'undefined') return;
-  try {
-    localStorage.removeItem('hse_unit_structure_v1');
-    localStorage.removeItem('hse_org_jobs');
-    localStorage.removeItem('hse_org_units');
-    localStorage.removeItem('hse_incident_types_config');
-    localStorage.removeItem('hse_ppe_categories');
-    localStorage.removeItem('hse_ppe_items');
-    sessionStorage.removeItem('hse_unit_structure_v1');
-    sessionStorage.removeItem('hse_org_jobs');
-  } catch {
-    // Ignore storage access errors
-  }
+  // No-op: organizational configuration is stored exclusively in PostgreSQL
 }
 
 /**
@@ -383,18 +372,19 @@ export function getStoredIncidentTypes(): HseIncidentCategoryItem[] {
  * Saves Incident Category Types directly to the central database.
  */
 export function saveIncidentTypesToDb(types: HseIncidentCategoryItem[]): void {
-  clearLegacyOrgBrowserStorage();
   inMemoryIncidentTypesCache = Array.isArray(types) ? [...types] : DEFAULT_INCIDENT_TYPES;
   apiDb
     .saveSetting('hse_incident_types_config', inMemoryIncidentTypesCache, 'HSE Incident Category Types Configuration')
-    .catch(console.error);
+    .catch((err) => {
+      console.error('Failed to save incident types to central DB:', err);
+      toast.error('خطا در ذخیره‌سازی انواع حوادث در پایگاه داده');
+    });
 }
 
 /**
  * Returns PPE Categories from in-memory database cache.
  */
 export function getStoredPpeCategories(): PpeCategoryItem[] {
-  clearLegacyOrgBrowserStorage();
   if (!inMemoryPpeCategoriesCache) {
     ensureOrgConfigHydrated();
     return DEFAULT_PPE_CATEGORIES;
@@ -406,16 +396,17 @@ export function getStoredPpeCategories(): PpeCategoryItem[] {
  * Saves PPE Categories directly to the central database.
  */
 export function savePpeCategoriesToDb(categories: PpeCategoryItem[]): void {
-  clearLegacyOrgBrowserStorage();
   inMemoryPpeCategoriesCache = Array.isArray(categories) ? [...categories] : DEFAULT_PPE_CATEGORIES;
-  apiDb.savePpeCategories(inMemoryPpeCategoriesCache).catch(console.error);
+  apiDb.savePpeCategories(inMemoryPpeCategoriesCache).catch((err) => {
+    console.error('Failed to save PPE categories to central DB:', err);
+    toast.error('خطا در ذخیره‌سازی دسته‌بندی تجهیزات حفاظت فردی');
+  });
 }
 
 /**
  * Returns PPE Catalog Items from in-memory database cache.
  */
 export function getStoredPpeItems(): PpeItem[] {
-  clearLegacyOrgBrowserStorage();
   if (!inMemoryPpeItemsCache) {
     ensureOrgConfigHydrated();
     return [];
@@ -427,9 +418,11 @@ export function getStoredPpeItems(): PpeItem[] {
  * Saves PPE Catalog Items directly to the central database.
  */
 export function savePpeItemsToDb(items: PpeItem[]): void {
-  clearLegacyOrgBrowserStorage();
   inMemoryPpeItemsCache = Array.isArray(items) ? [...items] : [];
-  apiDb.savePpeItems(inMemoryPpeItemsCache).catch(console.error);
+  apiDb.savePpeItems(inMemoryPpeItemsCache).catch((err) => {
+    console.error('Failed to save PPE items to central DB:', err);
+    toast.error('خطا در ذخیره‌سازی فهرست تجهیزات حفاظت فردی');
+  });
 }
 
 /**

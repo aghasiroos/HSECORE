@@ -43,6 +43,7 @@ import {
 } from '../utils/orgHelper';
 import { PpeItem, OshaPpeCategory } from '../types';
 import { syncAndGetExtractedDepartments, getStoredOrgNodes, fetchStoredOrgNodes, saveStoredOrgNodes } from '../utils/personnelHelper';
+import { toast } from 'react-hot-toast';
 import { OrgNode, hasPermission, isUserAdmin } from '../utils/authHelper';
 import OrgStructureManager, { ORG_TYPE_LABELS } from './OrgStructureManager';
 import OrgBackupRestorePanel from './OrgBackupRestorePanel';
@@ -386,13 +387,13 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
   const handleAddUnit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canManageOrg) {
-      alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی ثبت واحد سازمانی جدید را دارد.' : 'Only the main Administrator is authorized to add units.');
+      toast.error(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی ثبت واحد سازمانی جدید را دارد.' : 'Only the main Administrator is authorized to add units.');
       return;
     }
     const name = newUnit.trim();
     if (!name) return;
     if (orgStructure[name]) {
-      alert(isFa ? 'این واحد قبلاً در لیست ثبت شده است.' : 'Unit already exists.');
+      toast.error(isFa ? 'این واحد قبلاً در لیست ثبت شده است.' : 'Unit already exists.');
       return;
     }
 
@@ -463,7 +464,7 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
     if (!selectedOrgNodeForConfig) return;
 
     if (!canManageOrg) {
-      alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی ثبت یا ویرایش واحد سازمانی را دارد.' : 'Only Administrator is authorized.');
+      toast.error(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی ثبت یا ویرایش واحد سازمانی را دارد.' : 'Only Administrator is authorized.');
       return;
     }
 
@@ -552,7 +553,7 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
 
   const handleDeleteUnit = (unitName: string) => {
     if (!canManageOrg) {
-      alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
+      toast.error(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
       return;
     }
     const subCount = Object.keys(orgStructure[unitName]?.subUnits || {}).length;
@@ -586,7 +587,7 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
 
   const handleSaveUnitRename = async (oldName: string) => {
     if (!canManageOrg) {
-      alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
+      toast.error(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
       return;
     }
     const newName = editUnitVal.trim();
@@ -596,7 +597,7 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
       return;
     }
     if (orgStructure[newName]) {
-      alert(isFa ? 'واحدی با این نام از قبل وجود دارد.' : 'A unit with this name already exists.');
+      toast.error(isFa ? 'واحدی با این نام از قبل وجود دارد.' : 'A unit with this name already exists.');
       return;
     }
 
@@ -627,7 +628,7 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
   // --- Sub-Units Handlers ---
   const handleAddSubUnit = async (unitName: string, subUnitNamesOverride?: string[]) => {
     if (!canManageOrg) {
-      alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی تعریف زیرمجموعه را دارد.' : 'Only the main Administrator is authorized to add sub-units.');
+      toast.error(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی تعریف زیرمجموعه را دارد.' : 'Only the main Administrator is authorized to add sub-units.');
       return;
     }
     const inputVal = subUnitNamesOverride ? subUnitNamesOverride.join('،') : (newSubUnitInputs[unitName] || '').trim();
@@ -683,7 +684,7 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
 
   const handleDeleteSubUnit = (unitName: string, subName: string) => {
     if (!canManageOrg) {
-      alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
+      toast.error(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
       return;
     }
     const jobCount = (orgStructure[unitName]?.subUnits?.[subName] || []).length;
@@ -724,7 +725,7 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
 
   const handleSaveSubUnitRename = async () => {
     if (!canManageOrg) {
-      alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی ویرایش زیرمجموعه‌ها را دارد.' : 'Only the main Administrator is authorized to edit sub-units.');
+      toast.error(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی ویرایش زیرمجموعه‌ها را دارد.' : 'Only the main Administrator is authorized to edit sub-units.');
       return;
     }
     if (!editingSubUnit) return;
@@ -762,7 +763,7 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
   // --- Direct Unit Jobs Handlers ---
   const handleAddUnitDirectJob = async (unitName: string) => {
     if (!canManageOrg) {
-      alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی ثبت شغل و سمت شغلی را دارد.' : 'Only the main Administrator is authorized to add jobs/positions.');
+      toast.error(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی ثبت شغل و سمت شغلی را دارد.' : 'Only the main Administrator is authorized to add jobs/positions.');
       return;
     }
     const inputVal = (newUnitDirectJobInputs[unitName] || '').trim();
@@ -802,7 +803,7 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
 
   const handleDeleteUnitDirectJob = (unitName: string, jobIdx: number) => {
     if (!canManageOrg) {
-      alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
+      toast.error(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
       return;
     }
     const jobName = orgStructure[unitName]?.jobs?.[jobIdx];
@@ -828,7 +829,7 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
   // --- Sub-Unit Specific Jobs Handlers ---
   const handleAddSubUnitJob = async (unitName: string, subName: string) => {
     if (!canManageOrg) {
-      alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی ثبت شغل و سمت شغلی را دارد.' : 'Only the main Administrator is authorized to add jobs/positions.');
+      toast.error(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی ثبت شغل و سمت شغلی را دارد.' : 'Only the main Administrator is authorized to add jobs/positions.');
       return;
     }
     const key = `${unitName}:::${subName}`;
@@ -871,7 +872,7 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
 
   const handleDeleteSubUnitJob = (unitName: string, subName: string, jobIdx: number) => {
     if (!canManageOrg) {
-      alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
+      toast.error(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
       return;
     }
     const jobName = orgStructure[unitName]?.subUnits?.[subName]?.[jobIdx];
@@ -898,7 +899,7 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
 
   const handleSaveJobItemEdit = async () => {
     if (!canManageOrg) {
-      alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی ویرایش را دارد.' : 'Only the main Administrator is authorized to edit.');
+      toast.error(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی ویرایش را دارد.' : 'Only the main Administrator is authorized to edit.');
       return;
     }
     if (!editingJobItem) return;
@@ -933,13 +934,13 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
   const addJob = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canManageOrg) {
-      alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی ثبت عنوان شغلی جدید را دارد.' : 'Only the main Administrator is authorized to add job titles.');
+      toast.error(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی ثبت عنوان شغلی جدید را دارد.' : 'Only the main Administrator is authorized to add job titles.');
       return;
     }
     const clean = newJob.trim();
     if (!clean) return;
     if (jobTitles.includes(clean)) {
-      alert(isFa ? 'این عنوان شغلی قبلا ثبت شده است.' : 'Job title already exists.');
+      toast.error(isFa ? 'این عنوان شغلی قبلا ثبت شده است.' : 'Job title already exists.');
       return;
     }
     const next = [...jobTitles, clean];
@@ -949,7 +950,7 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
 
   const deleteJob = (idx: number) => {
     if (!canManageOrg) {
-      alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
+      toast.error(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
       return;
     }
     const name = jobTitles[idx];
@@ -966,7 +967,7 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
 
   const saveJobEdit = async (idx: number) => {
     if (!canManageOrg) {
-      alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
+      toast.error(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
       return;
     }
     const clean = editJobVal.trim();
@@ -1021,7 +1022,7 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
 
   const handleEditIncType = (item: HseIncidentCategoryItem) => {
     if (!canManageOrg) {
-      alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
+      toast.error(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
       return;
     }
     setEditingIncTypeId(item.id);
@@ -1047,7 +1048,7 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
 
   const handleDeleteIncType = (id: string, name: string) => {
     if (!canManageOrg) {
-      alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
+      toast.error(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
       return;
     }
     setDeleteConfirm({
@@ -1062,7 +1063,7 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
 
   const handleResetIncTypesToDefault = () => {
     if (!canManageOrg) {
-      alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
+      toast.error(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
       return;
     }
     setDeleteConfirm({
@@ -1095,7 +1096,7 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
 
   const handleOpenEditEquipmentModal = (item: PpeItem) => {
     if (currentUser?.role !== 'Administrator') {
-      alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
+      toast.error(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
       return;
     }
     setEditingEquipmentItem(item);
@@ -1163,7 +1164,7 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
 
   const handleDeleteEquipment = (id: string, name: string) => {
     if (currentUser?.role !== 'Administrator') {
-      alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
+      toast.error(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
       return;
     }
     setDeleteConfirm({

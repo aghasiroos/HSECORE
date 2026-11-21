@@ -1491,9 +1491,6 @@ export function setCurrentUser(user: UserProfile | null): void {
   memoryCurrentUser = user;
   try {
     if (typeof window !== 'undefined') {
-      // Strictly never store personnel assignment relationships in Browser Storage
-      localStorage.removeItem('hse_user_personnel_assignments');
-      sessionStorage.removeItem('hse_user_personnel_assignments');
       if (user) {
         const {
           assignedPersonnel,
@@ -1677,7 +1674,9 @@ export function ensureUserAndPersonnelInSync(item: {
       permissions: createRolePresetPermissions('standard_user')
     };
     memorySystemUsers.push(existingUser);
-    apiDb.saveUser(existingUser).catch(() => {});
+    apiDb.saveUser(existingUser).catch((err) => {
+      console.error('Failed to sync personnel user account to database:', err);
+    });
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('hse_users_updated', { detail: memorySystemUsers }));
       window.dispatchEvent(new CustomEvent('app_data_mutated', { detail: { entity: 'users' } }));
@@ -1697,27 +1696,9 @@ export function setAuditLogs(logs: AuditLogEntry[]): void {
   }
 }
 
-// Purge legacy offline mock data keys to ensure database remains authoritative source of truth
+// All system state is database-authoritative; no browser storage seeds used
 export function initializeRbacSeeds() {
-  try {
-    localStorage.removeItem('hse_users');
-    localStorage.removeItem('hse_departments');
-    localStorage.removeItem('hse_audit_logs');
-    localStorage.removeItem('hse_notifications');
-    localStorage.removeItem('hse_org_nodes');
-    localStorage.removeItem('trir_records');
-    localStorage.removeItem('hse_trir_records_backup');
-    localStorage.removeItem('hse_trir_records_v3');
-    localStorage.removeItem('warning_records');
-    localStorage.removeItem('hse_permits');
-    localStorage.removeItem('hse-heat-log');
-    localStorage.removeItem('hse_unit_structure_v1');
-    localStorage.removeItem('hse_unit_subunits_map');
-    localStorage.removeItem('hse_org_units');
-    localStorage.removeItem('hse_org_jobs');
-  } catch (e) {
-    console.warn('Storage purge cleanup note:', e);
-  }
+  // No-op: PostgreSQL database is the single source of truth
 }
 
 // Check if user has Administrator role (bilingual Persian/English case-insensitive check)
@@ -2233,5 +2214,7 @@ export function addAuditLog(
       tsFa: newLog.tsFa,
     },
     ipAddress: newLog.ip,
-  }).catch(() => {});
+  }).catch((err) => {
+    console.warn('Audit log persistence skipped or failed:', err);
+  });
 }

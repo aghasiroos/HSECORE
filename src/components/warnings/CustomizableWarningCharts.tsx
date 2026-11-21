@@ -32,6 +32,8 @@ import { printService } from '../../services/printService';
 import { getComplexPersonnelList } from '../../utils/personnelHelper';
 import { apiDb } from '../../services/apiDatabaseClient';
 import * as XLSX from 'xlsx';
+import { toast } from 'react-hot-toast';
+import { showConfirmDialog } from '../common/ConfirmDialogModal';
 
 export type ChartType = 'bar' | 'line' | 'pie' | 'area';
 
@@ -136,34 +138,44 @@ export const CustomizableWarningCharts: React.FC<CustomizableWarningChartsProps>
   const isFa = language === 'fa';
   const printRef = useRef<HTMLDivElement>(null);
 
-  // Storage key based on user
-  const userKey = currentUser?.id || currentUser?.username || 'default_user';
-  const storageKey = `hse_custom_charts_settings_${userKey}`;
+  const prefKey = 'warning_custom_charts';
 
-  // State: Chart Configurations
+  // State: Chart Configurations (loaded from PostgreSQL userPreferences)
   const [charts, setCharts] = useState<ChartConfig[]>(() => {
-    try {
-      const saved = localStorage.getItem(storageKey);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
-        }
-      }
-    } catch (e) {
-      console.warn('Failed to load chart preferences, fallback to defaults:', e);
-    }
+    const cached = apiDb.userPreferences.getCached<ChartConfig[]>(prefKey);
+    if (Array.isArray(cached) && cached.length > 0) return cached;
     return DEFAULT_CHARTS;
   });
 
-  // Save to localStorage when charts config change
   useEffect(() => {
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(charts));
-    } catch (e) {
-      console.warn('Failed to persist chart preferences:', e);
-    }
-  }, [charts, storageKey]);
+    let mounted = true;
+    const syncPrefs = () => {
+      const cached = apiDb.userPreferences.getCached<ChartConfig[]>(prefKey);
+      if (mounted && Array.isArray(cached) && cached.length > 0) {
+        setCharts(cached);
+      }
+    };
+    apiDb.userPreferences.get<ChartConfig[]>(prefKey).then((saved) => {
+      if (mounted && Array.isArray(saved?.value) && saved.value.length > 0) {
+        setCharts(saved.value);
+      }
+    }).catch(() => {});
+    window.addEventListener('hse_user_preferences_updated', syncPrefs);
+    window.addEventListener('hse_auth_state_changed', syncPrefs);
+    return () => {
+      mounted = false;
+      window.removeEventListener('hse_user_preferences_updated', syncPrefs);
+      window.removeEventListener('hse_auth_state_changed', syncPrefs);
+    };
+  }, []);
+
+  const persistCharts = (updater: (prev: ChartConfig[]) => ChartConfig[]) => {
+    setCharts(prev => {
+      const next = updater(prev);
+      void apiDb.userPreferences.set(prefKey, next).catch(() => {});
+      return next;
+    });
+  };
 
   // Personnel & Medical Exams data for enrichment
   const [medicalExams, setMedicalExams] = useState<any[]>([]);
@@ -399,7 +411,7 @@ export const CustomizableWarningCharts: React.FC<CustomizableWarningChartsProps>
 
   // Chart actions
   const updateChartType = (id: string, type: ChartType) => {
-    setCharts(prev => prev.map(c => c.id === id ? { ...c, chartType: type } : c));
+    persistCharts(prev => prev.map(c => c.id === id ? { ...c, chartType: type } : c));
   };
 
   const updateChartMetric = (id: string, metric: WarningMetric) => {
@@ -415,7 +427,7 @@ export const CustomizableWarningCharts: React.FC<CustomizableWarningChartsProps>
       repeatOffenders: 'پرتکرارترین افراد دریافت‌کننده اخطار'
     };
 
-    setCharts(prev => prev.map(c => {
+    persistCharts(prev => prev.map(c => {
       if (c.id === id) {
         return {
           ...c,
@@ -428,15 +440,15 @@ export const CustomizableWarningCharts: React.FC<CustomizableWarningChartsProps>
   };
 
   const toggleColSpan = (id: string) => {
-    setCharts(prev => prev.map(c => c.id === id ? { ...c, colSpan: c.colSpan === 1 ? 2 : 1 } : c));
+    persistCharts(prev => prev.map(c => c.id === id ? { ...c, colSpan: c.colSpan === 1 ? 2 : 1 } : c));
   };
 
   const removeChart = (id: string) => {
     if (charts.length <= 1) {
-      alert(isFa ? 'حداقل یک نمودار باید در داشبورد فعال باشد.' : 'At least one chart must remain active.');
+      toast.error(isFa ? 'حداقل یک نمودار باید در داشبورد فعال باشد.' : 'At least one chart must remain active.');
       return;
     }
-    setCharts(prev => prev.filter(c => c.id !== id));
+    persistCharts(prev => prev.filter(c => c.id !== id));
   };
 
   const addNewChart = () => {
@@ -449,12 +461,19 @@ export const CustomizableWarningCharts: React.FC<CustomizableWarningChartsProps>
       colSpan: 1,
       colorTheme: PALETTE[charts.length % PALETTE.length]
     };
-    setCharts(prev => [...prev, newChart]);
+    persistCharts(prev => [...prev, newChart]);
   };
 
-  const resetToDefaultCharts = () => {
-    if (window.confirm(isFa ? 'آیا مایلید چیدمان و تنظیمات نمودارها به حالت پیش‌فرض سامانه بازگردد؟' : 'Reset all chart layouts and settings to system default?')) {
-      setCharts(DEFAULT_CHARTS);
+  const resetToDefaultCharts = async () => {
+    const confirmed = await showConfirmDialog({
+      title: isFa ? 'بازنشانی چیدمان نمودارها' : 'Reset Chart Layout',
+      message: isFa ? 'آیا مایلید چیدمان و تنظیمات نمودارها به حالت پیش‌فرض سامانه بازگردد؟' : 'Reset all chart layouts and settings to system default?',
+      confirmLabel: isFa ? 'بازنشانی' : 'Reset',
+      cancelLabel: isFa ? 'انصراف' : 'Cancel',
+      tone: 'warning',
+    });
+    if (confirmed) {
+      persistCharts(() => DEFAULT_CHARTS);
     }
   };
 
@@ -466,7 +485,7 @@ export const CustomizableWarningCharts: React.FC<CustomizableWarningChartsProps>
 
   const saveTitle = (id: string) => {
     if (editingTitleValue.trim()) {
-      setCharts(prev => prev.map(c => c.id === id ? { ...c, title: editingTitleValue.trim() } : c));
+      persistCharts(prev => prev.map(c => c.id === id ? { ...c, title: editingTitleValue.trim() } : c));
     }
     setEditingTitleId(null);
   };
@@ -502,9 +521,15 @@ export const CustomizableWarningCharts: React.FC<CustomizableWarningChartsProps>
     const targetIndex = newCharts.findIndex(c => c.id === targetId);
 
     if (sourceIndex !== -1 && targetIndex !== -1) {
-      const [moved] = newCharts.splice(sourceIndex, 1);
-      newCharts.splice(targetIndex, 0, moved);
-      setCharts(newCharts);
+      persistCharts(prev => {
+        const next = [...prev];
+        const sIdx = next.findIndex(c => c.id === draggedChartId);
+        const tIdx = next.findIndex(c => c.id === targetId);
+        if (sIdx === -1 || tIdx === -1) return prev;
+        const [moved] = next.splice(sIdx, 1);
+        next.splice(tIdx, 0, moved);
+        return next;
+      });
     }
 
     setDraggedChartId(null);

@@ -31,6 +31,7 @@ import {
 } from 'lucide-react';
 import { PsmSubTabKey } from './PsmManagementModule';
 import { PsmDeepLinkAction } from './psmGuidedEngine';
+import { apiDb } from '../../services/apiDatabaseClient';
 import {
   PSM_SPECIALIZED_SUBSYSTEMS,
   PSM_STAGE_GATES,
@@ -980,28 +981,25 @@ export function PsmComprehensiveGuide({
     return initial;
   });
 
-  // Educational reading progress (strictly separated from real project operational progress)
-  const [readSectionIds, setReadSectionIds] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem(GUIDE_READ_STORAGE_KEY);
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
+  // Educational reading progress (persisted in PostgreSQL user_preferences)
+  const [readSectionIds, setReadSectionIds] = useState<string[]>([]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(GUIDE_READ_STORAGE_KEY, JSON.stringify(readSectionIds));
-    } catch {
-      // ignore storage errors
-    }
-  }, [readSectionIds]);
+    let active = true;
+    apiDb.userPreferences.get(GUIDE_READ_STORAGE_KEY).then((saved) => {
+      if (active && Array.isArray(saved?.value)) {
+        setReadSectionIds(saved.value);
+      }
+    }).catch(() => {});
+    return () => { active = false; };
+  }, []);
 
   const toggleReadSection = (sectionId: string) => {
-    setReadSectionIds((prev) =>
-      prev.includes(sectionId) ? prev.filter((id) => id !== sectionId) : [...prev, sectionId]
-    );
+    setReadSectionIds((prev) => {
+      const next = prev.includes(sectionId) ? prev.filter((id) => id !== sectionId) : [...prev, sectionId];
+      apiDb.userPreferences.set(GUIDE_READ_STORAGE_KEY, next).catch(() => {});
+      return next;
+    });
   };
 
   const toggleExpandSection = (sectionId: string) => {

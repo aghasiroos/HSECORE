@@ -57,9 +57,11 @@ export class MedicalExamService {
   private lastReloadTime = 0;
 
   constructor() {
-    this.initData();
     if (typeof window !== 'undefined') {
-      this.reloadFromServer();
+      void this.reloadFromServer();
+      window.addEventListener('hse_auth_state_changed', () => {
+        void this.reloadFromServer();
+      });
       window.addEventListener('hse_medical_data_updated', () => {
         this.debouncedReload();
       });
@@ -107,114 +109,22 @@ export class MedicalExamService {
     }
   };
 
-  private loadFromStorage = <T>(key: string, defaultValue: T): T => {
-    try {
-      const saved = localStorage.getItem(key);
-      if (saved) {
-        return JSON.parse(saved);
-      }
-    } catch {
-      // ignore
-    }
-    return defaultValue;
-  };
-
   public reloadFromStorage = () => {
-    this.reloadFromServer();
+    void this.reloadFromServer();
   };
-
-  private initData() {
-    // Clean older keys
-    ['hse_medical_records_v1', 'hse_medical_records_v2', 'hse_medical_records_v3',
-     'hse_medical_exams_v1', 'hse_medical_exams_v2', 'hse_medical_exams_v3',
-     'hse_medical_attachments_v1', 'hse_medical_attachments_v2', 'hse_medical_attachments_v3'].forEach(k => {
-      try { localStorage.removeItem(k); } catch (_) {}
-    });
-
-    // 1. Load Records
-    this.records = this.loadFromStorage(STORAGE_KEYS.RECORDS, []);
-
-    // 2. Load Exams
-    this.exams = this.loadFromStorage(STORAGE_KEYS.EXAMS, []);
-
-    // 3. Load Attachments
-    this.attachments = this.loadFromStorage(STORAGE_KEYS.ATTACHMENTS, []);
-
-    // 4. Load Structured Labs
-    this.structuredLabs = this.loadFromStorage(STORAGE_KEYS.STRUCTURED_LABS, []);
-
-    // 5. Load Import Audits
-    this.importAudits = this.loadFromStorage(STORAGE_KEYS.IMPORT_AUDITS, []);
-
-    // 6. Explicitly purge any remaining 1402 exams, structured labs, attachments, and import audits
-    const has1402Exams = this.exams.some(e => Number(e.examYear) === 1402);
-    const has1402Labs = this.structuredLabs.some(l => Number(l.examYear) === 1402);
-    const has1402Audits = this.importAudits.some(a => Number(a.examYear) === 1402);
-    const has1402Atts = this.attachments.some(a => Number(a.examYear) === 1402);
-
-    if (has1402Exams || has1402Labs || has1402Audits || has1402Atts) {
-      const exam1402Ids = new Set(this.exams.filter(e => Number(e.examYear) === 1402).map(e => e.id));
-      const affectedCodes = new Set<string>();
-      this.exams.filter(e => Number(e.examYear) === 1402).forEach(e => {
-        if (e.employeeCode) affectedCodes.add(e.employeeCode);
-      });
-
-      this.exams = this.exams.filter(e => Number(e.examYear) !== 1402);
-      this.structuredLabs = this.structuredLabs.filter(l => Number(l.examYear) !== 1402 && !exam1402Ids.has(l.examId));
-      this.attachments = this.attachments.filter(a => Number(a.examYear) !== 1402 && !exam1402Ids.has(a.examId));
-      this.importAudits = this.importAudits.filter(a => Number(a.examYear) !== 1402);
-
-      // Clean master records if no other exams remain
-      this.records = this.records.filter(r => {
-        const isAffected = affectedCodes.has(r.employeeCode);
-        if (!isAffected) return true;
-        const remaining = this.exams.filter(e => e.recordId === r.id || e.employeeCode === r.employeeCode);
-        return remaining.length > 0;
-      });
-    }
-
-    // 7. Purge any legacy default/mock seeded records or exams
-    const mockExams = this.exams.filter(e => 
-      e.id.startsWith('exam_seed_') || 
-      e.id.startsWith('seed_') || 
-      e.doctor?.includes('احمدرضا سهرابی') || 
-      e.medicalCenter?.includes('مرکز سلامت شغلی و طب کار صنعت نفت')
-    );
-    if (mockExams.length > 0) {
-      const mockIds = new Set(mockExams.map(e => e.id));
-      this.exams = this.exams.filter(e => !mockIds.has(e.id));
-      this.structuredLabs = this.structuredLabs.filter(l => !mockIds.has(l.examId));
-      this.attachments = this.attachments.filter(a => !mockIds.has(a.examId));
-      this.records = this.records.filter(r => this.exams.some(e => e.recordId === r.id || e.employeeCode === r.employeeCode));
-    }
-
-    // 8. Reconstruct import audit logs for any existing exam batches
-    this.syncImportAuditsFromExams();
-
-    this.saveData();
-  }
 
   private saveData() {
     try {
-      // Authoritatively persist to پایگاه داده database
+      // Authoritatively persist to PostgreSQL central database
       apiDb.saveSetting(STORAGE_KEYS.RECORDS, this.records);
       apiDb.saveSetting(STORAGE_KEYS.EXAMS, this.exams);
       apiDb.saveSetting(STORAGE_KEYS.ATTACHMENTS, this.attachments);
       apiDb.saveSetting(STORAGE_KEYS.STRUCTURED_LABS, this.structuredLabs);
       apiDb.saveSetting(STORAGE_KEYS.IMPORT_AUDITS, this.importAudits);
 
-      // Clean local storage cache
-      try {
-        localStorage.removeItem(STORAGE_KEYS.RECORDS);
-        localStorage.removeItem(STORAGE_KEYS.EXAMS);
-        localStorage.removeItem(STORAGE_KEYS.ATTACHMENTS);
-        localStorage.removeItem(STORAGE_KEYS.STRUCTURED_LABS);
-        localStorage.removeItem(STORAGE_KEYS.IMPORT_AUDITS);
-      } catch (_) {}
-
       notifyMedicalDataChange();
     } catch (e) {
-      console.warn('[MedicalExamService] Storage write warning:', e);
+      console.warn('[MedicalExamService] Database write warning:', e);
     }
   }
 
@@ -1543,7 +1453,7 @@ export class MedicalExamService {
     // 7. Remove from import audits
     this.importAudits = this.importAudits.filter(a => a.id !== auditLogId);
 
-    // 8. Clear any legacy localStorage keys and OCC_HEALTH_EXAMS_DATA_V2
+    // 8. Sync OCC_HEALTH_EXAMS_DATA_V2 in database
     try {
       apiDb.getSetting('OCC_HEALTH_EXAMS_DATA_V2').then(v2 => {
         if (Array.isArray(v2)) {
@@ -1551,12 +1461,6 @@ export class MedicalExamService {
           apiDb.saveSetting('OCC_HEALTH_EXAMS_DATA_V2', filteredV2);
         }
       }).catch(() => {});
-    } catch (_) {}
-
-    try {
-      ['hse_medical_exams_v2', 'hse_medical_records_v2'].forEach(k => {
-        localStorage.removeItem(k);
-      });
     } catch (_) {}
 
     this.saveData();

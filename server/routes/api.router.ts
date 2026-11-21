@@ -25,6 +25,8 @@ import { referralRouter } from './referral.router.ts';
 import { webhooksRouter } from './webhooks.router.ts';
 import { automationRouter } from './automation.router.ts';
 import { backupRouter } from './backup.router.ts';
+import { userPreferencesRouter } from './userPreferences.router.ts';
+import { collectionRouter } from './collection.router.ts';
 import { initBackupScheduler } from '../services/backup.service.ts';
 import { requireAuth, requireRole } from '../core/middleware/auth.ts';
 import { authController } from '../modules/auth/auth.controller.ts';
@@ -41,6 +43,8 @@ export function createApiRouter(): Router {
   const v1 = Router();
   v1.use('/dashboard', dashboardRouter);
   v1.use('/settings', settingsRouter);
+  v1.use('/user-preferences', userPreferencesRouter);
+  v1.use('/collection', collectionRouter);
   v1.use('/backup', backupRouter);
   v1.use('/webhooks', webhooksRouter);
   v1.use('/organization', organizationRouter);

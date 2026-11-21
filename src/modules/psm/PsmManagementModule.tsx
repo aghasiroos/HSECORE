@@ -36,6 +36,7 @@ import {
 import { toast } from 'react-hot-toast';
 import { UserProfile } from '../../types';
 import { getAuthToken } from '../../services/apiDatabaseClient';
+import { showConfirmDialog } from '../../components/common/ConfirmDialogModal';
 import {
   CCPS_PILLARS,
   CCPS_20_ELEMENTS,
@@ -379,6 +380,27 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
 
   useEffect(() => {
     fetchBootstrap();
+
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    const handleRemoteUpdate = (e?: any) => {
+      const entity = String(e?.detail?.entityType || e?.detail?.entity || '').toLowerCase();
+      if (!entity || entity.includes('psm')) {
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          void fetchBootstrap();
+        }, 300);
+      }
+    };
+
+    window.addEventListener('hse_psm_updated', handleRemoteUpdate);
+    window.addEventListener('hse_data_mutated', handleRemoteUpdate);
+    window.addEventListener('app_data_mutated', handleRemoteUpdate);
+    return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      window.removeEventListener('hse_psm_updated', handleRemoteUpdate);
+      window.removeEventListener('hse_data_mutated', handleRemoteUpdate);
+      window.removeEventListener('app_data_mutated', handleRemoteUpdate);
+    };
   }, []);
 
   const handleSelectProject = async (projectId: number) => {
@@ -687,7 +709,8 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
   };
 
   const handleDeleteProcessAsset = async (assetId: number) => {
-    if (!window.confirm('آیا از حذف این تجهیز از ساختار پروژه PSM اطمینان دارید؟')) return;
+    const confirmed = await showConfirmDialog('آیا از حذف این تجهیز از ساختار پروژه PSM اطمینان دارید؟', { isFa: true, variant: 'danger' });
+    if (!confirmed) return;
     try {
       await apiRequest(`/assets/${assetId}`, { method: 'DELETE' });
       toast.success('تجهیز از ساختار دارایی‌های PSM حذف شد');

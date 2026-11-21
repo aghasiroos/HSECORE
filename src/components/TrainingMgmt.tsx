@@ -30,6 +30,7 @@ import { findPersonnelByCode } from '../utils/personnelHelper';
 import CentralPersonnelSelector from './CentralPersonnelSelector';
 import { apiDb } from '../services/apiDatabaseClient';
 import { SubViewTransition } from '../motion';
+import { toast } from 'react-hot-toast';
 
 interface TrainingMgmtProps {
   isFa: boolean;
@@ -227,7 +228,7 @@ export default function TrainingMgmt({ isFa, currentUser }: TrainingMgmtProps) {
 
   const deleteContractor = (id: string) => {
     if (currentUser?.role !== 'Administrator') {
-      alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
+      toast.error(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
       return;
     }
     const contractor = contractors.find(c => c.id === id);
@@ -274,7 +275,7 @@ export default function TrainingMgmt({ isFa, currentUser }: TrainingMgmtProps) {
 
   const deleteCourse = (id: string) => {
     if (currentUser?.role !== 'Administrator') {
-      alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
+      toast.error(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
       return;
     }
     const course = courses.find(c => c.id === id);
@@ -306,7 +307,7 @@ export default function TrainingMgmt({ isFa, currentUser }: TrainingMgmtProps) {
 
   const deleteCourseDef = (id: string) => {
     if (currentUser?.role !== 'Administrator') {
-      alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
+      toast.error(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
       return;
     }
     const cdef = courseDefs.find(c => c.id === id);
@@ -349,7 +350,7 @@ export default function TrainingMgmt({ isFa, currentUser }: TrainingMgmtProps) {
 
   const deleteTrainingNeed = (id: string) => {
     if (currentUser?.role !== 'Administrator') {
-      alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
+      toast.error(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
       return;
     }
     const need = trainingNeeds.find(n => n.id === id);
@@ -547,7 +548,7 @@ export default function TrainingMgmt({ isFa, currentUser }: TrainingMgmtProps) {
               }}
               onDeleteEvent={(eventId) => {
                 if (currentUser?.role !== 'Administrator') {
-                  alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
+                  toast.error(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
                   return;
                 }
                 const evt = calendarEvents.find(e => e.id === eventId);

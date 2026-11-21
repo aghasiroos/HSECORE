@@ -25,6 +25,7 @@ import {
 } from '../config/columns';
 import { getUnits, getOrgSites, getSubUnitsForUnit } from '../../../utils/orgHelper';
 import { getStoredOrgNodes } from '../../../utils/personnelHelper';
+import { getCurrentUser } from '../../../utils/authHelper';
 
 interface Props {
   language: 'fa' | 'en';
@@ -38,15 +39,8 @@ interface Props {
 }
 
 function getCurrentActorDisplayName(): string {
-  if (typeof window === 'undefined') return 'کارشناس آتش‌نشانی';
-  try {
-    const raw = sessionStorage.getItem('hse_current_user') || localStorage.getItem('hse_current_user');
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      return parsed?.fullName || parsed?.name || parsed?.username || 'کارشناس آتش‌نشانی';
-    }
-  } catch {}
-  return 'کارشناس آتش‌نشانی';
+  const parsed = getCurrentUser();
+  return parsed?.fullName || parsed?.username || 'کارشناس آتش‌نشانی';
 }
 
 export default function EquipmentModal({

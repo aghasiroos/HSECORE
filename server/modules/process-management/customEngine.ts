@@ -1,6 +1,6 @@
 import { XMLParser } from 'fast-xml-parser';
-import { db, schema } from '../../core/db.ts';
-import { eq } from 'drizzle-orm';
+import { db, schema, withTransaction } from '../../core/db.ts';
+import { eq, sql } from 'drizzle-orm';
 import type {
   WorkflowApprover,
   WorkflowInstance,
@@ -250,66 +250,166 @@ export const INITIAL_ENTERPRISE_WORKFLOWS: WorkflowDefinition[] = [
   }
 ];
 
+const PROCESS_SETTINGS_KEY = 'hse_process_management_data_v1';
+const PROCESS_ADVISORY_LOCK_KEY = 94827101;
+
+function applySnapshotPayloadToMemory(data: any) {
+  DB.Workflows.clear();
+  if (Array.isArray(data?.workflows) && data.workflows.length > 0) {
+    data.workflows.forEach((wf: WorkflowDefinition) => DB.Workflows.set(wf.id, wf));
+  } else {
+    INITIAL_ENTERPRISE_WORKFLOWS.forEach((wf) => DB.Workflows.set(wf.id, wf));
+  }
+  DB.WorkflowInstances.clear();
+  if (Array.isArray(data?.instances)) {
+    data.instances.forEach((inst: WorkflowInstance) => DB.WorkflowInstances.set(inst.id, inst));
+  }
+  DB.Tasks.clear();
+  if (Array.isArray(data?.tasks)) {
+    data.tasks.forEach((t: WorkflowTask) => DB.Tasks.set(t.id, t));
+  }
+  DB.AutomationRules.clear();
+  if (Array.isArray(data?.automationRules)) {
+    data.automationRules.forEach((r: any) => {
+      if (r?.id) DB.AutomationRules.set(r.id, r);
+    });
+  }
+}
+
+export async function runWithProcessState<T>(mode: 'read' | 'write', fn: () => Promise<T> | T): Promise<T> {
+  return await withTransaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(${PROCESS_ADVISORY_LOCK_KEY})`);
+    const rowsResult = await tx.execute(
+      sql`SELECT value, version FROM system_settings WHERE key = ${PROCESS_SETTINGS_KEY} FOR UPDATE`
+    );
+    const rows = Array.isArray((rowsResult as any)?.rows) ? (rowsResult as any).rows : (rowsResult as any) || [];
+    const existingRow = rows[0];
+
+    if (existingRow?.value && Array.isArray(existingRow.value?.workflows) && existingRow.value.workflows.length > 0) {
+      applySnapshotPayloadToMemory(existingRow.value);
+    } else {
+      applySnapshotPayloadToMemory({ workflows: INITIAL_ENTERPRISE_WORKFLOWS, instances: [], tasks: [], automationRules: [] });
+      const seedPayload = {
+        workflows: Array.from(DB.Workflows.values()),
+        instances: Array.from(DB.WorkflowInstances.values()),
+        tasks: Array.from(DB.Tasks.values()),
+        automationRules: Array.from(DB.AutomationRules.values()),
+        updatedAt: new Date().toISOString(),
+      };
+      await tx
+        .insert(schema.systemSettings)
+        .values({
+          key: PROCESS_SETTINGS_KEY,
+          value: seedPayload,
+          description: 'Persistent BPMN Process Management & Tasks Data',
+          updatedAt: new Date(),
+        })
+        .onConflictDoUpdate({
+          target: schema.systemSettings.key,
+          set: {
+            value: seedPayload,
+            description: 'Persistent BPMN Process Management & Tasks Data',
+            version: sql`${schema.systemSettings.version} + 1`,
+            updatedAt: new Date(),
+          },
+        });
+    }
+
+    const result = await fn();
+
+    if (mode === 'write') {
+      const payload = {
+        workflows: Array.from(DB.Workflows.values()),
+        instances: Array.from(DB.WorkflowInstances.values()),
+        tasks: Array.from(DB.Tasks.values()),
+        automationRules: Array.from(DB.AutomationRules.values()),
+        updatedAt: new Date().toISOString(),
+      };
+      await tx
+        .insert(schema.systemSettings)
+        .values({
+          key: PROCESS_SETTINGS_KEY,
+          value: payload,
+          description: 'Persistent BPMN Process Management & Tasks Data',
+          updatedAt: new Date(),
+        })
+        .onConflictDoUpdate({
+          target: schema.systemSettings.key,
+          set: {
+            value: payload,
+            description: 'Persistent BPMN Process Management & Tasks Data',
+            version: sql`${schema.systemSettings.version} + 1`,
+            updatedAt: new Date(),
+          },
+        });
+    }
+
+    return result;
+  });
+}
+
 export async function persistProcessManagementData() {
-  try {
+  const payload = {
+    workflows: Array.from(DB.Workflows.values()),
+    instances: Array.from(DB.WorkflowInstances.values()),
+    tasks: Array.from(DB.Tasks.values()),
+    automationRules: Array.from(DB.AutomationRules.values()),
+    updatedAt: new Date().toISOString()
+  };
+  await db
+    .insert(schema.systemSettings)
+    .values({
+      key: PROCESS_SETTINGS_KEY,
+      value: payload,
+      description: 'Persistent BPMN Process Management & Tasks Data',
+      updatedAt: new Date()
+    })
+    .onConflictDoUpdate({
+      target: schema.systemSettings.key,
+      set: {
+        value: payload,
+        description: 'Persistent BPMN Process Management & Tasks Data',
+        version: sql`${schema.systemSettings.version} + 1`,
+        updatedAt: new Date()
+      }
+    });
+}
+
+export async function initializeWorkflows(forceReset = false) {
+  if (!forceReset) {
+    await runWithProcessState('read', () => undefined);
+    return;
+  }
+
+  await withTransaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(${PROCESS_ADVISORY_LOCK_KEY})`);
+    DB.Workflows.clear();
+    INITIAL_ENTERPRISE_WORKFLOWS.forEach((wf) => DB.Workflows.set(wf.id, wf));
     const payload = {
       workflows: Array.from(DB.Workflows.values()),
       instances: Array.from(DB.WorkflowInstances.values()),
       tasks: Array.from(DB.Tasks.values()),
       automationRules: Array.from(DB.AutomationRules.values()),
-      updatedAt: new Date().toISOString()
+      updatedAt: new Date().toISOString(),
     };
-    await db
+    await tx
       .insert(schema.systemSettings)
       .values({
-        key: 'hse_process_management_data_v1',
+        key: PROCESS_SETTINGS_KEY,
         value: payload,
         description: 'Persistent BPMN Process Management & Tasks Data',
-        updatedAt: new Date()
+        updatedAt: new Date(),
       })
       .onConflictDoUpdate({
         target: schema.systemSettings.key,
         set: {
           value: payload,
           description: 'Persistent BPMN Process Management & Tasks Data',
-          updatedAt: new Date()
-        }
+          version: sql`${schema.systemSettings.version} + 1`,
+          updatedAt: new Date(),
+        },
       });
-  } catch (e) {
-    console.warn('[ProcessEngine] Notice: Could not save process data to پایگاه داده:', e);
-  }
-}
-
-export async function initializeWorkflows(forceReset = false) {
-  if (!forceReset) {
-    try {
-      const row = await db.select().from(schema.systemSettings).where(eq(schema.systemSettings.key, 'hse_process_management_data_v1'));
-      if (row && row.length > 0 && row[0].value) {
-        const data = row[0].value as any;
-        if (data.workflows && Array.isArray(data.workflows) && data.workflows.length > 0) {
-          DB.Workflows.clear();
-          data.workflows.forEach((wf: WorkflowDefinition) => DB.Workflows.set(wf.id, wf));
-          
-          if (data.instances && Array.isArray(data.instances)) {
-            DB.WorkflowInstances.clear();
-            data.instances.forEach((inst: WorkflowInstance) => DB.WorkflowInstances.set(inst.id, inst));
-          }
-          if (data.tasks && Array.isArray(data.tasks)) {
-            DB.Tasks.clear();
-            data.tasks.forEach((t: WorkflowTask) => DB.Tasks.set(t.id, t));
-          }
-          return;
-        }
-      }
-    } catch (err) {
-      console.warn('[ProcessEngine] Could not load persisted process data from پایگاه داده, seeding defaults:', err);
-    }
-  }
-
-  // Seed default workflows if empty or force reset
-  DB.Workflows.clear();
-  INITIAL_ENTERPRISE_WORKFLOWS.forEach(wf => DB.Workflows.set(wf.id, wf));
-  persistProcessManagementData().catch(() => {});
+  });
 }
 
 // Initial bootstrap

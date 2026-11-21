@@ -5,6 +5,8 @@ import {
 } from 'lucide-react';
 import { WasteRecord, WasteCategory, WasteStatus } from '../types';
 import { healthEnvService } from '../services/healthEnvService';
+import { toast } from 'react-hot-toast';
+import { showConfirmDialog } from '../../../components/common/ConfirmDialogModal';
 
 interface Props {
   language: 'fa' | 'en';
@@ -44,8 +46,7 @@ export default function WasteManagementView({ language, currentUser }: Props) {
 
   useEffect(() => {
     const handleForce = () => {
-      if (typeof reloadData === 'function') reloadData();
-      else window.location.reload();
+      reloadData();
     };
     window.addEventListener('force_update', handleForce);
     return () => window.removeEventListener('force_update', handleForce);
@@ -135,7 +136,7 @@ export default function WasteManagementView({ language, currentUser }: Props) {
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.title || !formData.code) {
-      alert('لطفاً عنوان و کد پسماند را وارد کنید.');
+      toast.error('لطفاً عنوان و کد پسماند را وارد کنید.');
       return;
     }
 
@@ -149,8 +150,15 @@ export default function WasteManagementView({ language, currentUser }: Props) {
     reloadData();
   };
 
-  const handleDelete = (id: string) => {
-    if (window.confirm('آیا از حذف این رکورد پسماند اطمینان دارید؟')) {
+  const handleDelete = async (id: string) => {
+    const ok = await showConfirmDialog({
+      title: 'حذف رکورد پسماند',
+      message: 'آیا از حذف این رکورد پسماند اطمینان دارید؟',
+      confirmLabel: 'حذف',
+      cancelLabel: 'انصراف',
+      tone: 'danger',
+    });
+    if (ok) {
       healthEnvService.deleteWasteRecord(id, currentUser?.fullName || 'admin');
       reloadData();
     }

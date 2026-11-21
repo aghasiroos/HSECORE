@@ -23,6 +23,7 @@ import {
   TrendingUp,
   ShieldAlert
 } from 'lucide-react';
+import { apiDb } from '../../../services/apiDatabaseClient';
 
 export type PermitChartType = 'donut' | 'pie' | 'bar' | 'barHorizontal' | 'radar' | 'cards';
 export type UnitsChartType = 'table' | 'bar' | 'barHorizontal' | 'pie' | 'radar';
@@ -102,27 +103,36 @@ export const DEFAULT_CHART_SETTINGS: ChartSettings = {
   defectAreasChart: 'cards'
 };
 
-export const CHART_SETTINGS_STORAGE_KEY = 'ptw_audit_chart_preferences_v2';
+export const CHART_SETTINGS_PREF_KEY = 'ptw_audit_chart_preferences';
 
 export const loadSavedChartSettings = (): ChartSettings => {
   try {
-    const saved = localStorage.getItem(CHART_SETTINGS_STORAGE_KEY);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      return { ...DEFAULT_CHART_SETTINGS, ...parsed };
+    const cached = apiDb.userPreferences.getCached<Partial<ChartSettings>>(CHART_SETTINGS_PREF_KEY);
+    if (cached && typeof cached === 'object') {
+      return { ...DEFAULT_CHART_SETTINGS, ...cached };
     }
   } catch (e) {
-    console.error('Failed to load chart preferences from localStorage', e);
+    console.error('Failed to read cached chart preferences:', e);
+  }
+  return DEFAULT_CHART_SETTINGS;
+};
+
+export const fetchSavedChartSettings = async (): Promise<ChartSettings> => {
+  try {
+    const saved = await apiDb.userPreferences.get<Partial<ChartSettings>>(CHART_SETTINGS_PREF_KEY);
+    if (saved?.value && typeof saved.value === 'object') {
+      return { ...DEFAULT_CHART_SETTINGS, ...saved.value };
+    }
+  } catch (e) {
+    console.error('Failed to fetch chart preferences from database:', e);
   }
   return DEFAULT_CHART_SETTINGS;
 };
 
 export const saveChartSettingsToStorage = (settings: ChartSettings) => {
-  try {
-    localStorage.setItem(CHART_SETTINGS_STORAGE_KEY, JSON.stringify(settings));
-  } catch (e) {
-    console.error('Failed to save chart preferences to localStorage', e);
-  }
+  void apiDb.userPreferences.set(CHART_SETTINGS_PREF_KEY, settings).catch((e) => {
+    console.error('Failed to save chart preferences to database:', e);
+  });
 };
 
 interface ChartCustomizationModalProps {

@@ -2,12 +2,13 @@
 import React, { Component, StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import axios from 'axios';
+import { Toaster } from 'react-hot-toast';
 import { getAuthToken } from './services/apiDatabaseClient';
 
 // Configure Axios Defaults and Authentication Interceptors
 axios.defaults.withCredentials = true;
 axios.interceptors.request.use((config) => {
-  const token = getAuthToken() || (typeof window !== 'undefined' ? (sessionStorage.getItem('hse_auth_token') || localStorage.getItem('hse_auth_token')) : null);
+  const token = getAuthToken();
   if (token && !config.headers.Authorization) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -52,14 +53,7 @@ import App from './App.tsx';
 import './index.css';
 import { FinalSubmitProvider } from './context/FinalSubmitContext';
 
-if (typeof window !== 'undefined') {
-  try {
-    localStorage.removeItem('mock_kc_role');
-    localStorage.removeItem('mock_kc_user');
-  } catch {
-    // Ignore storage access errors
-  }
-}
+
 
 interface ErrorBoundaryProps {
   children: React.ReactNode;
@@ -134,6 +128,7 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <WebSocketProvider>
       <FinalSubmitProvider>
+        <Toaster position="top-center" toastOptions={{ duration: 4000 }} />
         <ErrorBoundary><App /></ErrorBoundary>
       </FinalSubmitProvider>
     </WebSocketProvider>

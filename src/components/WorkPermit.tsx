@@ -217,7 +217,7 @@ export default function WorkPermitModule({ language, currentUser }: WorkPermitPr
       console.error('Failed to delete permit from backend:', err);
     }
 
-    // Update local state and localStorage
+    // Update React state and dispatch global database mutation event
     const updated = permits.filter(p => p.id !== deleteConfirmPermitId && p.serialNumber !== deleteConfirmPermitId);
     savePermits(updated);
     window.dispatchEvent(new CustomEvent('hse_data_mutated', { detail: { entityType: 'permits' } }));

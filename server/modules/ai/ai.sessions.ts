@@ -1,7 +1,6 @@
 /**
  * HSECORE AI Chat Session Service
- * Persistent, user-isolated chat history stored in PostgreSQL.
- * Replaces frontend localStorage storage for compliance with HSECORE security rules.
+ * Persistent, user-isolated chat history stored strictly in PostgreSQL (zero RAM fallback/cache).
  */
 
 import { eq, desc, and, or, sql } from 'drizzle-orm';
@@ -33,18 +32,6 @@ export interface SessionMessage {
 
 export class AISessionService {
   private schemaReadyPromise: Promise<void> | null = null;
-
-  private inMemorySessions: Map<string, {
-    id: string;
-    userId: number | null;
-    userUid: string | null;
-    username: string | null;
-    title: string;
-    assistantId: string;
-    createdAt: string;
-    updatedAt: string;
-    messages: SessionMessage[];
-  }> = new Map();
 
   private resolveUserIdentity(user: UserContext): {
     userId: number | null;
@@ -99,8 +86,6 @@ export class AISessionService {
               ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW() NOT NULL;
           `);
         } catch (err: any) {
-          // Do not mark the schema as ready when DDL failed. A rejected promise is
-          // retried on the next request instead of silently switching to volatile memory.
           this.schemaReadyPromise = null;
           logger.error('[AISessionService] Schema initialization failed', { error: err?.message || err });
           throw err;
@@ -117,7 +102,6 @@ export class AISessionService {
     const recordHasStableIdentity = record.userId != null || Boolean(record.userUid?.trim());
     const identityHasStableIdentity = identity.userId != null || Boolean(identity.userUid?.trim());
 
-    // Stable identifiers are authoritative: any available stable-identity mismatch denies access.
     if (identity.userId != null && record.userId != null && Number(record.userId) !== identity.userId) return false;
     if (identity.userUid && record.userUid && record.userUid.trim() !== identity.userUid) return false;
 
@@ -126,7 +110,6 @@ export class AISessionService {
         Boolean(identity.userUid && record.userUid && record.userUid.trim() === identity.userUid);
     }
 
-    // Username matching is reserved for genuinely legacy rows with no stable owner identifiers.
     if (!recordHasStableIdentity && identity.username && record.username) {
       return record.username.trim().toLowerCase() === identity.username;
     }
@@ -134,20 +117,16 @@ export class AISessionService {
   }
 
   /**
-   * List sessions belonging to the authenticated user only.
+   * List sessions belonging to the authenticated user strictly from PostgreSQL.
    */
   async listSessions(user: UserContext, limit = 50): Promise<SessionSummary[]> {
     await this.ensureSchema();
     const identity = this.resolveUserIdentity(user);
     const { userId, userUid, username } = identity;
 
-    const mergedMap = new Map<string, SessionSummary>();
-
     try {
       const conditions = [];
       if (userId != null && userUid) {
-        // When both stable identifiers exist on both sides, require consistency.
-        // Permit matching legacy rows that contain only one stable identifier.
         conditions.push(sql`(
           (${schema.aiChatSessions.userId} = ${userId} AND
             (${schema.aiChatSessions.userUid} IS NULL OR ${schema.aiChatSessions.userUid} = ${userUid}))
@@ -163,84 +142,39 @@ export class AISessionService {
         conditions.push(sql`user_id IS NULL AND user_uid IS NULL AND LOWER(COALESCE(${schema.aiChatSessions.metadata}->>'username', '')) = ${username}`);
       }
 
-      if (conditions.length > 0) {
-        const whereClause = conditions.length === 1 ? conditions[0] : or(...conditions);
+      if (conditions.length === 0) return [];
+      const whereClause = conditions.length === 1 ? conditions[0] : or(...conditions);
 
-        const rows = await db
-          .select({
-            id: schema.aiChatSessions.id,
-            title: schema.aiChatSessions.title,
-            assistantId: schema.aiChatSessions.assistantId,
-            createdAt: schema.aiChatSessions.createdAt,
-            updatedAt: schema.aiChatSessions.updatedAt,
-            messageCount: sql<number>`(SELECT COUNT(*)::int FROM ai_chat_messages m WHERE m.session_id = ${schema.aiChatSessions.id})`,
-          })
-          .from(schema.aiChatSessions)
-          .where(whereClause!)
-          .orderBy(desc(schema.aiChatSessions.updatedAt))
-          .limit(Math.min(Math.max(limit, 1), 100));
+      const rows = await db
+        .select({
+          id: schema.aiChatSessions.id,
+          title: schema.aiChatSessions.title,
+          assistantId: schema.aiChatSessions.assistantId,
+          createdAt: schema.aiChatSessions.createdAt,
+          updatedAt: schema.aiChatSessions.updatedAt,
+          messageCount: sql<number>`(SELECT COUNT(*)::int FROM ai_chat_messages m WHERE m.session_id = ${schema.aiChatSessions.id})`,
+        })
+        .from(schema.aiChatSessions)
+        .where(whereClause!)
+        .orderBy(desc(schema.aiChatSessions.updatedAt))
+        .limit(Math.min(Math.max(limit, 1), 100));
 
-        for (const r of rows) {
-          const existingMem = this.inMemorySessions.get(r.id);
-          const createdAtStr = r.createdAt?.toISOString?.() ?? String(r.createdAt);
-          const updatedAtStr = r.updatedAt?.toISOString?.() ?? String(r.updatedAt);
-          const dbMsgCount = Number(r.messageCount || 0);
-          const memMsgCount = existingMem?.messages?.length || 0;
-
-          const item: SessionSummary = {
-            id: r.id,
-            title: existingMem?.title && existingMem.title !== 'گفت‌وگوی جدید' && r.title === 'گفت‌وگوی جدید'
-              ? existingMem.title
-              : r.title,
-            assistantId: r.assistantId || 'GENERAL_HSE',
-            createdAt: createdAtStr,
-            updatedAt: existingMem && new Date(existingMem.updatedAt).getTime() > new Date(updatedAtStr).getTime()
-              ? existingMem.updatedAt
-              : updatedAtStr,
-            messageCount: Math.max(dbMsgCount, memMsgCount),
-          };
-          mergedMap.set(item.id, item);
-
-          if (!existingMem) {
-            this.inMemorySessions.set(item.id, {
-              ...item,
-              userId,
-              userUid,
-              username,
-              messages: [],
-            });
-          } else {
-            existingMem.title = item.title;
-            existingMem.updatedAt = item.updatedAt;
-          }
-        }
-      }
+      return rows.map((r) => ({
+        id: r.id,
+        title: r.title,
+        assistantId: r.assistantId || 'GENERAL_HSE',
+        createdAt: r.createdAt?.toISOString?.() ?? String(r.createdAt),
+        updatedAt: r.updatedAt?.toISOString?.() ?? String(r.updatedAt),
+        messageCount: Number(r.messageCount || 0),
+      }));
     } catch (err: any) {
       logger.error('[AISessionService] Database error listing sessions', { error: err?.message || err });
       throw new Error('ذخیره‌ساز گفتگوها در دسترس نیست؛ تاریخچه از پایگاه داده قابل دریافت نیست.');
     }
-
-    // Merge any in-memory sessions not yet reflected in DB query
-    for (const item of this.inMemorySessions.values()) {
-      if (this.matchesUser(item, identity) && !mergedMap.has(item.id)) {
-        mergedMap.set(item.id, {
-          id: item.id,
-          title: item.title,
-          assistantId: item.assistantId,
-          createdAt: item.createdAt,
-          updatedAt: item.updatedAt,
-          messageCount: item.messages.length,
-        });
-      }
-    }
-
-    const result = Array.from(mergedMap.values());
-    result.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-    return result.slice(0, limit);
   }
 
   /**
-   * Create a new chat session owned by the user.
+   * Create a new chat session owned by the user strictly in PostgreSQL.
    */
   async createSession(
     user: UserContext,
@@ -253,15 +187,6 @@ export class AISessionService {
     const now = new Date();
     const sessionTitle = (title || 'مشاوره جدید HSE').slice(0, 200);
     const { userId, userUid, username } = this.resolveUserIdentity(user);
-
-    const summary: SessionSummary = {
-      id,
-      title: sessionTitle,
-      assistantId: assistantId || 'GENERAL_HSE',
-      createdAt: now.toISOString(),
-      updatedAt: now.toISOString(),
-      messageCount: 0,
-    };
 
     try {
       await db
@@ -278,65 +203,6 @@ export class AISessionService {
         })
         .onConflictDoNothing({ target: schema.aiChatSessions.id });
 
-      const rows = await db.select({
-        userId: schema.aiChatSessions.userId,
-        userUid: schema.aiChatSessions.userUid,
-        metadata: schema.aiChatSessions.metadata,
-        title: schema.aiChatSessions.title,
-        assistantId: schema.aiChatSessions.assistantId,
-        createdAt: schema.aiChatSessions.createdAt,
-        updatedAt: schema.aiChatSessions.updatedAt,
-      }).from(schema.aiChatSessions).where(eq(schema.aiChatSessions.id, id)).limit(1);
-      const row = rows[0];
-      if (!row || !this.matchesUser({
-        userId: row.userId,
-        userUid: row.userUid,
-        username: (row.metadata as any)?.username || null,
-      }, { userId, userUid, username })) {
-        throw new Error('شناسه گفت‌وگو قبلاً به کاربر دیگری تعلق دارد.');
-      }
-
-      const actualUsername = (row.metadata as any)?.username || username;
-      this.inMemorySessions.set(id, {
-        id,
-        userId: row.userId ?? null,
-        userUid: row.userUid ?? null,
-        username: actualUsername ?? null,
-        title: row.title,
-        assistantId: row.assistantId || 'GENERAL_HSE',
-        createdAt: row.createdAt?.toISOString?.() ?? String(row.createdAt),
-        updatedAt: row.updatedAt?.toISOString?.() ?? String(row.updatedAt),
-        messages: this.inMemorySessions.get(id)?.messages || [],
-      });
-      return {
-        ...summary,
-        title: row.title,
-        assistantId: row.assistantId || 'GENERAL_HSE',
-        createdAt: row.createdAt?.toISOString?.() ?? String(row.createdAt),
-        updatedAt: row.updatedAt?.toISOString?.() ?? String(row.updatedAt),
-      };
-    } catch (err: any) {
-      logger.error('[AISessionService] Database error creating session', { error: err?.message || err });
-      throw new Error(err?.message?.includes('تعلق') ? err.message : 'ایجاد گفت‌وگو در پایگاه داده انجام نشد؛ لطفاً اتصال پایگاه داده را بررسی کنید.');
-    }
-  }
-
-  /**
-   * Check session ownership status: 'owned' | 'forbidden' | 'not_found' (fail-closed).
-   */
-  private async checkSessionOwnership(
-    sessionId: string,
-    user: UserContext
-  ): Promise<'owned' | 'forbidden' | 'not_found'> {
-    await this.ensureSchema();
-    const identity = this.resolveUserIdentity(user);
-
-    const mem = this.inMemorySessions.get(sessionId);
-    if (mem) {
-      return this.matchesUser(mem, identity) ? 'owned' : 'forbidden';
-    }
-
-    try {
       const rows = await db
         .select({
           userId: schema.aiChatSessions.userId,
@@ -348,48 +214,82 @@ export class AISessionService {
           updatedAt: schema.aiChatSessions.updatedAt,
         })
         .from(schema.aiChatSessions)
+        .where(eq(schema.aiChatSessions.id, id))
+        .limit(1);
+
+      const row = rows[0];
+      if (
+        !row ||
+        !this.matchesUser(
+          {
+            userId: row.userId,
+            userUid: row.userUid,
+            username: (row.metadata as any)?.username || null,
+          },
+          { userId, userUid, username }
+        )
+      ) {
+        throw new Error('شناسه گفت‌وگو قبلاً به کاربر دیگری تعلق دارد.');
+      }
+
+      return {
+        id,
+        title: row.title,
+        assistantId: row.assistantId || 'GENERAL_HSE',
+        createdAt: row.createdAt?.toISOString?.() ?? String(row.createdAt),
+        updatedAt: row.updatedAt?.toISOString?.() ?? String(row.updatedAt),
+        messageCount: 0,
+      };
+    } catch (err: any) {
+      logger.error('[AISessionService] Database error creating session', { error: err?.message || err });
+      throw new Error(err?.message?.includes('تعلق') ? err.message : 'ایجاد گفت‌وگو در پایگاه داده انجام نشد؛ لطفاً اتصال پایگاه داده را بررسی کنید.');
+    }
+  }
+
+  /**
+   * Check session ownership status directly against PostgreSQL.
+   */
+  private async checkSessionOwnership(
+    sessionId: string,
+    user: UserContext
+  ): Promise<'owned' | 'forbidden' | 'not_found'> {
+    await this.ensureSchema();
+    const identity = this.resolveUserIdentity(user);
+
+    try {
+      const rows = await db
+        .select({
+          userId: schema.aiChatSessions.userId,
+          userUid: schema.aiChatSessions.userUid,
+          metadata: schema.aiChatSessions.metadata,
+        })
+        .from(schema.aiChatSessions)
         .where(eq(schema.aiChatSessions.id, sessionId))
         .limit(1);
 
-      if (rows.length > 0) {
-        const row = rows[0];
-        const rowUsername = (row.metadata as any)?.username || null;
-        if (this.matchesUser({ userId: row.userId, userUid: row.userUid, username: rowUsername }, identity)) {
-          this.inMemorySessions.set(sessionId, {
-            id: sessionId,
-            userId: row.userId ?? identity.userId,
-            userUid: row.userUid ?? identity.userUid,
-            username: rowUsername ?? identity.username,
-            title: row.title,
-            assistantId: row.assistantId || 'GENERAL_HSE',
-            createdAt: row.createdAt?.toISOString?.() ?? String(row.createdAt),
-            updatedAt: row.updatedAt?.toISOString?.() ?? String(row.updatedAt),
-            messages: [],
-          });
-          return 'owned';
-        }
-        return 'forbidden';
+      if (rows.length === 0) {
+        return 'not_found';
       }
+
+      const row = rows[0];
+      const rowUsername = (row.metadata as any)?.username || null;
+      return this.matchesUser({ userId: row.userId, userUid: row.userUid, username: rowUsername }, identity)
+        ? 'owned'
+        : 'forbidden';
     } catch (err: any) {
       logger.error('[AISessionService] Database error checking session ownership', { error: err?.message || err });
       throw new Error('بررسی مالکیت گفتگو در پایگاه داده ناموفق بود.');
     }
-
-    return 'not_found';
   }
 
   /**
-   * Get messages of a session (ownership-checked), merging DB and in-memory state so no reply is lost.
+   * Get messages of a session directly from PostgreSQL (ownership-checked).
    */
   async getMessages(sessionId: string, user: UserContext, limit = 200): Promise<SessionMessage[]> {
     const status = await this.checkSessionOwnership(sessionId, user);
     if (status !== 'owned') {
       throw new Error('دسترسی به این گفتگو مجاز نیست یا گفتگو یافت نشد.');
     }
-
-    const mem = this.inMemorySessions.get(sessionId);
-    const memMessages = mem?.messages || [];
-    const mergedById = new Map<string, SessionMessage>();
 
     try {
       const rows = await db
@@ -399,73 +299,25 @@ export class AISessionService {
         .orderBy(schema.aiChatMessages.createdAt)
         .limit(Math.min(Math.max(limit, 1), 500));
 
-      for (const r of rows) {
-        mergedById.set(r.id, {
-          id: r.id,
-          sessionId: r.sessionId,
-          role: r.role as 'user' | 'assistant' | 'system',
-          content: r.content,
-          toolsUsed: Array.isArray(r.toolsUsed) ? (r.toolsUsed as string[]) : undefined,
-          citations: Array.isArray(r.citations) ? (r.citations as string[]) : undefined,
-          durationMs: r.durationMs ?? undefined,
-          model: r.model ?? undefined,
-          createdAt: r.createdAt?.toISOString?.() ?? String(r.createdAt),
-        });
-      }
+      return rows.map((r) => ({
+        id: r.id,
+        sessionId: r.sessionId,
+        role: r.role as 'user' | 'assistant' | 'system',
+        content: r.content,
+        toolsUsed: Array.isArray(r.toolsUsed) ? (r.toolsUsed as string[]) : undefined,
+        citations: Array.isArray(r.citations) ? (r.citations as string[]) : undefined,
+        durationMs: r.durationMs ?? undefined,
+        model: r.model ?? undefined,
+        createdAt: r.createdAt?.toISOString?.() ?? String(r.createdAt),
+      }));
     } catch (err: any) {
       logger.error('[AISessionService] Database error fetching messages', { error: err?.message || err });
       throw new Error('خواندن پیام‌های گفتگو از پایگاه داده ناموفق بود.');
     }
-
-    // Merge any in-memory messages that might not have been flushed to DB yet
-    const unsyncedMessages: SessionMessage[] = [];
-    for (const m of memMessages) {
-      const existing = mergedById.get(m.id);
-      if (!existing || (m.content.length > existing.content.length)) {
-        mergedById.set(m.id, m);
-        if (!existing) unsyncedMessages.push(m);
-      }
-    }
-
-    // Best-effort background flush of any in-memory message that was missing in DB
-    if (unsyncedMessages.length > 0) {
-      void (async () => {
-        for (const m of unsyncedMessages) {
-          try {
-            await db
-              .insert(schema.aiChatMessages)
-              .values({
-                id: m.id,
-                sessionId,
-                role: m.role,
-                content: m.content,
-                toolsUsed: m.toolsUsed || null,
-                citations: m.citations || null,
-                durationMs: m.durationMs != null ? Math.round(Number(m.durationMs)) : null,
-                model: m.model ?? null,
-                createdAt: new Date(m.createdAt || Date.now()),
-              })
-              .onConflictDoNothing();
-          } catch {
-            // ignore background sync error
-          }
-        }
-      })();
-    }
-
-    const list = Array.from(mergedById.values()).sort(
-      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-    );
-
-    if (mem) {
-      mem.messages = list;
-    }
-
-    return list;
   }
 
   /**
-   * Append or update a message in a session (idempotent by message.id) and touch updatedAt.
+   * Append or update a message synchronously in PostgreSQL (zero RAM buffering).
    */
   async appendMessage(
     sessionId: string,
@@ -489,7 +341,6 @@ export class AISessionService {
       await this.createSession(user, 'گفت‌وگوی جدید', 'GENERAL_HSE', sessionId);
     }
 
-    const id = message.id && message.id.trim() ? message.id.trim() : randomUUID();
     const now = new Date();
     const requestedCreatedAt = message.createdAt ? new Date(message.createdAt) : now;
     const createdAt = Number.isNaN(requestedCreatedAt.getTime()) ? now : requestedCreatedAt;
@@ -498,70 +349,47 @@ export class AISessionService {
         ? Math.round(Number(message.durationMs))
         : undefined;
 
-    const newMsg: SessionMessage = {
-      id,
-      sessionId,
-      role: message.role,
-      content: message.content,
-      toolsUsed: Array.isArray(message.toolsUsed) && message.toolsUsed.length > 0 ? message.toolsUsed : undefined,
-      citations: Array.isArray(message.citations) && message.citations.length > 0 ? message.citations : undefined,
-      durationMs: safeDurationMs,
-      model: message.model,
-      createdAt: createdAt.toISOString(),
-    };
-
-    const mem = this.inMemorySessions.get(sessionId);
-    if (mem) {
-      const existingIdx = mem.messages.findIndex((m) => m.id === id);
-      if (existingIdx >= 0) {
-        newMsg.createdAt = mem.messages[existingIdx].createdAt || newMsg.createdAt;
-        mem.messages[existingIdx] = newMsg;
-      } else {
-        // Also deduplicate if the exact same role + content was appended within the last 3 seconds
-        const recentDupIdx = mem.messages.findIndex(
-          (m) =>
-            m.role === message.role &&
-            m.content === message.content &&
-            Math.abs(new Date(m.createdAt).getTime() - now.getTime()) < 3000
-        );
-        if (recentDupIdx >= 0) {
-          mem.messages[recentDupIdx] = { ...mem.messages[recentDupIdx], ...newMsg, id: mem.messages[recentDupIdx].id };
-          return mem.messages[recentDupIdx];
-        }
-        mem.messages.push(newMsg);
-      }
-      mem.updatedAt = now.toISOString();
-    }
-
     try {
-      const identity = this.resolveUserIdentity(user);
-      // Ensure parent session exists in PostgreSQL before inserting message
-      await db
-        .insert(schema.aiChatSessions)
-        .values({
-          id: sessionId,
-          userId: identity.userId,
-          userUid: identity.userUid,
-          title: mem?.title || 'گفت‌وگوی جدید',
-          assistantId: mem?.assistantId || 'GENERAL_HSE',
-          metadata: identity.username ? { username: identity.username } : {},
-          createdAt: mem?.createdAt ? new Date(mem.createdAt) : now,
-          updatedAt: now,
-        })
-        .onConflictDoUpdate({
-          target: schema.aiChatSessions.id,
-          set: { updatedAt: now },
-        });
+      // Check DB-level recent duplicate within last 3 seconds when caller omitted explicit id
+      let targetId = message.id && message.id.trim() ? message.id.trim() : '';
+      if (!targetId) {
+        const recentThreshold = new Date(now.getTime() - 3000);
+        const recent = await db
+          .select({ id: schema.aiChatMessages.id, createdAt: schema.aiChatMessages.createdAt })
+          .from(schema.aiChatMessages)
+          .where(
+            and(
+              eq(schema.aiChatMessages.sessionId, sessionId),
+              eq(schema.aiChatMessages.role, message.role),
+              eq(schema.aiChatMessages.content, message.content),
+              sql`${schema.aiChatMessages.createdAt} >= ${recentThreshold}`
+            )
+          )
+          .limit(1);
+        if (recent[0]) {
+          targetId = recent[0].id;
+        } else {
+          targetId = randomUUID();
+        }
+      }
+
+      const toolsUsed = Array.isArray(message.toolsUsed) && message.toolsUsed.length > 0 ? message.toolsUsed : null;
+      const citations = Array.isArray(message.citations) && message.citations.length > 0 ? message.citations : null;
 
       await db
+        .update(schema.aiChatSessions)
+        .set({ updatedAt: now })
+        .where(eq(schema.aiChatSessions.id, sessionId));
+
+      const [savedMsg] = await db
         .insert(schema.aiChatMessages)
         .values({
-          id,
+          id: targetId,
           sessionId,
           role: message.role,
           content: message.content,
-          toolsUsed: newMsg.toolsUsed || null,
-          citations: newMsg.citations || null,
+          toolsUsed,
+          citations,
           durationMs: safeDurationMs ?? null,
           model: message.model ?? null,
           createdAt,
@@ -570,12 +398,13 @@ export class AISessionService {
           target: schema.aiChatMessages.id,
           set: {
             content: message.content,
-            toolsUsed: newMsg.toolsUsed || null,
-            citations: newMsg.citations || null,
+            toolsUsed,
+            citations,
             durationMs: safeDurationMs ?? null,
             model: message.model ?? null,
           },
-        });
+        })
+        .returning();
 
       // Auto-title from first user message if still default
       if (message.role === 'user' && message.content.trim()) {
@@ -598,19 +427,27 @@ export class AISessionService {
               .update(schema.aiChatSessions)
               .set({ title: autoTitle, updatedAt: now })
               .where(eq(schema.aiChatSessions.id, sessionId));
-            if (mem) mem.title = autoTitle;
           }
         } catch (e) {
           logger.warn('AI session auto-title failed', e);
         }
       }
+
+      return {
+        id: savedMsg.id,
+        sessionId: savedMsg.sessionId,
+        role: savedMsg.role as 'user' | 'assistant' | 'system',
+        content: savedMsg.content,
+        toolsUsed: Array.isArray(savedMsg.toolsUsed) ? (savedMsg.toolsUsed as string[]) : undefined,
+        citations: Array.isArray(savedMsg.citations) ? (savedMsg.citations as string[]) : undefined,
+        durationMs: savedMsg.durationMs ?? undefined,
+        model: savedMsg.model ?? undefined,
+        createdAt: savedMsg.createdAt?.toISOString?.() ?? now.toISOString(),
+      };
     } catch (err: any) {
-      if (mem) mem.messages = mem.messages.filter(item => item.id !== id);
       logger.error('[AISessionService] Database error appending message', { error: err?.message || err });
       throw new Error('ذخیره پیام در پایگاه داده ناموفق بود؛ پیام به‌عنوان ذخیره‌شده تأیید نمی‌شود.');
     }
-
-    return newMsg;
   }
 
   /**
@@ -623,7 +460,6 @@ export class AISessionService {
     }
     try {
       await db.delete(schema.aiChatSessions).where(eq(schema.aiChatSessions.id, sessionId));
-      this.inMemorySessions.delete(sessionId);
     } catch (err: any) {
       logger.error('[AISessionService] Database error deleting session', { error: err?.message || err });
       throw new Error('حذف گفتگو در پایگاه داده ناموفق بود؛ سابقه موجود حفظ شد.');
@@ -631,8 +467,7 @@ export class AISessionService {
   }
 
   /**
-   * Optional one-time migration helper: import sessions from a client payload.
-   * Only imports into the current user's account.
+   * Import legacy sessions directly into PostgreSQL under current user's account.
    */
   async importLocalSessions(
     user: UserContext,
@@ -654,8 +489,8 @@ export class AISessionService {
   ): Promise<{ imported: number }> {
     if (!Array.isArray(payload) || payload.length === 0) return { imported: 0 };
     const batch = payload.slice(0, 30);
-    if (batch.some(item => !item?.id || !String(item.id).trim())) {
-      throw new Error('انتقال تاریخچه به شناسه پایدار برای هر گفتگو نیاز دارد؛ نسخه محلی حفظ شد.');
+    if (batch.some((item) => !item?.id || !String(item.id).trim())) {
+      throw new Error('انتقال تاریخچه به شناسه پایدار برای هر گفتگو نیاز دارد.');
     }
     let imported = 0;
     for (const item of batch) {

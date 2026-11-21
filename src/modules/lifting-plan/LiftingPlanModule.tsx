@@ -156,6 +156,27 @@ export default function LiftingPlanModule({ currentUser: _currentUser }: Props) 
 
   useEffect(() => {
     loadAll();
+
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    const handleRemoteUpdate = (e?: any) => {
+      const entity = String(e?.detail?.entityType || e?.detail?.entity || '').toLowerCase();
+      if (!entity || entity.includes('lifting') || entity.includes('crane') || entity.includes('rigging')) {
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          void loadAll();
+        }, 250);
+      }
+    };
+
+    window.addEventListener('hse_lifting_updated', handleRemoteUpdate);
+    window.addEventListener('hse_data_mutated', handleRemoteUpdate);
+    window.addEventListener('app_data_mutated', handleRemoteUpdate);
+    return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      window.removeEventListener('hse_lifting_updated', handleRemoteUpdate);
+      window.removeEventListener('hse_data_mutated', handleRemoteUpdate);
+      window.removeEventListener('app_data_mutated', handleRemoteUpdate);
+    };
   }, [loadAll]);
 
   const selectedPlan = useMemo(

@@ -32,6 +32,7 @@ import { Department } from '../types';
 import { getOrgUnitsStructure, saveOrgUnitsStructure, OrgUnitsDataMap } from '../utils/orgHelper';
 
 import { apiDb } from '../services/apiDatabaseClient';
+import { toast } from 'react-hot-toast';
 
 interface OrgStructureManagerProps {
   isFa: boolean;
@@ -244,7 +245,7 @@ export default function OrgStructureManager({ isFa, currentUser, onUpdate, onOpe
   const handleSubmitForm = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.name.trim()) {
-      alert(isFa ? 'لطفاً نام ساختار سازمانی را وارد نمایید.' : 'Please enter organization name.');
+      toast.error(isFa ? 'لطفاً نام ساختار سازمانی را وارد نمایید.' : 'Please enter organization name.');
       return;
     }
 

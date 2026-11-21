@@ -9,6 +9,7 @@ import {
 import { auditService } from '../audit/audit.service.ts';
 import { broadcastDataMutation } from '../../core/socket.ts';
 import { logger } from '../../core/logger.ts';
+import { assertVersionMatch, extractExpectedVersion, extractExpectedUpdatedAt, sendConflictIfApplicable } from '../../core/occ.ts';
 import { liftingService, type WorkflowStageKey } from './lifting.service.ts';
 import { runIndependentBenchmarkSuite } from '../../../shared/lifting-engine/validationSuite.ts';
 
@@ -202,6 +203,7 @@ router.put('/standards/:code', requireAuth, async (req: Request, res: Response) 
       return res.status(404).json({ success: false, error: 'استاندارد موردنظر یافت نشد.' });
     }
     const body = req.body || {};
+    assertVersionMatch(existing, extractExpectedVersion(body), extractExpectedUpdatedAt(body));
     const [updated] = await db
       .update(schema.liftingStandardsConfig)
       .set({
@@ -217,10 +219,11 @@ router.put('/standards/:code', requireAuth, async (req: Request, res: Response) 
       .returning();
 
     await logAudit(req, 'UPDATE', 'STANDARD_CONFIG', code, existing, updated);
-    broadcastDataMutation('lifting', 'update_standard', updated);
+    broadcastDataMutation('lifting', 'update_standard', updated, { module: 'LIFTING', recordId: code, actorId: req.user?.uid });
     return res.json({ success: true, data: updated });
   } catch (err: any) {
-    return res.status(500).json({ success: false, error: err?.message || 'خطا در به‌روزرسانی استاندارد' });
+    if (sendConflictIfApplicable(res, err)) return;
+    return res.status(err?.statusCode || 500).json({ success: false, error: err?.message || 'خطا در به‌روزرسانی استاندارد' });
   }
 });
 
@@ -318,6 +321,7 @@ router.put('/cranes/:id', requireAuth, async (req: Request, res: Response) => {
     const [existing] = await db.select().from(schema.liftingCranes).where(eq(schema.liftingCranes.id, id));
     if (!existing || existing.isDeleted) return res.status(404).json({ success: false, error: 'جرثقیل یافت نشد.' });
     const b = req.body || {};
+    assertVersionMatch(existing, extractExpectedVersion(b), extractExpectedUpdatedAt(b));
     const [updated] = await db
       .update(schema.liftingCranes)
       .set({
@@ -348,6 +352,7 @@ router.put('/cranes/:id', requireAuth, async (req: Request, res: Response) => {
         nextInspectionDate: b.nextInspectionDate !== undefined ? b.nextInspectionDate : existing.nextInspectionDate,
         status: b.status ?? existing.status,
         notes: b.notes !== undefined ? b.notes : existing.notes,
+        version: Number(existing.version ?? 1) + 1,
         updatedBy: actorLabel(req),
         updatedAt: new Date(),
       })
@@ -355,10 +360,11 @@ router.put('/cranes/:id', requireAuth, async (req: Request, res: Response) => {
       .returning();
 
     await logAudit(req, 'UPDATE', 'LIFTING_CRANE', id, existing, updated);
-    broadcastDataMutation('lifting', 'update_crane', updated);
+    broadcastDataMutation('lifting', 'update_crane', updated, { module: 'LIFTING', recordId: id, actorId: req.user?.uid, version: updated.version });
     return res.json({ success: true, data: updated });
   } catch (err: any) {
-    return res.status(500).json({ success: false, error: err?.message || 'خطا در ویرایش جرثقیل' });
+    if (sendConflictIfApplicable(res, err)) return;
+    return res.status(err?.statusCode || 500).json({ success: false, error: err?.message || 'خطا در ویرایش جرثقیل' });
   }
 });
 
@@ -503,6 +509,7 @@ router.put('/rigging/:id', requireAuth, async (req: Request, res: Response) => {
     const [existing] = await db.select().from(schema.liftingRiggingEquipment).where(eq(schema.liftingRiggingEquipment.id, id));
     if (!existing || existing.isDeleted) return res.status(404).json({ success: false, error: 'تجهیز یافت نشد.' });
     const b = req.body || {};
+    assertVersionMatch(existing, extractExpectedVersion(b), extractExpectedUpdatedAt(b));
     const [updated] = await db
       .update(schema.liftingRiggingEquipment)
       .set({
@@ -528,6 +535,7 @@ router.put('/rigging/:id', requireAuth, async (req: Request, res: Response) => {
         safetyLatchOk: b.safetyLatchOk !== undefined ? Boolean(b.safetyLatchOk) : existing.safetyLatchOk,
         conditionStatus: b.conditionStatus ?? existing.conditionStatus,
         notes: b.notes !== undefined ? b.notes : existing.notes,
+        version: Number(existing.version ?? 1) + 1,
         updatedBy: actorLabel(req),
         updatedAt: new Date(),
       })
@@ -535,10 +543,11 @@ router.put('/rigging/:id', requireAuth, async (req: Request, res: Response) => {
       .returning();
 
     await logAudit(req, 'UPDATE', 'RIGGING_EQUIPMENT', id, existing, updated);
-    broadcastDataMutation('lifting', 'update_rigging', updated);
+    broadcastDataMutation('lifting', 'update_rigging', updated, { module: 'LIFTING', recordId: id, actorId: req.user?.uid, version: updated.version });
     return res.json({ success: true, data: updated });
   } catch (err: any) {
-    return res.status(500).json({ success: false, error: err?.message || 'خطا در ویرایش تجهیز' });
+    if (sendConflictIfApplicable(res, err)) return;
+    return res.status(err?.statusCode || 500).json({ success: false, error: err?.message || 'خطا در ویرایش تجهیز' });
   }
 });
 
@@ -596,10 +605,11 @@ router.put('/plans/:id', requireAuth, async (req: Request, res: Response) => {
       revisionNumber: plan.revisionNumber,
       revisionBumped,
     });
-    broadcastDataMutation('lifting', 'update_plan', plan);
+    broadcastDataMutation('lifting', 'update_plan', plan, { module: 'LIFTING', recordId: id, actorId: req.user?.uid, version: (plan as any)?.version });
     return res.json({ success: true, data: plan, revisionBumped });
   } catch (err: any) {
-    return res.status(500).json({ success: false, error: err?.message || 'خطا در ویرایش طرح باربرداری' });
+    if (sendConflictIfApplicable(res, err)) return;
+    return res.status(err?.statusCode || 500).json({ success: false, error: err?.message || 'خطا در ویرایش طرح باربرداری' });
   }
 });
 
@@ -691,10 +701,11 @@ router.put('/plans/:id/governance', requireAuth, async (req: Request, res: Respo
       hasHse: Boolean(req.body?.hseChecklist),
       hasField: Boolean(req.body?.fieldConditionsVerification),
     });
-    broadcastDataMutation('lifting', 'update_governance', updated);
+    broadcastDataMutation('lifting', 'update_governance', updated, { module: 'LIFTING', recordId: id, actorId: req.user?.uid, version: (updated as any)?.version });
     return res.json({ success: true, data: updated });
   } catch (err: any) {
-    return res.status(400).json({ success: false, error: err?.message || 'خطا در ثبت چک‌لیست‌های کنترلی طرح' });
+    if (sendConflictIfApplicable(res, err)) return;
+    return res.status(err?.statusCode || 400).json({ success: false, error: err?.message || 'خطا در ثبت چک‌لیست‌های کنترلی طرح' });
   }
 });
 

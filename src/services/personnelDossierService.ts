@@ -18,6 +18,7 @@ import { safetyDeptService } from '../modules/safety-dept/services/safetyDeptSer
 import { getPtwAudits } from '../modules/ptw-audit/services/ptwAuditService';
 import { addAuditLog } from '../utils/authHelper';
 import { apiDb } from './apiDatabaseClient';
+import { toast } from 'react-hot-toast';
 
 const STORAGE_KEYS = {
   RESTRICTIONS: 'hse_personnel_restrictions_v1',
@@ -47,7 +48,10 @@ class PersonnelDossierService {
 
   private setStored<T>(key: string, value: T): void {
     dossierMemoryStore.set(key, value);
-    apiDb.saveSetting(key, value, `Personnel Dossier Data: ${key}`).catch(console.error);
+    apiDb.saveSetting(key, value, `Personnel Dossier Data: ${key}`).catch((err) => {
+      console.error('Failed to save dossier record:', err);
+      toast.error('خطا در ذخیره‌سازی اطلاعات پرونده پرسنل در پایگاه داده');
+    });
   }
 
   /**

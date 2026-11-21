@@ -135,19 +135,10 @@ let activeSessionId: string = '';
 
 export function getActiveSessionId(): string {
   if (activeSessionId) return activeSessionId;
-  try {
-    if (typeof window !== 'undefined') {
-      const existing = sessionStorage.getItem('hse_audit_session_id');
-      if (existing) {
-        activeSessionId = existing;
-        return existing;
-      }
-      activeSessionId = `SES-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
-      sessionStorage.setItem('hse_audit_session_id', activeSessionId);
-      return activeSessionId;
-    }
-  } catch {}
-  activeSessionId = `SES-${Date.now().toString(36).toUpperCase()}`;
+  const rand = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID().slice(0, 8).toUpperCase()
+    : Math.random().toString(36).substring(2, 8).toUpperCase();
+  activeSessionId = `SES-${Date.now().toString(36).toUpperCase()}-${rand}`;
   return activeSessionId;
 }
 

@@ -274,14 +274,12 @@ export default function ApiManagementTab({ isFa, currentUser, initialSubSection 
 
         if (dbConfig && typeof dbConfig === 'object') {
           applyConfig(dbConfig);
-          try { localStorage.removeItem('hse_integration_config'); } catch {}
         }
 
         await loadWebhookConfigAndLogs();
 
         if (Array.isArray(dbTokens)) {
           setApiTokens(dbTokens);
-          try { localStorage.removeItem('hse_system_api_tokens'); } catch {}
         } else {
           setApiTokens([]);
         }
@@ -384,9 +382,6 @@ export default function ApiManagementTab({ isFa, currentUser, initialSubSection 
       webhookOnWarning, webhookOnHeat, webhookOnPermit, webhookOnIncident,
       rateLimitPerMinute, corsAllowedOrigins, enableIpFilter, ipWhitelist
     };
-    try {
-      localStorage.removeItem('hse_integration_config');
-    } catch {}
 
     try {
       const res = await fetch('/api/v1/webhooks/config', {
@@ -627,7 +622,6 @@ export default function ApiManagementTab({ isFa, currentUser, initialSubSection 
     };
     const updated = [created, ...apiTokens];
     setApiTokens(updated);
-    try { localStorage.removeItem('hse_system_api_tokens'); } catch {}
     await apiDb.saveSetting('hse_system_api_tokens', updated, 'System API Access Tokens');
     addAuditLog(currentUser.username, `ایجاد توکن دسترسی جدید: ${created.name}`, 'موفقیت‌آمیز');
     setNewTokenName('');
@@ -643,7 +637,6 @@ export default function ApiManagementTab({ isFa, currentUser, initialSubSection 
     setPendingRevokeTokenId(null);
     const filtered = apiTokens.filter(t => t.id !== id);
     setApiTokens(filtered);
-    try { localStorage.removeItem('hse_system_api_tokens'); } catch {}
     await apiDb.saveSetting('hse_system_api_tokens', filtered, 'System API Access Tokens');
     addAuditLog(currentUser.username, `ابطال توکن دسترسی: ${name}`, 'موفقیت‌آمیز');
   };

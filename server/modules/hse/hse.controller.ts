@@ -2,6 +2,8 @@ import { Request, Response } from 'express';
 import { hseService } from './hse.service.ts';
 import { ApiResponse } from '../../core/response.ts';
 import { personnelAccessService } from '../../core/personnelAccess.service.ts';
+import { broadcastDataMutation } from '../../core/socket.ts';
+import { invalidateDashboardCache } from '../../routes/dashboard.router.ts';
 
 export class HSEController {
   // 5S
@@ -12,6 +14,8 @@ export class HSEController {
 
   async createFiveS(req: Request, res: Response) {
     const created = await hseService.createFiveSAudit(req.body, req.user?.name);
+    invalidateDashboardCache();
+    broadcastDataMutation('fiveSAudits', 'create', created, { module: '5S', recordId: created?.id, actorId: req.user?.uid, version: (created as any)?.version });
     return ApiResponse.success(res, created, undefined, 201);
   }
 
@@ -23,6 +27,8 @@ export class HSEController {
 
   async upsertFireEquipment(req: Request, res: Response) {
     const result = await hseService.upsertFireEquipment(req.body, req.user?.name);
+    invalidateDashboardCache();
+    broadcastDataMutation('fireEquipment', 'upsert', result, { module: 'FIRE_EQUIPMENT', recordId: (result as any)?.id, actorId: req.user?.uid, version: (result as any)?.version });
     return ApiResponse.success(res, result);
   }
 
@@ -40,16 +46,22 @@ export class HSEController {
       personnelAccessService.assertCanAccessRecordOrPersonnel(ctx, req.body);
     }
     const created = await hseService.createSafetyWarning(req.body, req.user?.name);
+    invalidateDashboardCache();
+    broadcastDataMutation('warnings', 'create', created, { module: 'WARNINGS', recordId: (created as any)?.id, actorId: req.user?.uid, version: (created as any)?.version });
     return ApiResponse.success(res, created, undefined, 201);
   }
 
   async deduplicateWarnings(req: Request, res: Response) {
     const result = await hseService.deduplicateWarnings();
+    invalidateDashboardCache();
+    broadcastDataMutation('warnings', 'deduplicate', result, { module: 'WARNINGS', actorId: req.user?.uid });
     return ApiResponse.success(res, result);
   }
 
   async clearAllWarnings(req: Request, res: Response) {
     const result = await hseService.clearAllWarnings();
+    invalidateDashboardCache();
+    broadcastDataMutation('warnings', 'clearAll', result, { module: 'WARNINGS', actorId: req.user?.uid });
     return ApiResponse.success(res, result);
   }
 
@@ -61,6 +73,8 @@ export class HSEController {
 
   async upsertTrir(req: Request, res: Response) {
     const result = await hseService.upsertTrirRecord(req.body);
+    invalidateDashboardCache();
+    broadcastDataMutation('trirRecords', 'upsert', result, { module: 'TRIR', recordId: (result as any)?.id, actorId: req.user?.uid, version: (result as any)?.version });
     return ApiResponse.success(res, result);
   }
 
@@ -68,11 +82,15 @@ export class HSEController {
     const year = req.query.year ? parseInt(req.query.year as string, 10) : undefined;
     const month = req.query.month ? String(req.query.month) : undefined;
     const result = await hseService.deleteTrirRecord(req.params.id, year, month);
+    invalidateDashboardCache();
+    broadcastDataMutation('trirRecords', 'delete', { id: req.params.id, year, month }, { module: 'TRIR', recordId: req.params.id, actorId: req.user?.uid });
     return ApiResponse.success(res, result);
   }
 
   async clearAllTrir(req: Request, res: Response) {
     const result = await hseService.clearAllTrirRecords();
+    invalidateDashboardCache();
+    broadcastDataMutation('trirRecords', 'clear_all', result, { module: 'TRIR', actorId: req.user?.uid });
     return ApiResponse.success(res, result);
   }
 
@@ -85,6 +103,11 @@ export class HSEController {
   async updateSetting(req: Request, res: Response) {
     const { key, value, description } = req.body;
     await hseService.setSystemSetting(key, value, description);
+    invalidateDashboardCache();
+    broadcastDataMutation('settings', 'update', { key, value }, { module: 'SETTINGS', recordId: key, actorId: req.user?.uid });
+    if (key && key !== 'settings') {
+      broadcastDataMutation(key, 'update', value, { module: key, recordId: key, actorId: req.user?.uid });
+    }
     return ApiResponse.success(res, { success: true, message: 'تنظیمات با موفقیت ذخیره شد.' });
   }
 

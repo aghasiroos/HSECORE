@@ -217,93 +217,23 @@ export function detectClientDeviceInfo(): {
   };
 }
 
-const PREFS_STORAGE_KEY = 'hse_notification_preferences_v1';
-const LOCKSCREEN_CONFIRMED_KEY = 'hse_lockscreen_siren_confirmed_v1';
-
-function loadCachedPrefsFromStorage(): NotificationPreferences {
-  if (typeof window === 'undefined') return { ...DEFAULT_PREFERENCES };
-  try {
-    const confirmedFlag = localStorage.getItem(LOCKSCREEN_CONFIRMED_KEY) === 'true';
-    const raw = localStorage.getItem(PREFS_STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === 'object') {
-        if (parsed.criticalHseCustomAudioUrl?.startsWith('data:')) {
-          parsed.criticalHseCustomAudioUrl = '/api/v1/notifications/custom-siren';
-        }
-        const isConfirmed = Boolean(confirmedFlag || parsed.lockScreenSirenConfirmed);
-        if (isConfirmed) {
-          localStorage.setItem(LOCKSCREEN_CONFIRMED_KEY, 'true');
-        }
-        return {
-          ...DEFAULT_PREFERENCES,
-          ...parsed,
-          lockScreenSirenConfirmed: isConfirmed,
-          enabledCategories: {
-            ...DEFAULT_PREFERENCES.enabledCategories,
-            ...(parsed.enabledCategories || {}),
-          },
-        };
-      }
-    }
-    if (confirmedFlag) {
-      return { ...DEFAULT_PREFERENCES, lockScreenSirenConfirmed: true };
-    }
-  } catch {}
-  return { ...DEFAULT_PREFERENCES };
-}
-
-function saveCachedPrefsToStorage(prefs: NotificationPreferences): void {
-  if (typeof window === 'undefined') return;
-  try {
-    const toSave = { ...prefs };
-    if (toSave.criticalHseCustomAudioUrl?.startsWith('data:')) {
-      toSave.criticalHseCustomAudioUrl = '/api/v1/notifications/custom-siren';
-    }
-    if (toSave.lockScreenSirenConfirmed) {
-      localStorage.setItem(LOCKSCREEN_CONFIRMED_KEY, 'true');
-    }
-    localStorage.setItem(PREFS_STORAGE_KEY, JSON.stringify(toSave));
-  } catch {}
-}
-
-const GUEST_ACK_KEY = 'hse_public_acknowledged_alerts';
-const GUEST_SESSION_KEY = 'hse_guest_session_id';
+let inMemoryGuestSessionId: string | null = null;
+const inMemoryPublicAcknowledgedIds = new Set<string>();
+const inMemoryConfirmedLockScreenUsers = new Set<string>();
 
 export function getOrInitGuestSessionId(): string {
-  if (typeof window === 'undefined') return 'guest_session';
-  try {
-    let sid = sessionStorage.getItem(GUEST_SESSION_KEY) || localStorage.getItem(GUEST_SESSION_KEY);
-    if (!sid) {
-      sid = 'sid_' + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
-      sessionStorage.setItem(GUEST_SESSION_KEY, sid);
-      localStorage.setItem(GUEST_SESSION_KEY, sid);
-    }
-    return sid;
-  } catch {
-    return 'guest_session';
+  if (!inMemoryGuestSessionId) {
+    inMemoryGuestSessionId = 'sid_' + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
   }
+  return inMemoryGuestSessionId;
 }
 
 export function getPublicAcknowledgedAlertIds(): Set<string> {
-  if (typeof window === 'undefined') return new Set();
-  try {
-    const raw = localStorage.getItem(GUEST_ACK_KEY);
-    if (raw) {
-      const arr = JSON.parse(raw);
-      if (Array.isArray(arr)) return new Set(arr);
-    }
-  } catch {}
-  return new Set();
+  return new Set(inMemoryPublicAcknowledgedIds);
 }
 
 export function markPublicAlertAcknowledgedLocally(notifId: string): void {
-  if (typeof window === 'undefined') return;
-  try {
-    const set = getPublicAcknowledgedAlertIds();
-    set.add(String(notifId));
-    localStorage.setItem(GUEST_ACK_KEY, JSON.stringify(Array.from(set)));
-  } catch {}
+  inMemoryPublicAcknowledgedIds.add(String(notifId));
 }
 
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
@@ -317,24 +247,20 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array {
   return outputArray;
 }
 
-// Cached preferences in-memory with localStorage + database persistence
-let cachedPreferences: NotificationPreferences = loadCachedPrefsFromStorage();
+// Cached preferences synced strictly from PostgreSQL /api/v1/notifications/preferences
+let cachedPreferences: NotificationPreferences = { ...DEFAULT_PREFERENCES };
 
 export const CentralNotificationService = {
   /**
-   * Check whether the user has already confirmed lock-screen & siren readiness on this device/account
+   * Check whether the user has already confirmed lock-screen & siren readiness on this account
    */
   isLockScreenSirenConfirmed(userId?: string | null): boolean {
-    if (typeof window === 'undefined') return true;
-    try {
-      if (localStorage.getItem(LOCKSCREEN_CONFIRMED_KEY) === 'true') return true;
-      if (userId && localStorage.getItem(`${LOCKSCREEN_CONFIRMED_KEY}_${userId}`) === 'true') return true;
-    } catch {}
+    if (userId && inMemoryConfirmedLockScreenUsers.has(String(userId))) return true;
     return Boolean(cachedPreferences.lockScreenSirenConfirmed);
   },
 
   /**
-   * Mark lock-screen & siren readiness as permanently confirmed so it is never requested again on page refresh
+   * Mark lock-screen & siren readiness as confirmed and persist strictly in PostgreSQL
    */
   async confirmLockScreenSiren(
     userOrId?: {
@@ -353,82 +279,55 @@ export const CentralNotificationService = {
     }
   ): Promise<void> {
     const uid = typeof userOrId === 'string' ? userOrId : userOrId?.id || userOrId?.username;
-    if (typeof window !== 'undefined') {
-      try {
-        localStorage.setItem(LOCKSCREEN_CONFIRMED_KEY, 'true');
-        if (uid) {
-          localStorage.setItem(`${LOCKSCREEN_CONFIRMED_KEY}_${uid}`, 'true');
-        }
-      } catch {}
+    if (uid) {
+      inMemoryConfirmedLockScreenUsers.add(String(uid));
     }
-    cachedPreferences = {
+    const nextPrefs: NotificationPreferences = {
       ...cachedPreferences,
       lockScreenSirenConfirmed: true,
     };
-    saveCachedPrefsToStorage(cachedPreferences);
-    try {
-      await this.subscribeToWebPush(userOrId, usernameArg, deviceMeta);
-    } catch {}
-    try {
-      await apiDb.saveNotificationPreferences(cachedPreferences);
-    } catch {}
+    await this.subscribeToWebPush(userOrId, usernameArg, deviceMeta);
+    await apiDb.saveNotificationPreferences(nextPrefs);
+    cachedPreferences = nextPrefs;
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('hse_notif_preferences_updated', { detail: cachedPreferences }));
     }
   },
 
   /**
-   * Initialize and synchronize preferences from database
+   * Initialize and synchronize preferences from PostgreSQL database
    */
   async loadPreferences(userId?: string | null): Promise<NotificationPreferences> {
-    const localStored = loadCachedPrefsFromStorage();
-    cachedPreferences = localStored;
     try {
       const data = await apiDb.getNotificationPreferences();
       if (data && typeof data === 'object') {
-        const rawCustomUrl = data.criticalHseCustomAudioUrl || localStored.criticalHseCustomAudioUrl;
+        const rawCustomUrl = data.criticalHseCustomAudioUrl;
         const sanitizedCustomUrl = rawCustomUrl?.startsWith('data:')
           ? '/api/v1/notifications/custom-siren'
           : rawCustomUrl;
 
-        const hasServerCustom = Boolean(data.criticalHseCustomAudioUrl);
-        const hasLocalCustom = Boolean(localStored.criticalHseCustomAudioUrl);
-        const userLocalFlag =
-          typeof window !== 'undefined' && userId
-            ? localStorage.getItem(`${LOCKSCREEN_CONFIRMED_KEY}_${userId}`) === 'true'
-            : false;
         const isConfirmed = Boolean(
-          localStored.lockScreenSirenConfirmed || data.lockScreenSirenConfirmed || userLocalFlag
+          data.lockScreenSirenConfirmed || (userId && inMemoryConfirmedLockScreenUsers.has(String(userId)))
         );
-        if (isConfirmed && typeof window !== 'undefined') {
-          try {
-            localStorage.setItem(LOCKSCREEN_CONFIRMED_KEY, 'true');
-            if (userId) localStorage.setItem(`${LOCKSCREEN_CONFIRMED_KEY}_${userId}`, 'true');
-          } catch {}
+        if (isConfirmed && userId) {
+          inMemoryConfirmedLockScreenUsers.add(String(userId));
         }
         cachedPreferences = {
           ...DEFAULT_PREFERENCES,
-          ...localStored,
           ...data,
           lockScreenSirenConfirmed: isConfirmed,
-          criticalHseAudioMode: hasServerCustom
-            ? data.criticalHseAudioMode
-            : hasLocalCustom
-            ? localStored.criticalHseAudioMode
-            : data.criticalHseAudioMode || 'default_synth',
+          criticalHseAudioMode: data.criticalHseCustomAudioUrl
+            ? (data.criticalHseAudioMode || 'custom_mp3')
+            : (data.criticalHseAudioMode || 'default_synth'),
           criticalHseCustomAudioUrl: sanitizedCustomUrl,
-          criticalHseCustomAudioName: data.criticalHseCustomAudioName || localStored.criticalHseCustomAudioName,
-          criticalHseCustomAudioSize: data.criticalHseCustomAudioSize || localStored.criticalHseCustomAudioSize,
           enabledCategories: {
             ...DEFAULT_PREFERENCES.enabledCategories,
-            ...(localStored.enabledCategories || {}),
             ...(data.enabledCategories || {}),
           },
         };
-        saveCachedPrefsToStorage(cachedPreferences);
       }
     } catch {
-      // Keep local/cached preferences
+      // Keep default/in-memory preferences when unauthenticated or unreachable
     }
     return cachedPreferences;
   },
@@ -438,7 +337,7 @@ export const CentralNotificationService = {
   },
 
   async updatePreferences(prefs: Partial<NotificationPreferences>): Promise<NotificationPreferences> {
-    cachedPreferences = {
+    const nextPrefs: NotificationPreferences = {
       ...cachedPreferences,
       ...prefs,
       enabledCategories: {
@@ -446,12 +345,8 @@ export const CentralNotificationService = {
         ...(prefs.enabledCategories || {}),
       },
     };
-    saveCachedPrefsToStorage(cachedPreferences);
-    try {
-      await apiDb.saveNotificationPreferences(cachedPreferences);
-    } catch (e) {
-      console.error('Failed to save preferences to server:', e);
-    }
+    await apiDb.saveNotificationPreferences(nextPrefs);
+    cachedPreferences = nextPrefs;
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('hse_notif_preferences_updated', { detail: cachedPreferences }));
     }
@@ -787,29 +682,23 @@ export const CentralNotificationService = {
       },
     };
 
-    try {
-      const saved = await apiDb.saveNotification(payload);
-      const finalNotif: AppNotification = {
-        ...(saved || payload),
-        notifId: String((saved as any)?.notifId || (saved as any)?.id || `notif-${Date.now()}`),
-        createdAt: (saved as any)?.createdAt || new Date().toISOString(),
-        viewedBy: (saved as any)?.viewedBy || (saved as any)?.metadata?.viewedBy || [],
-        deliveryReport: (saved as any)?.deliveryReport || (saved as any)?.metadata?.deliveryReport,
-        metadata: {
-          ...((saved as any)?.metadata || payload.metadata || {}),
-          playSound: options.playSound ?? true,
-        },
-      };
+    const saved = await apiDb.saveNotification(payload);
+    const finalNotif: AppNotification = {
+      ...(saved || payload),
+      notifId: String((saved as any)?.notifId || (saved as any)?.id || `notif-${Date.now()}`),
+      createdAt: (saved as any)?.createdAt || new Date().toISOString(),
+      viewedBy: (saved as any)?.viewedBy || (saved as any)?.metadata?.viewedBy || [],
+      deliveryReport: (saved as any)?.deliveryReport || (saved as any)?.metadata?.deliveryReport,
+      metadata: {
+        ...((saved as any)?.metadata || payload.metadata || {}),
+        playSound: options.playSound ?? true,
+      },
+    };
 
-      // Route through the unified deduplicated processor in NotificationContext
-      window.dispatchEvent(new CustomEvent('hse_local_notification_dispatched', { detail: finalNotif }));
-      window.dispatchEvent(new CustomEvent('hse_notifications_updated'));
+    window.dispatchEvent(new CustomEvent('hse_local_notification_dispatched', { detail: finalNotif }));
+    window.dispatchEvent(new CustomEvent('hse_notifications_updated'));
 
-      return finalNotif;
-    } catch (e) {
-      console.error('Failed to dispatch notification:', e);
-      return null;
-    }
+    return finalNotif;
   },
 
   /**

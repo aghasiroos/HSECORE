@@ -29,6 +29,7 @@ import {
   DEFAULT_DASHBOARD_CHARTS
 } from '../chartConfigStorage';
 import { printService } from '../../../../../services/printService';
+import { showConfirmDialog } from '../../../../../components/common/ConfirmDialogModal';
 
 interface Props {
   joinedRecords: any[];
@@ -52,8 +53,18 @@ export const DashboardTab: React.FC<Props> = ({
   // 1. Common Shared Dashboard Filters State
   const [filters, setFilters] = useState<DashboardFilterState>(INITIAL_DASHBOARD_FILTERS);
 
-  // 2. User Charts Layout & Configuration State (Stored per user in localStorage)
+  // 2. User Charts Layout & Configuration State (Stored per user in PostgreSQL userPreferences)
   const [chartConfigs, setChartConfigs] = useState<UserChartItemConfig[]>(() => loadUserChartConfigs());
+
+  useEffect(() => {
+    const syncConfigs = () => setChartConfigs(loadUserChartConfigs());
+    window.addEventListener('hse_user_preferences_updated', syncConfigs);
+    window.addEventListener('hse_auth_state_changed', syncConfigs);
+    return () => {
+      window.removeEventListener('hse_user_preferences_updated', syncConfigs);
+      window.removeEventListener('hse_auth_state_changed', syncConfigs);
+    };
+  }, []);
 
   // 3. Edit / Add Chart Modal State
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
@@ -258,8 +269,15 @@ export const DashboardTab: React.FC<Props> = ({
   };
 
   // Reset to Default Dashboard Layout
-  const handleResetLayout = () => {
-    if (window.confirm('آیا از بازنشانی چیدمان نمودارها به حالت پیش‌فرض سازمان اطمینان دارید؟')) {
+  const handleResetLayout = async () => {
+    const confirmed = await showConfirmDialog({
+      title: 'بازنشانی چیدمان نمودارها',
+      message: 'آیا از بازنشانی چیدمان نمودارها به حالت پیش‌فرض سازمان اطمینان دارید؟',
+      confirmLabel: 'بازنشانی',
+      cancelLabel: 'انصراف',
+      tone: 'warning',
+    });
+    if (confirmed) {
       const defs = resetUserChartConfigs();
       setChartConfigs(defs);
       showToast('چیدمان پیش‌فرض نمودارها بازیابی شد.');

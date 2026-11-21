@@ -53,7 +53,7 @@ import {
   CornerDownLeft,
 } from 'lucide-react';
 import { UserProfile } from '../../types';
-import { authFetch } from '../../services/apiDatabaseClient';
+import { apiDb, authFetch } from '../../services/apiDatabaseClient';
 import {
   parseSlashQueryFromInput,
   stripSlashTokenFromInput,
@@ -99,14 +99,30 @@ export interface ChatSession {
 }
 
 export const AI_ALLOW_TOOLS_STORAGE_KEY = 'hsecore_ai_allow_tools';
+let inMemoryAllowTools = true;
+let inMemorySelectedModel = '';
 
 export function getAiAllowToolsSetting(): boolean {
+  return inMemoryAllowTools;
+}
+
+export async function fetchAiAllowToolsSetting(): Promise<boolean> {
   try {
-    const v = localStorage.getItem(AI_ALLOW_TOOLS_STORAGE_KEY);
-    return v === null ? true : v === 'true';
+    const res = await apiDb.userPreferences.get<boolean>('ai_allow_tools');
+    if (typeof res?.value === 'boolean') {
+      inMemoryAllowTools = res.value;
+    }
   } catch {
-    return true;
+    // keep default
   }
+  return inMemoryAllowTools;
+}
+
+export function setAiAllowToolsSetting(val: boolean): void {
+  inMemoryAllowTools = val;
+  apiDb.userPreferences.set('ai_allow_tools', val).catch((err) => {
+    console.warn('Failed to persist AI allow_tools preference:', err);
+  });
 }
 
 const GENERAL_AI_ASSISTANT = {
@@ -224,21 +240,15 @@ function notifyAiRuntimeListeners() {
 }
 
 function getStoredSelectedModel(): string {
-  try {
-    return localStorage.getItem(AI_SELECTED_MODEL_STORAGE_KEY) || '';
-  } catch {
-    return '';
-  }
+  return inMemorySelectedModel || '';
 }
 
 function setStoredSelectedModel(model: string) {
-  try {
-    if (model) {
-      localStorage.setItem(AI_SELECTED_MODEL_STORAGE_KEY, model);
-    }
-  } catch {
-    // ignore storage errors
-  }
+  if (!model) return;
+  inMemorySelectedModel = model;
+  apiDb.userPreferences.set('ai_selected_model', model).catch((err) => {
+    console.warn('Failed to persist AI selected model preference:', err);
+  });
 }
 
 function ensureRuntimeCacheForUser(userKey: string) {
@@ -318,10 +328,8 @@ export default function AiAssistantApp({
     const next =
       typeof updater === 'function' ? updater(aiRuntimeCache.activeSessionId) : updater;
     aiRuntimeCache.activeSessionId = next;
-    try {
-      if (next) sessionStorage.setItem(`hsecore_ai_active_session_${userKey}`, next);
-    } catch {
-      // ignore storage errors
+    if (next) {
+      apiDb.userPreferences.set(`ai_active_session_${userKey}`, next).catch(() => {});
     }
     setActiveSessionIdState(next);
     notifyAiRuntimeListeners();
@@ -425,12 +433,28 @@ export default function AiAssistantApp({
 
   const handleToggleAllowTools = (nextVal: boolean) => {
     setAllowTools(nextVal);
-    try {
-      localStorage.setItem(AI_ALLOW_TOOLS_STORAGE_KEY, String(nextVal));
-    } catch {
-      // ignore storage errors
-    }
+    setAiAllowToolsSetting(nextVal);
   };
+
+  useEffect(() => {
+    let active = true;
+    Promise.all([
+      fetchAiAllowToolsSetting(),
+      apiDb.userPreferences.get<string>('ai_selected_model').catch(() => null),
+    ]).then(([toolsAllowed, modelRes]) => {
+      if (!active) return;
+      setAllowTools(toolsAllowed);
+      const savedModel = modelRes?.value;
+      if (typeof savedModel === 'string' && savedModel) {
+        inMemorySelectedModel = savedModel;
+        aiRuntimeCache.selectedModel = savedModel;
+        setSelectedModelState(savedModel);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [userKey]);
 
   const loadSessionsFromServer = async () => {
     if (aiRuntimeCache.sessions.length === 0) {
@@ -438,60 +462,14 @@ export default function AiAssistantApp({
     }
     setSessionsError(null);
     try {
-      const res = await authFetch('/api/v1/ai/sessions');
+      const [res, storedActiveIdPref] = await Promise.all([
+        authFetch('/api/v1/ai/sessions'),
+        apiDb.userPreferences.get<string>(`ai_active_session_${userKey}`).catch(() => null),
+      ]);
       const data = await res.json();
       if (!data.success) throw new Error(data.message || 'خطا در دریافت گفتگوها');
 
       let rawList: Array<{ id: string; title: string; createdAt: string }> = data.data || [];
-
-      if (!aiRuntimeCache.migrated) {
-        aiRuntimeCache.migrated = true;
-        try {
-          const raw = localStorage.getItem('hsecore_ai_sessions');
-          if (raw) {
-            const localSessions = JSON.parse(raw);
-            if (Array.isArray(localSessions) && localSessions.length > 0) {
-              for (let offset = 0; offset < localSessions.length; offset += 30) {
-                const batch = localSessions.slice(offset, offset + 30);
-                const importRes = await authFetch('/api/v1/ai/sessions/import-local', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ sessions: batch }),
-                });
-                const importData = await importRes.json().catch(() => ({}));
-                if (!importRes.ok || !importData.success || Number(importData.data?.imported) !== batch.length) {
-                  throw new Error(importData.message || 'انتقال کامل تاریخچه گفتگوها تأیید نشد.');
-                }
-              }
-
-              const res2 = await authFetch('/api/v1/ai/sessions?limit=100');
-              const data2 = await res2.json().catch(() => ({}));
-              if (!res2.ok || !data2.success || !Array.isArray(data2.data)) {
-                throw new Error('تأیید تاریخچه منتقل‌شده از پایگاه داده ناموفق بود.');
-              }
-              const importedById = new Map(data2.data.map((item: any) => [String(item.id), item]));
-              const allSessionsVerified = localSessions.every((local: any) => {
-                const remote: any = importedById.get(String(local?.id || ''));
-                if (!remote) return false;
-                const expectedMessages = Array.isArray(local?.messages)
-                  ? local.messages.filter((message: any) =>
-                      Boolean(message?.content) && (message.role === 'user' || message.role === 'assistant')
-                    ).length
-                  : 0;
-                return Number(remote.messageCount || 0) >= Math.min(expectedMessages, 100);
-              });
-              if (!allSessionsVerified) {
-                throw new Error('تعداد گفتگوها یا پیام‌های منتقل‌شده با تاریخچه محلی مطابقت ندارد؛ نسخه محلی حفظ شد.');
-              }
-
-              localStorage.removeItem('hsecore_ai_sessions');
-              rawList = data2.data;
-            }
-          }
-        } catch {
-          // best-effort
-        }
-      }
 
       if (rawList.length === 0 && !aiRuntimeCache.autoCreated) {
         aiRuntimeCache.autoCreated = true;
@@ -534,12 +512,8 @@ export default function AiAssistantApp({
 
       setSessions(mergedList);
 
-      let storedActiveId = '';
-      try {
-        storedActiveId = sessionStorage.getItem(`hsecore_ai_active_session_${userKey}`) || '';
-      } catch {
-        // ignore
-      }
+      const rawActiveId = storedActiveIdPref && typeof storedActiveIdPref === 'object' ? storedActiveIdPref.value : storedActiveIdPref;
+      const storedActiveId = typeof rawActiveId === 'string' ? rawActiveId : '';
       const preferredId = aiRuntimeCache.activeSessionId || storedActiveId;
       const resolvedActiveId =
         preferredId && mergedList.some(s => s.id === preferredId)

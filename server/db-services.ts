@@ -6,6 +6,7 @@ import { authService } from './modules/auth/auth.service.ts';
 import { generateNextPermitNumber, ensurePermitTablesExist } from './services/permitNumberService.ts';
 import { dispatchDomainWebhookEvent } from './services/webhookDispatcher.ts';
 import { cleanPersonnelCode, sortPersonnelByCodeAsc, parseValidPgSerialId } from '../src/utils/textNormalization.ts';
+import { assertVersionMatch, extractExpectedVersion, extractExpectedUpdatedAt } from './core/occ.ts';
 
 // ============================================================================
 // 1. ORGANIZATIONAL HIERARCHY
@@ -312,6 +313,7 @@ export async function upsertPersonnel(
 
     let saved: any;
     if (existingRecord) {
+      assertVersionMatch(existingRecord, extractExpectedVersion(data), extractExpectedUpdatedAt(data));
       const updatedRows = await db
         .update(schema.personnel)
         .set({
@@ -333,6 +335,7 @@ export async function upsertPersonnel(
           bloodGroup: data.bloodGroup !== undefined ? data.bloodGroup : existingRecord.bloodGroup,
           status: data.status || existingRecord.status || 'ACTIVE',
           extraData: extraData,
+          version: Number(existingRecord.version ?? 1) + 1,
           updatedAt: new Date(),
         })
         .where(eq(schema.personnel.id, existingRecord.id))
@@ -416,8 +419,11 @@ export async function upsertPersonnel(
       mobile: saved.mobile || extraData.phone || '',
       signatureImage: extraData.signatureImage || '',
     };
-  } catch (error) {
+  } catch (error: any) {
     console.error('Failed to upsert personnel:', error);
+    if (error?.statusCode === 409 || error?.code === 'VERSION_CONFLICT' || error?.statusCode) {
+      throw error;
+    }
     throw new Error('Failed to upsert personnel', { cause: error });
   }
 }
@@ -617,6 +623,7 @@ export async function savePeriodicMedicalExam(data: {
 
     let examId: number;
     if (existing.length > 0) {
+      assertVersionMatch(existing[0], extractExpectedVersion(data), extractExpectedUpdatedAt(data));
       examId = existing[0].id;
       await db
         .update(schema.periodicMedicalExams)
@@ -638,6 +645,7 @@ export async function savePeriodicMedicalExam(data: {
           examCenter: data.examCenter,
           examiningDoctor: data.examiningDoctor,
           rawData: data.rawData || {},
+          version: Number(existing[0].version ?? 1) + 1,
           updatedAt: new Date(),
         })
         .where(eq(schema.periodicMedicalExams.id, examId));
@@ -761,8 +769,11 @@ export async function savePeriodicMedicalExam(data: {
     }
 
     return await getMedicalExamWithDetails(examId);
-  } catch (error) {
+  } catch (error: any) {
     console.error('Failed to save periodic medical exam:', error);
+    if (error?.statusCode === 409 || error?.code === 'VERSION_CONFLICT' || error?.statusCode) {
+      throw error;
+    }
     throw new Error('Failed to save medical exam record', { cause: error });
   }
 }
@@ -865,6 +876,8 @@ export async function upsertWorkPermit(permitData: any) {
     let savedPermit: any;
     const previousStatus = existing.length > 0 ? existing[0].status : null;
     if (existing.length > 0) {
+      assertVersionMatch(existing[0], extractExpectedVersion(permitData), extractExpectedUpdatedAt(permitData));
+      formattedData.version = Number(existing[0].version ?? 1) + 1;
       const res = await db
         .update(schema.workPermits)
         .set(formattedData)
@@ -900,8 +913,11 @@ export async function upsertWorkPermit(permitData: any) {
     }
 
     return savedPermit;
-  } catch (error) {
+  } catch (error: any) {
     console.error('Failed to upsert work permit:', error);
+    if (error?.statusCode === 409 || error?.code === 'VERSION_CONFLICT' || error?.statusCode) {
+      throw error;
+    }
     throw new Error('Failed to upsert work permit', { cause: error });
   }
 }
@@ -1161,6 +1177,7 @@ export function mapRiskRowToClient(row: any) {
     reviewHistory: Array.isArray(row.reviewHistory) ? row.reviewHistory : [],
     linkedRefs: row.linkedRefs && typeof row.linkedRefs === 'object' ? row.linkedRefs : {},
     ...(fallbackSteps ? { steps: fallbackSteps } : {}),
+    version: Number(row.version ?? 1),
     createdAt: row.createdAt ? new Date(row.createdAt).toISOString() : new Date().toISOString(),
     updatedAt: row.updatedAt ? new Date(row.updatedAt).toISOString() : new Date().toISOString(),
   };
@@ -1198,9 +1215,10 @@ export async function createRiskAssessment(data: any) {
     if (numId !== null) {
       const existing = await db.select().from(schema.riskAssessments).where(eq(schema.riskAssessments.id, numId));
       if (existing.length > 0) {
+        assertVersionMatch(existing[0], extractExpectedVersion(data), extractExpectedUpdatedAt(data), mapRiskRowToClient);
         const updated = await db
           .update(schema.riskAssessments)
-          .set({ ...dbValues, updatedAt: new Date() })
+          .set({ ...dbValues, version: Number(existing[0].version ?? 1) + 1, updatedAt: new Date() })
           .where(eq(schema.riskAssessments.id, numId))
           .returning();
         return mapRiskRowToClient(updated[0]);
@@ -1212,9 +1230,10 @@ export async function createRiskAssessment(data: any) {
         .from(schema.riskAssessments)
         .where(eq(schema.riskAssessments.assessmentCode, dbValues.assessmentCode));
       if (byCode.length > 0) {
+        assertVersionMatch(byCode[0], extractExpectedVersion(data), extractExpectedUpdatedAt(data), mapRiskRowToClient);
         const updated = await db
           .update(schema.riskAssessments)
-          .set({ ...dbValues, updatedAt: new Date() })
+          .set({ ...dbValues, version: Number(byCode[0].version ?? 1) + 1, updatedAt: new Date() })
           .where(eq(schema.riskAssessments.id, byCode[0].id))
           .returning();
         return mapRiskRowToClient(updated[0]);
@@ -1222,8 +1241,11 @@ export async function createRiskAssessment(data: any) {
     }
     const res = await db.insert(schema.riskAssessments).values(dbValues).returning();
     return mapRiskRowToClient(res[0]);
-  } catch (error) {
+  } catch (error: any) {
     console.error('Failed to create/upsert risk assessment:', error);
+    if (error?.statusCode === 409 || error?.code === 'VERSION_CONFLICT' || error?.statusCode) {
+      throw error;
+    }
     throw new Error('Failed to create risk assessment', { cause: error });
   }
 }
@@ -1244,16 +1266,21 @@ export async function updateRiskAssessment(id: string | number, data: any) {
     const existingRows = await db.select().from(schema.riskAssessments).where(eq(schema.riskAssessments.id, targetId));
     if (existingRows.length === 0) return null;
 
+    assertVersionMatch(existingRows[0], extractExpectedVersion(data), extractExpectedUpdatedAt(data), mapRiskRowToClient);
+
     const mergedClient = { ...mapRiskRowToClient(existingRows[0]), ...data };
     const dbValues = summarizeAssessmentForDb(mergedClient);
     const updated = await db
       .update(schema.riskAssessments)
-      .set({ ...dbValues, updatedAt: new Date() })
+      .set({ ...dbValues, version: Number(existingRows[0].version ?? 1) + 1, updatedAt: new Date() })
       .where(eq(schema.riskAssessments.id, targetId))
       .returning();
     return mapRiskRowToClient(updated[0]);
-  } catch (error) {
+  } catch (error: any) {
     console.error('Failed to update risk assessment:', error);
+    if (error?.statusCode === 409 || error?.code === 'VERSION_CONFLICT' || error?.statusCode) {
+      throw error;
+    }
     throw new Error('Failed to update risk assessment', { cause: error });
   }
 }
@@ -1307,11 +1334,16 @@ export async function upsertIncident(data: any) {
 
     let savedIncident: any;
     if (existing) {
-      const { id, ...updateFields } = data;
-      const res = await db.update(schema.incidents).set(updateFields).where(eq(schema.incidents.id, existing.id)).returning();
+      assertVersionMatch(existing, extractExpectedVersion(data), extractExpectedUpdatedAt(data));
+      const { id, version: _v, expectedVersion: _ev, expectedUpdatedAt: _eu, createdAt: _ca, ...updateFields } = data;
+      const res = await db
+        .update(schema.incidents)
+        .set({ ...updateFields, version: Number(existing.version ?? 1) + 1, updatedAt: new Date() })
+        .where(eq(schema.incidents.id, existing.id))
+        .returning();
       savedIncident = res[0] || existing || data;
     } else {
-      const { id, ...insertFields } = data;
+      const { id, version: _v, expectedVersion: _ev, expectedUpdatedAt: _eu, ...insertFields } = data;
       const res = await db.insert(schema.incidents).values(insertFields).returning();
       savedIncident = res[0] || data || { id: Date.now(), ...insertFields };
     }
@@ -1338,8 +1370,11 @@ export async function upsertIncident(data: any) {
     });
 
     return savedIncident;
-  } catch (error) {
+  } catch (error: any) {
     console.error('Failed to upsert incident:', error);
+    if (error?.statusCode === 409 || error?.code === 'VERSION_CONFLICT' || error?.statusCode) {
+      throw error;
+    }
     throw new Error('Failed to upsert incident', { cause: error });
   }
 }
@@ -1495,6 +1530,7 @@ export async function upsertTrirRecord(data: any) {
 
     let savedRow: any = null;
     if (primaryRow && primaryRow.id) {
+      assertVersionMatch(primaryRow, extractExpectedVersion(data), extractExpectedUpdatedAt(data));
       const res = await db
         .update(schema.trirMonthlyRecords)
         .set({
@@ -1509,6 +1545,7 @@ export async function upsertTrirRecord(data: any) {
           monthlyTrir,
           rollingTrir,
           notes,
+          version: Number(primaryRow.version ?? 1) + 1,
           updatedAt: new Date(),
         })
         .where(eq(schema.trirMonthlyRecords.id, Number(primaryRow.id)))
@@ -1574,8 +1611,11 @@ export async function upsertTrirRecord(data: any) {
       rollingTrir: Number(savedRow.rollingTrir ?? rollingTrir),
       notes: savedRow.notes || notes || '',
     };
-  } catch (error) {
+  } catch (error: any) {
     console.error('Failed to upsert TRIR record:', error);
+    if (error?.statusCode === 409 || error?.code === 'VERSION_CONFLICT' || error?.statusCode) {
+      throw error;
+    }
     throw new Error('Failed to upsert TRIR record', { cause: error });
   }
 }
@@ -2047,6 +2087,7 @@ function mapFireEquipmentRowToDto(row: any): any {
     statusHistory: Array.isArray(extra.statusHistory) ? extra.statusHistory : [],
     inspections: Array.isArray(extra.inspections) ? extra.inspections : [],
     defects: Array.isArray(extra.defects) ? extra.defects : [],
+    version: Number(row.version ?? 1),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -2269,8 +2310,12 @@ export async function upsertFireEquipment(data: any, actorUsername: string = 'sy
 
     let savedRow: any;
     if (existingRow) {
+      if (!isCreateMode) {
+        assertVersionMatch(existingRow, extractExpectedVersion(data), extractExpectedUpdatedAt(data), mapFireEquipmentRowToDto);
+      }
       // Allow updating code if it changed and didn't conflict
       dbValues.code = canonicalCode;
+      dbValues.version = Number(existingRow.version ?? 1) + 1;
       const res = await withDbRetry(() =>
         db
           .update(schema.fireEquipment)
@@ -2390,7 +2435,7 @@ export async function getAllSystemSettings() {
     return map;
   } catch (error) {
     console.error('Failed to get all system settings:', error);
-    return {};
+    throw new Error('Failed to fetch system settings from database', { cause: error });
   }
 }
 
@@ -2402,7 +2447,7 @@ export async function getSystemSetting(key: string) {
     return res[0]?.value || null;
   } catch (error) {
     console.error('Failed to get system setting:', error);
-    return null;
+    throw new Error(`Failed to fetch system setting ${key} from database`, { cause: error });
   }
 }
 
@@ -2413,7 +2458,7 @@ export async function setSystemSetting(key: string, value: any, description?: st
       .values({ key, value, description, updatedAt: new Date() })
       .onConflictDoUpdate({
         target: schema.systemSettings.key,
-        set: { value, description, updatedAt: new Date() },
+        set: { value, description, version: sql`${schema.systemSettings.version} + 1`, updatedAt: new Date() },
       });
     return { success: true };
   } catch (error) {
@@ -2428,7 +2473,7 @@ export async function deleteSystemSetting(key: string) {
     return { success: true };
   } catch (error) {
     console.error('Failed to delete system setting:', error);
-    return { success: false };
+    throw new Error('Failed to delete system setting', { cause: error });
   }
 }
 
@@ -2437,7 +2482,7 @@ export async function getAllUsersList() {
     return await authService.getAllUsers();
   } catch (error) {
     console.error('Failed to get users:', error);
-    return [];
+    throw new Error('Failed to fetch users from database', { cause: error });
   }
 }
 
@@ -2468,7 +2513,7 @@ export async function getAllNotificationsList() {
       .orderBy(desc(schema.notifications.createdAt));
   } catch (error) {
     console.error('Failed to get notifications:', error);
-    return [];
+    throw new Error('Failed to fetch notifications from database', { cause: error });
   }
 }
 
@@ -2630,7 +2675,7 @@ export async function getAllNonConformances(filters?: {
     return deduplicated;
   } catch (error) {
     console.error('Failed to get non conformances:', error);
-    return [];
+    throw new Error('Failed to fetch non-conformances from database', { cause: error });
   }
 }
 
@@ -2761,9 +2806,16 @@ export async function createNonConformance(data: any, username: string = 'system
 export async function updateNonConformance(id: number | string, data: any, username: string = 'system') {
   try {
     const current = await getNonConformanceByIdOrTrackingCode(id);
-    if (!current) throw new Error('Non-conformance record not found');
+    if (!current) {
+      const notFoundErr: any = new Error('Non-conformance record not found');
+      notFoundErr.statusCode = 404;
+      throw notFoundErr;
+    }
+
+    assertVersionMatch(current, extractExpectedVersion(data), extractExpectedUpdatedAt(data));
 
     const updateData: any = {
+      version: Number(current.version ?? 1) + 1,
       updatedAt: new Date(),
     };
 
@@ -2874,21 +2926,21 @@ export async function getFullSyncSnapshot() {
       recentLogs,
       nonConformancesList,
     ] = await Promise.all([
-      getAllUsersList().catch(() => []),
-      getAllPersonnel().catch(() => []),
-      getAllMedicalExams().catch(() => []),
-      getAllWorkPermits().catch(() => []),
-      getAllRiskAssessments().catch(() => []),
-      getAllIncidents().catch(() => []),
-      getTrirRecords().catch(() => []),
-      getAllSafetyWarnings().catch(() => []),
-      getAllFireEquipment().catch(() => []),
-      getAllFiveSAudits().catch(() => []),
-      getAllNotificationsList().catch(() => []),
-      getAllSystemSettings().catch(() => ({})),
-      getOrganizationHierarchy().catch(() => ({})),
-      getAuditLogsList(100).catch(() => []),
-      getAllNonConformances().catch(() => []),
+      getAllUsersList(),
+      getAllPersonnel(),
+      getAllMedicalExams(),
+      getAllWorkPermits(),
+      getAllRiskAssessments(),
+      getAllIncidents(),
+      getTrirRecords(),
+      getAllSafetyWarnings(),
+      getAllFireEquipment(),
+      getAllFiveSAudits(),
+      getAllNotificationsList(),
+      getAllSystemSettings(),
+      getOrganizationHierarchy(),
+      getAuditLogsList(100),
+      getAllNonConformances(),
     ]);
 
     return {

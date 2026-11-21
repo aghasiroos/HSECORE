@@ -76,6 +76,7 @@ import { GENDER_OPTIONS, MILITARY_STATUS_OPTIONS, downloadPersonnelExcelTemplate
 import { printService } from '../services/printService';
 import { getSystemBrandingConfig } from '../utils/systemBrandingHelper';
 import { VirtualizedDataTable, VirtualizedColumn } from './common/virtualized/VirtualizedDataTable';
+import { toast } from 'react-hot-toast';
 
 export interface Personnel {
   id: string;
@@ -638,7 +639,7 @@ export default function PersonnelManagement({ isFa, currentUser }: { isFa: boole
       setTimeout(() => setSaveToastMessage(null), 5000);
     } catch (err) {
       console.error('Failed to sync to central DB', err);
-      alert(isFa ? 'خطا در ارتباط با سرور مرکزی جهت ذخیره اطلاعات پرسنل' : 'Failed to save personnel to central server');
+      toast.error(isFa ? 'خطا در ارتباط با سرور مرکزی جهت ذخیره اطلاعات پرسنل' : 'Failed to save personnel to central server');
     } finally {
       setIsSavingPersonnel(false);
     }
@@ -646,7 +647,7 @@ export default function PersonnelManagement({ isFa, currentUser }: { isFa: boole
 
   const handleEdit = (p: Personnel) => {
     if (currentUser?.role && currentUser.role !== 'Administrator' && currentUser.role !== 'ADMIN' && currentUser.role !== 'ADMINISTRATOR') {
-      alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
+      toast.error(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
       return;
     }
     loadOrgData();
@@ -679,7 +680,7 @@ export default function PersonnelManagement({ isFa, currentUser }: { isFa: boole
 
   const handleDelete = (target: Personnel | string) => {
     if (currentUser?.role && currentUser.role !== 'Administrator' && currentUser.role !== 'ADMIN' && currentUser.role !== 'ADMINISTRATOR') {
-      alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
+      toast.error(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی حذف یا ویرایش این اطلاعات را دارد.' : 'Only the main Administrator is authorized to delete or edit this information.');
       return;
     }
     const person = typeof target === 'string' 
@@ -727,11 +728,11 @@ export default function PersonnelManagement({ isFa, currentUser }: { isFa: boole
         window.dispatchEvent(new Event('app_data_mutated'));
         window.dispatchEvent(new CustomEvent('hse_personnel_updated', { detail: { deleted: primaryIdentifier } }));
       } else {
-        alert(isFa ? 'خطا در حذف پرسنل از پایگاه داده اصلی سرور' : 'Failed to delete personnel from server');
+        toast.error(isFa ? 'خطا در حذف پرسنل از پایگاه داده اصلی سرور' : 'Failed to delete personnel from server');
       }
     } catch (err) {
       console.error('Delete personnel error:', err);
-      alert(isFa ? 'خطا در ارتباط با سرور هنگام حذف پرسنل' : 'Server connection error during personnel deletion');
+      toast.error(isFa ? 'خطا در ارتباط با سرور هنگام حذف پرسنل' : 'Server connection error during personnel deletion');
     } finally {
       setIsDeleting(false);
     }
@@ -1032,7 +1033,7 @@ export default function PersonnelManagement({ isFa, currentUser }: { isFa: boole
             <button
               onClick={() => {
                 if (currentUser?.role && currentUser.role !== 'Administrator') {
-                  alert(isFa ? 'ورود و بارگذاری فایل اکسل پرسنل تنها برای مدیر اصلی سیستم (Administrator) مجاز است.' : 'Excel import is restricted to System Administrators.');
+                  toast.error(isFa ? 'ورود و بارگذاری فایل اکسل پرسنل تنها برای مدیر اصلی سیستم (Administrator) مجاز است.' : 'Excel import is restricted to System Administrators.');
                   return;
                 }
                 setImportModalOpen(true);

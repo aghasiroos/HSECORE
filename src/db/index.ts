@@ -77,7 +77,7 @@ export const createPool = (): Pool => {
       process.env.PG_URL;
 
     const sslConfig = getPostgresSslConfig();
-    const maxConnections = Number(process.env.PG_MAX_POOL || process.env.SQL_MAX_POOL) || 15;
+    const maxConnections = Number(process.env.PG_MAX_POOL || process.env.SQL_MAX_POOL) || 30;
     const minConnections = Number(process.env.PG_MIN_POOL || process.env.SQL_MIN_POOL) || 2;
     const idleTimeoutMillis = Number(process.env.PG_IDLE_TIMEOUT_MS || process.env.SQL_IDLE_TIMEOUT_MS) || 60000;
     const connectionTimeoutMillis = Number(process.env.PG_CONN_TIMEOUT_MS || process.env.SQL_CONN_TIMEOUT_MS) || 15000;

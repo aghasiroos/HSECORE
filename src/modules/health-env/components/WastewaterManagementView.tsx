@@ -5,6 +5,8 @@ import {
 } from 'lucide-react';
 import { WastewaterRecord, ComplianceStatus } from '../types';
 import { healthEnvService } from '../services/healthEnvService';
+import { toast } from 'react-hot-toast';
+import { showConfirmDialog } from '../../../components/common/ConfirmDialogModal';
 
 interface Props {
   language: 'fa' | 'en';
@@ -61,8 +63,7 @@ export default function WastewaterManagementView({ language, currentUser }: Prop
 
   useEffect(() => {
     const handleForce = () => {
-      if (typeof reloadData === 'function') reloadData();
-      else window.location.reload();
+      reloadData();
     };
     window.addEventListener('force_update', handleForce);
     return () => window.removeEventListener('force_update', handleForce);
@@ -132,7 +133,7 @@ export default function WastewaterManagementView({ language, currentUser }: Prop
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.parameter || !formData.samplingPoint) {
-      alert('لطفاً پارامتر و محل نمونه‌برداری را مشخص نمایید.');
+      toast.error('لطفاً پارامتر و محل نمونه‌برداری را مشخص نمایید.');
       return;
     }
 
@@ -145,8 +146,15 @@ export default function WastewaterManagementView({ language, currentUser }: Prop
     reloadData();
   };
 
-  const handleDelete = (id: string) => {
-    if (window.confirm('آیا از حذف این رکورد پساب اطمینان دارید؟')) {
+  const handleDelete = async (id: string) => {
+    const ok = await showConfirmDialog({
+      title: 'حذف رکورد پساب',
+      message: 'آیا از حذف این رکورد پساب اطمینان دارید؟',
+      confirmLabel: 'حذف',
+      cancelLabel: 'انصراف',
+      tone: 'danger',
+    });
+    if (ok) {
       healthEnvService.deleteWastewater(id, currentUser?.fullName || 'admin');
       reloadData();
     }

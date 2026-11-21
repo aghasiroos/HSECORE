@@ -34,6 +34,7 @@ export const users = pgTable(
     permissions: jsonb('permissions'),
     profileData: jsonb('profile_data'),
     passwordHash: text('password_hash'),
+    version: integer('version').default(1).notNull(),
     deletedAt: timestamp('deleted_at'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
@@ -136,6 +137,7 @@ export const personnel = pgTable(
     bloodGroup: text('blood_group'),
     status: text('status').default('ACTIVE').notNull(),
     extraData: jsonb('extra_data'),
+    version: integer('version').default(1).notNull(),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
   },
@@ -196,6 +198,7 @@ export const periodicMedicalExams = pgTable(
     examCenter: text('exam_center'),
     examiningDoctor: text('examining_doctor'),
     rawData: jsonb('raw_data'),
+    version: integer('version').default(1).notNull(),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
   },
@@ -392,6 +395,7 @@ export const workPermits = pgTable('work_permits', {
   sequenceNumber: integer('sequence_number'),
   jalaliYear: integer('jalali_year'),
   formData: jsonb('form_data'),
+  version: integer('version').default(1).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
@@ -453,6 +457,7 @@ export const riskAssessments = pgTable('risk_assessments', {
   controlActions: jsonb('control_actions').$type<any[]>().default([]),
   reviewHistory: jsonb('review_history').$type<any[]>().default([]),
   linkedRefs: jsonb('linked_refs').$type<Record<string, any>>().default({}),
+  version: integer('version').default(1).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
@@ -480,7 +485,9 @@ export const incidents = pgTable('incidents', {
   status: text('status').default('REPORTED').notNull(), // REPORTED, UNDER_INVESTIGATION, CLOSED
   investigator: text('investigator'),
   closedAt: timestamp('closed_at'),
+  version: integer('version').default(1).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
 export const trirMonthlyRecords = pgTable('trir_monthly_records', {
@@ -496,6 +503,7 @@ export const trirMonthlyRecords = pgTable('trir_monthly_records', {
   monthlyTrir: doublePrecision('monthly_trir').default(0).notNull(),
   rollingTrir: doublePrecision('rolling_trir').default(0).notNull(),
   notes: text('notes'),
+  version: integer('version').default(1).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
@@ -525,7 +533,9 @@ export const safetyWarnings = pgTable('safety_warnings', {
   day: integer('day'),
   month: text('month'),
   year: integer('year'),
+  version: integer('version').default(1).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
 // ==========================================
@@ -540,7 +550,9 @@ export const hseTrainings = pgTable('hse_trainings', {
   validityMonths: integer('validity_months').default(12).notNull(),
   targetPositions: jsonb('target_positions'),
   description: text('description'),
+  version: integer('version').default(1).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
 export const trainingAttendances = pgTable('training_attendances', {
@@ -572,7 +584,9 @@ export const ppeIssuances = pgTable('ppe_issuances', {
   expiryDate: text('expiry_date'),
   status: text('status').default('ACTIVE').notNull(),
   notes: text('notes'),
+  version: integer('version').default(1).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
 // ==========================================
@@ -593,6 +607,7 @@ export const fireEquipment = pgTable('fire_equipment', {
   pressureStatus: text('pressure_status').default('NORMAL'),
   notes: text('notes'),
   extraData: jsonb('extra_data'),
+  version: integer('version').default(1).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
@@ -603,7 +618,9 @@ export const safetyTemplates = pgTable('safety_templates', {
   category: text('category').notNull(),
   description: text('description'),
   defaultItems: jsonb('default_items').notNull(),
+  version: integer('version').default(1).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
 export const safetyInspections = pgTable('safety_inspections', {
@@ -621,6 +638,7 @@ export const safetyInspections = pgTable('safety_inspections', {
   findings: text('findings'),
   actionItems: jsonb('action_items'),
   nextInspectionDate: text('next_inspection_date'),
+  version: integer('version').default(1).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
@@ -642,7 +660,9 @@ export const environmentalLogs = pgTable('environmental_logs', {
   destination: text('destination'),
   notes: text('notes'),
   extraData: jsonb('extra_data'),
+  version: integer('version').default(1).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
 export const fiveSAudits = pgTable('five_s_audits', {
@@ -658,7 +678,9 @@ export const fiveSAudits = pgTable('five_s_audits', {
   totalScore: doublePrecision('total_score').default(0).notNull(),
   actionItems: jsonb('action_items'),
   findings: text('findings'),
+  version: integer('version').default(1).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
 // ==========================================
@@ -690,6 +712,7 @@ export const bpmnInstances = pgTable('bpmn_instances', {
   variables: jsonb('variables'),
   startedAt: timestamp('started_at').defaultNow().notNull(),
   completedAt: timestamp('completed_at'),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
 // ==========================================
@@ -699,6 +722,8 @@ export const systemSettings = pgTable('system_settings', {
   key: text('key').primaryKey(),
   value: jsonb('value').notNull(),
   description: text('description'),
+  version: integer('version').default(1).notNull(),
+  updatedBy: text('updated_by'),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
@@ -916,6 +941,7 @@ export const nonConformances = pgTable('non_conformances', {
   cancellationInfo: jsonb('cancellation_info'),
   activeReferralId: text('active_referral_id'),
   attachments: jsonb('attachments').default([]),
+  version: integer('version').default(1).notNull(),
   createdBy: text('created_by'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
@@ -1235,6 +1261,7 @@ export const psmProjects = pgTable(
     overallStatus: text('overall_status').default('INITIATION').notNull(),
     overallProgress: doublePrecision('overall_progress').default(0).notNull(),
     handoverData: jsonb('handover_data').default({}).notNull(),
+    version: integer('version').default(1).notNull(),
     createdBy: text('created_by'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
@@ -1640,6 +1667,7 @@ export const fireDesignBuildings = pgTable(
     waterSupply: jsonb('water_supply').default({}).notNull(),
     currentSuppressionNotes: text('current_suppression_notes'),
     status: text('status').default('DRAFT').notNull(),
+    version: integer('version').default(1).notNull(),
     isDeleted: boolean('is_deleted').default(false).notNull(),
     deletedAt: timestamp('deleted_at'),
     deletedBy: text('deleted_by'),
@@ -1683,6 +1711,7 @@ export const fireDesignFloors = pgTable(
     scaleMetersPerPixel: doublePrecision('scale_meters_per_pixel'),
     calibrationLine: jsonb('calibration_line'),
     notes: text('notes'),
+    version: integer('version').default(1).notNull(),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
   },
@@ -1718,6 +1747,7 @@ export const fireDesignLayouts = pgTable(
     approvedAt: timestamp('approved_at'),
     reviewNotes: text('review_notes'),
     notes: text('notes'),
+    version: integer('version').default(1).notNull(),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
   },
@@ -1837,6 +1867,7 @@ export const sdsRecords = pgTable(
     publishedBy: text('published_by'),
     publishedAt: timestamp('published_at'),
     obsoleteReason: text('obsolete_reason'),
+    version: integer('version').default(1).notNull(),
     deletedAt: timestamp('deleted_at'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
@@ -1917,6 +1948,7 @@ export const liftingStandardsConfig = pgTable(
     engineeringFactors: jsonb('engineering_factors').$type<Record<string, any>>().default({}).notNull(),
     notes: text('notes'),
     isActive: boolean('is_active').default(true).notNull(),
+    version: integer('version').default(1).notNull(),
     updatedBy: text('updated_by'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
@@ -1960,6 +1992,7 @@ export const liftingCranes = pgTable(
     latestInspectionId: integer('latest_inspection_id'),
     status: text('status').default('ACTIVE').notNull(), // ACTIVE, EXPIRED_CERT, MAINTENANCE, OUT_OF_SERVICE
     notes: text('notes'),
+    version: integer('version').default(1).notNull(),
     createdBy: text('created_by'),
     updatedBy: text('updated_by'),
     isDeleted: boolean('is_deleted').default(false).notNull(),
@@ -2027,6 +2060,7 @@ export const liftingRiggingEquipment = pgTable(
     safetyLatchOk: boolean('safety_latch_ok').default(true).notNull(),
     conditionStatus: text('condition_status').default('SERVICEABLE').notNull(), // SERVICEABLE, WARNING_DUE, EXPIRED_CERT, DEFECTIVE, QUARANTINED
     notes: text('notes'),
+    version: integer('version').default(1).notNull(),
     createdBy: text('created_by'),
     updatedBy: text('updated_by'),
     isDeleted: boolean('is_deleted').default(false).notNull(),
@@ -2086,6 +2120,7 @@ export const liftingPlans = pgTable(
     latestCalculationSummary: jsonb('latest_calculation_summary').$type<Record<string, any>>().default({}).notNull(),
     aiAnalysisSnapshot: jsonb('ai_analysis_snapshot').$type<Record<string, any>>().default({}).notNull(),
     notes: text('notes'),
+    version: integer('version').default(1).notNull(),
     createdBy: text('created_by'),
     updatedBy: text('updated_by'),
     approvedBy: text('approved_by'),
@@ -2192,6 +2227,25 @@ export const liftingStageGates = pgTable(
   },
   (table) => [
     index('idx_lifting_gates_code').on(table.gateCode),
+  ]
+);
+
+// ==========================================
+// 22. Per-User Database Preferences & UI Customization
+// ==========================================
+export const userPreferences = pgTable(
+  'user_preferences',
+  {
+    id: serial('id').primaryKey(),
+    userUid: text('user_uid').notNull(),
+    prefKey: text('pref_key').notNull(),
+    value: jsonb('value').notNull(),
+    version: integer('version').default(1).notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('idx_user_preferences_uid_key').on(table.userUid, table.prefKey),
+    index('idx_user_preferences_uid').on(table.userUid),
   ]
 );
 

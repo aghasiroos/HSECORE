@@ -1449,10 +1449,14 @@ export default function SystemSettings({ language, currentUser, onUserUpdateTrig
   // Active section
   const [activeSubTab, setActiveSubTab] = useState<'org_structure' | 'personnel' | 'users' | 'notifications' | 'audit' | 'ui_config' | 'integration' | 'automation' | 'backup' | 'ai'>(() => {
     try {
-      const saved = sessionStorage.getItem('hse_system_settings_active_subtab');
-      if (saved && allowedSubTabs.includes(saved as any)) {
-        sessionStorage.removeItem('hse_system_settings_active_subtab');
-        return saved as any;
+      const hash = window.location.hash || '';
+      const qIndex = hash.indexOf('?');
+      if (qIndex !== -1) {
+        const params = new URLSearchParams(hash.slice(qIndex + 1));
+        const sub = params.get('sub');
+        if (sub && allowedSubTabs.includes(sub as any)) {
+          return sub as any;
+        }
       }
     } catch {}
     return allowedSubTabs[0] || 'org_structure';

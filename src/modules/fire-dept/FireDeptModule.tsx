@@ -11,6 +11,7 @@ import FireDailyReportView from './daily-report/FireDailyReportView';
 import FireSuppressionDesignModule from './fire-design/FireSuppressionDesignModule';
 import { CategoryIcon, getCategoryMeta } from './config/categoryIcons';
 import { getMergedFireDeptConfig, FireDeptSubItemConfig } from '../../config/modulesConfig';
+import { apiDb } from '../../services/apiDatabaseClient';
 import { SubViewTransition } from '../../motion';
 
 interface Props {
@@ -20,21 +21,40 @@ interface Props {
 export default function FireDeptModule({ language }: Props) {
   const isFa = language === 'fa';
   const { equipment, addEquipment, updateEquipment, deleteEquipment } = useFireDeptData();
-  const [activeSection, setActiveSectionState] = useState<string>(() => {
-    try {
-      return sessionStorage.getItem('hse_fire_dept_active_section') || 'dashboard';
-    } catch {
-      return 'dashboard';
-    }
-  });
+  const [activeSection, setActiveSectionState] = useState<string>('dashboard');
 
   const setActiveSection = (section: string) => {
     setActiveSectionState(section);
-    try {
-      sessionStorage.setItem('hse_fire_dept_active_section', section);
-      localStorage.setItem('hse_fire_dept_active_section', section);
-    } catch {}
+    void apiDb.userPreferences.set('fire_dept_active_section', section).catch(() => {});
   };
+
+  useEffect(() => {
+    let mounted = true;
+    const syncSection = () => {
+      const cached = apiDb.userPreferences.getCached<string>('fire_dept_active_section');
+      if (cached && mounted) {
+        setActiveSectionState(cached);
+        return;
+      }
+      apiDb.userPreferences
+        .get<string>('fire_dept_active_section')
+        .then((res) => {
+          const val = res?.value;
+          if (mounted && typeof val === 'string' && val) {
+            setActiveSectionState(val);
+          }
+        })
+        .catch(() => {});
+    };
+    syncSection();
+    window.addEventListener('hse_user_preferences_updated', syncSection);
+    window.addEventListener('hse_auth_state_changed', syncSection);
+    return () => {
+      mounted = false;
+      window.removeEventListener('hse_user_preferences_updated', syncSection);
+      window.removeEventListener('hse_auth_state_changed', syncSection);
+    };
+  }, []);
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -52,12 +72,12 @@ export default function FireDeptModule({ language }: Props) {
     };
 
     window.addEventListener('fire_dept_config_updated', handleUpdate);
-    window.addEventListener('storage', handleUpdate);
+    window.addEventListener('hse_data_mutated', handleUpdate);
     window.addEventListener('hse-fire-dept-navigate', handleDirectNavigate);
 
     return () => {
       window.removeEventListener('fire_dept_config_updated', handleUpdate);
-      window.removeEventListener('storage', handleUpdate);
+      window.removeEventListener('hse_data_mutated', handleUpdate);
       window.removeEventListener('hse-fire-dept-navigate', handleDirectNavigate);
     };
   }, []);

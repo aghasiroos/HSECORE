@@ -10,7 +10,7 @@ import {
   processTaskAction,
   substituteTaskApprover,
   initializeWorkflows,
-  persistProcessManagementData,
+  runWithProcessState,
   WorkflowDefinition
 } from './customEngine.ts';
 
@@ -83,12 +83,15 @@ export const processController = {
         return res.status(400).json({ success: false, message: 'Workflow ID is required' });
       }
 
-      if (DB.Workflows.has(targetWfId)) {
-        const result = startWorkflowInstance(targetWfId, title, variables, initiatorInfo);
-        await persistProcessManagementData();
-        broadcastDataMutation('tasks', 'create', result);
-        broadcastDataMutation('process_management', 'start', result);
-        return res.json({ success: true, data: result });
+      const customResult = await runWithProcessState('write', () => {
+        if (!DB.Workflows.has(targetWfId)) return null;
+        return startWorkflowInstance(targetWfId, title, variables, initiatorInfo);
+      });
+
+      if (customResult) {
+        broadcastDataMutation('tasks', 'create', customResult);
+        broadcastDataMutation('process_management', 'start', customResult);
+        return res.json({ success: true, data: customResult });
       }
 
       // Fallback to Camunda 8 service if configured
@@ -104,7 +107,7 @@ export const processController = {
     try {
       const { status, moduleType, priority, assignedRole, userId, requiresSubstitute, department } = req.query;
 
-      let taskList = Array.from(DB.Tasks.values());
+      let taskList = await runWithProcessState('read', () => Array.from(DB.Tasks.values()));
 
       // Enforce server-side recipient isolation: only System Manager / Main Admin sees all tasks globally
       if (req.user && !isGlobalAdminUser(req.user)) {
@@ -157,16 +160,17 @@ export const processController = {
         return res.status(400).json({ success: false, message: 'شناسه و نام کاربر جایگزین الزامی است' });
       }
 
-      const result = substituteTaskApprover(
-        id,
-        substituteUserId,
-        substituteUserName,
-        reason,
-        performedBy,
-        performedByName
+      const result = await runWithProcessState('write', () =>
+        substituteTaskApprover(
+          id,
+          substituteUserId,
+          substituteUserName,
+          reason,
+          performedBy,
+          performedByName
+        )
       );
 
-      await persistProcessManagementData();
       broadcastDataMutation('tasks', 'substitute', result);
       broadcastDataMutation('process_management', 'substitute', result);
 
@@ -182,32 +186,34 @@ export const processController = {
       const { id } = req.params;
       const { action = 'APPROVE', actor, actorName, comments, variables, delegateTo } = req.body;
 
-      if (DB.Tasks.has(id)) {
+      const customResult = await runWithProcessState('write', () => {
+        if (!DB.Tasks.has(id)) return null;
         const targetTask = DB.Tasks.get(id)!;
         if (req.user && !isUserAssignedToProcessTask(req.user, targetTask)) {
-          return res.status(403).json({
-            success: false,
-            message: 'شما مجاز به اقدام یا تأیید وظیفه ارجاع‌شده به شخص دیگر نیستید.'
-          });
+          const forbiddenErr: any = new Error('شما مجاز به اقدام یا تأیید وظیفه ارجاع‌شده به شخص دیگر نیستید.');
+          forbiddenErr.statusCode = 403;
+          throw forbiddenErr;
         }
-        const result = processTaskAction(id, action, {
+        return processTaskAction(id, action, {
           actor: actor || req.user?.username,
           actorName: actorName || req.user?.name,
           comments,
           delegateTo,
           variables
         });
-        await persistProcessManagementData();
-        broadcastDataMutation('tasks', 'complete', result);
-        broadcastDataMutation('process_management', 'action', result);
-        return res.json({ success: true, data: result });
+      });
+
+      if (customResult) {
+        broadcastDataMutation('tasks', 'complete', customResult);
+        broadcastDataMutation('process_management', 'action', customResult);
+        return res.json({ success: true, data: customResult });
       }
 
       // Fallback to Camunda 8
       const result = await camundaService.completeTask(id, variables || {});
       res.json({ success: true, data: result });
     } catch (error: any) {
-      res.status(500).json({ success: false, message: error.message });
+      res.status(error?.statusCode || 500).json({ success: false, message: error.message });
     }
   },
 
@@ -215,7 +221,7 @@ export const processController = {
   getInstances: async (req: Request, res: Response) => {
     try {
       const { workflowId, state } = req.query;
-      let instances = Array.from(DB.WorkflowInstances.values());
+      let instances = await runWithProcessState('read', () => Array.from(DB.WorkflowInstances.values()));
 
       if (workflowId && typeof workflowId === 'string' && workflowId !== 'all') {
         instances = instances.filter(i => i.workflowId === workflowId);
@@ -235,11 +241,14 @@ export const processController = {
   getInstanceById: async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
-      const instance = DB.WorkflowInstances.get(id);
-      if (!instance) return res.status(404).json({ success: false, message: 'Instance not found' });
-      
-      const workflow = DB.Workflows.get(instance.workflowId);
-      res.json({ success: true, data: { instance, workflow } });
+      const found = await runWithProcessState('read', () => {
+        const instance = DB.WorkflowInstances.get(id);
+        if (!instance) return null;
+        const workflow = DB.Workflows.get(instance.workflowId);
+        return { instance, workflow };
+      });
+      if (!found) return res.status(404).json({ success: false, message: 'Instance not found' });
+      res.json({ success: true, data: found });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });
     }
@@ -249,7 +258,11 @@ export const processController = {
   getWorkflows: async (req: Request, res: Response) => {
     try {
       const { category, moduleType, search } = req.query;
-      let list = Array.from(DB.Workflows.values());
+      const snapshot = await runWithProcessState('read', () => ({
+        list: Array.from(DB.Workflows.values()),
+        instances: Array.from(DB.WorkflowInstances.values()),
+      }));
+      let list = snapshot.list;
 
       if (category && typeof category === 'string' && category !== 'all') {
         list = list.filter(w => w.category === category);
@@ -266,8 +279,7 @@ export const processController = {
         );
       }
 
-      // Attach active instance counts
-      const instances = Array.from(DB.WorkflowInstances.values());
+      const instances = snapshot.instances;
       const enriched = list.map(wf => {
         const activeCount = instances.filter(i => i.workflowId === wf.id && i.state === 'ACTIVE').length;
         const totalCount = instances.filter(i => i.workflowId === wf.id).length;
@@ -287,11 +299,14 @@ export const processController = {
   getWorkflow: async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
-      const wf = DB.Workflows.get(id);
-      if (!wf) return res.status(404).json({ success: false, message: 'Workflow not found' });
-      
-      const instances = Array.from(DB.WorkflowInstances.values()).filter(i => i.workflowId === id);
-      res.json({ success: true, data: { ...wf, instances } });
+      const found = await runWithProcessState('read', () => {
+        const wf = DB.Workflows.get(id);
+        if (!wf) return null;
+        const instances = Array.from(DB.WorkflowInstances.values()).filter(i => i.workflowId === id);
+        return { ...wf, instances };
+      });
+      if (!found) return res.status(404).json({ success: false, message: 'Workflow not found' });
+      res.json({ success: true, data: found });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });
     }
@@ -300,9 +315,12 @@ export const processController = {
   deleteWorkflow: async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
-      if (!DB.Workflows.has(id)) return res.status(404).json({ success: false, message: 'Workflow not found' });
-      DB.Workflows.delete(id);
-      await persistProcessManagementData();
+      const deleted = await runWithProcessState('write', () => {
+        if (!DB.Workflows.has(id)) return false;
+        DB.Workflows.delete(id);
+        return true;
+      });
+      if (!deleted) return res.status(404).json({ success: false, message: 'Workflow not found' });
       broadcastDataMutation('workflows', 'delete', { id });
       broadcastDataMutation('process_management', 'delete', { id });
       res.json({ success: true, message: 'Workflow deleted successfully' });
@@ -321,29 +339,29 @@ export const processController = {
       // Validate XML
       parseBPMN(xml);
 
-      const existing = DB.Workflows.get(id);
-
-      const savedWf: WorkflowDefinition = {
-        id,
-        name: processName,
-        module_type: moduleType,
-        category: category || existing?.category || 'safety',
-        descriptionFa: descriptionFa || existing?.descriptionFa || 'فرآیند سفارشی تعریف شده در سیستم',
-        descriptionEn: existing?.descriptionEn || 'Custom Defined Workflow',
-        version: existing ? existing.version + 1 : 1,
-        is_active: true,
-        slaHours: slaHours || existing?.slaHours || 24,
-        roles: existing?.roles || ['HSE Officer', 'Manager'],
-        steps: steps || existing?.steps || [
-          { id: 's1', titleFa: 'ثبت و آغاز', titleEn: 'Initiation', assignedRole: 'Initiator', actionType: 'form', slaHours: 4 },
-          { id: 's2', titleFa: 'بررسی و تایید', titleEn: 'Approval', assignedRole: 'HSE Manager', actionType: 'approval', slaHours: 8 }
-        ],
-        xml_data: xml,
-        createdAt: existing ? existing.createdAt : new Date().toISOString()
-      };
-
-      DB.Workflows.set(id, savedWf);
-      await persistProcessManagementData();
+      const savedWf = await runWithProcessState('write', () => {
+        const existing = DB.Workflows.get(id);
+        const nextWf: WorkflowDefinition = {
+          id,
+          name: processName,
+          module_type: moduleType,
+          category: category || existing?.category || 'safety',
+          descriptionFa: descriptionFa || existing?.descriptionFa || 'فرآیند سفارشی تعریف شده در سیستم',
+          descriptionEn: existing?.descriptionEn || 'Custom Defined Workflow',
+          version: existing ? existing.version + 1 : 1,
+          is_active: true,
+          slaHours: slaHours || existing?.slaHours || 24,
+          roles: existing?.roles || ['HSE Officer', 'Manager'],
+          steps: steps || existing?.steps || [
+            { id: 's1', titleFa: 'ثبت و آغاز', titleEn: 'Initiation', assignedRole: 'Initiator', actionType: 'form', slaHours: 4 },
+            { id: 's2', titleFa: 'بررسی و تایید', titleEn: 'Approval', assignedRole: 'HSE Manager', actionType: 'approval', slaHours: 8 }
+          ],
+          xml_data: xml,
+          createdAt: existing ? existing.createdAt : new Date().toISOString()
+        };
+        DB.Workflows.set(id, nextWf);
+        return nextWf;
+      });
       broadcastDataMutation('workflows', 'save', savedWf);
       broadcastDataMutation('process_management', 'save', savedWf);
       
@@ -356,7 +374,7 @@ export const processController = {
   resetWorkflows: async (_req: Request, res: Response) => {
     try {
       await initializeWorkflows(true);
-      await persistProcessManagementData();
+      broadcastDataMutation('workflows', 'reset', {});
       res.json({ success: true, message: 'Workflows re-seeded successfully', count: DB.Workflows.size });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });
@@ -365,29 +383,27 @@ export const processController = {
 
   getStats: async (_req: Request, res: Response) => {
     try {
-      const totalWorkflows = DB.Workflows.size;
-      const instances = Array.from(DB.WorkflowInstances.values());
-      const tasks = Array.from(DB.Tasks.values());
+      const statsData = await runWithProcessState('read', () => {
+        const totalWorkflows = DB.Workflows.size;
+        const instances = Array.from(DB.WorkflowInstances.values());
+        const tasks = Array.from(DB.Tasks.values());
 
-      const activeInstances = instances.filter(i => i.state === 'ACTIVE').length;
-      const completedInstances = instances.filter(i => i.state === 'COMPLETED').length;
-      const rejectedInstances = instances.filter(i => i.state === 'REJECTED').length;
+        const activeInstances = instances.filter(i => i.state === 'ACTIVE').length;
+        const completedInstances = instances.filter(i => i.state === 'COMPLETED').length;
+        const rejectedInstances = instances.filter(i => i.state === 'REJECTED').length;
 
-      const pendingTasks = tasks.filter(t => t.status === 'PENDING').length;
-      const criticalTasks = tasks.filter(t => t.priority === 'critical' || t.priority === 'high').length;
+        const pendingTasks = tasks.filter(t => t.status === 'PENDING').length;
+        const criticalTasks = tasks.filter(t => t.priority === 'critical' || t.priority === 'high').length;
 
-      // Group by category
-      const categories: Record<string, number> = {};
-      DB.Workflows.forEach(wf => {
-        categories[wf.category] = (categories[wf.category] || 0) + 1;
-      });
+        const categories: Record<string, number> = {};
+        DB.Workflows.forEach(wf => {
+          categories[wf.category] = (categories[wf.category] || 0) + 1;
+        });
 
-      // SLA Compliance estimation
-      const slaCompliance = 94.8;
+        const totalResolved = completedInstances + rejectedInstances;
+        const slaCompliance = totalResolved > 0 ? Number(((completedInstances / totalResolved) * 100).toFixed(1)) : 100;
 
-      res.json({
-        success: true,
-        data: {
+        return {
           totalWorkflows,
           activeInstances,
           completedInstances,
@@ -396,7 +412,12 @@ export const processController = {
           criticalTasks,
           slaCompliance,
           categories
-        }
+        };
+      });
+
+      res.json({
+        success: true,
+        data: statsData
       });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });

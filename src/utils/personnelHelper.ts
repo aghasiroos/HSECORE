@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
+import { toast } from 'react-hot-toast';
 import { Department, UserProfile, PtwQualificationData, PtwValidityDuration, PtwQualificationStatus } from '../types';
 import { OrgNode, SEED_ORG_NODES, getRawMemorySystemUsers, getCurrentUser, isUserAdmin } from './authHelper';
 import { apiDb } from '../services/apiDatabaseClient';
@@ -81,29 +82,10 @@ export interface PersonnelOrgDetails {
 }
 
 /**
- * Purges any legacy personnel or organization structure keys from browser storage
- * to strictly enforce 100% database-authoritative storage.
+ * No-op retained for backward API compatibility (100% PostgreSQL backed).
  */
 export function purgeLegacyBrowserCache(): void {
-  if (typeof window === 'undefined') return;
-  const legacyKeys = [
-    'hse_personnel_v3',
-    'hse_org_nodes',
-    'hse_extracted_departments',
-    'hse_unit_structure_v1',
-    'hse_org_jobs',
-    'hse_incident_types_config',
-    'hse_ppe_categories',
-    'hse_ppe_items'
-  ];
-  try {
-    legacyKeys.forEach(k => {
-      localStorage.removeItem(k);
-      sessionStorage.removeItem(k);
-    });
-  } catch {
-    // Ignore storage access errors
-  }
+  // No browser storage used
 }
 
 function normalizeLookupKey(str?: string): string {
@@ -407,7 +389,10 @@ export function setInMemoryPersonnelList(rawList: any[]): ComplexPersonnel[] {
  */
 export function setComplexPersonnelList(rawList: any[]): ComplexPersonnel[] {
   const normalized = setInMemoryPersonnelList(rawList);
-  apiDb.batchSavePersonnel(normalized).catch(console.error);
+  apiDb.batchSavePersonnel(normalized).catch((err) => {
+    console.error('Failed to batch save personnel to PostgreSQL:', err);
+    toast.error('خطا در ذخیره‌سازی گروهی اطلاعات پرسنل در پایگاه داده');
+  });
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('hse_personnel_updated', { detail: normalized }));
     window.dispatchEvent(new Event('app_data_mutated'));
@@ -1095,9 +1080,8 @@ export function getPersonnelSignature(target?: any): string | undefined {
         }
       }
 
-      const sessionRaw = typeof window !== 'undefined' ? sessionStorage.getItem('hse_current_user') : null;
-      if (sessionRaw) {
-        const curUser = JSON.parse(sessionRaw);
+      const curUser = getCurrentUser() as any;
+      if (curUser) {
         const curSig = extractSigFromUser(curUser);
         if (curSig) {
           const curKeys = [curUser.id, curUser.uid, curUser.username, curUser.personnelNumber, curUser.nationalId, curUser.fullName]

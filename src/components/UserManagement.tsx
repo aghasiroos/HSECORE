@@ -57,6 +57,7 @@ import CentralPersonnelSelector from './CentralPersonnelSelector';
 import { SitePersonnelTab } from './users/SitePersonnelTab';
 import { PermissionsMatrixTab } from './users/PermissionsMatrixTab';
 import { UserPersonnelAssignmentSection, UserPersonnelAssignmentModal } from './users/UserPersonnelAssignmentSection';
+import { toast } from 'react-hot-toast';
 
 const PREDEFINED_ROLES = [
   'User',
@@ -934,12 +935,12 @@ export default function UserManagement({ currentUser, language, onUserUpdateTrig
   // --- DYNAMIC PERMISSIONS GRID OPERATIONS ---
   const handleTogglePermission = async (group: PermissionGroup, action: keyof PermissionActions) => {
     if (currentUser.role !== 'Administrator') {
-      alert(isFa ? 'تنها مدیر ارشد (Administrator) مجاز به ویرایش دسترسی‌های کاربران است.' : 'Only the System Administrator is authorized to modify user permissions.');
+      toast.error(isFa ? 'تنها مدیر ارشد (Administrator) مجاز به ویرایش دسترسی‌های کاربران است.' : 'Only the System Administrator is authorized to modify user permissions.');
       return;
     }
     if (!selectedUserForPerms) return;
     if (selectedUserForPerms.role === 'Administrator') {
-      alert(isFa 
+      toast.error(isFa 
         ? 'کاربر مدیر ارشد (Administrator) به صورت پیش‌فرض به تمام بخش‌ها دسترسی نامحدود دارد و نیازی به تغییر دستی مجوزهای آن نیست.' 
         : 'Administrator has absolute full access by default. Modifying permissions manually is not required.');
       return;
@@ -961,14 +962,17 @@ export default function UserManagement({ currentUser, language, onUserUpdateTrig
 
     saveUsers(updatedUsers);
     if (modifiedUser) {
-      apiDb.saveUser(modifiedUser).catch(console.error);
+      apiDb.saveUser(modifiedUser).catch((err) => {
+        console.error('Failed to save user permissions:', err);
+        toast.error(isFa ? 'خطا در ذخیره‌سازی دسترسی کاربر در پایگاه داده' : 'Failed to save user permissions');
+      });
     }
     addAuditLog(currentUser.username, `تغییر دسترسی کاربر ${selectedUserForPerms.username}: ماژول ${group} -> اقدام ${action}`, 'مجوز ویرایش شد');
   };
 
   const handleGrantFullAccess = async () => {
     if (currentUser.role !== 'Administrator') {
-      alert(isFa ? 'تنها مدیر ارشد (Administrator) مجاز به ویرایش دسترسی‌های کاربران است.' : 'Only the System Administrator is authorized to modify user permissions.');
+      toast.error(isFa ? 'تنها مدیر ارشد (Administrator) مجاز به ویرایش دسترسی‌های کاربران است.' : 'Only the System Administrator is authorized to modify user permissions.');
       return;
     }
     if (!selectedUserForPerms) return;
@@ -982,14 +986,17 @@ export default function UserManagement({ currentUser, language, onUserUpdateTrig
     });
     saveUsers(updatedUsers);
     if (modifiedUser) {
-      apiDb.saveUser(modifiedUser).catch(console.error);
+      apiDb.saveUser(modifiedUser).catch((err) => {
+        console.error('Failed to grant full access:', err);
+        toast.error(isFa ? 'خطا در ذخیره‌سازی دسترسی کاربر در پایگاه داده' : 'Failed to save user permissions');
+      });
     }
     addAuditLog(currentUser.username, `اعطای دسترسی کامل به کاربر: ${selectedUserForPerms.username}`, 'موفقیت‌آمیز');
   };
 
   const handleRevokeAllAccess = async () => {
     if (!isUserAdmin(currentUser)) {
-      alert(isFa ? 'تنها مدیر ارشد (Administrator) مجاز به ویرایش دسترسی‌های کاربران است.' : 'Only the System Administrator is authorized to modify user permissions.');
+      toast.error(isFa ? 'تنها مدیر ارشد (Administrator) مجاز به ویرایش دسترسی‌های کاربران است.' : 'Only the System Administrator is authorized to modify user permissions.');
       return;
     }
     if (!selectedUserForPerms) return;
@@ -1003,7 +1010,10 @@ export default function UserManagement({ currentUser, language, onUserUpdateTrig
     });
     saveUsers(updatedUsers);
     if (modifiedUser) {
-      apiDb.saveUser(modifiedUser).catch(console.error);
+      apiDb.saveUser(modifiedUser).catch((err) => {
+        console.error('Failed to revoke user access:', err);
+        toast.error(isFa ? 'خطا در ذخیره‌سازی دسترسی کاربر در پایگاه داده' : 'Failed to save user permissions');
+      });
     }
     addAuditLog(currentUser.username, `لغو کامل دسترسی‌های کاربر: ${selectedUserForPerms.username}`, 'موفقیت‌آمیز');
   };

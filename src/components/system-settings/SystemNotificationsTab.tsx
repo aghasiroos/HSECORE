@@ -457,13 +457,11 @@ export const SystemNotificationsTab: React.FC<SystemNotificationsTabProps> = ({
           (!target || String(n.id) !== String(target.id))
       );
       setNotifications(updated);
-      try {
-        localStorage.removeItem('hse_notifications');
-      } catch (e) {}
       window.dispatchEvent(new Event('hse_notifications_updated'));
       addAuditLog(currentUser.username, `حذف اعلان با شناسه: ${id}`, 'موفقیت‌آمیز');
     } catch (err) {
       console.error('Error deleting notification:', err);
+      toast.error(isFa ? 'خطا در حذف اعلان از پایگاه داده' : 'Failed to delete notification');
     } finally {
       setIsLoading(false);
       setDeleteConfirmId(null);
@@ -475,13 +473,11 @@ export const SystemNotificationsTab: React.FC<SystemNotificationsTabProps> = ({
     try {
       await apiDb.clearAllNotifications();
       setNotifications([]);
-      try {
-        localStorage.removeItem('hse_notifications');
-      } catch (e) {}
       window.dispatchEvent(new Event('hse_notifications_updated'));
       addAuditLog(currentUser.username, 'پاکسازی کامل تاریخچه اعلان‌های سیستم', 'موفقیت‌آمیز');
     } catch (err) {
       console.error('Error clearing all notifications:', err);
+      toast.error(isFa ? 'خطا در پاکسازی تاریخچه اعلان‌ها' : 'Failed to clear notifications');
     } finally {
       setIsLoading(false);
       setShowClearConfirm(false);

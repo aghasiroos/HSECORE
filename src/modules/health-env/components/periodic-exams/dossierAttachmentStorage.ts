@@ -91,9 +91,6 @@ export const DOC_TYPE_CONFIG: Record<DossierDocType, { label: string; color: str
   }
 };
 
-const DB_NAME = 'hse_periodic_dossier_attachments_db';
-const STORE_NAME = 'attachments';
-const DB_VERSION = 1;
 const CENTRAL_SETTING_KEY = 'hse_periodic_dossier_attachments_v1';
 
 // In-memory cache for fast queries synchronized with central database
@@ -101,50 +98,14 @@ let memoryCache: DossierAttachment[] = [];
 let isDbInitialized = false;
 let initPromise: Promise<void> | null = null;
 
-function openDB(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    if (typeof window === 'undefined' || !window.indexedDB) {
-      reject(new Error('IndexedDB is not supported'));
-      return;
-    }
-
-    const req = window.indexedDB.open(DB_NAME, DB_VERSION);
-
-    req.onupgradeneeded = () => {
-      const db = req.result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        const store = db.createObjectStore(STORE_NAME, { keyPath: 'id' });
-        store.createIndex('personnelId', 'personnelId', { unique: false });
-        store.createIndex('examYear', 'examYear', { unique: false });
-        store.createIndex('personnel_year', ['personnelId', 'examYear'], { unique: false });
-      }
-    };
-
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-async function readLocalIndexedDB(): Promise<DossierAttachment[]> {
-  try {
-    const db = await openDB();
-    const tx = db.transaction(STORE_NAME, 'readonly');
-    const store = tx.objectStore(STORE_NAME);
-    const getAllReq = store.getAll();
-    return await new Promise<DossierAttachment[]>((resolve, reject) => {
-      getAllReq.onsuccess = () => resolve(Array.isArray(getAllReq.result) ? getAllReq.result : []);
-      getAllReq.onerror = () => reject(getAllReq.error);
-    });
-  } catch {
-    return [];
-  }
-}
-
 export async function reloadDossierAttachmentsFromServer(): Promise<void> {
   try {
     const remoteList = await apiDb.getSetting(CENTRAL_SETTING_KEY);
     if (Array.isArray(remoteList)) {
-      memoryCache = remoteList;
+      memoryCache = [...remoteList].sort(
+        (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+      );
+      isDbInitialized = true;
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('hse_medical_data_updated', { detail: { entity: CENTRAL_SETTING_KEY } }));
       }
@@ -157,12 +118,16 @@ export async function reloadDossierAttachmentsFromServer(): Promise<void> {
 if (typeof window !== 'undefined') {
   const handleRemoteMutation = (e: any) => {
     const key = String(e?.detail?.key || e?.detail?.entityType || e?.detail?.entity || '');
-    if (key === CENTRAL_SETTING_KEY || key.includes('dossier_attachment')) {
-      reloadDossierAttachmentsFromServer();
+    if (key === CENTRAL_SETTING_KEY || key.includes('dossier_attachment') || key === 'settings') {
+      void reloadDossierAttachmentsFromServer();
     }
   };
   window.addEventListener('app_data_mutated', handleRemoteMutation);
   window.addEventListener('hse_data_mutated', handleRemoteMutation);
+  window.addEventListener('hse_auth_state_changed', () => {
+    isDbInitialized = false;
+    void reloadDossierAttachmentsFromServer();
+  });
 }
 
 export async function initDossierAttachmentStorage(): Promise<void> {
@@ -171,45 +136,11 @@ export async function initDossierAttachmentStorage(): Promise<void> {
 
   initPromise = (async () => {
     try {
-      const [remoteList, localList] = await Promise.all([
-        apiDb.getSetting(CENTRAL_SETTING_KEY).catch(() => null),
-        readLocalIndexedDB()
-      ]);
-
+      const remoteList = await apiDb.getSetting(CENTRAL_SETTING_KEY).catch(() => null);
       const remoteArr: DossierAttachment[] = Array.isArray(remoteList) ? remoteList : [];
-      const mergedMap = new Map<string, DossierAttachment>();
-
-      remoteArr.forEach(item => {
-        if (item && item.id) mergedMap.set(item.id, item);
-      });
-
-      let hasUnmigratedLocal = false;
-      localList.forEach(item => {
-        if (item && item.id && !mergedMap.has(item.id)) {
-          mergedMap.set(item.id, item);
-          hasUnmigratedLocal = true;
-        }
-      });
-
-      memoryCache = Array.from(mergedMap.values()).sort(
+      memoryCache = [...remoteArr].sort(
         (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
       );
-
-      // Automatically migrate any browser-only IndexedDB attachments to the central database
-      if (hasUnmigratedLocal && memoryCache.length > 0) {
-        await apiDb.saveSetting(CENTRAL_SETTING_KEY, memoryCache, 'Periodic Medical Exam Dossier Attachments').catch(() => {});
-      }
-
-      // Purge legacy browser storage after migration
-      if (typeof window !== 'undefined') {
-        try {
-          localStorage.removeItem('dossier_attachments_cache_meta');
-          if (window.indexedDB && localList.length > 0) {
-            window.indexedDB.deleteDatabase(DB_NAME);
-          }
-        } catch {}
-      }
-
       isDbInitialized = true;
     } catch (err) {
       console.warn('Failed to initialize dossier attachment storage:', err);
@@ -261,12 +192,9 @@ export async function addDossierAttachment(
     createdAt: new Date().toISOString()
   };
 
-  memoryCache = [newAttachment, ...memoryCache];
-
-  // Persist exclusively to authoritative central PostgreSQL database
-  await apiDb.saveSetting(CENTRAL_SETTING_KEY, memoryCache, 'Periodic Medical Exam Dossier Attachments').catch(err => {
-    console.warn('Could not save attachment to central database:', err);
-  });
+  const nextCache = [newAttachment, ...memoryCache];
+  await apiDb.saveSetting(CENTRAL_SETTING_KEY, nextCache, 'Periodic Medical Exam Dossier Attachments');
+  memoryCache = nextCache;
 
   return newAttachment;
 }
@@ -285,12 +213,10 @@ export async function updateDossierAttachment(
     ...updates
   };
 
-  memoryCache[index] = updated;
-
-  // Persist exclusively to authoritative central PostgreSQL database
-  await apiDb.saveSetting(CENTRAL_SETTING_KEY, memoryCache, 'Periodic Medical Exam Dossier Attachments').catch(err => {
-    console.warn('Could not update attachment in central database:', err);
-  });
+  const nextCache = [...memoryCache];
+  nextCache[index] = updated;
+  await apiDb.saveSetting(CENTRAL_SETTING_KEY, nextCache, 'Periodic Medical Exam Dossier Attachments');
+  memoryCache = nextCache;
 
   return updated;
 }
@@ -301,12 +227,9 @@ export async function deleteDossierAttachment(id: string): Promise<boolean> {
   const index = memoryCache.findIndex(item => item.id === id);
   if (index === -1) return false;
 
-  memoryCache.splice(index, 1);
-
-  // Persist deletion exclusively to authoritative central PostgreSQL database
-  await apiDb.saveSetting(CENTRAL_SETTING_KEY, memoryCache, 'Periodic Medical Exam Dossier Attachments').catch(err => {
-    console.warn('Could not delete attachment from central database:', err);
-  });
+  const nextCache = memoryCache.filter(item => item.id !== id);
+  await apiDb.saveSetting(CENTRAL_SETTING_KEY, nextCache, 'Periodic Medical Exam Dossier Attachments');
+  memoryCache = nextCache;
 
   return true;
 }

@@ -9,8 +9,10 @@ import {
 } from './components/notifications';
 import { SystemStatusBadge } from './components/SystemStatusBadge';
 import { PrintNotificationModal } from './components/common/PrintNotificationModal';
+import { ConfirmDialogModal } from './components/common/ConfirmDialogModal';
+import { ConflictResolutionModal, handleVersionConflict } from './components/common/ConflictResolutionModal';
 import { centralSync } from './services/centralSyncService';
-import { apiDb, getAuthToken } from './services/apiDatabaseClient';
+import { apiDb, getAuthToken, isConflictError } from './services/apiDatabaseClient';
 import { deduplicateWarningRecords } from './utils/safeStorage';
 /**
  * @license
@@ -354,10 +356,10 @@ export default function App() {
    });
  }, []);
 
-  // Initial Active Tab resolution: 1. URL Hash -> 2. SessionStorage -> 3. LocalStorage -> 4. Default 'dashboard'
+  // Initial Active Tab resolution: URL Hash -> Default 'dashboard' (hydrated from DB user_preferences after login)
   const getInitialActiveTab = (): MainTabKey => {
     try {
-      const hash = window.location.hash.replace(/^#\/?/, '').trim() as MainTabKey;
+      const hash = window.location.hash.replace(/^#\/?/, '').split('?')[0].trim() as MainTabKey;
       const adminTabs = ['user-mgmt', 'system'];
       const user = getCurrentUser();
       const isAdmin = isUserAdmin(user);
@@ -367,10 +369,6 @@ export default function App() {
           return hash;
         }
       }
-      const sessionSaved = sessionStorage.getItem('hse_active_tab') as MainTabKey;
-      if (sessionSaved && (!adminTabs.includes(sessionSaved) || isAdmin)) return sessionSaved;
-      const localSaved = localStorage.getItem('hse_active_tab') as MainTabKey;
-      if (localSaved && (!adminTabs.includes(localSaved) || isAdmin)) return localSaved;
     } catch {
       // Fallback on error
     }
@@ -379,34 +377,31 @@ export default function App() {
 
   const [activeTab, setActiveTabState] = useState<MainTabKey>(getInitialActiveTab);
 
-  // Synchronized activeTab setter that persists across browser refreshes & updates URL hash
+  // Synchronized activeTab setter that updates URL hash & saves to PostgreSQL user_preferences
   const setActiveTab = useCallback((tab: MainTabKey) => {
     React.startTransition(() => {
       setActiveTabState(tab);
     });
     try {
-      sessionStorage.setItem('hse_active_tab', tab);
-      localStorage.setItem('hse_active_tab', tab);
       if (window.location.hash !== `#${tab}`) {
         window.history.replaceState(null, '', `#${tab}`);
       }
     } catch (e) {
-      console.error('Error persisting active tab:', e);
+      console.error('Error updating URL hash:', e);
+    }
+    if (getAuthToken()) {
+      apiDb.userPreferences.set('active_tab', tab).catch(() => {});
     }
   }, []);
 
   // Listen to browser Back/Forward & URL Hash changes
   useEffect(() => {
     const handleHashChange = () => {
-      const hash = window.location.hash.replace(/^#\/?/, '').trim() as MainTabKey;
+      const hash = window.location.hash.replace(/^#\/?/, '').split('?')[0].trim() as MainTabKey;
       if (hash) {
         React.startTransition(() => {
           setActiveTabState(hash);
         });
-        try {
-          sessionStorage.setItem('hse_active_tab', hash);
-          localStorage.setItem('hse_active_tab', hash);
-        } catch {}
       }
     };
     window.addEventListener('hashchange', handleHashChange);
@@ -418,22 +413,15 @@ export default function App() {
   }, []);
 
  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
- const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
-   try {
-     const saved = localStorage.getItem('hse_sidebar_collapsed');
-     return saved !== null ? saved === 'true' : true;
-   } catch {
-     return true;
-   }
- });
+ const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(true);
 
  const handleToggleSidebarCollapse = () => {
    setIsSidebarCollapsed(prev => {
      const next = !prev;
-     try {
-       localStorage.setItem('hse_sidebar_collapsed', String(next));
-     } catch (e) {
-       console.error(e);
+     if (currentUser?.id && getAuthToken()) {
+       apiDb.userPreferences.set('sidebar_collapsed', next).catch((err: any) => {
+         toast.error(err?.message || 'خطا در ذخیره وضعیت منو در پایگاه داده');
+       });
      }
      return next;
    });
@@ -494,15 +482,7 @@ export default function App() {
     document.title = `${brandName} | ${sub}`;
   }, [branding, language]);
 
-  const [themeMode, setThemeMode] = useState<'dark' | 'light'>(() => {
-    try {
-      const saved = localStorage.getItem('hse_theme_mode');
-      if (saved === 'dark') return 'dark';
-      return 'light';
-    } catch {
-      return 'light';
-    }
-  });
+  const [themeMode, setThemeMode] = useState<'dark' | 'light'>('light');
 
   const themeTransitionTimerRef = useRef<number | null>(null);
   const lastThemeToggleAtRef = useRef<number>(0);
@@ -511,11 +491,6 @@ export default function App() {
     if (typeof document === 'undefined') return;
     document.documentElement.classList.remove('light', 'dark', 'navy');
     document.documentElement.classList.add(mode === 'dark' ? 'dark' : 'light');
-    try {
-      localStorage.setItem('hse_theme_mode', mode);
-    } catch (e) {
-      console.error(e);
-    }
   }, []);
 
   const handleSetThemeMode = useCallback(
@@ -576,9 +551,55 @@ export default function App() {
 
       applyThemeClasses(nextMode);
       setThemeMode(nextMode);
+      if (getAuthToken()) {
+        apiDb.userPreferences.set('theme_mode', nextMode).catch(() => {});
+      }
     },
     [themeMode, applyThemeClasses]
   );
+
+  // Hydrate user preferences (theme_mode, sidebar_collapsed, active_tab) from PostgreSQL once logged in
+  useEffect(() => {
+    if (!currentUser?.id || !getAuthToken()) return;
+    let active = true;
+    const hydrateUserPrefs = () => {
+      apiDb.userPreferences
+        .getAll()
+        .then(({ data }) => {
+          if (!active || !data) return;
+          if (data.theme_mode === 'dark' || data.theme_mode === 'light') {
+            setThemeMode(data.theme_mode);
+          }
+          if (typeof data.sidebar_collapsed === 'boolean') {
+            setIsSidebarCollapsed(data.sidebar_collapsed);
+          }
+          const currentHash = window.location.hash.replace(/^#\/?/, '').split('?')[0].trim();
+          if (!currentHash && typeof data.active_tab === 'string' && data.active_tab) {
+            setActiveTabState(data.active_tab as MainTabKey);
+          }
+        })
+        .catch(() => {});
+    };
+    hydrateUserPrefs();
+
+    const handlePrefUpdated = (e: any) => {
+      const prefKey = e?.detail?.prefKey || e?.detail?.key;
+      const val = e?.detail?.value;
+      if (prefKey === 'theme_mode' && (val === 'dark' || val === 'light')) {
+        setThemeMode(val);
+      } else if (prefKey === 'sidebar_collapsed' && typeof val === 'boolean') {
+        setIsSidebarCollapsed(val);
+      } else if (!prefKey) {
+        apiDb.invalidateCache('user-prefs');
+        hydrateUserPrefs();
+      }
+    };
+    window.addEventListener('hse_user_preferences_updated', handlePrefUpdated);
+    return () => {
+      active = false;
+      window.removeEventListener('hse_user_preferences_updated', handlePrefUpdated);
+    };
+  }, [currentUser?.id]);
 
   useEffect(() => {
     return () => {
@@ -670,7 +691,7 @@ export default function App() {
     const interval = setInterval(() => {
       const timeoutMinutes = (typeof currentUser.sessionTimeoutMinutes === 'number' && currentUser.sessionTimeoutMinutes > 0)
         ? currentUser.sessionTimeoutMinutes
-        : (parseInt(localStorage.getItem('hse_session_timeout') || '5') || 5);
+        : 15;
 
       const maxSeconds = timeoutMinutes * 60;
       const secondsInactive = (Date.now() - lastActivity) / 1000;
@@ -1036,11 +1057,28 @@ export default function App() {
   const handleTrirTargetUpdated = React.useCallback((target: number) => {
     if (typeof target !== 'number' || isNaN(target) || target <= 0) return;
     setTrirTarget(target);
-    centralSync.persistSetting('trir_target', target, 'Target TRIR Rate');
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('hse_trir_target_changed', { detail: { target } }));
-      window.dispatchEvent(new CustomEvent('hse_data_mutated', { detail: { entityType: 'settings', key: 'trir_target', value: target } }));
-    }
+    centralSync.persistSetting('trir_target', target, 'Target TRIR Rate')
+      .then(() => {
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('hse_trir_target_changed', { detail: { target } }));
+          window.dispatchEvent(new CustomEvent('hse_data_mutated', { detail: { entityType: 'settings', key: 'trir_target', value: target } }));
+        }
+      })
+      .catch(async (err: any) => {
+        if (isConflictError(err)) {
+          await handleVersionConflict(err, {
+            title: 'تعارض نسخه هدف TRIR',
+            onReloadLatest: async () => {
+              const latest = await apiDb.getSetting('trir_target').catch(() => null);
+              if (typeof latest === 'number' || (latest && !isNaN(Number(latest)))) {
+                setTrirTarget(Number(latest));
+              }
+            },
+          });
+        } else {
+          toast.error(err?.message || 'خطا در ذخیره هدف TRIR در پایگاه داده');
+        }
+      });
   }, []);
 
   const handleHeatLogUpdated = React.useCallback((newLog: HeatRecord[]) => {
@@ -1048,7 +1086,22 @@ export default function App() {
     if (newLog.length > 0) {
       setActiveRecord(newLog[0]);
     }
-    centralSync.persistSetting('hse_heat_log', newLog, 'Live Heat Stress Log');
+    centralSync.persistSetting('hse_heat_log', newLog, 'Live Heat Stress Log').catch(async (err: any) => {
+      if (isConflictError(err)) {
+        await handleVersionConflict(err, {
+          title: 'تعارض نسخه لاگ پایش گرمایی',
+          onReloadLatest: async () => {
+            const latest = await apiDb.getSetting('hse_heat_log').catch(() => null);
+            if (Array.isArray(latest)) {
+              setHeatLog(latest);
+              if (latest.length > 0) setActiveRecord(latest[0]);
+            }
+          },
+        });
+      } else {
+        toast.error(err?.message || 'خطا در ذخیره گزارش پایش گرمایی در پایگاه داده');
+      }
+    });
   }, []);
 
   const dashboardSeries: TrirSeriesPoint[] = React.useMemo(() => {
@@ -1164,6 +1217,8 @@ export default function App() {
               setThemeMode={handleSetThemeMode}
             />
             <NotificationPopupModal />
+            <ConfirmDialogModal />
+            <ConflictResolutionModal />
           </NotificationProvider>
         </SyncProvider>
       </HseMotionProvider>
@@ -1181,8 +1236,6 @@ export default function App() {
      centralSync.stopSync();
    }
    try {
-     localStorage.removeItem('hse_active_tab');
-     sessionStorage.removeItem('hse_active_tab');
      window.location.hash = '#dashboard';
    } catch {}
    await apiDb.logout();
@@ -1506,11 +1559,6 @@ export default function App() {
                 language={language}
                 onOpenGlobalMenu={() => setIsSidebarOpen(true)}
                 onNavigate={(tab, subItem) => {
-                  if (subItem) {
-                    try {
-                      sessionStorage.setItem('hse_system_settings_active_subtab', subItem);
-                    } catch {}
-                  }
                   setActiveTab(tab as MainTabKey);
                   if (subItem) {
                     setTimeout(() => {
@@ -1538,6 +1586,8 @@ export default function App() {
 
  <PrintNotificationModal />
  <NotificationPopupModal />
+ <ConfirmDialogModal />
+ <ConflictResolutionModal />
  </div>
  </NotificationProvider>
  </SyncProvider>

@@ -33,6 +33,7 @@ import CentralPersonnelSelector from '../../../components/CentralPersonnelSelect
 import { printService } from '../../../services/printService';
 import { getSystemBrandingConfig } from '../../../utils/systemBrandingHelper';
 import { VirtualizedDataTable, VirtualizedColumn } from '../../../components/common/virtualized/VirtualizedDataTable';
+import { toast } from 'react-hot-toast';
 import { formatFileSize, downloadCsvFile } from '../../../utils/fileHelpers';
 
 interface Props {
@@ -478,7 +479,7 @@ export default function NonPeriodicExams({ language, currentUser }: Props) {
   const handleSaveForm = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.employeeName || !formData.employeeCode) {
-      alert(isFa ? 'لطفاً مشخصات و کد پرسنلی را وارد یا از سامانه پرسنلی انتخاب نمایید.' : 'Please enter or select personnel.');
+      toast.error(isFa ? 'لطفاً مشخصات و کد پرسنلی را وارد یا از سامانه پرسنلی انتخاب نمایید.' : 'Please enter or select personnel.');
       return;
     }
 

@@ -1,35 +1,23 @@
+import { toast } from 'react-hot-toast';
+import { apiDb, getAuthToken } from '../services/apiDatabaseClient';
+
 async function fetchSettingFromServer(key: string): Promise<any> {
-  if (typeof window === 'undefined') return null;
+  if (typeof window === 'undefined' || !getAuthToken()) return null;
   try {
-    const token = sessionStorage.getItem('hse_auth_token') || localStorage.getItem('hse_auth_token');
-    const headers: Record<string, string> = { Accept: 'application/json' };
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-    const res = await fetch(`/api/settings/${encodeURIComponent(key)}`, {
-      headers,
-      credentials: 'include',
-    });
-    if (!res.ok) return null;
-    const json = await res.json();
-    return json?.value !== undefined ? json.value : null;
+    return await apiDb.getSetting(key);
   } catch {
     return null;
   }
 }
 
-async function saveSettingToServer(key: string, value: any, description?: string): Promise<void> {
-  if (typeof window === 'undefined') return;
+async function saveSettingToServer(key: string, value: any, description?: string): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
   try {
-    const token = sessionStorage.getItem('hse_auth_token') || localStorage.getItem('hse_auth_token');
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-    await fetch(`/api/settings/${encodeURIComponent(key)}`, {
-      method: 'PUT',
-      headers,
-      credentials: 'include',
-      body: JSON.stringify({ value, description }),
-    });
-  } catch {
-    // ignore network error; localStorage remains fallback
+    await apiDb.saveSetting(key, value, description);
+    return true;
+  } catch (err: any) {
+    toast.error(err?.message || 'خطا در ذخیره پیکربندی ماژول‌ها در پایگاه داده');
+    return false;
   }
 }
 
@@ -274,7 +262,7 @@ let memoryFireDeptConfig: FireDeptSubItemConfig[] | null = null;
 let memorySafetyDeptConfig: SafetyDeptSubItemConfig[] | null = null;
 
 export async function syncModuleConfigsFromDb(): Promise<void> {
-  if (typeof window === 'undefined') return;
+  if (typeof window === 'undefined' || !getAuthToken()) return;
   try {
     const [uiCfg, healthCfg, fireCfg, safetyCfg] = await Promise.all([
       fetchSettingFromServer(STORAGE_KEY),
@@ -285,35 +273,21 @@ export async function syncModuleConfigsFromDb(): Promise<void> {
 
     if (Array.isArray(uiCfg) && uiCfg.length > 0) {
       memoryUiConfig = uiCfg;
-      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(uiCfg)); } catch {}
       window.dispatchEvent(new Event('hse_ui_config_updated'));
-    } else if (uiCfg === null) {
-      const localUi = localStorage.getItem(STORAGE_KEY);
-      if (localUi) {
-        try {
-          const parsed = JSON.parse(localUi);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            void saveSettingToServer(STORAGE_KEY, parsed, 'System Navigation Modules Config');
-          }
-        } catch {}
-      }
     }
 
     if (Array.isArray(healthCfg) && healthCfg.length > 0) {
       memoryHealthEnvConfig = healthCfg;
-      try { localStorage.setItem(STORAGE_KEY_HEALTH_ENV, JSON.stringify(healthCfg)); } catch {}
       window.dispatchEvent(new Event('health_env_config_updated'));
     }
 
     if (Array.isArray(fireCfg) && fireCfg.length > 0) {
       memoryFireDeptConfig = fireCfg;
-      try { localStorage.setItem(STORAGE_KEY_FIRE_DEPT, JSON.stringify(fireCfg)); } catch {}
       window.dispatchEvent(new Event('fire_dept_config_updated'));
     }
 
     if (Array.isArray(safetyCfg) && safetyCfg.length > 0) {
       memorySafetyDeptConfig = safetyCfg;
-      try { localStorage.setItem(STORAGE_KEY_SAFETY_DEPT, JSON.stringify(safetyCfg)); } catch {}
       window.dispatchEvent(new Event('safety_dept_config_updated'));
     }
   } catch (err) {
@@ -323,7 +297,9 @@ export async function syncModuleConfigsFromDb(): Promise<void> {
 
 if (typeof window !== 'undefined') {
   setTimeout(() => {
-    syncModuleConfigsFromDb();
+    if (getAuthToken()) {
+      syncModuleConfigsFromDb();
+    }
   }, 150);
 
   const handleRemoteConfigMutation = (e: any) => {
@@ -335,11 +311,15 @@ if (typeof window !== 'undefined') {
       key === STORAGE_KEY_SAFETY_DEPT ||
       key === 'settings'
     ) {
+      apiDb.invalidateCache('settings');
       syncModuleConfigsFromDb();
     }
   };
   window.addEventListener('app_data_mutated', handleRemoteConfigMutation);
   window.addEventListener('hse_data_mutated', handleRemoteConfigMutation);
+  window.addEventListener('hse_auth_state_changed', () => {
+    if (getAuthToken()) syncModuleConfigsFromDb();
+  });
 }
 
 /**
@@ -348,13 +328,7 @@ if (typeof window !== 'undefined') {
  */
 export function getMergedUiConfig(): SystemModuleConfig[] {
   try {
-    let parsed: SystemModuleConfig[] | null = memoryUiConfig;
-    if (!parsed) {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        parsed = JSON.parse(saved);
-      }
-    }
+    const parsed: SystemModuleConfig[] | null = memoryUiConfig;
     if (!parsed || !Array.isArray(parsed) || parsed.length === 0) {
       return ALL_SYSTEM_MODULES.map(m => ({ ...m }));
     }
@@ -368,7 +342,6 @@ export function getMergedUiConfig(): SystemModuleConfig[] {
       'سوابق و پرونده جامع پرسنل',
     ]);
 
-    // 1. Preserve saved modules in their stored order and customized properties
     parsed.forEach(savedItem => {
       const sysModule = ALL_SYSTEM_MODULES.find(m => m.key === savedItem.key);
       if (sysModule) {
@@ -393,7 +366,6 @@ export function getMergedUiConfig(): SystemModuleConfig[] {
       }
     });
 
-    // 2. Automatically discover and append ANY new system module missing from saved config
     ALL_SYSTEM_MODULES.forEach(sysModule => {
       if (!mergedList.some(item => item.key === sysModule.key)) {
         mergedList.push({
@@ -408,7 +380,6 @@ export function getMergedUiConfig(): SystemModuleConfig[] {
       }
     });
 
-    // 3. Ensure canonical order for 'intelligent_analytics' sub-modules (1. reports, 2. personnel-history, 3. ai-assistant)
     const canonicalAnalyticsOrder: Record<string, number> = {
       reports: 1,
       'personnel-history': 2,
@@ -435,12 +406,11 @@ export function getMergedUiConfig(): SystemModuleConfig[] {
 }
 
 /**
- * Saves updated module list to central database and local cache
+ * Saves updated module list strictly to PostgreSQL central database
  */
 export function saveUiConfig(modules: SystemModuleConfig[]): boolean {
   try {
     memoryUiConfig = modules;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(modules));
     void saveSettingToServer(STORAGE_KEY, modules, 'System Navigation Modules Config');
     window.dispatchEvent(new Event('hse_ui_config_updated'));
     return true;
@@ -451,14 +421,11 @@ export function saveUiConfig(modules: SystemModuleConfig[]): boolean {
 }
 
 /**
- * Resets UI layout configuration to default in both local cache and central database
+ * Resets UI layout configuration to default in central database
  */
 export function resetUiConfig(): void {
   try {
     memoryUiConfig = null;
-    localStorage.removeItem(STORAGE_KEY);
-    localStorage.removeItem(PREV_STORAGE_KEY);
-    localStorage.removeItem(LEGACY_STORAGE_KEY);
     void saveSettingToServer(STORAGE_KEY, [], 'Reset System Navigation Modules Config');
     window.dispatchEvent(new Event('hse_ui_config_updated'));
   } catch (e) {
@@ -471,13 +438,7 @@ export function resetUiConfig(): void {
  */
 export function getMergedHealthEnvConfig(): HealthEnvSubItemConfig[] {
   try {
-    let parsed: HealthEnvSubItemConfig[] | null = memoryHealthEnvConfig;
-    if (!parsed) {
-      const saved = localStorage.getItem(STORAGE_KEY_HEALTH_ENV);
-      if (saved) {
-        parsed = JSON.parse(saved);
-      }
-    }
+    const parsed: HealthEnvSubItemConfig[] | null = memoryHealthEnvConfig;
     if (!parsed || !Array.isArray(parsed) || parsed.length === 0) {
       return ALL_HEALTH_ENV_SUBITEMS.map(m => ({ ...m }));
     }
@@ -521,7 +482,6 @@ export function getMergedHealthEnvConfig(): HealthEnvSubItemConfig[] {
 export function saveHealthEnvConfig(items: HealthEnvSubItemConfig[]): boolean {
   try {
     memoryHealthEnvConfig = items;
-    localStorage.setItem(STORAGE_KEY_HEALTH_ENV, JSON.stringify(items));
     void saveSettingToServer(STORAGE_KEY_HEALTH_ENV, items, 'Health & Env Subitems Config');
     window.dispatchEvent(new Event('health_env_config_updated'));
     return true;
@@ -534,7 +494,6 @@ export function saveHealthEnvConfig(items: HealthEnvSubItemConfig[]): boolean {
 export function resetHealthEnvConfig(): void {
   try {
     memoryHealthEnvConfig = null;
-    localStorage.removeItem(STORAGE_KEY_HEALTH_ENV);
     void saveSettingToServer(STORAGE_KEY_HEALTH_ENV, [], 'Reset Health & Env Subitems Config');
     window.dispatchEvent(new Event('health_env_config_updated'));
   } catch (err) {
@@ -547,13 +506,7 @@ export function resetHealthEnvConfig(): void {
  */
 export function getMergedFireDeptConfig(): FireDeptSubItemConfig[] {
   try {
-    let parsed: FireDeptSubItemConfig[] | null = memoryFireDeptConfig;
-    if (!parsed) {
-      const saved = localStorage.getItem(STORAGE_KEY_FIRE_DEPT);
-      if (saved) {
-        parsed = JSON.parse(saved);
-      }
-    }
+    const parsed: FireDeptSubItemConfig[] | null = memoryFireDeptConfig;
     if (!parsed || !Array.isArray(parsed) || parsed.length === 0) {
       return ALL_FIRE_DEPT_SUBITEMS.map(m => ({ ...m }));
     }
@@ -597,7 +550,6 @@ export function getMergedFireDeptConfig(): FireDeptSubItemConfig[] {
 export function saveFireDeptConfig(items: FireDeptSubItemConfig[]): boolean {
   try {
     memoryFireDeptConfig = items;
-    localStorage.setItem(STORAGE_KEY_FIRE_DEPT, JSON.stringify(items));
     void saveSettingToServer(STORAGE_KEY_FIRE_DEPT, items, 'Fire Dept Subitems Config');
     window.dispatchEvent(new Event('fire_dept_config_updated'));
     return true;
@@ -610,7 +562,6 @@ export function saveFireDeptConfig(items: FireDeptSubItemConfig[]): boolean {
 export function resetFireDeptConfig(): void {
   try {
     memoryFireDeptConfig = null;
-    localStorage.removeItem(STORAGE_KEY_FIRE_DEPT);
     void saveSettingToServer(STORAGE_KEY_FIRE_DEPT, [], 'Reset Fire Dept Subitems Config');
     window.dispatchEvent(new Event('fire_dept_config_updated'));
   } catch (err) {
@@ -623,13 +574,7 @@ export function resetFireDeptConfig(): void {
  */
 export function getMergedSafetyDeptConfig(): SafetyDeptSubItemConfig[] {
   try {
-    let parsed: SafetyDeptSubItemConfig[] | null = memorySafetyDeptConfig;
-    if (!parsed) {
-      const saved = localStorage.getItem(STORAGE_KEY_SAFETY_DEPT);
-      if (saved) {
-        parsed = JSON.parse(saved);
-      }
-    }
+    const parsed: SafetyDeptSubItemConfig[] | null = memorySafetyDeptConfig;
     if (!parsed || !Array.isArray(parsed) || parsed.length === 0) {
       return ALL_SAFETY_DEPT_SUBITEMS.map(m => ({ ...m }));
     }
@@ -673,7 +618,6 @@ export function getMergedSafetyDeptConfig(): SafetyDeptSubItemConfig[] {
 export function saveSafetyDeptConfig(items: SafetyDeptSubItemConfig[]): boolean {
   try {
     memorySafetyDeptConfig = items;
-    localStorage.setItem(STORAGE_KEY_SAFETY_DEPT, JSON.stringify(items));
     void saveSettingToServer(STORAGE_KEY_SAFETY_DEPT, items, 'Safety Dept Subitems Config');
     window.dispatchEvent(new Event('safety_dept_config_updated'));
     return true;
@@ -686,7 +630,6 @@ export function saveSafetyDeptConfig(items: SafetyDeptSubItemConfig[]): boolean 
 export function resetSafetyDeptConfig(): void {
   try {
     memorySafetyDeptConfig = null;
-    localStorage.removeItem(STORAGE_KEY_SAFETY_DEPT);
     void saveSettingToServer(STORAGE_KEY_SAFETY_DEPT, [], 'Reset Safety Dept Subitems Config');
     window.dispatchEvent(new Event('safety_dept_config_updated'));
   } catch (err) {

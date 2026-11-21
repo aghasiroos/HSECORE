@@ -36,6 +36,7 @@ import { HeatRecord, WeatherInfo } from '../types';
 import { apiDb } from '../services/apiDatabaseClient';
 import { centralSync } from '../services/centralSyncService';
 import { downloadCsvFile } from '../utils/fileHelpers';
+import { toast } from 'react-hot-toast';
 import { 
   bilinearHeatIndex, 
   categorizeHeatStress as categorize, 
@@ -290,12 +291,25 @@ export default function HeatStressMonitor({
   const [showIncidentLayer, setShowIncidentLayer] = useState(true);
   const [gpsPermissionDenied, setGpsPermissionDenied] = useState(false);
   const [selectedWeatherProvider, setSelectedWeatherProvider] = useState<string>(() => {
-    try {
-      return localStorage.getItem('hse_weather_selected_provider') || 'auto';
-    } catch {
-      return 'auto';
-    }
+    return apiDb.userPreferences.getCached<string>('weather_selected_provider') || 'auto';
   });
+
+  useEffect(() => {
+    const syncProvider = () => {
+      const cached = apiDb.userPreferences.getCached<string>('weather_selected_provider');
+      if (cached) setSelectedWeatherProvider(cached);
+    };
+    apiDb.userPreferences.get<string>('weather_selected_provider').then((res) => {
+      const val = res?.value;
+      if (typeof val === 'string' && val) setSelectedWeatherProvider(val);
+    }).catch(() => {});
+    window.addEventListener('hse_user_preferences_updated', syncProvider);
+    window.addEventListener('hse_auth_state_changed', syncProvider);
+    return () => {
+      window.removeEventListener('hse_user_preferences_updated', syncProvider);
+      window.removeEventListener('hse_auth_state_changed', syncProvider);
+    };
+  }, []);
   
   // References for latest state in async/timer callbacks (prevents stale closures)
   const logRef = useRef<HeatRecord[]>(log);
@@ -807,9 +821,7 @@ export default function HeatStressMonitor({
 
   const handleSelectWeatherProvider = (providerId: string) => {
     setSelectedWeatherProvider(providerId);
-    try {
-      localStorage.setItem('hse_weather_selected_provider', providerId);
-    } catch {}
+    void apiDb.userPreferences.set('weather_selected_provider', providerId).catch(() => {});
     const target = activeRecord
       ? { lat: activeRecord.lat, lon: activeRecord.lon, loc: activeRecord.loc }
       : lastFetchedLocationRef.current;
@@ -1144,7 +1156,7 @@ export default function HeatStressMonitor({
   const handleExportXLSX = () => {
     const XLSX_ = (window as any).XLSX;
     if (!XLSX_) {
-      alert("Excel export library is loading... Please wait.");
+      toast.error(isFa ? 'کتابخانه خروجی اکسل در حال بارگذاری است... لطفاً چند لحظه صبر کنید.' : 'Excel export library is loading... Please wait.');
       return;
     }
     const headers: (string | number)[] = [
@@ -1174,7 +1186,7 @@ export default function HeatStressMonitor({
   const handleExportPDF = () => {
     const jspdf_ = (window as any).jspdf;
     if (!jspdf_) {
-      alert("PDF library is loading... Please wait.");
+      toast.error(isFa ? 'کتابخانه PDF در حال بارگذاری است... لطفاً چند لحظه صبر کنید.' : 'PDF library is loading... Please wait.');
       return;
     }
     const doc = new jspdf_.jsPDF({ orientation: 'landscape' });

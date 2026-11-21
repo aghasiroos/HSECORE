@@ -6,7 +6,7 @@ import { sql } from 'drizzle-orm';
 import { db, createPool } from '../../src/db/index.ts';
 import * as schema from '../../src/db/schema.ts';
 import { logger } from './logger.ts';
-import { DatabaseError } from './errors.ts';
+import { AppError, DatabaseError } from './errors.ts';
 
 export async function checkDatabaseHealth(): Promise<{
   status: 'healthy' | 'degraded' | 'unreachable';
@@ -81,6 +81,9 @@ export async function withTransaction<T>(
       return await callback(tx as any);
     });
   } catch (error: any) {
+    if (error instanceof AppError || typeof error?.statusCode === 'number') {
+      throw error;
+    }
     logger.error('Transaction rolled back due to error', error);
     throw new DatabaseError(error?.message || 'Transaction failed', error);
   }

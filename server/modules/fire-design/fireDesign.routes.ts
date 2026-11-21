@@ -19,6 +19,7 @@ import {
 import { auditService } from '../audit/audit.service.ts';
 import { broadcastDataMutation } from '../../core/socket.ts';
 import { logger } from '../../core/logger.ts';
+import { assertVersionMatch, extractExpectedVersion, extractExpectedUpdatedAt, sendConflictIfApplicable } from '../../core/occ.ts';
 import {
   runNfpaFloorCalculation,
   ExistingEquipmentSummaryItem,
@@ -363,6 +364,7 @@ router.put('/buildings/:id', requireAuth, async (req: Request, res: Response) =>
     if (!existing || existing.isDeleted) return res.status(404).json({ success: false, error: 'ساختمان یافت نشد.' });
 
     const body = req.body || {};
+    assertVersionMatch(existing, extractExpectedVersion(body), extractExpectedUpdatedAt(body));
     const hasWaterUpdate = body.waterSupply !== undefined || body.waterSourceType !== undefined;
     const nextRawWs = body.waterSupply !== undefined ? body.waterSupply : (existing.waterSupply as any);
     const explicitSourceType: WaterSourceType | null =
@@ -402,17 +404,19 @@ router.put('/buildings/:id', requireAuth, async (req: Request, res: Response) =>
         waterSupply: normalizedWater ? normalizedWater.waterSupply : existing.waterSupply,
         currentSuppressionNotes: body.currentSuppressionNotes !== undefined ? body.currentSuppressionNotes : existing.currentSuppressionNotes,
         status: body.status ?? existing.status,
+        version: Number(existing.version ?? 1) + 1,
         updatedAt: new Date(),
       })
       .where(eq(fireDesignBuildings.id, id))
       .returning();
 
     await recordAudit(req, 'UPDATE', 'BUILDING', id, existing, updated);
-    broadcastDataMutation('fire_design', 'update_building', updated);
+    broadcastDataMutation('fire_design', 'update_building', updated, { module: 'FIRE_DESIGN', recordId: id, actorId: req.user?.uid, version: updated.version });
     return res.json({ success: true, data: updated });
   } catch (error: any) {
+    if (sendConflictIfApplicable(res, error)) return;
     logger.error('[FireDesign] update building failed:', error);
-    return res.status(500).json({ success: false, error: error?.message || 'خطا در ویرایش ساختمان' });
+    return res.status(error?.statusCode || 500).json({ success: false, error: error?.message || 'خطا در ویرایش ساختمان' });
   }
 });
 
@@ -574,6 +578,7 @@ router.put('/floors/:id', requireAuth, async (req: Request, res: Response) => {
     if (!existing) return res.status(404).json({ success: false, error: 'طبقه یافت نشد.' });
 
     const body = req.body || {};
+    assertVersionMatch(existing, extractExpectedVersion(body), extractExpectedUpdatedAt(body));
     const lengthM = body.lengthM !== undefined ? Number(body.lengthM) : existing.lengthM;
     const widthM = body.widthM !== undefined ? Number(body.widthM) : existing.widthM;
     const areaSqm =
@@ -606,17 +611,19 @@ router.put('/floors/:id', requireAuth, async (req: Request, res: Response) => {
         scaleMetersPerPixel: body.scaleMetersPerPixel !== undefined ? body.scaleMetersPerPixel : existing.scaleMetersPerPixel,
         calibrationLine: body.calibrationLine !== undefined ? body.calibrationLine : existing.calibrationLine,
         notes: body.notes !== undefined ? body.notes : existing.notes,
+        version: Number(existing.version ?? 1) + 1,
         updatedAt: new Date(),
       })
       .where(eq(fireDesignFloors.id, id))
       .returning();
 
     await recordAudit(req, 'UPDATE', 'FLOOR', id, existing, updated);
-    broadcastDataMutation('fire_design', 'update_floor', updated);
+    broadcastDataMutation('fire_design', 'update_floor', updated, { module: 'FIRE_DESIGN', recordId: id, actorId: req.user?.uid, version: updated.version });
     return res.json({ success: true, data: updated });
   } catch (error: any) {
+    if (sendConflictIfApplicable(res, error)) return;
     logger.error('[FireDesign] update floor failed:', error);
-    return res.status(500).json({ success: false, error: error?.message || 'خطا در ویرایش طبقه' });
+    return res.status(error?.statusCode || 500).json({ success: false, error: error?.message || 'خطا در ویرایش طبقه' });
   }
 });
 
@@ -785,6 +792,7 @@ router.post('/layouts/:id/approve', requireAuth, async (req: Request, res: Respo
     const [existing] = await db.select().from(fireDesignLayouts).where(eq(fireDesignLayouts.id, id));
     if (!existing) return res.status(404).json({ success: false, error: 'نسخه جانمایی یافت نشد.' });
 
+    assertVersionMatch(existing, extractExpectedVersion(req.body), extractExpectedUpdatedAt(req.body));
     const snap = (existing.calculationSnapshot || {}) as Partial<FloorCalculationResult>;
     if (snap.calculationStatus === 'INCOMPLETE_DATA') {
       return res.status(400).json({
@@ -805,6 +813,7 @@ router.post('/layouts/:id/approve', requireAuth, async (req: Request, res: Respo
             reviewedAt: new Date(),
             reviewNotes: notesValue ?? existing.reviewNotes,
             notes: req.body?.notes ?? existing.notes,
+            version: Number(existing.version ?? 1) + 1,
             updatedAt: new Date(),
           }
         : {
@@ -815,6 +824,7 @@ router.post('/layouts/:id/approve', requireAuth, async (req: Request, res: Respo
             approvedAt: new Date(),
             reviewNotes: notesValue ?? existing.reviewNotes,
             notes: req.body?.notes ?? existing.notes,
+            version: Number(existing.version ?? 1) + 1,
             updatedAt: new Date(),
           };
 
@@ -832,11 +842,12 @@ router.post('/layouts/:id/approve', requireAuth, async (req: Request, res: Respo
     }
 
     await recordAudit(req, nextStatus === 'REVIEWED' ? 'REVIEW' : 'APPROVE', 'LAYOUT_REVISION', id, { status: existing.status }, { status: nextStatus, by: actorName, notes: notesValue });
-    broadcastDataMutation('fire_design', 'approve_layout', updated);
+    broadcastDataMutation('fire_design', 'approve_layout', updated, { module: 'FIRE_DESIGN', recordId: id, actorId: req.user?.uid, version: updated.version });
     return res.json({ success: true, data: updated });
   } catch (error: any) {
+    if (sendConflictIfApplicable(res, error)) return;
     logger.error('[FireDesign] approve layout failed:', error);
-    return res.status(500).json({ success: false, error: error?.message || 'خطا در تایید نسخه طراحی' });
+    return res.status(error?.statusCode || 500).json({ success: false, error: error?.message || 'خطا در تایید نسخه طراحی' });
   }
 });
 

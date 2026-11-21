@@ -10,6 +10,7 @@ import { ROLE_PERMISSIONS, normalizeRoleToCanonical, checkUserHasPermission } fr
 import { config } from '../../core/config.ts';
 import { logger } from '../../core/logger.ts';
 import { personnelAccessService, isAdminRole } from '../../core/personnelAccess.service.ts';
+import { assertVersionMatch, extractExpectedVersion, extractExpectedUpdatedAt } from '../../core/occ.ts';
 import {
   normalizePersianArabicText,
   normalizeDigits as sharedNormalizeDigits,
@@ -770,6 +771,7 @@ export class AuthService {
         personnelAccessScope: schema.users.personnelAccessScope,
         permissions: schema.users.permissions,
         profileData: schema.users.profileData,
+        version: schema.users.version,
         createdAt: schema.users.createdAt,
         updatedAt: schema.users.updatedAt,
       })
@@ -1011,6 +1013,8 @@ export class AuthService {
 
     let resultUser;
     if (existingUser) {
+      assertVersionMatch(existingUser, extractExpectedVersion(data), extractExpectedUpdatedAt(data));
+      valuesToInsert.version = Number(existingUser.version ?? 1) + 1;
       const res = await db
         .update(schema.users)
         .set(valuesToInsert)
@@ -1018,6 +1022,7 @@ export class AuthService {
         .returning();
       resultUser = res[0];
     } else {
+      valuesToInsert.version = 1;
       const res = await db
         .insert(schema.users)
         .values(valuesToInsert)

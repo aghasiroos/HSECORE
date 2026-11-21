@@ -67,13 +67,16 @@ export class ApiResponse {
     correlationId?: string
   ): Response {
     const isAppError = error instanceof AppError;
-    const statusCode = isAppError ? error.statusCode : 500;
-    const code = isAppError ? error.code : 'INTERNAL_SERVER_ERROR';
+    const statusCode = isAppError ? error.statusCode : (Number(error?.statusCode || error?.status) || 500);
+    const code = (error as any)?.code || (isAppError ? error.code : 'INTERNAL_SERVER_ERROR');
     const message = isAppError ? error.message : (error?.message || 'خطای غیرمنتظره سرور');
-    const details = isAppError ? error.details : undefined;
+    const details = isAppError ? error.details : error?.details;
+    const conflict = error?.conflict || error?.details?.conflict || undefined;
 
-    const envelope: ErrorEnvelope = {
+    const envelope: ErrorEnvelope & { conflict?: any; code?: string } = {
       success: false,
+      code,
+      ...(conflict ? { conflict } : {}),
       error: {
         code,
         message,

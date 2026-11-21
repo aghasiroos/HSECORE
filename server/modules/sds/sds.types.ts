@@ -248,6 +248,7 @@ export interface SdsRecordDTO {
   physicalState: SdsPhysicalState;
   revisionNumber: number;
   preparedDate: string;
+  version?: number;
   lastRevisionDate: string;
   revisionTriggerReason: string;
   needsRevision: boolean;

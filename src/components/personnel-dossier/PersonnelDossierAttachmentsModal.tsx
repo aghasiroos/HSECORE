@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { DossierAttachmentItem } from '../../types/personnelDossierTypes';
 import { personnelDossierService } from '../../services/personnelDossierService';
+import { showConfirmDialog } from '../common/ConfirmDialogModal';
 
 interface PersonnelDossierAttachmentsModalProps {
   personnelCode: string;
@@ -109,8 +110,12 @@ export default function PersonnelDossierAttachmentsModal({
     }
   };
 
-  const handleDelete = (id: string) => {
-    if (window.confirm(isFa ? 'آیا از حذف این فایل پیوست اطمینان دارید؟' : 'Are you sure you want to delete this attachment?')) {
+  const handleDelete = async (id: string) => {
+    const confirmed = await showConfirmDialog(
+      isFa ? 'آیا از حذف این فایل پیوست اطمینان دارید؟' : 'Are you sure you want to delete this attachment?',
+      { isFa, variant: 'danger' }
+    );
+    if (confirmed) {
       personnelDossierService.deleteAttachment(id);
       setAttachments(prev => prev.filter(a => a.id !== id));
       onUpdated();

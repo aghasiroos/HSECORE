@@ -39,24 +39,42 @@ export const DEFAULT_PERFORMANCE_THRESHOLDS: PerformanceThresholdConfig = {
   maxMemoryCacheEntries: 1000
 };
 
+import { apiDb } from '../../services/apiDatabaseClient';
+
+const PERF_PREF_KEY = 'performance_thresholds';
+
 class PerformanceConfigManager {
   private config: PerformanceThresholdConfig = { ...DEFAULT_PERFORMANCE_THRESHOLDS };
   private listeners: Set<(cfg: PerformanceThresholdConfig) => void> = new Set();
 
   constructor() {
-    this.loadFromStorage();
+    this.hydrateFromDatabase();
+    if (typeof window !== 'undefined') {
+      window.addEventListener('hse_auth_state_changed', () => {
+        this.hydrateFromDatabase();
+      });
+      window.addEventListener('hse_user_preferences_updated', (e: any) => {
+        const key = e?.detail?.key;
+        if (!key || key === PERF_PREF_KEY) {
+          if (e?.detail?.value && typeof e.detail.value === 'object') {
+            this.config = { ...DEFAULT_PERFORMANCE_THRESHOLDS, ...e.detail.value };
+            this.notify();
+          }
+        }
+      });
+    }
   }
 
-  private loadFromStorage() {
+  private async hydrateFromDatabase() {
     try {
-      if (typeof window !== 'undefined' && window.localStorage) {
-        const saved = localStorage.getItem('hse_performance_thresholds');
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          this.config = { ...DEFAULT_PERFORMANCE_THRESHOLDS, ...parsed };
-        }
+      const saved = await apiDb.userPreferences.get(PERF_PREF_KEY);
+      if (saved?.value && typeof saved.value === 'object') {
+        this.config = { ...DEFAULT_PERFORMANCE_THRESHOLDS, ...saved.value };
+        this.notify();
       }
-    } catch (_) {}
+    } catch {
+      // keep defaults until authenticated
+    }
   }
 
   public getConfig(): PerformanceThresholdConfig {
@@ -65,21 +83,17 @@ class PerformanceConfigManager {
 
   public updateConfig(newConfig: Partial<PerformanceThresholdConfig>) {
     this.config = { ...this.config, ...newConfig };
-    try {
-      if (typeof window !== 'undefined' && window.localStorage) {
-        localStorage.setItem('hse_performance_thresholds', JSON.stringify(this.config));
-      }
-    } catch (_) {}
+    apiDb.userPreferences.set(PERF_PREF_KEY, this.config).catch((err) => {
+      console.error('Failed to persist performance thresholds preference:', err);
+    });
     this.notify();
   }
 
   public resetToDefaults() {
     this.config = { ...DEFAULT_PERFORMANCE_THRESHOLDS };
-    try {
-      if (typeof window !== 'undefined' && window.localStorage) {
-        localStorage.removeItem('hse_performance_thresholds');
-      }
-    } catch (_) {}
+    apiDb.userPreferences.set(PERF_PREF_KEY, this.config).catch((err) => {
+      console.error('Failed to reset performance thresholds preference:', err);
+    });
     this.notify();
   }
 

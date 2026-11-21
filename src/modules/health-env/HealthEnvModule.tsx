@@ -7,6 +7,7 @@ import {
   ClipboardCheck, Apple
 } from 'lucide-react';
 import { getMergedHealthEnvConfig, HealthEnvSubItemConfig } from '../../config/modulesConfig';
+import { apiDb } from '../../services/apiDatabaseClient';
 
 // Components
 import ComprehensiveExecutiveDashboard from './components/ComprehensiveExecutiveDashboard';
@@ -253,42 +254,45 @@ const NavItem: React.FC<NavItemProps> = ({
 
 export default function HealthEnvModule({ language, currentUser }: Props) {
   const isFa = language === 'fa';
-  const [activeSection, setActiveSectionState] = useState<string>(() => {
-    try {
-      return sessionStorage.getItem('hse_health_env_active_section') || 'comprehensive-dashboard';
-    } catch {
-      return 'comprehensive-dashboard';
-    }
-  });
+  const [activeSection, setActiveSectionState] = useState<string>('comprehensive-dashboard');
 
   const setActiveSection = (section: string) => {
     setActiveSectionState(section);
-    try {
-      sessionStorage.setItem('hse_health_env_active_section', section);
-      localStorage.setItem('hse_health_env_active_section', section);
-    } catch {}
+    void apiDb.userPreferences.set('health_env_active_section', section).catch(() => {});
   };
 
-  // Sidebar Open State (Persisted in localStorage, default open on desktop only)
-  const [sidebarOpen, setSidebarOpen] = useState(() => {
-    try {
-      if (typeof window !== 'undefined' && window.innerWidth < 1024) return false;
-      const saved = localStorage.getItem('hse_health_env_sidebar_open');
-      if (saved !== null) return saved === 'true';
-      return window.innerWidth >= 1024;
-    } catch {
-      return false;
-    }
-  });
+  // Sidebar Open State (Persisted in PostgreSQL user_preferences, default open on desktop only)
+  const [sidebarOpen, setSidebarOpen] = useState(() =>
+    typeof window !== 'undefined' ? window.innerWidth >= 1024 : false
+  );
+
+  useEffect(() => {
+    let active = true;
+    Promise.all([
+      apiDb.userPreferences.get<string>('health_env_active_section').catch(() => null),
+      apiDb.userPreferences.get<boolean>('health_env_sidebar_open').catch(() => null),
+    ]).then(([sectionRes, sidebarRes]) => {
+      if (!active) return;
+      const savedSection = sectionRes?.value;
+      const savedSidebar = sidebarRes?.value;
+      if (typeof savedSection === 'string' && savedSection) {
+        setActiveSectionState(savedSection);
+      }
+      if (typeof savedSidebar === 'boolean' && typeof window !== 'undefined' && window.innerWidth >= 1024) {
+        setSidebarOpen(savedSidebar);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const toggleSidebar = () => {
     setSidebarOpen(prev => {
       const next = !prev;
-      try {
-        if (typeof window !== 'undefined' && window.innerWidth >= 1024) {
-          localStorage.setItem('hse_health_env_sidebar_open', String(next));
-        }
-      } catch {}
+      if (typeof window !== 'undefined' && window.innerWidth >= 1024) {
+        void apiDb.userPreferences.set('health_env_sidebar_open', next).catch(() => {});
+      }
       return next;
     });
   };

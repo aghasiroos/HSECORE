@@ -22,6 +22,7 @@ import { ComplexPersonnel, PersonnelOrgDetails } from '../../../../utils/personn
 import { getOrgSites, getUnits } from '../../../../utils/orgHelper';
 import { getTodayJalaliDate, calculateNextInspectionDate } from '../../../../utils/inspectionScheduleHelper';
 import { SafetyAuditPhoto } from '../../../safety-dept/types';
+import { toast } from 'react-hot-toast';
 
 interface Props {
   isOpen: boolean;
@@ -297,7 +298,7 @@ export default function HealthEnvChecklistFormModal({
 
     Array.from(files).forEach(file => {
       if (file.size > 25 * 1024 * 1024) {
-        alert(`فایل ${file.name} بیشتر از ۲۵ مگابایت است.`);
+        toast.error(`فایل ${file.name} بیشتر از ۲۵ مگابایت است.`);
         return;
       }
 

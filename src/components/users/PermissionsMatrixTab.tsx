@@ -76,6 +76,7 @@ import {
   validatePermissionDependencies,
   getDefaultPermissionsForRole
 } from '../../utils/authHelper';
+import { toast } from 'react-hot-toast';
 
 interface PermissionsMatrixTabProps {
   users: UserProfile[];
@@ -245,11 +246,11 @@ export const PermissionsMatrixTab: React.FC<PermissionsMatrixTabProps> = ({
   const handleToggleAction = (nodeId: string, action: HierarchicalActionKey) => {
     if (!selectedUser) return;
     if (!isCurrentAdmin) {
-      alert(isFa ? 'تنها مدیر ارشد مجاز به ویرایش دسترسی‌های کاربران است.' : 'Only Administrator is authorized to modify user permissions.');
+      toast.error(isFa ? 'تنها مدیر ارشد مجاز به ویرایش دسترسی‌های کاربران است.' : 'Only Administrator is authorized to modify user permissions.');
       return;
     }
     if (isSelectedAdmin) {
-      alert(isFa 
+      toast.error(isFa 
         ? 'کاربر مدیر ارشد (Administrator) به صورت پیش‌فرض دسترسی نامحدود ریشه‌ای دارد.' 
         : 'Administrator has absolute full access.');
       return;

@@ -1,8 +1,8 @@
-import { desc, eq } from 'drizzle-orm';
-import { db, schema } from '../../core/db.ts';
+import { desc, eq, sql } from 'drizzle-orm';
+import { db, schema, withTransaction } from '../../core/db.ts';
 import { auditService } from '../audit/audit.service.ts';
-import { notificationService } from '../notifications/notification.service.ts';
-import { ValidationError, NotFoundError } from '../../core/errors.ts';
+import { broadcastDataMutation } from '../../core/socket.ts';
+import { NotFoundError, ValidationError } from '../../core/errors.ts';
 import { UserContext } from '../../core/middleware/auth.ts';
 
 export interface BPMNProcess {
@@ -28,227 +28,259 @@ export interface ProcessVersionItem {
   bpmnXml: string;
 }
 
-// Default standard HSE processes
-const DEFAULT_BPMN_PROCESSES: BPMNProcess[] = [
+const DEFAULT_BPMN_PROCESSES: Array<{
+  processKey: string;
+  name: string;
+  category: string;
+  priority: string;
+  description: string;
+  bpmnXml: string;
+  status: 'deployed' | 'draft';
+}> = [
   {
-    id: 999,
     processKey: 'PTW_HOT_WORK',
     name: 'فرآیند صدور پروانه کار گرم (PTW Hot Work)',
     category: 'PTW',
     priority: 'بالا',
     description: 'گردش کار چندمرحله‌ای صدور مجوز کار گرم با تست گاز و تایید مدیر HSE',
-    version: 1,
     bpmnXml: `<?xml version="1.0" encoding="UTF-8"?><bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" id="Definitions_PTW" targetNamespace="http://bpmn.io/schema/bpmn"><bpmn:process id="Process_PTW" isExecutable="true"><bpmn:startEvent id="StartEvent_1" name="ثبت درخواست PTW"/><bpmn:userTask id="Task_Area" name="تایید مسئول محوطه"/><bpmn:userTask id="Task_Safety" name="بررسی ایمنی و تست گاز"/><bpmn:userTask id="Task_HSEManager" name="تایید و امضای مدیر HSE"/><bpmn:endEvent id="EndEvent_1" name="صدور مجوز کار"/></bpmn:process></bpmn:definitions>`,
     status: 'deployed',
-    createdAt: new Date(Date.now() - 86400000 * 30).toISOString(),
-    updatedAt: new Date().toISOString(),
   },
   {
-    id: 998,
     processKey: 'INCIDENT_INVESTIGATION',
     name: 'گردش‌کار گزارش، ریشه‌یابی و مدیریت حوادث',
     category: 'Incident',
     priority: 'بحرانی',
     description: 'ثبت، بازرسی میدانی، تحلیل RCA و تدوین اقدامات اصلاحی CAPA',
-    version: 1,
     bpmnXml: `<?xml version="1.0" encoding="UTF-8"?><bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" id="Definitions_INC"><bpmn:process id="Process_INC" isExecutable="true"><bpmn:startEvent id="Start_1" name="ثبت اولیه حادثه"/><bpmn:userTask id="Task_RCA" name="تشکیل تیم و تحلیل علل ریشه‌ای"/><bpmn:userTask id="Task_CAPA" name="تصویب اقدامات اصلاحی CAPA"/><bpmn:endEvent id="End_1" name="بستن پرونده حادثه"/></bpmn:process></bpmn:definitions>`,
     status: 'deployed',
-    createdAt: new Date(Date.now() - 86400000 * 20).toISOString(),
-    updatedAt: new Date().toISOString(),
   },
   {
-    id: 997,
     processKey: 'OCCUPATIONAL_HEALTH_CHECK',
     name: 'فرآیند معاینات ادواری و سلامت طب کار',
     category: 'Health',
     priority: 'متوسط',
     description: 'انجام آزمایشات، شنوایی‌سنجی، تنفس و تایید صلاحیت شغلی توسط پزشک',
-    version: 1,
     bpmnXml: `<?xml version="1.0" encoding="UTF-8"?><bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" id="Definitions_MED"><bpmn:process id="Process_MED" isExecutable="true"><bpmn:startEvent id="Start_1" name="نوبت‌دهی معاینات"/><bpmn:userTask id="Task_Lab" name="ثبت نتایج پاراکلینیک"/><bpmn:userTask id="Task_Doc" name="نظریه نهایی و گواهی سلامت پزشک"/><bpmn:endEvent id="End_1" name="تکمیل پرونده سلامت"/></bpmn:process></bpmn:definitions>`,
     status: 'deployed',
-    createdAt: new Date(Date.now() - 86400000 * 15).toISOString(),
-    updatedAt: new Date().toISOString(),
   },
   {
-    id: 996,
     processKey: 'FIVE_S_INSPECTION',
     name: 'ممیزی دوره‌ای نظام آراستگی محیط کار (5S)',
     category: 'Inspection',
     priority: 'متوسط',
     description: 'بازرسی چک‌لیست پنج‌گانه، عکاسی قبل/بعد و ارزیابی انطباق واحد',
-    version: 1,
     bpmnXml: `<?xml version="1.0" encoding="UTF-8"?><bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" id="Definitions_5S"><bpmn:process id="Process_5S" isExecutable="true"><bpmn:startEvent id="Start_1" name="شروع ممیزی 5S"/><bpmn:userTask id="Task_Audit" name="ثبت امتیازات و مشاهدات"/><bpmn:endEvent id="End_1" name="صدور کارنامه آراستگی"/></bpmn:process></bpmn:definitions>`,
     status: 'deployed',
-    createdAt: new Date(Date.now() - 86400000 * 10).toISOString(),
-    updatedAt: new Date().toISOString(),
   },
 ];
 
-const memProcesses: BPMNProcess[] = [...DEFAULT_BPMN_PROCESSES];
-const memVersionsMap: Record<number, ProcessVersionItem[]> = {
-  999: [
-    {
-      version: 1,
-      createdAt: new Date(Date.now() - 7 * 86400000).toISOString(),
-      createdBy: 'Admin User',
-      tag: 'نسخه اولیه',
-      changes: 'ایجاد اولین ساختار پروانه کار',
-      bpmnXml: DEFAULT_BPMN_PROCESSES[0].bpmnXml,
-    },
-  ],
-};
-
-let memActiveInstances: any[] = [];
+function mapRowToBPMNProcess(row: typeof schema.bpmnProcesses.$inferSelect): BPMNProcess {
+  const meta = (row.metadata && typeof row.metadata === 'object' ? row.metadata : {}) as Record<string, any>;
+  return {
+    id: row.id,
+    processKey: row.processKey,
+    name: row.name,
+    category: row.category || 'General',
+    priority: meta.priority || 'متوسط',
+    description: meta.description || '',
+    version: row.version || 1,
+    bpmnXml: row.xmlContent,
+    status: (row.status as BPMNProcess['status']) || 'deployed',
+    createdAt: row.createdAt ? new Date(row.createdAt).toISOString() : new Date().toISOString(),
+    updatedAt: row.updatedAt ? new Date(row.updatedAt).toISOString() : new Date().toISOString(),
+  };
+}
 
 export class BPMNService {
-  async getAllProcesses(): Promise<BPMNProcess[]> {
-    // Sync with database workflows table
-    try {
-      const dbWorkflows = await db.select().from(schema.workflows);
-      if (dbWorkflows.length > 0) {
-        // Merge with memory processes
-        for (const wf of dbWorkflows) {
-          const exists = memProcesses.find((p) => p.processKey === wf.key);
-          const meta: any = wf.defaultSteps || {};
-          if (!exists) {
-            memProcesses.push({
-              id: wf.id,
-              processKey: wf.key,
-              name: wf.name,
-              category: meta.category || 'General',
-              priority: 'متوسط',
-              description: wf.description || '',
-              version: meta.version || 1,
-              bpmnXml: meta.bpmnXml || DEFAULT_BPMN_PROCESSES[0].bpmnXml,
-              status: wf.isActive ? 'deployed' : 'draft',
-              createdAt: wf.createdAt.toISOString(),
-              updatedAt: wf.updatedAt.toISOString(),
-            });
-          }
-        }
-      }
-    } catch (e) {
-      // Fallback
-    }
+  private seededPromise: Promise<void> | null = null;
 
-    return memProcesses;
+  private async ensureSeeded(): Promise<void> {
+    if (!this.seededPromise) {
+      this.seededPromise = (async () => {
+        try {
+          const existing = await db.select({ id: schema.bpmnProcesses.id }).from(schema.bpmnProcesses).limit(1);
+          if (existing.length === 0) {
+            for (const def of DEFAULT_BPMN_PROCESSES) {
+              const nowIso = new Date().toISOString();
+              await db
+                .insert(schema.bpmnProcesses)
+                .values({
+                  processKey: def.processKey,
+                  name: def.name,
+                  category: def.category,
+                  version: 1,
+                  xmlContent: def.bpmnXml,
+                  status: def.status,
+                  metadata: {
+                    priority: def.priority,
+                    description: def.description,
+                    versions: [
+                      {
+                        version: 1,
+                        createdAt: nowIso,
+                        createdBy: 'سیستم',
+                        tag: 'نسخه اولیه',
+                        changes: def.description,
+                        bpmnXml: def.bpmnXml,
+                      },
+                    ],
+                  },
+                })
+                .onConflictDoNothing({ target: schema.bpmnProcesses.processKey });
+            }
+          }
+        } catch (err) {
+          this.seededPromise = null;
+          throw err;
+        }
+      })();
+    }
+    return this.seededPromise;
+  }
+
+  async getAllProcesses(): Promise<BPMNProcess[]> {
+    await this.ensureSeeded();
+    const rows = await db.select().from(schema.bpmnProcesses).orderBy(desc(schema.bpmnProcesses.updatedAt));
+    return rows.map(mapRowToBPMNProcess);
   }
 
   async getProcessVersions(processId: number): Promise<ProcessVersionItem[]> {
-    return memVersionsMap[processId] || [
+    await this.ensureSeeded();
+    const [row] = await db.select().from(schema.bpmnProcesses).where(eq(schema.bpmnProcesses.id, processId)).limit(1);
+    if (!row) {
+      throw new NotFoundError('فرآیند BPMN یافت نشد.');
+    }
+    const meta = (row.metadata && typeof row.metadata === 'object' ? row.metadata : {}) as Record<string, any>;
+    const versions = Array.isArray(meta.versions) ? (meta.versions as ProcessVersionItem[]) : [];
+    if (versions.length > 0) return versions;
+    return [
       {
-        version: 1,
-        createdAt: new Date().toISOString(),
+        version: row.version || 1,
+        createdAt: row.createdAt ? new Date(row.createdAt).toISOString() : new Date().toISOString(),
         createdBy: 'سیستم',
-        tag: 'نسخه رسمی ۱',
-        changes: 'استقرار نسخه پایه',
-        bpmnXml: memProcesses.find((p) => p.id === processId)?.bpmnXml || DEFAULT_BPMN_PROCESSES[0].bpmnXml,
+        tag: `نسخه ${row.version || 1}`,
+        changes: meta.description || 'استقرار نسخه پایه',
+        bpmnXml: row.xmlContent,
       },
     ];
   }
 
-  async deployProcess(data: {
-    processId?: number;
-    name: string;
-    category?: string;
-    bpmnXml: string;
-    versionTag?: string;
-    changes?: string;
-    user?: string;
-  }, userContext?: UserContext) {
-    const pId = data.processId || Date.now();
-    const existing = memProcesses.find((p) => p.id === pId);
-
-    const newVersionNum = existing ? existing.version + 1 : 1;
-    const author = data.user || userContext?.name || 'مدیر سیستم';
-
-    const newVersion: ProcessVersionItem = {
-      version: newVersionNum,
-      createdAt: new Date().toISOString(),
-      createdBy: author,
-      tag: data.versionTag || `نسخه ${newVersionNum}`,
-      changes: data.changes || 'بروزرسانی نمودار فرآیند',
-      bpmnXml: data.bpmnXml,
-    };
-
-    if (!memVersionsMap[pId]) {
-      memVersionsMap[pId] = [];
+  async deployProcess(
+    data: {
+      processId?: number;
+      processKey?: string;
+      name: string;
+      category?: string;
+      priority?: string;
+      bpmnXml: string;
+      versionTag?: string;
+      changes?: string;
+      user?: string;
+    },
+    userContext?: UserContext
+  ) {
+    await this.ensureSeeded();
+    if (!data?.name?.trim() || !data?.bpmnXml?.trim()) {
+      throw new ValidationError('نام فرآیند و محتوای BPMN XML الزامی است.');
     }
-    memVersionsMap[pId].unshift(newVersion);
 
-    if (existing) {
-      existing.name = data.name;
-      existing.bpmnXml = data.bpmnXml;
-      existing.version = newVersionNum;
-      existing.status = 'deployed';
-      existing.updatedAt = new Date().toISOString();
-    } else {
-      memProcesses.unshift({
-        id: pId,
-        processKey: `PROC_${pId}`,
-        name: data.name,
-        category: data.category || 'General',
-        priority: 'متوسط',
-        description: data.changes || '',
+    const author = data.user || userContext?.name || userContext?.username || 'مدیر سیستم';
+
+    const saved = await withTransaction(async (tx) => {
+      let existing: typeof schema.bpmnProcesses.$inferSelect | undefined;
+      if (data.processId) {
+        const rows = await tx.select().from(schema.bpmnProcesses).where(eq(schema.bpmnProcesses.id, Number(data.processId))).limit(1);
+        existing = rows[0];
+      } else if (data.processKey) {
+        const rows = await tx.select().from(schema.bpmnProcesses).where(eq(schema.bpmnProcesses.processKey, data.processKey)).limit(1);
+        existing = rows[0];
+      }
+
+      const newVersionNum = existing ? (existing.version || 1) + 1 : 1;
+      const prevMeta = (existing?.metadata && typeof existing.metadata === 'object' ? existing.metadata : {}) as Record<string, any>;
+      const prevVersions: ProcessVersionItem[] = Array.isArray(prevMeta.versions) ? [...prevMeta.versions] : [];
+
+      const newVersionItem: ProcessVersionItem = {
         version: newVersionNum,
-        bpmnXml: data.bpmnXml,
-        status: 'deployed',
         createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      });
-    }
+        createdBy: author,
+        tag: data.versionTag || `نسخه ${newVersionNum}`,
+        changes: data.changes || 'بروزرسانی نمودار فرآیند',
+        bpmnXml: data.bpmnXml,
+      };
+      prevVersions.unshift(newVersionItem);
 
-    // Persist to database workflows table
-    try {
-      await db
-        .insert(schema.workflows)
-        .values({
-          key: `PROC_${pId}`,
-          name: data.name,
-          entityType: 'BPMN_PROCESS',
-          description: data.changes || '',
-          isActive: true,
-          defaultSteps: {
+      const nextMeta = {
+        ...prevMeta,
+        priority: data.priority || prevMeta.priority || 'متوسط',
+        description: data.changes || prevMeta.description || '',
+        versions: prevVersions.slice(0, 50),
+      };
+
+      if (existing) {
+        const [updated] = await tx
+          .update(schema.bpmnProcesses)
+          .set({
+            name: data.name.trim(),
+            category: data.category || existing.category,
             version: newVersionNum,
-            category: data.category || 'General',
-            bpmnXml: data.bpmnXml,
-          },
-        })
-        .onConflictDoUpdate({
-          target: schema.workflows.key,
-          set: {
-            name: data.name,
-            defaultSteps: {
-              version: newVersionNum,
-              category: data.category || 'General',
-              bpmnXml: data.bpmnXml,
-            },
+            xmlContent: data.bpmnXml,
+            status: 'deployed',
+            metadata: nextMeta,
             updatedAt: new Date(),
-          },
-        });
-    } catch (e) {
-      // Handled
-    }
+          })
+          .where(eq(schema.bpmnProcesses.id, existing.id))
+          .returning();
+        return updated;
+      }
+
+      const processKey = data.processKey || `PROC_${Date.now()}_${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+      const [inserted] = await tx
+        .insert(schema.bpmnProcesses)
+        .values({
+          processKey,
+          name: data.name.trim(),
+          category: data.category || 'General',
+          version: 1,
+          xmlContent: data.bpmnXml,
+          status: 'deployed',
+          metadata: nextMeta,
+        })
+        .returning();
+      return inserted;
+    });
 
     await auditService.log({
       action: 'DEPLOY_BPMN_PROCESS',
       module: 'BPMN',
       entityType: 'BPMN_PROCESS',
-      entityId: String(pId),
-      newValue: { name: data.name, version: newVersionNum },
+      entityId: String(saved.id),
+      newValue: { name: saved.name, version: saved.version },
       details: { author },
+    });
+
+    const dto = mapRowToBPMNProcess(saved);
+    broadcastDataMutation('bpmn', 'deploy', dto, {
+      module: 'BPMN',
+      recordId: dto.id,
+      actorId: userContext?.uid,
+      version: dto.version,
     });
 
     return {
       success: true,
-      processId: pId,
-      version: newVersionNum,
-      message: `فرآیند "${data.name}" با موفقیت مستقر گردید.`,
+      processId: dto.id,
+      version: dto.version,
+      data: dto,
+      message: `فرآیند "${dto.name}" با موفقیت در پایگاه داده مستقر گردید.`,
     };
   }
 
   async simulateProcess(data: { processId: number; scenario?: string; inputs?: any }) {
-    const process = memProcesses.find((p) => p.id === data.processId) || DEFAULT_BPMN_PROCESSES[0];
+    await this.ensureSeeded();
+    const [row] = await db.select().from(schema.bpmnProcesses).where(eq(schema.bpmnProcesses.id, Number(data.processId))).limit(1);
+    const processName = row?.name || DEFAULT_BPMN_PROCESSES[0].name;
     const scenario = data.scenario || 'HAPPY_PATH';
 
     const steps = [
@@ -273,7 +305,7 @@ export class BPMNService {
 
     return {
       processId: data.processId,
-      processName: process.name,
+      processName,
       scenario,
       simulationResult: scenario === 'HAPPY_PATH' ? 'SUCCESS' : 'EXCEPTION_HANDLED',
       simulatedDurationMinutes: 57,
@@ -285,73 +317,166 @@ export class BPMNService {
   }
 
   async getActiveInstances() {
-    return memActiveInstances;
+    const rows = await db.select().from(schema.bpmnInstances).orderBy(desc(schema.bpmnInstances.startedAt));
+    return rows.map((r) => ({
+      instanceId: r.id,
+      id: r.id,
+      processId: r.processId,
+      instanceNumber: r.instanceNumber,
+      status: r.status.toLowerCase(),
+      currentStep: r.currentNodeId,
+      currentStepName: r.currentNodeName,
+      initiatorId: r.initiatorId,
+      variables: r.variables || {},
+      assignee: (r.variables as any)?.assignee || null,
+      startedAt: r.startedAt ? new Date(r.startedAt).toISOString() : null,
+      completedAt: r.completedAt ? new Date(r.completedAt).toISOString() : null,
+      updatedAt: r.updatedAt ? new Date(r.updatedAt).toISOString() : null,
+    }));
   }
 
-  async interveneInstance(instanceId: number, action: 'reassign' | 'retry' | 'skip' | 'terminate', params?: any) {
-    const inst = memActiveInstances.find((i) => i.instanceId === instanceId);
+  async interveneInstance(
+    instanceId: number,
+    action: 'reassign' | 'retry' | 'skip' | 'terminate',
+    params?: any,
+    userContext?: UserContext
+  ) {
+    const [inst] = await db.select().from(schema.bpmnInstances).where(eq(schema.bpmnInstances.id, Number(instanceId))).limit(1);
     if (!inst) {
       throw new NotFoundError('نمونه فعال فرآیند یافت نشد.');
     }
 
+    const vars = (inst.variables && typeof inst.variables === 'object' ? { ...(inst.variables as Record<string, any>) } : {}) as Record<string, any>;
+    const updates: Partial<typeof schema.bpmnInstances.$inferInsert> = {
+      updatedAt: new Date(),
+    };
+
     if (action === 'terminate') {
-      inst.status = 'terminated';
+      updates.status = 'TERMINATED';
+      updates.completedAt = new Date();
     } else if (action === 'reassign' && params?.assignee) {
-      inst.assignee = params.assignee;
+      vars.assignee = params.assignee;
+      updates.variables = vars;
     } else if (action === 'skip') {
-      inst.currentStep = 'Next_Task';
-      inst.currentStepName = 'مرحله بعدی (مداخله دستی)';
+      updates.currentNodeId = 'Next_Task';
+      updates.currentNodeName = 'مرحله بعدی (مداخله دستی)';
+    } else if (action === 'retry') {
+      updates.status = 'RUNNING';
     }
+
+    const [updated] = await db
+      .update(schema.bpmnInstances)
+      .set(updates)
+      .where(eq(schema.bpmnInstances.id, inst.id))
+      .returning();
 
     await auditService.log({
       action: `INTERVENE_INSTANCE_${action.toUpperCase()}`,
       module: 'BPMN',
       entityType: 'BPMN_INSTANCE',
       entityId: String(instanceId),
-      details: { action, params },
+      details: { action, params, actor: userContext?.username },
     });
 
-    return { success: true, instance: inst };
+    broadcastDataMutation('bpmn', 'intervene', updated, {
+      module: 'BPMN',
+      recordId: updated.id,
+      actorId: userContext?.uid,
+    });
+
+    return { success: true, instance: updated };
   }
 
   async getStatistics() {
+    await this.ensureSeeded();
+    const [processes, instances] = await Promise.all([
+      db.select({ id: schema.bpmnProcesses.id }).from(schema.bpmnProcesses),
+      db.select().from(schema.bpmnInstances),
+    ]);
+
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    const runningInstancesCount = instances.filter((i) => String(i.status).toUpperCase() === 'RUNNING' || String(i.status).toUpperCase() === 'ACTIVE').length;
+    const completedInstances = instances.filter((i) => String(i.status).toUpperCase() === 'COMPLETED');
+    const completedTodayCount = completedInstances.filter((i) => i.completedAt && new Date(i.completedAt) >= todayStart).length;
+
+    let avgCompletionTimeHours = 0;
+    if (completedInstances.length > 0) {
+      const totalMs = completedInstances.reduce((sum, i) => {
+        if (!i.completedAt || !i.startedAt) return sum;
+        return sum + Math.max(0, new Date(i.completedAt).getTime() - new Date(i.startedAt).getTime());
+      }, 0);
+      avgCompletionTimeHours = Number((totalMs / completedInstances.length / 3600000).toFixed(1));
+    }
+
+    const monthlyMap = new Map<string, number>();
+    for (const inst of instances) {
+      const d = inst.startedAt ? new Date(inst.startedAt) : new Date();
+      const label = d.toLocaleDateString('fa-IR', { month: 'long' });
+      monthlyMap.set(label, (monthlyMap.get(label) || 0) + 1);
+    }
+
     return {
-      activeProcessesCount: memProcesses.length,
-      runningInstancesCount: memActiveInstances.filter((i) => i.status === 'running').length,
-      completedTodayCount: 14,
-      avgCompletionTimeHours: 3.8,
-      monthlyDistribution: [
-        { month: 'فروردین', count: 12 },
-        { month: 'اردیبهشت', count: 19 },
-        { month: 'خرداد', count: 24 },
-        { month: 'تیر', count: 31 },
-        { month: 'مرداد', count: 28 },
-        { month: 'شهریور', count: 35 },
-      ],
+      activeProcessesCount: processes.length,
+      runningInstancesCount,
+      completedTodayCount,
+      avgCompletionTimeHours,
+      monthlyDistribution: Array.from(monthlyMap.entries()).map(([month, count]) => ({ month, count })),
     };
   }
 
-  async uploadBpmn(data: { name: string; bpmnXml: string; status?: 'active' | 'inactive'; owner?: string }) {
-    const id = Date.now();
-    const newProcess: BPMNProcess = {
-      id,
-      processKey: `PROC_${id}`,
-      name: data.name,
-      category: 'General',
-      priority: 'متوسط',
-      description: 'بارگذاری شده از طریق BPMN Modeler',
-      version: 1,
-      bpmnXml: data.bpmnXml,
-      status: data.status === 'inactive' ? 'draft' : 'deployed',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    memProcesses.unshift(newProcess);
-    return newProcess;
+  async uploadBpmn(
+    data: { name: string; bpmnXml: string; status?: 'active' | 'inactive'; owner?: string },
+    userContext?: UserContext
+  ) {
+    await this.ensureSeeded();
+    if (!data?.name?.trim() || !data?.bpmnXml?.trim()) {
+      throw new ValidationError('نام فرآیند و محتوای BPMN XML الزامی است.');
+    }
+
+    const nowIso = new Date().toISOString();
+    const processKey = `PROC_${Date.now()}_${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+    const [inserted] = await db
+      .insert(schema.bpmnProcesses)
+      .values({
+        processKey,
+        name: data.name.trim(),
+        category: 'General',
+        version: 1,
+        xmlContent: data.bpmnXml,
+        status: data.status === 'inactive' ? 'draft' : 'deployed',
+        metadata: {
+          priority: 'متوسط',
+          description: 'بارگذاری شده از طریق BPMN Modeler',
+          owner: data.owner || userContext?.username || 'admin',
+          versions: [
+            {
+              version: 1,
+              createdAt: nowIso,
+              createdBy: data.owner || userContext?.name || 'admin',
+              tag: 'نسخه اولیه',
+              changes: 'بارگذاری اولیه فایل BPMN',
+              bpmnXml: data.bpmnXml,
+            },
+          ],
+        },
+      })
+      .returning();
+
+    const dto = mapRowToBPMNProcess(inserted);
+    broadcastDataMutation('bpmn', 'create', dto, {
+      module: 'BPMN',
+      recordId: dto.id,
+      actorId: userContext?.uid,
+      version: dto.version,
+    });
+    return dto;
   }
 
   async getBpmnList() {
-    return memProcesses.map((p) => ({
+    const all = await this.getAllProcesses();
+    return all.map((p) => ({
       id: p.id,
       name: p.name,
       version: p.version,
@@ -362,9 +487,10 @@ export class BPMNService {
   }
 
   async getBpmnById(id: number) {
-    const p = memProcesses.find((proc) => proc.id === id);
-    if (!p) throw new NotFoundError('فایل فرآیند BPMN یافت نشد.');
-    return p;
+    await this.ensureSeeded();
+    const [row] = await db.select().from(schema.bpmnProcesses).where(eq(schema.bpmnProcesses.id, Number(id))).limit(1);
+    if (!row) throw new NotFoundError('فایل فرآیند BPMN یافت نشد.');
+    return mapRowToBPMNProcess(row);
   }
 
   async getBpmnXml(id: number) {
@@ -372,12 +498,21 @@ export class BPMNService {
     return p.bpmnXml;
   }
 
-  async deleteBpmn(id: number) {
-    const idx = memProcesses.findIndex((p) => p.id === id);
-    if (idx !== -1) {
-      memProcesses.splice(idx, 1);
+  async deleteBpmn(id: number, userContext?: UserContext) {
+    await this.ensureSeeded();
+    const deleted = await db
+      .delete(schema.bpmnProcesses)
+      .where(eq(schema.bpmnProcesses.id, Number(id)))
+      .returning();
+    if (deleted.length === 0) {
+      throw new NotFoundError('فایل فرآیند BPMN جهت حذف یافت نشد.');
     }
-    return { success: true, message: 'فرآیند با موفقیت حذف شد.' };
+    broadcastDataMutation('bpmn', 'delete', { id: Number(id) }, {
+      module: 'BPMN',
+      recordId: id,
+      actorId: userContext?.uid,
+    });
+    return { success: true, message: 'فرآیند با موفقیت از پایگاه داده حذف شد.' };
   }
 }
 

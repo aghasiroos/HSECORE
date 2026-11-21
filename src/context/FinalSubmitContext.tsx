@@ -6,6 +6,7 @@ import {
   DEFAULT_CONFIRM_TEXT_FA,
   DEFAULT_CANCEL_TEXT_FA
 } from '../components/common/FinalSubmitConfirmModal';
+import { showConfirmDialog } from '../components/common/ConfirmDialogModal';
 
 interface FinalSubmitContextType {
   confirmFinalSubmit: (options: FinalSubmitOptions) => Promise<boolean>;
@@ -96,9 +97,13 @@ export const useFinalSubmit = (): FinalSubmitContextType => {
     // Return a fallback handler that creates a temporary promise/alert or silent execution if provider is missing
     return {
       confirmFinalSubmit: async (opts) => {
-        const isFa = opts.isFa !== false;
         const msg = opts.message || DEFAULT_FINAL_SUBMIT_MESSAGE_FA;
-        const ok = window.confirm(msg);
+        const ok = await showConfirmDialog(msg, {
+          isFa: opts.isFa !== false,
+          confirmText: opts.confirmText || DEFAULT_CONFIRM_TEXT_FA,
+          cancelText: opts.cancelText || DEFAULT_CANCEL_TEXT_FA,
+          variant: 'warning',
+        });
         if (ok) {
           await opts.onConfirm();
           return true;

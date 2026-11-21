@@ -46,6 +46,8 @@ import { DocumentWorkflowTrackerModal } from './referral/DocumentWorkflowTracker
 import { PrintDocumentSignaturesBox } from './referral/PrintDocumentSignaturesBox';
 import { CentralNotificationService } from '../services/notificationService';
 import { Send, History } from 'lucide-react';
+import { toast } from 'react-hot-toast';
+import { handleVersionConflict } from './common/ConflictResolutionModal';
 
 interface IncidentReportingProps {
   isFa: boolean;
@@ -289,7 +291,7 @@ export default function IncidentReporting({ isFa, currentUser }: IncidentReporti
                       Boolean(currentUser?.permissions?.Incidents?.delete);
 
     if (!canDelete) {
-      alert(isFa ? 'تنها مدیر ارشد و سرپرستان مجاز سیستم دسترسی حذف این اطلاعات را دارند.' : 'Only authorized managers and administrators can delete this record.');
+      toast.error(isFa ? 'تنها مدیر ارشد و سرپرستان مجاز سیستم دسترسی حذف این اطلاعات را دارند.' : 'Only authorized managers and administrators can delete this record.');
       return;
     }
     const incident = incidents.find(i => i.id === id || i.reportNumber === id);
@@ -316,8 +318,10 @@ export default function IncidentReporting({ isFa, currentUser }: IncidentReporti
           if (incident?.reportNumber && String(incident.reportNumber) !== String(id)) {
             await apiDb.deleteIncident(incident.reportNumber).catch(() => {});
           }
-        } catch (e) {
+        } catch (e: any) {
           console.error('Error deleting incident from database:', e);
+          toast.error(e?.message || (isFa ? 'خطا در حذف حادثه از پایگاه داده' : 'Database delete error'));
+          loadIncidents();
         }
       }
     });
@@ -331,7 +335,7 @@ export default function IncidentReporting({ isFa, currentUser }: IncidentReporti
                     Boolean(currentUser?.permissions?.Incidents?.edit);
 
     if (!canEdit) {
-      alert(isFa ? 'تنها مدیر ارشد و سرپرستان مجاز سیستم دسترسی ویرایش این اطلاعات را دارند.' : 'Only authorized managers and administrators can edit this record.');
+      toast.error(isFa ? 'تنها مدیر ارشد و سرپرستان مجاز سیستم دسترسی ویرایش این اطلاعات را دارند.' : 'Only authorized managers and administrators can edit this record.');
       return;
     }
     setEditingIncident({ ...row });
@@ -347,13 +351,24 @@ export default function IncidentReporting({ isFa, currentUser }: IncidentReporti
                     Boolean(currentUser?.permissions?.Incidents?.edit);
 
     if (!canEdit) {
-      alert(isFa ? 'تنها مدیر ارشد و سرپرستان مجاز سیستم دسترسی ویرایش این اطلاعات را دارند.' : 'Only authorized managers and administrators can edit this record.');
+      toast.error(isFa ? 'تنها مدیر ارشد و سرپرستان مجاز سیستم دسترسی ویرایش این اطلاعات را دارند.' : 'Only authorized managers and administrators can edit this record.');
       return;
     }
     try {
       await apiDb.saveIncident(editingIncident);
-    } catch (err) {
-      console.warn('Failed to save edited incident to DB:', err);
+    } catch (err: any) {
+      if (err?.status === 409 || err?.code === 'VERSION_CONFLICT') {
+        await handleVersionConflict(err, {
+          localRecord: editingIncident,
+          onReloadLatest: () => {
+            loadIncidents();
+            setEditingIncident(null);
+          },
+        });
+        return;
+      }
+      toast.error(err?.message || (isFa ? 'خطا در ذخیره‌سازی ویرایش حادثه در پایگاه داده' : 'Failed to save incident'));
+      return;
     }
     setIncidents(prev => {
       const updated = prev.map(i => i.id === editingIncident.id ? editingIncident : i);
@@ -383,14 +398,25 @@ export default function IncidentReporting({ isFa, currentUser }: IncidentReporti
   const [referralTargetIncident, setReferralTargetIncident] = useState<SafetyIncidentRecord | null>(null);
   const [trackerTargetIncident, setTrackerTargetIncident] = useState<SafetyIncidentRecord | null>(null);
 
-  // Load HSE Incident Categories from Organization Management
-  const [configuredIncidentTypes] = useState<HseIncidentCategoryItem[]>(() => {
-    try {
-      const saved = localStorage.getItem('hse_incident_types_config');
-      if (saved) return JSON.parse(saved);
-    } catch {}
-    return DEFAULT_INCIDENT_TYPES;
-  });
+  // Load HSE Incident Categories from PostgreSQL Organization Settings
+  const [configuredIncidentTypes, setConfiguredIncidentTypes] = useState<HseIncidentCategoryItem[]>(DEFAULT_INCIDENT_TYPES);
+
+  useEffect(() => {
+    let mounted = true;
+    const loadIncidentTypes = () => {
+      apiDb.getSetting('hse_incident_types_config').then((saved) => {
+        if (mounted && Array.isArray(saved) && saved.length > 0) {
+          setConfiguredIncidentTypes(saved);
+        }
+      }).catch(() => {});
+    };
+    loadIncidentTypes();
+    window.addEventListener('hse_data_mutated', loadIncidentTypes);
+    return () => {
+      mounted = false;
+      window.removeEventListener('hse_data_mutated', loadIncidentTypes);
+    };
+  }, []);
 
   // Selected Period for Safety Pyramid Tab
   const [pyramidPeriod, setPyramidPeriod] = useState<'compare' | 'current_year' | 'last_year' | 'daily' | 'all'>('compare');
@@ -820,7 +846,7 @@ export default function IncidentReporting({ isFa, currentUser }: IncidentReporti
         try {
           const savedResult = await apiDb.saveIncident(newRecPayload);
           if (!savedResult || !savedResult.id) {
-            alert(isFa ? 'خطا در ثبت گزارش حادثه در پایگاه داده سامانه. شناسه معتبر صادر نشد.' : 'Failed to receive valid record ID from backend.');
+            toast.error(isFa ? 'خطا در ثبت گزارش حادثه در پایگاه داده سامانه. شناسه معتبر صادر نشد.' : 'Failed to receive valid record ID from backend.');
             return;
           }
 
@@ -883,7 +909,7 @@ export default function IncidentReporting({ isFa, currentUser }: IncidentReporti
             toxicLeakDurationMinutes: 0
           });
         } catch (err: any) {
-          alert(err.message || (isFa ? 'خطا در ذخیره‌سازی حادثه در پایگاه داده' : 'Database error'));
+          toast.error(err.message || (isFa ? 'خطا در ذخیره‌سازی حادثه در پایگاه داده' : 'Database error'));
         }
       }
     });
@@ -2729,7 +2755,7 @@ export default function IncidentReporting({ isFa, currentUser }: IncidentReporti
           onClose={() => setReferralTargetIncident(null)}
           onSuccess={() => {
             setReferralTargetIncident(null);
-            alert(isFa ? 'سند با موفقیت به افراد منتخب ارجاع داده شد و در کارتابل ایشان قرار گرفت.' : 'Incident referred successfully.');
+            toast.success(isFa ? 'سند با موفقیت به افراد منتخب ارجاع داده شد و در کارتابل ایشان قرار گرفت.' : 'Incident referred successfully.');
           }}
         />
       )}

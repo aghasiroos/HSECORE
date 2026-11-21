@@ -309,9 +309,6 @@ export class HealthEnvService {
       }
 
       if (typeof window !== 'undefined') {
-        try {
-          Object.values(STORAGE_KEYS).forEach(k => localStorage.removeItem(k));
-        } catch (_) {}
         window.dispatchEvent(new Event('hse_health_env_updated'));
       }
     } catch (e) {
@@ -330,25 +327,11 @@ export class HealthEnvService {
   };
 
   private initData() {
-    // Purge legacy keys from browser storage
     if (typeof window !== 'undefined') {
-      [
-        ...Object.values(STORAGE_KEYS),
-        'hse_medical_records_v1', 'hse_medical_records_v2', 'hse_medical_records_v3',
-        'hse_medical_exams_v1', 'hse_medical_exams_v2', 'hse_medical_exams_v3',
-        'hse_non_periodic_exams_v1', 'hse_non_periodic_exams_v2', 'hse_non_periodic_exams_v3',
-        'hse_medical_attachments_v1', 'hse_medical_attachments_v2', 'hse_medical_attachments_v3',
-        'hse_env_monitoring_v1', 'hse_env_monitoring_v2', 'hse_env_monitoring_v3', 'hse_env_monitoring_v4',
-        'hse_waste_records_v1', 'hse_waste_records_v2', 'hse_waste_records_v3', 'hse_waste_records_v4',
-        'hse_wastewater_records_v1', 'hse_wastewater_records_v2', 'hse_wastewater_records_v3', 'hse_wastewater_records_v4',
-        'hse_air_quality_v1', 'hse_air_quality_v2', 'hse_air_quality_v3', 'hse_air_quality_v4',
-        'hse_water_soil_v1', 'hse_water_soil_v2', 'hse_water_soil_v3', 'hse_water_soil_v4',
-        'hse_env_health_nc_v1', 'hse_env_health_nc_v2', 'hse_env_health_nc_v3', 'hse_env_health_nc_v4'
-      ].forEach(k => {
-        try { localStorage.removeItem(k); } catch (_) {}
+      window.addEventListener('hse_auth_state_changed', () => {
+        void this.reloadFromServer();
       });
     }
-
     void this.reloadFromServer();
   }
 
@@ -529,10 +512,9 @@ export class HealthEnvService {
       }
     }
 
-    // 2. Fetch Periodic Medical Exams (from current service + legacy localStorage v2)
+    // 2. Fetch Periodic Medical Exams from authoritative in-memory PostgreSQL snapshot
     const pExamsSet = new Map<string, PeriodicMedicalExam>();
     
-    // from this.periodicExams
     this.periodicExams.forEach(e => {
       if (
         e.recordId === record?.id ||
@@ -541,24 +523,6 @@ export class HealthEnvService {
         pExamsSet.set(e.id, e);
       }
     });
-
-    // also check legacy v2
-    try {
-      const v2Exams = localStorage.getItem('hse_medical_exams_v2');
-      if (v2Exams) {
-        const parsed = JSON.parse(v2Exams);
-        if (Array.isArray(parsed)) {
-          parsed.forEach((e: PeriodicMedicalExam) => {
-            if (
-              e.recordId === record?.id ||
-              (e.employeeCode && (e.employeeCode === pCode || e.employeeCode === person?.nationalCode || e.employeeCode === person?.id))
-            ) {
-              pExamsSet.set(e.id, e);
-            }
-          });
-        }
-      }
-    } catch {}
 
     let periodicExams = Array.from(pExamsSet.values()).sort((a, b) => (b.examYear || 0) - (a.examYear || 0));
 
@@ -1161,22 +1125,6 @@ export class HealthEnvService {
         yearsSet.add(yr);
       }
     });
-
-    // Also check localStorage for any dynamically added exams
-    try {
-      const localExams = localStorage.getItem(STORAGE_KEYS.EXAMS);
-      if (localExams) {
-        const parsed = JSON.parse(localExams);
-        if (Array.isArray(parsed)) {
-          parsed.forEach((e: PeriodicMedicalExam) => {
-            const yr = Number(e.examYear) || extractShamsiYear(e.examDate);
-            if (yr && yr >= 1300 && yr <= 1500) {
-              yearsSet.add(yr);
-            }
-          });
-        }
-      }
-    } catch (_) {}
 
     // Return numerically sorted in ASCENDING order
     return Array.from(yearsSet).sort((a, b) => a - b);

@@ -1,9 +1,16 @@
 import { Router } from 'express';
 import { db, withDbRetry } from '../../src/db/index.ts';
+import { withTransaction } from '../core/db.ts';
 import { systemSettings } from '../../src/db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { logger } from '../core/logger.ts';
-import { requireAuth, requireRole, optionalAuth, isGlobalAdminUser } from '../core/middleware/auth.ts';
+import { requireAuth, optionalAuth, isGlobalAdminUser } from '../core/middleware/auth.ts';
+import {
+  assertVersionMatch,
+  extractExpectedUpdatedAt,
+  extractExpectedVersion,
+  sendConflictIfApplicable,
+} from '../core/occ.ts';
 import { auditService } from '../modules/audit/audit.service.ts';
 import { broadcastDataMutation } from '../core/socket.ts';
 import {
@@ -16,7 +23,6 @@ import {
 
 import {
   INTEGRATION_CONFIG_KEY,
-  WEBHOOK_DELIVERY_LOGS_KEY,
   maskIntegrationConfigForClient,
   saveIntegrationConfigToDb,
   syncIntegrationConfigCache,
@@ -25,7 +31,7 @@ import { invalidateDashboardCache } from './dashboard.router.ts';
 
 export const settingsRouter = Router();
 
-// In-memory persistent cache fallback ensuring settings are always available
+// Warmup/webhook mirror (read endpoints always query PostgreSQL as single source of truth)
 const memorySettingsCache: Record<string, any> = {};
 
 export function syncSettingsMemoryCache(key: string, value: any) {
@@ -94,22 +100,19 @@ export function checkIsAdminRequest(req: any): boolean {
   return isGlobalAdminUser(user) || ['ADMIN', 'ADMINISTRATOR', 'HSE_MANAGER', 'SUPER_ADMIN'].includes(role);
 }
 
-// Get all settings
+// Get all settings directly from PostgreSQL (Single Source of Truth)
 settingsRouter.get('/', optionalAuth, async (req, res) => {
   const isAdmin = checkIsAdminRequest(req);
   try {
     const records = await withDbRetry(() => db.select().from(systemSettings));
     const settingsMap: Record<string, any> = {};
+    const versions: Record<string, number> = {};
     for (const r of records) {
       if (!isAdmin && SENSITIVE_ADMIN_READ_KEYS.includes(r.key)) continue;
       settingsMap[r.key] =
         r.key === INTEGRATION_CONFIG_KEY ? maskIntegrationConfigForClient(r.value) : r.value;
-    }
-    for (const [k, v] of Object.entries(memorySettingsCache)) {
-      if (!isAdmin && SENSITIVE_ADMIN_READ_KEYS.includes(k)) continue;
-      if (settingsMap[k] === undefined) {
-        settingsMap[k] = k === INTEGRATION_CONFIG_KEY ? maskIntegrationConfigForClient(v) : v;
-      }
+      versions[r.key] = Number((r as any).version ?? 1);
+      syncSettingsMemoryCache(r.key, r.value);
     }
     if (settingsMap[REFERRAL_STORAGE_KEY] !== undefined) {
       const rawRefs = Array.isArray(settingsMap[REFERRAL_STORAGE_KEY])
@@ -117,24 +120,18 @@ settingsRouter.get('/', optionalAuth, async (req, res) => {
         : [];
       settingsMap[REFERRAL_STORAGE_KEY] = filterReferralsForUser(req.user, rawRefs);
     }
-    res.json({ success: true, data: settingsMap });
+    res.json({ success: true, data: settingsMap, versions });
   } catch (err: any) {
-    logger.warn('Failed to query db for all settings, checking memory cache fallback', { error: err?.message });
-    const copy: Record<string, any> = {};
-    for (const [k, v] of Object.entries(memorySettingsCache)) {
-      if (!isAdmin && SENSITIVE_ADMIN_READ_KEYS.includes(k)) continue;
-      copy[k] = k === INTEGRATION_CONFIG_KEY ? maskIntegrationConfigForClient(v) : v;
-    }
-    if (copy[REFERRAL_STORAGE_KEY] !== undefined) {
-      copy[REFERRAL_STORAGE_KEY] = filterReferralsForUser(
-        req.user,
-        Array.isArray(copy[REFERRAL_STORAGE_KEY]) ? copy[REFERRAL_STORAGE_KEY] : []
-      );
-    }
-    res.json({ success: true, data: copy });
+    logger.error('Failed to query PostgreSQL for all settings', { error: err?.message });
+    res.status(503).json({
+      success: false,
+      code: 'DATABASE_READ_FAILED',
+      message: 'خطا در بازیابی تنظیمات از پایگاه داده PostgreSQL.',
+    });
   }
 });
 
+// Get single setting directly from PostgreSQL with version metadata
 settingsRouter.get('/:key', optionalAuth, async (req, res) => {
   const { key } = req.params;
   if (SENSITIVE_ADMIN_READ_KEYS.includes(key) && !checkIsAdminRequest(req)) {
@@ -145,40 +142,50 @@ settingsRouter.get('/:key', optionalAuth, async (req, res) => {
       const all = await loadReferrals();
       const visible = filterReferralsForUser(req.user, all);
       return res.json({ success: true, data: visible, value: visible });
-    } catch {
-      return res.json({ success: true, data: [], value: [] });
+    } catch (err: any) {
+      logger.error('Failed to load referrals setting from PostgreSQL', { error: err?.message });
+      return res.status(503).json({ success: false, code: 'DATABASE_READ_FAILED', message: 'خطا در بازیابی ارجاعات از پایگاه داده.' });
     }
-  }
-  // Fast-path: return from memory cache immediately (<1ms)
-  if (memorySettingsCache[key] !== undefined) {
-    const outVal =
-      key === INTEGRATION_CONFIG_KEY
-        ? maskIntegrationConfigForClient(memorySettingsCache[key])
-        : memorySettingsCache[key];
-    return res.json({ success: true, data: outVal });
   }
 
   try {
     const records = await withDbRetry(() => db.select().from(systemSettings).where(eq(systemSettings.key, key)));
     if (records.length > 0) {
-      memorySettingsCache[key] = records[0].value;
+      const rec = records[0] as any;
+      syncSettingsMemoryCache(key, rec.value);
       const outVal =
-        key === INTEGRATION_CONFIG_KEY ? maskIntegrationConfigForClient(records[0].value) : records[0].value;
-      return res.json({ success: true, data: outVal });
+        key === INTEGRATION_CONFIG_KEY ? maskIntegrationConfigForClient(rec.value) : rec.value;
+      return res.json({
+        success: true,
+        data: outVal,
+        value: outVal,
+        version: Number(rec.version ?? 1),
+        updatedAt: rec.updatedAt ?? null,
+        updatedBy: rec.updatedBy ?? null,
+      });
     }
-    res.json({ success: true, data: null });
-  } catch (err) {
-    logger.warn('Failed to query db for setting', { key, error: (err as any)?.message });
-    res.json({ success: true, data: null });
+    res.json({ success: true, data: null, value: null, version: 0, updatedAt: null });
+  } catch (err: any) {
+    logger.error('Failed to query PostgreSQL for setting', { key, error: err?.message });
+    res.status(503).json({
+      success: false,
+      code: 'DATABASE_READ_FAILED',
+      message: 'خطا در ارتباط با پایگاه داده PostgreSQL هنگام دریافت تنظیمات.',
+      key,
+    });
   }
 });
 
-// Save setting with role-aware security: sensitive system settings require ADMIN, while operational records (referrals, workflows, inspections) allowed for all authenticated users
+// Save setting transactionally with OCC (Optimistic Concurrency Control)
 settingsRouter.post('/:key', requireAuth, async (req, res) => {
   const { key } = req.params;
   const rawBody = req.body;
   const value = (rawBody && typeof rawBody === 'object' && 'value' in rawBody) ? rawBody.value : rawBody;
+  const description = (rawBody && typeof rawBody === 'object' && typeof rawBody.description === 'string') ? rawBody.description : undefined;
+  const expectedVersion = extractExpectedVersion(rawBody);
+  const expectedUpdatedAt = extractExpectedUpdatedAt(rawBody);
   const isAdmin = checkIsAdminRequest(req);
+  const actor = (req.user as any)?.fullName || req.user?.name || req.user?.username || req.user?.uid || 'system';
 
   if (ADMIN_ONLY_SETTING_KEYS.includes(key) && !isAdmin) {
     void auditService.logAccessDenied(req, `تلاش غیرمجاز برای تغییر تنظیمات سیستمی (${key})`, 'settings:admin');
@@ -190,7 +197,7 @@ settingsRouter.post('/:key', requireAuth, async (req, res) => {
   if (key === INTEGRATION_CONFIG_KEY) {
     try {
       const { config } = await saveIntegrationConfigToDb(value || {});
-      memorySettingsCache[key] = config;
+      syncSettingsMemoryCache(key, config);
       const masked = maskIntegrationConfigForClient(config);
       void auditService.logFromRequest(req, {
         action: 'SETTINGS_CHANGE',
@@ -204,6 +211,7 @@ settingsRouter.post('/:key', requireAuth, async (req, res) => {
           actionTitle: `تغییر پیکربندی یکپارچه‌سازی و وب‌هوک‌ها (${key})`,
         },
       });
+      broadcastDataMutation('settings', 'update', { key, value: masked }, { module: key, actorId: req.user?.uid });
       return res.json({ success: true, message: 'Setting saved successfully', key, value: masked });
     } catch (err: any) {
       return res.status(err?.statusCode || 400).json({
@@ -219,7 +227,7 @@ settingsRouter.post('/:key', requireAuth, async (req, res) => {
       const existing = await loadReferrals();
       const merged = mergeAndDeduplicateReferrals(existing, value, req.user);
       await persistReferrals(merged);
-      memorySettingsCache[key] = merged;
+      syncSettingsMemoryCache(key, merged);
       const visible = filterReferralsForUser(req.user, merged);
       void auditService.logFromRequest(req, {
         action: 'UPDATE',
@@ -232,6 +240,7 @@ settingsRouter.post('/:key', requireAuth, async (req, res) => {
           count: Array.isArray(merged) ? merged.length : 0,
         },
       });
+      broadcastDataMutation('settings', 'update', { key, value: merged }, { module: REFERRAL_STORAGE_KEY, actorId: req.user?.uid });
       return res.json({ success: true, message: 'Setting saved successfully', key, value: visible });
     } catch (err: any) {
       return res.status(500).json({ success: false, message: err?.message || 'Error saving referrals' });
@@ -239,23 +248,65 @@ settingsRouter.post('/:key', requireAuth, async (req, res) => {
   }
 
   try {
-    const isUnchanged =
-      prevValue !== undefined &&
-      JSON.stringify(prevValue) === JSON.stringify(value);
+    const txRes = await withTransaction(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${'setting:' + key}))`);
+      const locked = await tx.execute(
+        sql`SELECT key, value, version, updated_at, updated_by, description FROM system_settings WHERE key = ${key} FOR UPDATE`
+      );
+      const existing = (locked as any)?.rows?.[0] || null;
+      if (existing) {
+        assertVersionMatch(
+          {
+            ...existing,
+            version: Number(existing.version ?? 1),
+            updatedAt: existing.updated_at,
+          },
+          expectedVersion,
+          expectedUpdatedAt
+        );
+      }
 
-    await withDbRetry(() => db.insert(systemSettings)
-      .values({ key, value })
-      .onConflictDoUpdate({
-        target: systemSettings.key,
-        set: { value, updatedAt: new Date() }
-      }));
-    memorySettingsCache[key] = value;
+      const nextVersion = existing ? Number(existing.version ?? 1) + 1 : 1;
+      const savedRes = await tx.execute(sql`
+        INSERT INTO system_settings (key, value, description, version, updated_by, updated_at)
+        VALUES (${key}, ${JSON.stringify(value)}::jsonb, ${description ?? existing?.description ?? null}, ${nextVersion}, ${actor}, NOW())
+        ON CONFLICT (key) DO UPDATE SET
+          value = ${JSON.stringify(value)}::jsonb,
+          description = COALESCE(${description ?? null}, system_settings.description),
+          version = ${nextVersion},
+          updated_by = ${actor},
+          updated_at = NOW()
+        RETURNING key, value, version, updated_at, updated_by
+      `);
+      const savedRow = (savedRes as any)?.rows?.[0];
+      return {
+        existing,
+        savedRow,
+        nextVersion,
+      };
+    });
+
+    syncSettingsMemoryCache(key, value);
+
+    const isUnchanged =
+      txRes.existing !== null &&
+      JSON.stringify(txRes.existing.value) === JSON.stringify(value);
 
     if (!isUnchanged) {
       invalidateDashboardCache();
-      broadcastDataMutation('settings', 'update', { key, value });
+      broadcastDataMutation(
+        'settings',
+        'update',
+        { key, value, version: txRes.nextVersion, updatedAt: txRes.savedRow?.updated_at },
+        { module: 'SETTINGS', recordId: key, actorId: req.user?.uid, version: txRes.nextVersion }
+      );
       if (key !== 'settings') {
-        broadcastDataMutation(key, 'update', value);
+        broadcastDataMutation(key, 'update', value, {
+          module: key,
+          recordId: key,
+          actorId: req.user?.uid,
+          version: txRes.nextVersion,
+        });
       }
 
       if (key !== 'hse_heat_log') {
@@ -265,18 +316,28 @@ settingsRouter.post('/:key', requireAuth, async (req, res) => {
           module: 'SETTINGS',
           entityType: 'SYSTEM_SETTING',
           entityId: key,
-          oldValue: prevValue ?? null,
+          oldValue: txRes.existing?.value ?? prevValue ?? null,
           newValue: value,
           details: {
             actionType: isSysConfig ? 'SETTINGS_CHANGE' : 'UPDATE',
             actionTitle: isSysConfig ? `تغییر تنظیمات سیستمی (${key})` : `بروزرسانی داده‌های کلید (${key})`,
+            version: txRes.nextVersion,
           },
         });
       }
     }
-    res.json({ success: true, message: 'Setting saved successfully', key, value });
-  } catch (err) {
-    logger.error('Database write failed for setting; refusing silent RAM-only mutation', { key, error: (err as any)?.message });
+
+    res.json({
+      success: true,
+      message: 'Setting saved successfully',
+      key,
+      value,
+      version: txRes.nextVersion,
+      updatedAt: txRes.savedRow?.updated_at || new Date().toISOString(),
+    });
+  } catch (err: any) {
+    if (sendConflictIfApplicable(res, err)) return;
+    logger.error('Database write failed for setting; refusing silent RAM-only mutation', { key, error: err?.message });
     res.status(503).json({
       success: false,
       code: 'DATABASE_WRITE_FAILED',
@@ -298,10 +359,10 @@ settingsRouter.delete('/:key', requireAuth, async (req, res) => {
   try {
     const prevValue = memorySettingsCache[key];
     await withDbRetry(() => db.delete(systemSettings).where(eq(systemSettings.key, key)));
-    delete memorySettingsCache[key];
+    syncSettingsMemoryCache(key, null);
     invalidateDashboardCache();
-    broadcastDataMutation('settings', 'delete', { key });
-    broadcastDataMutation(key, 'delete', null);
+    broadcastDataMutation('settings', 'delete', { key }, { module: 'SETTINGS', recordId: key, actorId: req.user?.uid });
+    broadcastDataMutation(key, 'delete', null, { module: key, recordId: key, actorId: req.user?.uid });
     void auditService.logFromRequest(req, {
       action: 'DELETE',
       module: 'SETTINGS',

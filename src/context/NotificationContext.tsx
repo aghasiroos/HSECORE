@@ -10,6 +10,8 @@ import { useWebSocket } from '../providers/WebSocketProvider';
 import { startSirenLoop, stopSirenLoop } from '../utils/notificationAudio';
 import { UserProfile } from '../types';
 import { apiDb } from '../services/apiDatabaseClient';
+import { getCurrentUser } from '../utils/authHelper';
+import { toast } from 'react-hot-toast';
 
 interface NotificationContextType {
   currentUser: UserProfile | null;
@@ -55,42 +57,22 @@ export const NotificationProvider: React.FC<{
 
   const [internalUser, setInternalUser] = useState<UserProfile | null>(() => {
     if (propsUser !== undefined) return propsUser;
-    try {
-      const raw =
-        typeof window !== 'undefined'
-          ? sessionStorage.getItem('hse_current_user') ||
-            localStorage.getItem('hse_current_user') ||
-            sessionStorage.getItem('hse_user_session') ||
-            localStorage.getItem('hse_user_session')
-          : null;
-      return raw ? JSON.parse(raw) : null;
-    } catch {
-      return null;
-    }
+    return getCurrentUser();
   });
 
   const currentUser = propsUser !== undefined ? propsUser : internalUser;
 
-  // Listen to session storage updates for user login/logout
+  // Listen to auth state updates for user login/logout
   useEffect(() => {
     if (propsUser !== undefined) return;
     const checkUser = () => {
-      try {
-        const raw =
-          sessionStorage.getItem('hse_current_user') ||
-          localStorage.getItem('hse_current_user') ||
-          sessionStorage.getItem('hse_user_session') ||
-          localStorage.getItem('hse_user_session');
-        setInternalUser(raw ? JSON.parse(raw) : null);
-      } catch {
-        setInternalUser(null);
-      }
+      setInternalUser(getCurrentUser());
     };
-    window.addEventListener('storage', checkUser);
     window.addEventListener('hse_auth_state_changed', checkUser);
+    window.addEventListener('hse_current_user_updated', checkUser);
     return () => {
-      window.removeEventListener('storage', checkUser);
       window.removeEventListener('hse_auth_state_changed', checkUser);
+      window.removeEventListener('hse_current_user_updated', checkUser);
     };
   }, [propsUser]);
 
@@ -770,105 +752,129 @@ export const NotificationProvider: React.FC<{
   );
 
   const markAsRead = useCallback(async (id: string | number) => {
-    const success = await CentralNotificationService.markAsRead(id);
-    if (success) {
-      setNotifications((prev) =>
-        prev.map((n) => (n.notifId === String(id) || n.id === Number(id) ? { ...n, read: true } : n))
-      );
+    try {
+      const success = await CentralNotificationService.markAsRead(id);
+      if (success) {
+        setNotifications((prev) =>
+          prev.map((n) => (n.notifId === String(id) || n.id === Number(id) ? { ...n, read: true } : n))
+        );
+      }
+      return success;
+    } catch (err: any) {
+      toast.error(err?.message || 'خطا در ثبت وضعیت مطالعه اعلان');
+      return false;
     }
-    return success;
   }, []);
 
   const markAllAsRead = useCallback(async () => {
-    const success = await CentralNotificationService.markAllAsRead();
-    if (success) {
-      setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    try {
+      const success = await CentralNotificationService.markAllAsRead();
+      if (success) {
+        setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+      }
+      return success;
+    } catch (err: any) {
+      toast.error(err?.message || 'خطا در ثبت وضعیت مطالعه اعلان‌ها');
+      return false;
     }
-    return success;
   }, []);
 
   const acknowledgeAlert = useCallback(
     async (id: string | number, note?: string, acknowledgmentSource?: string) => {
       const idStr = String(id);
-      // Immediately stop the siren on this device before network round-trip
       stopSirenLoop();
-      let success = false;
+      try {
+        const success = currentUser?.id
+          ? await CentralNotificationService.acknowledge(
+              id,
+              note,
+              acknowledgmentSource || 'in_app_modal'
+            )
+          : await CentralNotificationService.acknowledgePublic(
+              id,
+              note,
+              acknowledgmentSource || 'login_screen'
+            );
 
-      if (currentUser?.id) {
-        success = await CentralNotificationService.acknowledge(
-          id,
-          note,
-          acknowledgmentSource || 'in_app_modal'
-        );
-      } else {
-        success = await CentralNotificationService.acknowledgePublic(
-          id,
-          note,
-          acknowledgmentSource || 'login_screen'
-        );
-      }
-
-      if (success) {
-        const ackObj = {
-          userId: currentUser?.id || currentUser?.username || 'guest_user',
-          userName: currentUser?.fullName || currentUser?.username || 'کاربر (صفحه ورود)',
-          timestamp: new Date().toISOString(),
-          note,
-          acknowledgmentSource: acknowledgmentSource || (currentUser?.id ? 'in_app_modal' : 'login_screen'),
-          status: 'acknowledged',
-        };
-        setNotifications((prev) =>
-          prev.map((n) =>
-            n.notifId === idStr || n.id === Number(id)
+        if (success) {
+          const ackObj = {
+            userId: currentUser?.id || currentUser?.username || 'guest_user',
+            userName: currentUser?.fullName || currentUser?.username || 'کاربر (صفحه ورود)',
+            timestamp: new Date().toISOString(),
+            note,
+            acknowledgmentSource: acknowledgmentSource || (currentUser?.id ? 'in_app_modal' : 'login_screen'),
+            status: 'acknowledged',
+          };
+          setNotifications((prev) =>
+            prev.map((n) =>
+              n.notifId === idStr || n.id === Number(id)
+                ? {
+                    ...n,
+                    read: true,
+                    acknowledgedBy: [...(n.acknowledgedBy || []), ackObj],
+                  }
+                : n
+            )
+          );
+          setSelectedAlertDetails((curr) =>
+            curr && (curr.notifId === idStr || curr.id === Number(id))
               ? {
-                  ...n,
+                  ...curr,
                   read: true,
-                  acknowledgedBy: [...(n.acknowledgedBy || []), ackObj],
+                  acknowledgedBy: [...(curr.acknowledgedBy || []), ackObj],
                 }
-              : n
-          )
-        );
-        setSelectedAlertDetails((curr) =>
-          curr && (curr.notifId === idStr || curr.id === Number(id))
-            ? {
-                ...curr,
-                read: true,
-                acknowledgedBy: [...(curr.acknowledgedBy || []), ackObj],
-              }
-            : curr
-        );
-        closePopup();
+              : curr
+          );
+          closePopup();
+        }
+        return success;
+      } catch (err: any) {
+        toast.error(err?.message || 'خطا در ثبت تاییدیه هشدار در پایگاه داده');
+        return false;
       }
-      return success;
     },
     [currentUser, closePopup]
   );
 
   const deleteNotification = useCallback(async (id: string | number) => {
-    const success = await CentralNotificationService.delete(id);
-    if (success) {
-      setNotifications((prev) => prev.filter((n) => n.notifId !== String(id) && n.id !== Number(id)));
-      setSelectedAlertDetails((curr) =>
-        curr && (curr.notifId === String(id) || curr.id === Number(id)) ? null : curr
-      );
+    try {
+      const success = await CentralNotificationService.delete(id);
+      if (success) {
+        setNotifications((prev) => prev.filter((n) => n.notifId !== String(id) && n.id !== Number(id)));
+        setSelectedAlertDetails((curr) =>
+          curr && (curr.notifId === String(id) || curr.id === Number(id)) ? null : curr
+        );
+      }
+      return success;
+    } catch (err: any) {
+      toast.error(err?.message || 'خطا در حذف اعلان از پایگاه داده');
+      return false;
     }
-    return success;
   }, []);
 
   const clearAll = useCallback(async () => {
-    const success = await CentralNotificationService.clearAll();
-    if (success) {
-      setNotifications([]);
-      setActivePopupAlert(null);
-      setSelectedAlertDetails(null);
-      setPopupQueue([]);
+    try {
+      const success = await CentralNotificationService.clearAll();
+      if (success) {
+        setNotifications([]);
+        setActivePopupAlert(null);
+        setSelectedAlertDetails(null);
+        setPopupQueue([]);
+      }
+      return success;
+    } catch (err: any) {
+      toast.error(err?.message || 'خطا در پاک‌سازی اعلان‌ها در پایگاه داده');
+      return false;
     }
-    return success;
   }, []);
 
   const updatePreferences = useCallback(async (newPrefs: Partial<NotificationPreferences>) => {
-    const updated = await CentralNotificationService.updatePreferences(newPrefs);
-    setPreferences(updated);
+    try {
+      const updated = await CentralNotificationService.updatePreferences(newPrefs);
+      setPreferences(updated);
+    } catch (err: any) {
+      toast.error(err?.message || 'خطا در ذخیره تنظیمات اعلان در پایگاه داده');
+    }
   }, []);
 
   const toggleMute = useCallback(() => {
@@ -893,8 +899,8 @@ export const NotificationProvider: React.FC<{
             detail: { notifId: `test-${Date.now()}`, category, priority, read: false },
           })
         );
-      } catch (e) {
-        console.error(e);
+      } catch (e: any) {
+        toast.error(e?.message || 'خطا در ارسال هشدار آزمایشی');
       }
     },
     [refreshNotifications]

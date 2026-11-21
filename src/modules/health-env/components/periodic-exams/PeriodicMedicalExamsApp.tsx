@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import * as XLSX from 'xlsx';
-import { get as idbGet, set as idbSet, del as idbDel } from 'idb-keyval';
+import { toast } from 'react-hot-toast';
 import {
   Activity,
   UserCheck,
@@ -131,7 +131,7 @@ async function saveToStorage(exams: any[], pMap: Record<string, any>, batches: I
       personnelMap: pMap,
       importedBatches: batches
     };
-    // Save authoritatively to پایگاه داده database
+    // Save authoritatively to PostgreSQL database
     await apiDb.saveSetting(STORAGE_KEY, payload);
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('hse_medical_data_updated'));
@@ -139,14 +139,9 @@ async function saveToStorage(exams: any[], pMap: Record<string, any>, batches: I
       window.dispatchEvent(new CustomEvent('app_data_mutated', { detail: { entity: 'medical', key: STORAGE_KEY } }));
       window.dispatchEvent(new Event('hse_health_env_updated'));
     }
-
-    // Clean browser local storage to prevent duplicate or stale cache
-    try {
-      localStorage.removeItem(STORAGE_KEY);
-      await idbDel(STORAGE_KEY);
-    } catch (_) {}
-  } catch (e) {
-    console.error('Error saving periodic exam data to پایگاه داده:', e);
+  } catch (e: any) {
+    console.error('Error saving periodic exam data to database:', e);
+    toast.error(e?.message || 'خطا در ذخیره‌سازی اطلاعات معاینات در پایگاه داده');
   }
 }
 
@@ -179,7 +174,6 @@ export const PeriodicMedicalExamsApp: React.FC<Props> = ({ language = 'fa', curr
 
     async function loadData() {
       try {
-        // 1. Authoritative check from پایگاه داده
         const dbData = await apiDb.getSetting(STORAGE_KEY);
         if (dbData && Array.isArray(dbData.examinations) && isMounted) {
           setExaminations(dbData.examinations || []);
@@ -188,42 +182,13 @@ export const PeriodicMedicalExamsApp: React.FC<Props> = ({ language = 'fa', curr
           return;
         }
 
-        // 2. Migration fallback from legacy IndexedDB or localStorage if not yet in پایگاه داده
-        try {
-          const idbData = await idbGet<any>(STORAGE_KEY);
-          if (idbData && Array.isArray(idbData.examinations) && isMounted) {
-            setExaminations(idbData.examinations || []);
-            setPersonnelMap(idbData.personnelMap || {});
-            setImportedBatches(idbData.importedBatches || []);
-            // Persist to پایگاه داده and purge IndexedDB
-            await apiDb.saveSetting(STORAGE_KEY, idbData);
-            await idbDel(STORAGE_KEY);
-            return;
-          }
-        } catch (_) {}
-
-        try {
-          const saved = localStorage.getItem(STORAGE_KEY);
-          if (saved) {
-            const parsed = JSON.parse(saved);
-            if (parsed && Array.isArray(parsed.examinations) && isMounted) {
-              setExaminations(parsed.examinations || []);
-              setPersonnelMap(parsed.personnelMap || {});
-              setImportedBatches(parsed.importedBatches || []);
-              await apiDb.saveSetting(STORAGE_KEY, parsed);
-              localStorage.removeItem(STORAGE_KEY);
-              return;
-            }
-          }
-        } catch (_) {}
-
         if (isMounted) {
           setExaminations([]);
           setPersonnelMap({});
           setImportedBatches([]);
         }
       } catch (err) {
-        console.error('Error initializing periodic exam data from پایگاه داده:', err);
+        console.error('Error initializing periodic exam data from database:', err);
         if (isMounted) {
           setExaminations([]);
           setPersonnelMap({});
@@ -603,9 +568,10 @@ export const PeriodicMedicalExamsApp: React.FC<Props> = ({ language = 'fa', curr
     setImportedBatches([]);
     try {
       await apiDb.saveSetting(STORAGE_KEY, null);
-      await idbDel(STORAGE_KEY);
-      localStorage.removeItem(STORAGE_KEY);
-    } catch (_) {}
+    } catch (e: any) {
+      toast.error(e?.message || 'خطا در پاک‌سازی اطلاعات در پایگاه داده');
+      return;
+    }
     setImportStatus('کلیه اطلاعات و فایل‌های سامانه به طور کامل در پایگاه داده پاک‌سازی شدند. پایگاه داده خالی است.');
   };
 

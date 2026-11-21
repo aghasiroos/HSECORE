@@ -43,6 +43,8 @@ import {
   Undo2,
   UserPlus
 } from 'lucide-react';
+import { toast } from 'react-hot-toast';
+import { showConfirmDialog } from '../common/ConfirmDialogModal';
 import {
   NonConformanceRecord,
   NonConformanceSourceModule,
@@ -350,7 +352,7 @@ export const ComprehensiveNonConformanceModule: React.FC<Props> = ({
       setAlertSuccessToast(`هشدار سیستمی به مسئولان ${overdueRecords.length} پرونده عدم انطباق سررسیدگذشته با موفقیت ارسال شد.`);
       setTimeout(() => setAlertSuccessToast(null), 4500);
     } catch (e: any) {
-      alert(`خطا در ارسال اعلان: ${e?.message || e}`);
+      toast.error(`خطا در ارسال اعلان: ${e?.message || e}`);
     }
   };
 
@@ -443,7 +445,7 @@ export const ComprehensiveNonConformanceModule: React.FC<Props> = ({
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.title?.trim() || !formData.description?.trim()) {
-      alert('لطفاً عنوان و شرح کامل عدم انطباق را تکمیل فرمایید.');
+      toast.error('لطفاً عنوان و شرح کامل عدم انطباق را تکمیل فرمایید.');
       return;
     }
 
@@ -457,7 +459,7 @@ export const ComprehensiveNonConformanceModule: React.FC<Props> = ({
       setIsModalOpen(false);
       loadData();
     } catch (err: any) {
-      alert(`خطا در ذخیره عدم انطباق در پایگاه داده: ${err?.message || err}`);
+      toast.error(`خطا در ذخیره عدم انطباق در پایگاه داده: ${err?.message || err}`);
     }
   };
 
@@ -497,7 +499,7 @@ export const ComprehensiveNonConformanceModule: React.FC<Props> = ({
       setTimeout(() => setAlertSuccessToast(null), 4000);
       loadData();
     } catch (err: any) {
-      alert(`خطا در حذف عدم انطباق: ${err?.message || err}`);
+      toast.error(`خطا در حذف عدم انطباق: ${err?.message || err}`);
     }
   };
 
@@ -539,7 +541,7 @@ export const ComprehensiveNonConformanceModule: React.FC<Props> = ({
       }
       loadData();
     } catch (err: any) {
-      alert(`خطا در اجرای فرآیند گردش کار: ${err?.message || err}`);
+      toast.error(`خطا در اجرای فرآیند گردش کار: ${err?.message || err}`);
     }
   };
 
@@ -557,7 +559,7 @@ export const ComprehensiveNonConformanceModule: React.FC<Props> = ({
 
   const handleExecuteRefer = async () => {
     if (!selectedRecord || !selectedRecord.id || !selectedAssigneeUser) {
-      alert('لطفاً کاربر مسئول را جهت ارجاع انتخاب فرمایید.');
+      toast.error('لطفاً کاربر مسئول را جهت ارجاع انتخاب فرمایید.');
       return;
     }
     try {
@@ -580,7 +582,7 @@ export const ComprehensiveNonConformanceModule: React.FC<Props> = ({
       setTimeout(() => setAlertSuccessToast(null), 4000);
       loadData();
     } catch (err: any) {
-      alert(`خطا در ارجاع پرونده: ${err?.message || err}`);
+      toast.error(`خطا در ارجاع پرونده: ${err?.message || err}`);
     }
   };
 
@@ -601,7 +603,7 @@ export const ComprehensiveNonConformanceModule: React.FC<Props> = ({
   const handleExecuteSignature = async () => {
     if (!selectedRecord || !selectedRecord.id) return;
     if (signatureStatus === 'SIGNED' && !signatureImage) {
-      alert('لطفاً پیش از تأیید، امضای الکترونیکی خود را ترسیم فرمایید.');
+      toast.error('لطفاً پیش از تأیید، امضای الکترونیکی خود را ترسیم فرمایید.');
       return;
     }
     try {
@@ -630,7 +632,7 @@ export const ComprehensiveNonConformanceModule: React.FC<Props> = ({
       setTimeout(() => setAlertSuccessToast(null), 4000);
       loadData();
     } catch (err: any) {
-      alert(`خطا در ثبت امضای الکترونیکی: ${err?.message || err}`);
+      toast.error(`خطا در ثبت امضای الکترونیکی: ${err?.message || err}`);
     }
   };
 
@@ -644,7 +646,7 @@ export const ComprehensiveNonConformanceModule: React.FC<Props> = ({
   const handleExecuteCancel = async () => {
     if (!cancelRecordTarget || !cancelRecordTarget.id) return;
     if (!cancelReason.trim()) {
-      alert('ثبت علت انصراف از فرآیند الزامی است.');
+      toast.error('ثبت علت انصراف از فرآیند الزامی است.');
       return;
     }
     try {
@@ -665,7 +667,7 @@ export const ComprehensiveNonConformanceModule: React.FC<Props> = ({
       setTimeout(() => setAlertSuccessToast(null), 5000);
       loadData();
     } catch (err: any) {
-      alert(`خطا در انصراف از فرآیند: ${err?.message || err}`);
+      toast.error(`خطا در انصراف از فرآیند: ${err?.message || err}`);
     }
   };
 
@@ -674,7 +676,7 @@ export const ComprehensiveNonConformanceModule: React.FC<Props> = ({
     setSelectedRecord(rec);
     const prev = getPreviousWorkflowStatus(rec.status);
     if (!prev) {
-      alert('این پرونده در مرحله اولیه قرار دارد و امکان بازگشت به مرحله قبل وجود ندارد.');
+      toast.error('این پرونده در مرحله اولیه قرار دارد و امکان بازگشت به مرحله قبل وجود ندارد.');
       return;
     }
     setStepBackTargetStage(prev);
@@ -685,7 +687,7 @@ export const ComprehensiveNonConformanceModule: React.FC<Props> = ({
   const handleExecuteStepBack = async () => {
     if (!selectedRecord || !selectedRecord.id || !stepBackTargetStage) return;
     if (!stepBackReason.trim()) {
-      alert('ثبت علت بازگشت به مرحله قبلی الزامی است.');
+      toast.error('ثبت علت بازگشت به مرحله قبلی الزامی است.');
       return;
     }
     try {
@@ -705,12 +707,19 @@ export const ComprehensiveNonConformanceModule: React.FC<Props> = ({
       setTimeout(() => setAlertSuccessToast(null), 4000);
       loadData();
     } catch (err: any) {
-      alert(`خطا در بازگشت به مرحله قبل: ${err?.message || err}`);
+      toast.error(`خطا در بازگشت به مرحله قبل: ${err?.message || err}`);
     }
   };
 
   const handleExecuteReopenCancelled = async (rec: NonConformanceRecord) => {
-    if (!confirm(`آیا از بازگشایی مجدد پرونده منصرف‌شده ${rec.trackingCode} و ادامه گردش کار اطمینان دارید؟`)) {
+    const confirmed = await showConfirmDialog({
+      title: 'بازگشایی پرونده منصرف‌شده',
+      message: `آیا از بازگشایی مجدد پرونده منصرف‌شده ${rec.trackingCode} و ادامه گردش کار اطمینان دارید؟`,
+      confirmLabel: 'بازگشایی',
+      cancelLabel: 'انصراف',
+      tone: 'warning',
+    });
+    if (!confirmed) {
       return;
     }
     try {
@@ -728,14 +737,14 @@ export const ComprehensiveNonConformanceModule: React.FC<Props> = ({
       setTimeout(() => setAlertSuccessToast(null), 4000);
       loadData();
     } catch (err: any) {
-      alert(`خطا در بازگشایی پرونده: ${err?.message || err}`);
+      toast.error(`خطا در بازگشایی پرونده: ${err?.message || err}`);
     }
   };
 
   // Excel Export
   const handleExportExcel = () => {
     if (records.length === 0) {
-      alert('داده‌ای برای خروجی اکسل وجود ندارد.');
+      toast.error('داده‌ای برای خروجی اکسل وجود ندارد.');
       return;
     }
     const exportRows = filteredRecords.map((r, idx) => ({

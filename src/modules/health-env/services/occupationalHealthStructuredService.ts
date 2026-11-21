@@ -194,21 +194,10 @@ class OccupationalHealthStructuredService {
   constructor() {
     if (typeof window !== 'undefined') {
       window.addEventListener('app_data_mutated', () => this.reloadFromServer());
+      window.addEventListener('hse_auth_state_changed', () => this.reloadFromServer());
     }
     this.reloadFromServer();
   }
-
-  private loadFromStorage = <T>(key: string, fallback: T): T => {
-    if (typeof window === 'undefined') return fallback;
-    try {
-      const item = localStorage.getItem(key);
-      if (!item) return fallback;
-      const parsed = JSON.parse(item);
-      return (Array.isArray(parsed) && parsed.length > 0 ? parsed : fallback) as T;
-    } catch (_) {
-      return fallback;
-    }
-  };
 
   public reloadFromStorage = () => {
     void this.reloadFromServer();
@@ -246,9 +235,6 @@ class OccupationalHealthStructuredService {
       }
 
       if (typeof window !== 'undefined') {
-        try {
-          Object.values(STORAGE_KEYS).forEach(k => localStorage.removeItem(k));
-        } catch {}
         window.dispatchEvent(new Event('hse_occ_health_updated'));
       }
     } catch (e) {

@@ -12,6 +12,7 @@ import { logger } from '../../core/logger.ts';
 import { auditService } from '../audit/audit.service.ts';
 import { fileService, normalizeUploadedFilename } from '../files/file.service.ts';
 import { broadcastDataMutation } from '../../core/socket.ts';
+import { assertVersionMatch, extractExpectedVersion, extractExpectedUpdatedAt } from '../../core/occ.ts';
 import {
   SdsRecordDTO,
   SdsRevisionDTO,
@@ -223,6 +224,7 @@ function mapRecordRow(
     obsoleteReason: row.obsoleteReason || undefined,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+    version: Number(row.version ?? 1),
     attachments: activeAttachments,
     revisions,
     attachmentCount: activeAttachments.length,
@@ -691,6 +693,8 @@ export class SdsService {
       throw new NotFoundError('برگه اطلاعات ایمنی (SDS) مورد نظر یافت نشد.');
     }
 
+    assertVersionMatch(existing, extractExpectedVersion(payload), extractExpectedUpdatedAt(payload));
+
     // Governance rule: APPROVED or PUBLISHED records cannot be edited directly
     if (existing.status === 'APPROVED' || existing.status === 'PUBLISHED') {
       throw new ValidationError(
@@ -803,6 +807,7 @@ export class SdsService {
             : existing.aiExtractionMetadata,
         linkedRiskRefs:
           payload.linkedRiskRefs !== undefined ? payload.linkedRiskRefs : existing.linkedRiskRefs,
+        version: Number(existing.version ?? 1) + 1,
         updatedBy: actorName,
         updatedAt: new Date(),
       })
@@ -875,6 +880,7 @@ export class SdsService {
     if (!existing) {
       throw new NotFoundError('برگه اطلاعات ایمنی (SDS) مورد نظر یافت نشد.');
     }
+    assertVersionMatch(existing, extractExpectedVersion(params), extractExpectedUpdatedAt(params));
     if (existing.status === 'OBSOLETE') {
       throw new ValidationError('امکان ایجاد بازنگری جدید روی سند منسوخ‌شده وجود ندارد.');
     }
@@ -928,6 +934,7 @@ export class SdsService {
         approvedAt: null,
         publishedBy: null,
         publishedAt: null,
+        version: Number(existing.version ?? 1) + 1,
         updatedBy: actorName,
         updatedAt: new Date(),
       })
@@ -984,6 +991,7 @@ export class SdsService {
     if (!existing) {
       throw new NotFoundError('برگه اطلاعات ایمنی (SDS) مورد نظر یافت نشد.');
     }
+    assertVersionMatch(existing, extractExpectedVersion(params), extractExpectedUpdatedAt(params));
 
     const actorName = req.user?.name || req.user?.username || 'کاربر سیستم';
     const isManager = canUserApproveOrPublishSds(req.user);
@@ -996,6 +1004,7 @@ export class SdsService {
     }
 
     const patch: Partial<typeof schema.sdsRecords.$inferInsert> = {
+      version: Number(existing.version ?? 1) + 1,
       updatedBy: actorName,
       updatedAt: new Date(),
     };

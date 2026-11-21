@@ -38,6 +38,7 @@ import {
 } from '../../../utils/inspectionScheduleHelper';
 import { apiDb } from '../../../services/apiDatabaseClient';
 import { downloadCsvFile } from '../../../utils/fileHelpers';
+import { toast } from 'react-hot-toast';
 
 interface Props {
   inspections: OperationalSafetyInspection[];
@@ -251,7 +252,7 @@ export default function OperationalChecklistsView({
   // Export to Excel / CSV
   const handleExportCSV = () => {
     if (filteredInspections.length === 0) {
-      alert(isFa ? 'داده‌ای برای خروجی وجود ندارد.' : 'No data to export.');
+      toast.error(isFa ? 'داده‌ای برای خروجی وجود ندارد.' : 'No data to export.');
       return;
     }
     const headers = ['شناسه', 'نوع چک‌لیست', 'عنوان', 'تاریخ', 'زمان‌بندی', 'موعد بعدی', 'سایت', 'واحد', 'موقعیت', 'بازرس', 'درصد انطباق', 'مطلوب', 'نامطلوب', 'وضعیت'];

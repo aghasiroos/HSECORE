@@ -2,7 +2,15 @@ import { Router, Request, Response } from 'express';
 import * as dbServices from '../db-services.ts';
 import { requireAuth, requireRole, requirePermission, isGlobalAdminUser, checkUserHasPermission } from '../core/middleware/auth.ts';
 import { getClientIp } from '../core/ip.ts';
-import { broadcastDataMutation, registerSSEClient } from '../core/socket.ts';
+import { broadcastDataMutation, registerSSEClient, getMissedMutationEvents } from '../core/socket.ts';
+import {
+  assertVersionMatch,
+  extractExpectedUpdatedAt,
+  extractExpectedVersion,
+  sendConflictIfApplicable,
+} from '../core/occ.ts';
+import { withTransaction } from '../core/db.ts';
+import { sql } from 'drizzle-orm';
 import { auditService } from '../modules/audit/audit.service.ts';
 import {
   REFERRAL_STORAGE_KEY,
@@ -119,10 +127,17 @@ router.post('/personnel', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR', 'HS
         fullName: req.user?.name,
       });
     }
-    broadcastDataMutation('personnel', 'upsert', record);
+    invalidateDashboardCache();
+    broadcastDataMutation('personnel', 'upsert', record, {
+      module: 'PERSONNEL',
+      recordId: record?.id,
+      actorId: req.user?.uid,
+      version: record?.version,
+    });
     res.json({ success: true, data: record });
   } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+    if (sendConflictIfApplicable(res, error)) return;
+    res.status(error?.statusCode || 500).json({ success: false, error: error.message });
   }
 });
 
@@ -219,10 +234,17 @@ router.post('/medical-exams', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR',
       });
     }
     const exam = await dbServices.savePeriodicMedicalExam(req.body);
-    broadcastDataMutation('medicalExams', 'upsert', exam);
+    invalidateDashboardCache();
+    broadcastDataMutation('medicalExams', 'upsert', exam, {
+      module: 'HEALTH_EXAMS',
+      recordId: (exam as any)?.id,
+      actorId: req.user?.uid,
+      version: (exam as any)?.version,
+    });
     res.json({ success: true, data: exam });
   } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+    if (sendConflictIfApplicable(res, error)) return;
+    res.status(error?.statusCode || 500).json({ success: false, error: error.message });
   }
 });
 
@@ -329,10 +351,17 @@ router.post('/work-permits', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR', 
     }
 
     const permit = await dbServices.upsertWorkPermit(payloadToSave);
-    broadcastDataMutation('permits', 'upsert', permit);
+    invalidateDashboardCache();
+    broadcastDataMutation('permits', 'upsert', permit, {
+      module: 'PTW',
+      recordId: (permit as any)?.id,
+      actorId: req.user?.uid,
+      version: (permit as any)?.version,
+    });
     res.json({ success: true, data: permit });
   } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+    if (sendConflictIfApplicable(res, error)) return;
+    res.status(error?.statusCode || 500).json({ success: false, error: error.message });
   }
 });
 
@@ -364,7 +393,8 @@ router.post('/work-permits/:id/signatures', requireAuth, requireRole('ADMIN', 'A
 router.delete('/work-permits/:id', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR'), async (req: Request, res: Response) => {
   try {
     const result = await dbServices.deleteWorkPermit(req.params.id);
-    broadcastDataMutation('permits', 'delete', { id: req.params.id });
+    invalidateDashboardCache();
+    broadcastDataMutation('permits', 'delete', { id: req.params.id }, { module: 'PTW', recordId: req.params.id, actorId: req.user?.uid });
     res.json({ success: true, data: result });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
@@ -438,7 +468,12 @@ router.put('/risk-assessments/:id', requireAuth, async (req: Request, res: Respo
     if (!oldRisk) return res.status(404).json({ success: false, error: 'پرونده ارزیابی ریسک یافت نشد.' });
     const risk = await dbServices.updateRiskAssessment(req.params.id, req.body);
     invalidateDashboardCache();
-    broadcastDataMutation('risks', 'update', risk);
+    broadcastDataMutation('risks', 'update', risk, {
+      module: 'RISK',
+      recordId: risk?.id || req.params.id,
+      actorId: req.user?.uid,
+      version: (risk as any)?.version,
+    });
     void auditService.logFromRequest(req, {
       action: 'UPDATE',
       module: 'risk',
@@ -450,7 +485,8 @@ router.put('/risk-assessments/:id', requireAuth, async (req: Request, res: Respo
     });
     res.json({ success: true, data: risk });
   } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+    if (sendConflictIfApplicable(res, error)) return;
+    res.status(error?.statusCode || 500).json({ success: false, error: error.message });
   }
 });
 
@@ -479,13 +515,20 @@ router.patch('/risk-assessments/:id/workflow', requireAuth, async (req: Request,
     });
 
     const updated = await dbServices.updateRiskAssessment(req.params.id, {
+      ...(req.body?.expectedVersion !== undefined ? { expectedVersion: req.body.expectedVersion } : {}),
+      ...(req.body?.expectedUpdatedAt !== undefined ? { expectedUpdatedAt: req.body.expectedUpdatedAt } : {}),
       ...(req.body?.status ? { status: targetStatus } : {}),
       ...(req.body?.workflowStage ? { workflowStage: req.body.workflowStage } : {}),
       ...(req.body?.approverName ? { approverName: req.body.approverName } : {}),
       reviewHistory: history,
     });
     invalidateDashboardCache();
-    broadcastDataMutation('risks', 'update', updated);
+    broadcastDataMutation('risks', 'update', updated, {
+      module: 'RISK',
+      recordId: updated?.id || req.params.id,
+      actorId: req.user?.uid,
+      version: (updated as any)?.version,
+    });
     void auditService.logFromRequest(req, {
       action: targetStatus === 'APPROVED' ? 'APPROVE' : 'UPDATE',
       module: 'risk',
@@ -497,7 +540,8 @@ router.patch('/risk-assessments/:id/workflow', requireAuth, async (req: Request,
     });
     res.json({ success: true, data: updated });
   } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+    if (sendConflictIfApplicable(res, error)) return;
+    res.status(error?.statusCode || 500).json({ success: false, error: error.message });
   }
 });
 
@@ -548,17 +592,25 @@ router.post('/incidents', requireAuth, async (req: Request, res: Response) => {
       }
     }
     const inc = await dbServices.createIncident(req.body);
-    broadcastDataMutation('incidents', 'create', inc);
+    invalidateDashboardCache();
+    broadcastDataMutation('incidents', 'upsert', inc, {
+      module: 'INCIDENTS',
+      recordId: (inc as any)?.id,
+      actorId: req.user?.uid,
+      version: (inc as any)?.version,
+    });
     res.json({ success: true, data: inc });
   } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+    if (sendConflictIfApplicable(res, error)) return;
+    res.status(error?.statusCode || 500).json({ success: false, error: error.message });
   }
 });
 
 router.delete('/incidents/:id', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR'), async (req: Request, res: Response) => {
   try {
     const result = await dbServices.deleteIncident(req.params.id);
-    broadcastDataMutation('incidents', 'delete', { id: req.params.id });
+    invalidateDashboardCache();
+    broadcastDataMutation('incidents', 'delete', { id: req.params.id }, { module: 'INCIDENTS', recordId: req.params.id, actorId: req.user?.uid });
     res.json({ success: true, data: result });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
@@ -581,14 +633,22 @@ router.post('/trir', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR', 'HSE_MAN
   try {
     if (Array.isArray(req.body)) {
       const results = await dbServices.upsertTrirBatch(req.body);
-      broadcastDataMutation('trirRecords', 'batch_upsert', { count: results.length });
+      invalidateDashboardCache();
+      broadcastDataMutation('trirRecords', 'batch_upsert', { count: results.length }, { module: 'TRIR', actorId: req.user?.uid });
       return res.json({ success: true, data: results, count: results.length });
     }
     const trir = await dbServices.upsertTrirRecord(req.body);
-    broadcastDataMutation('trirRecords', 'upsert', trir);
+    invalidateDashboardCache();
+    broadcastDataMutation('trirRecords', 'upsert', trir, {
+      module: 'TRIR',
+      recordId: (trir as any)?.id,
+      actorId: req.user?.uid,
+      version: (trir as any)?.version,
+    });
     res.json({ success: true, data: trir });
   } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+    if (sendConflictIfApplicable(res, error)) return;
+    res.status(error?.statusCode || 500).json({ success: false, error: error.message });
   }
 });
 
@@ -609,7 +669,8 @@ router.delete('/trir/:id', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR', 'H
     const year = req.query.year ? parseInt(req.query.year as string, 10) : undefined;
     const month = req.query.month ? String(req.query.month) : undefined;
     const result = await dbServices.deleteTrirRecord(rawId, year, month);
-    broadcastDataMutation('trirRecords', 'delete', { id: rawId, year, month });
+    invalidateDashboardCache();
+    broadcastDataMutation('trirRecords', 'delete', { id: rawId, year, month }, { module: 'TRIR', recordId: rawId, actorId: req.user?.uid });
     res.json({ success: true, data: result });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
@@ -619,7 +680,8 @@ router.delete('/trir/:id', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR', 'H
 router.delete('/trir', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR', 'HSE_MANAGER', 'SAFETY_OFFICER'), async (req: Request, res: Response) => {
   try {
     const result = await dbServices.deleteTrirRecord('clear_all');
-    broadcastDataMutation('trirRecords', 'clear_all', result);
+    invalidateDashboardCache();
+    broadcastDataMutation('trirRecords', 'clear_all', result, { module: 'TRIR', actorId: req.user?.uid });
     res.json({ success: true, data: result });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
@@ -693,7 +755,8 @@ router.post('/warnings/deduplicate', requireAuth, requireRole('ADMIN', 'ADMINIST
 router.delete('/warnings/:id', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR'), async (req: Request, res: Response) => {
   try {
     const success = await dbServices.deleteSafetyWarningById(req.params.id);
-    broadcastDataMutation('warnings', 'delete', { id: req.params.id });
+    invalidateDashboardCache();
+    broadcastDataMutation('warnings', 'delete', { id: req.params.id }, { module: 'WARNINGS', recordId: req.params.id, actorId: req.user?.uid });
     res.json({ success, message: success ? 'Warning deleted' : 'Failed to delete warning' });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
@@ -703,7 +766,8 @@ router.delete('/warnings/:id', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR'
 router.delete('/warnings', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR'), async (req: Request, res: Response) => {
   try {
     const count = await dbServices.clearAllSafetyWarnings();
-    broadcastDataMutation('warnings', 'clearAll', { count });
+    invalidateDashboardCache();
+    broadcastDataMutation('warnings', 'clearAll', { count }, { module: 'WARNINGS', actorId: req.user?.uid });
     res.json({ success: true, message: 'All safety warnings cleared', count });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
@@ -726,9 +790,16 @@ router.post('/fire-equipment', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR'
   try {
     const actor = (req.user as any)?.fullName || req.user?.name || req.user?.username || 'system';
     const item = await dbServices.upsertFireEquipment(req.body, actor);
-    broadcastDataMutation('fireEquipment', 'upsert', item);
+    invalidateDashboardCache();
+    broadcastDataMutation('fireEquipment', 'upsert', item, {
+      module: 'FIRE_EQUIPMENT',
+      recordId: (item as any)?.id,
+      actorId: req.user?.uid,
+      version: (item as any)?.version,
+    });
     res.json({ success: true, data: item });
   } catch (error: any) {
+    if (sendConflictIfApplicable(res, error)) return;
     const status = error?.statusCode || 500;
     res.status(status).json({
       success: false,
@@ -743,7 +814,8 @@ router.delete('/fire-equipment/:id', requireAuth, requireRole('ADMIN', 'ADMINIST
   try {
     const actor = (req.user as any)?.fullName || req.user?.name || req.user?.username || 'system';
     await dbServices.deleteFireEquipment(req.params.id, actor);
-    broadcastDataMutation('fireEquipment', 'delete', { id: req.params.id });
+    invalidateDashboardCache();
+    broadcastDataMutation('fireEquipment', 'delete', { id: req.params.id }, { module: 'FIRE_EQUIPMENT', recordId: req.params.id, actorId: req.user?.uid });
     res.json({ success: true });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
@@ -823,11 +895,23 @@ router.post('/non-conformances', requireAuth, async (req: Request, res: Response
 router.put('/non-conformances/:id', requireAuth, async (req: Request, res: Response) => {
   try {
     const updated = await dbServices.updateNonConformance(req.params.id, req.body, req.user?.username || req.user?.name || 'system');
-    broadcastDataMutation('nonConformances', 'update', updated);
-    broadcastDataMutation('non_conformances', 'update', updated);
+    invalidateDashboardCache();
+    broadcastDataMutation('nonConformances', 'update', updated, {
+      module: 'CAPA',
+      recordId: (updated as any)?.id || req.params.id,
+      actorId: req.user?.uid,
+      version: (updated as any)?.version,
+    });
+    broadcastDataMutation('non_conformances', 'update', updated, {
+      module: 'CAPA',
+      recordId: (updated as any)?.id || req.params.id,
+      actorId: req.user?.uid,
+      version: (updated as any)?.version,
+    });
     res.json({ success: true, data: updated });
   } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+    if (sendConflictIfApplicable(res, error)) return;
+    res.status(error?.statusCode || 500).json({ success: false, error: error.message });
   }
 });
 
@@ -835,8 +919,9 @@ router.delete('/non-conformances/:id', requireAuth, async (req: Request, res: Re
   try {
     const success = await dbServices.deleteNonConformance(req.params.id, req.user?.username || req.user?.name || 'system');
     if (success) {
-      broadcastDataMutation('nonConformances', 'delete', { id: req.params.id });
-      broadcastDataMutation('non_conformances', 'delete', { id: req.params.id });
+      invalidateDashboardCache();
+      broadcastDataMutation('nonConformances', 'delete', { id: req.params.id }, { module: 'CAPA', recordId: req.params.id, actorId: req.user?.uid });
+      broadcastDataMutation('non_conformances', 'delete', { id: req.params.id }, { module: 'CAPA', recordId: req.params.id, actorId: req.user?.uid });
     }
     res.json({ success });
   } catch (error: any) {
@@ -856,8 +941,9 @@ router.post('/non-conformances/batch-delete', requireAuth, async (req: Request, 
       const ok = await dbServices.deleteNonConformance(id, username);
       if (ok) deletedCount++;
     }
-    broadcastDataMutation('nonConformances', 'delete', { ids });
-    broadcastDataMutation('non_conformances', 'delete', { ids });
+    invalidateDashboardCache();
+    broadcastDataMutation('nonConformances', 'delete', { ids }, { module: 'CAPA', actorId: req.user?.uid });
+    broadcastDataMutation('non_conformances', 'delete', { ids }, { module: 'CAPA', actorId: req.user?.uid });
     res.json({ success: true, count: deletedCount });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
@@ -966,7 +1052,7 @@ router.get('/sync/health', async (req: Request, res: Response) => {
   }
 });
 
-// Realtime Server-Sent Events (SSE) stream for cross-client multi-user sync
+// Realtime Server-Sent Events (SSE) stream for cross-client multi-user sync (RBAC & personnel-scope filtered)
 router.get('/sync/events', requireAuth, (req: Request, res: Response) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -976,8 +1062,8 @@ router.get('/sync/events', requireAuth, (req: Request, res: Response) => {
     (res as any).flushHeaders();
   }
 
-  registerSSEClient(res);
-  res.write(`data: ${JSON.stringify({ type: 'connected', time: new Date().toISOString() })}\n\n`);
+  registerSSEClient(res, req.user!);
+  res.write(`data: ${JSON.stringify({ type: 'connected', uid: req.user?.uid, time: new Date().toISOString() })}\n\n`);
 
   const keepAlive = setInterval(() => {
     try {
@@ -990,6 +1076,17 @@ router.get('/sync/events', requireAuth, (req: Request, res: Response) => {
   req.on('close', () => {
     clearInterval(keepAlive);
   });
+});
+
+// Catch-up missed mutation events since last sequence number after network reconnect
+router.get('/sync/events/catchup', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const sinceSeq = Number(req.query.sinceSeq || 0);
+    const result = await getMissedMutationEvents(sinceSeq, req.user!);
+    res.json({ success: true, ...result });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error?.message || 'Catchup failed' });
+  }
 });
 
 router.post('/sync/push', requireAuth, async (req: Request, res: Response) => {
@@ -1080,10 +1177,17 @@ router.post('/sync/push', requireAuth, async (req: Request, res: Response) => {
       default:
         return res.status(400).json({ success: false, error: `نوع داده ناشناخته است: ${entityType}` });
     }
-    broadcastDataMutation(entityType, 'push', result);
+    invalidateDashboardCache();
+    broadcastDataMutation(entityType, 'push', result, {
+      module: entityType,
+      recordId: (result as any)?.id ?? (result as any)?.uid ?? (result as any)?.key ?? null,
+      actorId: req.user?.uid,
+      version: (result as any)?.version ?? null,
+    });
     res.json({ success: true, data: result });
   } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+    if (sendConflictIfApplicable(res, error)) return;
+    res.status(error?.statusCode || 500).json({ success: false, error: error.message });
   }
 });
 
@@ -1100,9 +1204,15 @@ router.get('/users', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR', 'HSE_MAN
 router.post('/users', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR'), async (req: Request, res: Response) => {
   try {
     const user = await dbServices.upsertUserRecord(req.body, req.user);
-    broadcastDataMutation('users', 'upsert', user);
+    broadcastDataMutation('users', 'upsert', user, {
+      module: 'USERS',
+      recordId: user?.uid || user?.id,
+      actorId: req.user?.uid,
+      version: (user as any)?.version,
+    });
     res.json({ success: true, data: user });
   } catch (error: any) {
+    if (sendConflictIfApplicable(res, error)) return;
     if (error.name === 'ValidationError' || error.statusCode === 422 || error.statusCode === 400) {
       return res.status(400).json({ success: false, error: error.message, code: 'VALIDATION_ERROR' });
     }
@@ -1314,12 +1424,63 @@ router.post('/settings/:key', requireAuth, async (req: Request, res: Response) =
       syncSettingsMemoryCache(key, merged);
       return res.json({ success: true, key });
     }
-    await dbServices.setSystemSetting(key, incomingValue, req.body?.description);
+    const expectedVersion = extractExpectedVersion(req.body);
+    const expectedUpdatedAt = extractExpectedUpdatedAt(req.body);
+    const actor = (req.user as any)?.fullName || req.user?.name || req.user?.username || req.user?.uid || 'system';
+
+    const txRes = await withTransaction(async (tx) => {
+      const locked = await tx.execute(
+        sql`SELECT key, value, version, updated_at, description FROM system_settings WHERE key = ${key} FOR UPDATE`
+      );
+      const existing = (locked as any)?.rows?.[0] || null;
+      if (existing) {
+        assertVersionMatch(
+          {
+            ...existing,
+            version: Number(existing.version ?? 1),
+            updatedAt: existing.updated_at,
+          },
+          expectedVersion,
+          expectedUpdatedAt
+        );
+      }
+      const nextVersion = existing ? Number(existing.version ?? 1) + 1 : 1;
+      const savedRes = await tx.execute(sql`
+        INSERT INTO system_settings (key, value, description, version, updated_by, updated_at)
+        VALUES (${key}, ${JSON.stringify(incomingValue)}::jsonb, ${req.body?.description ?? existing?.description ?? null}, ${nextVersion}, ${actor}, NOW())
+        ON CONFLICT (key) DO UPDATE SET
+          value = ${JSON.stringify(incomingValue)}::jsonb,
+          description = COALESCE(${req.body?.description ?? null}, system_settings.description),
+          version = ${nextVersion},
+          updated_by = ${actor},
+          updated_at = NOW()
+        RETURNING key, version, updated_at
+      `);
+      return {
+        nextVersion,
+        updatedAt: (savedRes as any)?.rows?.[0]?.updated_at || new Date().toISOString(),
+      };
+    });
+
     syncSettingsMemoryCache(key, incomingValue);
     invalidateDashboardCache();
-    broadcastDataMutation('settings', 'update', { key, value: incomingValue });
-    res.json({ success: true, key });
+    broadcastDataMutation(
+      'settings',
+      'update',
+      { key, value: incomingValue, version: txRes.nextVersion, updatedAt: txRes.updatedAt },
+      { module: 'SETTINGS', recordId: key, actorId: req.user?.uid, version: txRes.nextVersion }
+    );
+    if (key !== 'settings') {
+      broadcastDataMutation(key, 'update', incomingValue, {
+        module: key,
+        recordId: key,
+        actorId: req.user?.uid,
+        version: txRes.nextVersion,
+      });
+    }
+    res.json({ success: true, key, version: txRes.nextVersion, updatedAt: txRes.updatedAt });
   } catch (error: any) {
+    if (sendConflictIfApplicable(res, error)) return;
     res.status(500).json({ success: false, error: error.message });
   }
 });

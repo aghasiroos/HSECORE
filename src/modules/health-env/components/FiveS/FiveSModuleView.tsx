@@ -38,6 +38,8 @@ import { useFinalSubmit } from '../../../../context/FinalSubmitContext';
 import FormalReportHeader from '../../../../components/common/FormalReportHeader';
 import { apiDb } from '../../../../services/apiDatabaseClient';
 import { downloadCsvFile } from '../../../../utils/fileHelpers';
+import { toast } from 'react-hot-toast';
+import { showConfirmDialog } from '../../../../components/common/ConfirmDialogModal';
 
 interface Props {
   language: 'fa' | 'en';
@@ -377,7 +379,7 @@ export default function FiveSModuleView({ language, currentUser }: Props) {
   // Save inspection
   const handleSaveInspection = () => {
     if (!formHeader.department || !formHeader.date) {
-      alert('لطفاً واحد و تاریخ بازرسی را مشخص فرمایید.');
+      toast.error('لطفاً واحد و تاریخ بازرسی را مشخص فرمایید.');
       return;
     }
 
@@ -410,8 +412,15 @@ export default function FiveSModuleView({ language, currentUser }: Props) {
   };
 
   // Delete Inspection
-  const handleDeleteInspection = (id: string) => {
-    if (confirm('آیا از حذف این بازرسی 5S اطمینان دارید؟')) {
+  const handleDeleteInspection = async (id: string) => {
+    const ok = await showConfirmDialog({
+      title: 'حذف بازرسی 5S',
+      message: 'آیا از حذف این بازرسی 5S اطمینان دارید؟',
+      confirmLabel: 'حذف',
+      cancelLabel: 'انصراف',
+      tone: 'danger',
+    });
+    if (ok) {
       fiveSService.deleteInspection(id, currentUser?.name || 'کاربر سیستم');
       reloadData();
     }
@@ -481,7 +490,7 @@ export default function FiveSModuleView({ language, currentUser }: Props) {
 
   const handleSaveSchedule = () => {
     if (!scheduleFormData.department || !scheduleFormData.scheduledDate) {
-      alert('لطفاً واحد و تاریخ برنامه‌ریزی‌شده را وارد نمایید.');
+      toast.error('لطفاً واحد و تاریخ برنامه‌ریزی‌شده را وارد نمایید.');
       return;
     }
     fiveSService.saveSchedule(scheduleFormData, currentUser?.name || 'کاربر سیستم');
@@ -1151,8 +1160,15 @@ export default function FiveSModuleView({ language, currentUser }: Props) {
                       <span>ویرایش و پیگیری اقدام</span>
                     </button>
                     <button
-                      onClick={() => {
-                        if (confirm('آیا از حذف این عدم انطباق اطمینان دارید؟')) {
+                      onClick={async () => {
+                        const ok = await showConfirmDialog({
+                          title: 'حذف عدم انطباق',
+                          message: 'آیا از حذف این عدم انطباق اطمینان دارید؟',
+                          confirmLabel: 'حذف',
+                          cancelLabel: 'انصراف',
+                          tone: 'danger',
+                        });
+                        if (ok) {
                           fiveSService.deleteNonConformance(nc.id, currentUser?.name || 'کاربر سیستم');
                           reloadData();
                         }
@@ -1259,8 +1275,15 @@ export default function FiveSModuleView({ language, currentUser }: Props) {
                               انجام بازرسی
                             </button>
                             <button
-                              onClick={() => {
-                                if (confirm('آیا از حذف این برنامه اطمینان دارید؟')) {
+                              onClick={async () => {
+                                const ok = await showConfirmDialog({
+                                  title: 'حذف برنامه بازرسی',
+                                  message: 'آیا از حذف این برنامه اطمینان دارید؟',
+                                  confirmLabel: 'حذف',
+                                  cancelLabel: 'انصراف',
+                                  tone: 'danger',
+                                });
+                                if (ok) {
                                   fiveSService.deleteSchedule(sch.id, currentUser?.name || 'کاربر سیستم');
                                   reloadData();
                                 }

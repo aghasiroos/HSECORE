@@ -66,19 +66,8 @@ export default function LoginScreen({
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Populate remembered username if available
+  // Silently unlock audio context on initial user interaction so emergency sirens play seamlessly
   useEffect(() => {
-    try {
-      const remembered = localStorage.getItem('hse_remembered_username');
-      if (remembered) {
-        setUsername(remembered);
-        setRememberMe(true);
-      }
-    } catch {
-      // Ignore storage access errors
-    }
-
-    // Silently unlock audio context on initial user interaction so emergency sirens play seamlessly
     const unlockAudio = () => {
       resumeAudioContext().catch(() => {});
       window.removeEventListener('click', unlockAudio);
@@ -118,17 +107,6 @@ export default function LoginScreen({
         setErrorMsg(result.error || (isFa ? 'نام کاربری یا رمز عبور اشتباه است.' : 'Incorrect username or password.'));
         addAuditLog(trimmedUsername, 'ورود ناموفق (Server-Side Auth Failed)', result.error || 'اطلاعات ورود نادرست');
         return;
-      }
-
-      // Persist or clear remembered username
-      try {
-        if (rememberMe) {
-          localStorage.setItem('hse_remembered_username', trimmedUsername);
-        } else {
-          localStorage.removeItem('hse_remembered_username');
-        }
-      } catch {
-        // Ignore storage errors
       }
 
       const { user } = result;

@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import { UserProfile } from '../../types';
 import { authFetch } from '../../services/apiDatabaseClient';
-import { AI_ALLOW_TOOLS_STORAGE_KEY, getAiAllowToolsSetting } from '../../modules/ai/AiAssistantApp';
+import { fetchAiAllowToolsSetting, getAiAllowToolsSetting, setAiAllowToolsSetting } from '../../modules/ai/AiAssistantApp';
 
 interface AiManagementTabProps {
   language?: 'fa' | 'en';
@@ -43,12 +43,14 @@ export default function AiManagementTab({ language = 'fa', currentUser }: AiMana
   const [actionMessage, setActionMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const [allowTools, setAllowTools] = useState<boolean>(getAiAllowToolsSetting);
 
+  useEffect(() => {
+    fetchAiAllowToolsSetting().then(setAllowTools).catch(() => {});
+  }, []);
+
   const handleToggleAllowTools = () => {
     const next = !allowTools;
     setAllowTools(next);
-    try {
-      localStorage.setItem(AI_ALLOW_TOOLS_STORAGE_KEY, String(next));
-    } catch {}
+    setAiAllowToolsSetting(next);
   };
 
   // RAG Knowledge Base States

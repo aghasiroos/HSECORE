@@ -1,110 +1,5 @@
-import { get, del } from 'idb-keyval';
 import { apiDb } from '../services/apiDatabaseClient';
 import { WarningRecord } from '../types';
-
-export const WARNING_STORAGE_KEY = 'warning_records';
-
-/**
- * Safely writes to localStorage with automatic quota exceeded handling
- * and recovery routines to prevent application crashes or unhandled console errors.
- */
-export function safeLocalStorageSet(key: string, value: string): boolean {
-  if (typeof window === 'undefined' || !window.localStorage) {
-    return false;
-  }
-
-  try {
-    localStorage.setItem(key, value);
-    return true;
-  } catch (err: any) {
-    const isQuotaError = 
-      err?.name === 'QuotaExceededError' ||
-      err?.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
-      err?.code === 22 ||
-      err?.code === 1014 ||
-      (typeof err?.message === 'string' && err.message.toLowerCase().includes('quota'));
-
-    if (isQuotaError) {
-      // Attempt to prune non-critical disposable caches from localStorage
-      try {
-        // 1. Prune large audit logs
-        const rawLogs = localStorage.getItem('hse_audit_logs');
-        if (rawLogs) {
-          try {
-            const parsedLogs = JSON.parse(rawLogs);
-            if (Array.isArray(parsedLogs) && parsedLogs.length > 20) {
-              localStorage.setItem('hse_audit_logs', JSON.stringify(parsedLogs.slice(-20)));
-            }
-          } catch {
-            localStorage.removeItem('hse_audit_logs');
-          }
-        }
-
-        // 2. Prune backup histories
-        const rawHistory = localStorage.getItem('hse_backup_history');
-        if (rawHistory) {
-          try {
-            const parsed = JSON.parse(rawHistory);
-            if (Array.isArray(parsed) && parsed.length > 2) {
-              localStorage.setItem('hse_backup_history', JSON.stringify(parsed.slice(-2)));
-            }
-          } catch {
-            localStorage.removeItem('hse_backup_history');
-          }
-        }
-
-        // 3. Prune old notifications
-        const rawNotifs = localStorage.getItem('hse_notifications');
-        if (rawNotifs) {
-          try {
-            const parsed = JSON.parse(rawNotifs);
-            if (Array.isArray(parsed) && parsed.length > 20) {
-              localStorage.setItem('hse_notifications', JSON.stringify(parsed.slice(-20)));
-            }
-          } catch {
-            localStorage.removeItem('hse_notifications');
-          }
-        }
-
-        // Retry saving after pruning
-        localStorage.setItem(key, value);
-        return true;
-      } catch {
-        return false;
-      }
-    }
-
-    return false;
-  }
-}
-
-/**
- * Safely reads from localStorage without throwing
- */
-export function safeLocalStorageGet(key: string): string | null {
-  if (typeof window === 'undefined' || !window.localStorage) {
-    return null;
-  }
-  try {
-    return localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Safely removes a key from localStorage
- */
-export function safeLocalStorageRemove(key: string): void {
-  if (typeof window === 'undefined' || !window.localStorage) {
-    return;
-  }
-  try {
-    localStorage.removeItem(key);
-  } catch {
-    // Gracefully ignore
-  }
-}
 
 /**
  * Robustly deduplicates warning records.
@@ -247,74 +142,32 @@ export function sanitizeWarningRecords(records: any[]): WarningRecord[] {
 
 /**
  * Asynchronously save warning records directly to PostgreSQL central database via apiDb,
- * ensuring real-time multi-user consistency without relying on browser memory.
+ * ensuring real-time multi-user consistency without browser storage.
  */
 export async function saveWarningsToStorage(warns: WarningRecord[]): Promise<void> {
   const sanitized = sanitizeWarningRecords(warns);
-  try {
-    await apiDb.saveSafetyWarningsBatch(sanitized);
-  } catch (err) {
-    console.warn('[Storage Migration] Error saving warnings to central database:', err);
-  }
-
-  // Purge any legacy browser storage remnants
-  try {
-    localStorage.removeItem(WARNING_STORAGE_KEY);
-    await del(WARNING_STORAGE_KEY).catch(() => {});
-  } catch {}
+  await apiDb.saveSafetyWarningsBatch(sanitized);
+  inMemoryWarningsSnapshot = sanitized;
 }
 
 /**
- * In-memory session cache for instant synchronous retrieval
+ * In-memory session snapshot populated strictly from PostgreSQL
  */
 let inMemoryWarningsSnapshot: WarningRecord[] = [];
 
 /**
  * Asynchronously load warning records from PostgreSQL central database.
- * Also performs zero-loss uplink migration of any orphaned legacy IndexedDB/LocalStorage drafts.
  */
 export async function loadWarningsFromStorage(): Promise<WarningRecord[]> {
-  try {
-    // 1. Fetch authoritative records from central PostgreSQL database
-    const dbRows = await apiDb.getSafetyWarnings();
-    let records: WarningRecord[] = Array.isArray(dbRows) ? dbRows : [];
-
-    // 2. One-time zero-loss uplink check for legacy orphaned client drafts
-    try {
-      const legacyIdb = await get<WarningRecord[]>(WARNING_STORAGE_KEY).catch(() => null);
-      const rawLocal = typeof window !== 'undefined' ? localStorage.getItem(WARNING_STORAGE_KEY) : null;
-      const legacyLocal = rawLocal ? JSON.parse(rawLocal) : null;
-      const candidates = [...(Array.isArray(legacyIdb) ? legacyIdb : []), ...(Array.isArray(legacyLocal) ? legacyLocal : [])];
-
-      if (candidates.length > 0) {
-        const { clean: orphaned } = deduplicateWarningRecords(candidates);
-        const existingNumbers = new Set(records.map(r => String(r.number || '').toLowerCase()));
-        const toUpload = orphaned.filter(o => o.number && !existingNumbers.has(String(o.number).toLowerCase()));
-
-        if (toUpload.length > 0) {
-          console.log(`[Storage Migration] Uplinking ${toUpload.length} legacy client warning drafts to central PostgreSQL...`);
-          await apiDb.saveSafetyWarningsBatch(toUpload).catch(() => {});
-          const refreshed = await apiDb.getSafetyWarnings().catch(() => null);
-          if (Array.isArray(refreshed)) records = refreshed;
-        }
-
-        // Cleanly purge legacy client storage once uplinked
-        localStorage.removeItem(WARNING_STORAGE_KEY);
-        await del(WARNING_STORAGE_KEY).catch(() => {});
-      }
-    } catch {}
-
-    const { clean } = deduplicateWarningRecords(records);
-    inMemoryWarningsSnapshot = clean;
-    return clean;
-  } catch (err) {
-    console.warn('[Storage Migration] Error loading warnings from database, returning in-memory snapshot:', err);
-    return inMemoryWarningsSnapshot;
-  }
+  const dbRows = await apiDb.getSafetyWarnings();
+  const records: WarningRecord[] = Array.isArray(dbRows) ? dbRows : [];
+  const { clean } = deduplicateWarningRecords(records);
+  inMemoryWarningsSnapshot = clean;
+  return clean;
 }
 
 /**
- * Synchronous initial retrieval of warnings from memory for zero-flicker render
+ * Synchronous retrieval of latest PostgreSQL warnings snapshot held in React/memory
  */
 export function getWarningsSynchronously(): WarningRecord[] {
   return inMemoryWarningsSnapshot;
@@ -324,14 +177,6 @@ export function getWarningsSynchronously(): WarningRecord[] {
  * Completely clear all stored warnings from the central database
  */
 export async function clearWarningsFromStorage(): Promise<void> {
-  try {
-    await apiDb.clearAllSafetyWarnings();
-  } catch (err) {
-    console.error('Error clearing warnings from database:', err);
-  }
+  await apiDb.clearAllSafetyWarnings();
   inMemoryWarningsSnapshot = [];
-  try {
-    await del(WARNING_STORAGE_KEY).catch(() => {});
-    localStorage.removeItem(WARNING_STORAGE_KEY);
-  } catch {}
 }

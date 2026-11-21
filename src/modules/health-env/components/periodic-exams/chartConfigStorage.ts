@@ -3,7 +3,7 @@ import { apiDb } from '../../../../services/apiDatabaseClient';
 
 const STORAGE_KEY_PREFIX = 'OCC_HEALTH_DASHBOARD_CHARTS_CONFIG_V2';
 
-// In-memory fallback cache in case browser localStorage is full or disabled
+// Pure in-memory session cache synchronized with PostgreSQL user_preferences
 const memoryCache: Record<string, UserChartItemConfig[]> = {};
 
 export const DEFAULT_DASHBOARD_CHARTS: UserChartItemConfig[] = [
@@ -69,7 +69,6 @@ export const DEFAULT_DASHBOARD_CHARTS: UserChartItemConfig[] = [
   }
 ];
 
-// Helper to sanitize and compress chart configs to minimal footprint
 function sanitizeConfigs(configs: UserChartItemConfig[]): UserChartItemConfig[] {
   if (!Array.isArray(configs)) return DEFAULT_DASHBOARD_CHARTS;
   return configs.map(c => ({
@@ -84,56 +83,26 @@ function sanitizeConfigs(configs: UserChartItemConfig[]): UserChartItemConfig[] 
   }));
 }
 
-// Attempt to free up storage from obsolete or legacy keys
-function cleanupLegacyStorageKeys() {
-  try {
-    const legacyKeysToPurge = [
-      'hse_medical_exams_v1',
-      'hse_medical_exams_v2',
-      'OCC_HEALTH_DASHBOARD_CHARTS_CONFIG_V1',
-      'periodic_exams_cache_temp',
-      'hse_temp_import_dump'
-    ];
-    for (const key of legacyKeysToPurge) {
-      localStorage.removeItem(key);
-    }
-  } catch (_) {
-    // Ignore storage errors during cleanup
-  }
-}
-
 export function loadUserChartConfigs(userId?: string): UserChartItemConfig[] {
   const key = `${STORAGE_KEY_PREFIX}_${userId || 'default'}`;
 
-  // 1. Return in-memory session cache if already hydrated
   if (memoryCache[key] && Array.isArray(memoryCache[key]) && memoryCache[key].length > 0) {
     return memoryCache[key];
   }
 
-  // 2. One-time zero-loss uplink from legacy localStorage/sessionStorage if present
-  if (typeof window !== 'undefined') {
-    try {
-      const raw = localStorage.getItem(key) || sessionStorage.getItem(key);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          const sanitized = sanitizeConfigs(parsed);
-          memoryCache[key] = sanitized;
-          void apiDb.saveSetting(key, sanitized, 'Occupational Health User Chart Configs').catch(() => {});
-        }
-        localStorage.removeItem(key);
-        sessionStorage.removeItem(key);
-      }
-      cleanupLegacyStorageKeys();
-    } catch (_) {}
-  }
-
-  // 3. Hydrate asynchronously from central database
-  void apiDb.getSetting(key).then((remote) => {
+  void Promise.all([
+    apiDb.userPreferences.get(key).catch(() => null),
+    apiDb.getSetting(key).catch(() => null),
+  ]).then(([prefRes, settingVal]) => {
+    const prefVal = prefRes?.value;
+    const remote = Array.isArray(prefVal) && prefVal.length > 0 ? prefVal : settingVal;
     if (Array.isArray(remote) && remote.length > 0) {
       memoryCache[key] = sanitizeConfigs(remote);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('hse_user_preferences_updated', { detail: { key, value: memoryCache[key] } }));
+      }
     }
-  }).catch(() => {});
+  });
 
   if (!memoryCache[key]) {
     memoryCache[key] = DEFAULT_DASHBOARD_CHARTS;
@@ -146,13 +115,17 @@ export function saveUserChartConfigs(configs: UserChartItemConfig[], userId?: st
   const sanitized = sanitizeConfigs(configs);
   memoryCache[key] = sanitized;
 
-  void apiDb.saveSetting(key, sanitized, 'Occupational Health User Chart Configs').catch(() => {});
+  void apiDb.userPreferences.set(key, sanitized).catch((err) => {
+    console.warn('Failed to persist user chart configs:', err);
+  });
 }
 
 export function resetUserChartConfigs(userId?: string): UserChartItemConfig[] {
   const key = `${STORAGE_KEY_PREFIX}_${userId || 'default'}`;
   memoryCache[key] = DEFAULT_DASHBOARD_CHARTS;
 
-  void apiDb.saveSetting(key, DEFAULT_DASHBOARD_CHARTS, 'Occupational Health User Chart Configs').catch(() => {});
+  void apiDb.userPreferences.set(key, DEFAULT_DASHBOARD_CHARTS).catch((err) => {
+    console.warn('Failed to reset user chart configs:', err);
+  });
   return DEFAULT_DASHBOARD_CHARTS;
 }

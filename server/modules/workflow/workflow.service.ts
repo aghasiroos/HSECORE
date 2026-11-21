@@ -13,6 +13,7 @@ import { auditService } from '../audit/audit.service.ts';
 import { NotFoundError, ValidationError, ForbiddenError } from '../../core/errors.ts';
 import { UserContext } from '../../core/middleware/auth.ts';
 import { logger } from '../../core/logger.ts';
+import { broadcastDataMutation } from '../../core/socket.ts';
 
 export class WorkflowService {
   async createInstance(req: CreateWorkflowInstanceRequest, user?: UserContext): Promise<WorkflowInstanceDTO> {
@@ -86,7 +87,14 @@ export class WorkflowService {
       newValue: { workflowId: instance.id, title: instance.title },
     });
 
-    return (await workflowRepository.findInstanceById(instance.id))!;
+    const created = (await workflowRepository.findInstanceById(instance.id))!;
+    broadcastDataMutation('workflows', 'create', created, {
+      module: 'WORKFLOW',
+      recordId: created.id,
+      actorId: user?.uid,
+      version: created.version,
+    });
+    return created;
   }
 
   async executeAction(
@@ -334,7 +342,14 @@ export class WorkflowService {
       details: { action: req.action, comment: req.comment, actor: actorName },
     });
 
-    return (await workflowRepository.findInstanceById(instanceId))!;
+    const updated = (await workflowRepository.findInstanceById(instanceId))!;
+    broadcastDataMutation('workflows', req.action.toLowerCase(), updated, {
+      module: 'WORKFLOW',
+      recordId: updated.id,
+      actorId: user?.uid,
+      version: updated.version,
+    });
+    return updated;
   }
 
   async getInstanceDetails(id: number): Promise<WorkflowInstanceDTO> {

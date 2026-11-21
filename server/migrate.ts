@@ -1303,6 +1303,55 @@ async function ensureSchemaColumnsAndTables() {
     `CREATE INDEX IF NOT EXISTS idx_lifting_gates_code ON lifting_stage_gates (gate_code);`,
   ], 'lifting-plan-tables');
 
+  // 21. Database-First Optimistic Concurrency Control (OCC) & Per-User Preferences
+  await executeBatchWithFallback([
+    `CREATE TABLE IF NOT EXISTS user_preferences (
+      id SERIAL PRIMARY KEY,
+      user_uid TEXT NOT NULL,
+      pref_key TEXT NOT NULL,
+      value JSONB NOT NULL,
+      version INTEGER DEFAULT 1 NOT NULL,
+      updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+    );`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_user_preferences_uid_key ON user_preferences (user_uid, pref_key);`,
+    `CREATE INDEX IF NOT EXISTS idx_user_preferences_uid ON user_preferences (user_uid);`,
+    `ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 1 NOT NULL;`,
+    `ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS updated_by TEXT;`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 1 NOT NULL;`,
+    `ALTER TABLE personnel ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 1 NOT NULL;`,
+    `ALTER TABLE periodic_medical_exams ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 1 NOT NULL;`,
+    `ALTER TABLE work_permits ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 1 NOT NULL;`,
+    `ALTER TABLE risk_assessments ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 1 NOT NULL;`,
+    `ALTER TABLE incidents ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 1 NOT NULL;`,
+    `ALTER TABLE incidents ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW() NOT NULL;`,
+    `ALTER TABLE trir_monthly_records ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 1 NOT NULL;`,
+    `ALTER TABLE safety_warnings ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 1 NOT NULL;`,
+    `ALTER TABLE safety_warnings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW() NOT NULL;`,
+    `ALTER TABLE hse_trainings ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 1 NOT NULL;`,
+    `ALTER TABLE hse_trainings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW() NOT NULL;`,
+    `ALTER TABLE ppe_issuances ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 1 NOT NULL;`,
+    `ALTER TABLE ppe_issuances ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW() NOT NULL;`,
+    `ALTER TABLE fire_equipment ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 1 NOT NULL;`,
+    `ALTER TABLE safety_templates ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 1 NOT NULL;`,
+    `ALTER TABLE safety_templates ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW() NOT NULL;`,
+    `ALTER TABLE safety_inspections ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 1 NOT NULL;`,
+    `ALTER TABLE environmental_logs ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 1 NOT NULL;`,
+    `ALTER TABLE environmental_logs ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW() NOT NULL;`,
+    `ALTER TABLE five_s_audits ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 1 NOT NULL;`,
+    `ALTER TABLE five_s_audits ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW() NOT NULL;`,
+    `ALTER TABLE bpmn_instances ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW() NOT NULL;`,
+    `ALTER TABLE non_conformances ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 1 NOT NULL;`,
+    `ALTER TABLE psm_projects ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 1 NOT NULL;`,
+    `ALTER TABLE fire_design_buildings ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 1 NOT NULL;`,
+    `ALTER TABLE fire_design_floors ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 1 NOT NULL;`,
+    `ALTER TABLE fire_design_layouts ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 1 NOT NULL;`,
+    `ALTER TABLE sds_records ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 1 NOT NULL;`,
+    `ALTER TABLE lifting_standards_config ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 1 NOT NULL;`,
+    `ALTER TABLE lifting_cranes ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 1 NOT NULL;`,
+    `ALTER TABLE lifting_rigging_equipment ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 1 NOT NULL;`,
+    `ALTER TABLE lifting_plans ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 1 NOT NULL;`,
+  ], 'database-first-occ-and-preferences');
+
   console.log('[Migration] AI knowledge, chat, provider, assignment, PSM, Fire Design, Risk Assessment, SDS and Lifting Plan tables verified.');
   console.log('[Migration] All database tables and missing columns verified successfully.');
 }

@@ -295,42 +295,11 @@ class FiveSService {
   }
 
   private initData() {
-    // One-time zero-loss uplink of legacy localStorage drafts to central database
     if (typeof window !== 'undefined') {
-      try {
-        const rawIns = localStorage.getItem(STORAGE_KEYS.INSPECTIONS);
-        const rawNc = localStorage.getItem(STORAGE_KEYS.NON_CONFORMANCES);
-        const rawSch = localStorage.getItem(STORAGE_KEYS.SCHEDULES);
-
-        if (rawIns || rawNc || rawSch) {
-          const legacyIns = rawIns ? JSON.parse(rawIns) : [];
-          const legacyNc = rawNc ? JSON.parse(rawNc) : [];
-          const legacySch = rawSch ? JSON.parse(rawSch) : [];
-
-          if (Array.isArray(legacyIns) && legacyIns.length > 0) {
-            void apiDb.saveFiveSInspections(legacyIns).catch(() => {});
-          }
-          if (Array.isArray(legacyNc) && legacyNc.length > 0) {
-            void apiDb.saveFiveSNonConformances(legacyNc).catch(() => {});
-          }
-          if (Array.isArray(legacySch) && legacySch.length > 0) {
-            void apiDb.saveFiveSSchedules(legacySch).catch(() => {});
-          }
-
-          // Purge all legacy 5S keys from browser storage
-          [
-            STORAGE_KEYS.INSPECTIONS, STORAGE_KEYS.NON_CONFORMANCES, STORAGE_KEYS.SCHEDULES,
-            'hse_5s_inspections_v1', 'hse_5s_inspections_v2',
-            'hse_5s_nc_v1', 'hse_5s_nc_v2',
-            'hse_5s_schedules_v1', 'hse_5s_schedules_v2'
-          ].forEach(k => {
-            try { localStorage.removeItem(k); } catch (_) {}
-          });
-        }
-      } catch {}
+      window.addEventListener('hse_auth_state_changed', () => {
+        void this.reloadFromServer();
+      });
     }
-
-    // Always hydrate state directly from authoritative backend database
     void this.reloadFromServer();
   }
 

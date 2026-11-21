@@ -3,6 +3,7 @@
  * Unified logic for Periodic (1-Month Default), Pre-Operation, Post-Operation, and Ad-Hoc Inspections.
  */
 import { apiDb } from '../services/apiDatabaseClient';
+import { toast } from 'react-hot-toast';
 import { toEnglishDigits } from './jalaliDate';
 
 export type UnifiedInspectionTimingType = 'PERIODIC' | 'PRE_OP' | 'POST_OP' | 'ADHOC';
@@ -329,21 +330,11 @@ async function syncInspectionAlertSettingsFromDb(): Promise<void> {
     const remote = await apiDb.getSetting(ALERT_SETTINGS_STORAGE_KEY);
     if (remote && typeof remote === 'object') {
       memoryAlertSettings = { ...DEFAULT_ALERT_SETTINGS, ...remote };
-      try {
-        localStorage.setItem(ALERT_SETTINGS_STORAGE_KEY, JSON.stringify(memoryAlertSettings));
-      } catch {}
       window.dispatchEvent(new CustomEvent('hse_inspection_alert_settings_updated', { detail: memoryAlertSettings }));
-    } else {
-      const localRaw = localStorage.getItem(ALERT_SETTINGS_STORAGE_KEY);
-      if (localRaw) {
-        try {
-          const parsed = JSON.parse(localRaw);
-          memoryAlertSettings = { ...DEFAULT_ALERT_SETTINGS, ...parsed };
-          apiDb.saveSetting(ALERT_SETTINGS_STORAGE_KEY, memoryAlertSettings, 'Inspection Alert Settings').catch(() => {});
-        } catch {}
-      }
     }
-  } catch {}
+  } catch (err) {
+    console.warn('Inspection alert settings sync skipped:', err);
+  }
 }
 
 if (typeof window !== 'undefined') {
@@ -353,40 +344,34 @@ if (typeof window !== 'undefined') {
 
   const handleRemoteMutation = (e: any) => {
     const key = String(e?.detail?.key || e?.detail?.entityType || '');
-    if (key === ALERT_SETTINGS_STORAGE_KEY || key === 'settings') {
+    if (key === ALERT_SETTINGS_STORAGE_KEY || key === 'settings' || key === 'system_settings') {
       syncInspectionAlertSettingsFromDb();
     }
   };
   window.addEventListener('app_data_mutated', handleRemoteMutation);
   window.addEventListener('hse_data_mutated', handleRemoteMutation);
+  window.addEventListener('hse_auth_state_changed', () => {
+    syncInspectionAlertSettingsFromDb();
+  });
 }
 
 export function getInspectionAlertSettings(): InspectionAlertSettings {
-  if (memoryAlertSettings) {
-    return memoryAlertSettings;
-  }
-  try {
-    const saved = localStorage.getItem(ALERT_SETTINGS_STORAGE_KEY);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      memoryAlertSettings = { ...DEFAULT_ALERT_SETTINGS, ...parsed };
-      return memoryAlertSettings;
-    }
-  } catch {
-    // fallback
-  }
-  return DEFAULT_ALERT_SETTINGS;
+  return memoryAlertSettings || DEFAULT_ALERT_SETTINGS;
 }
 
 export function saveInspectionAlertSettings(settings: InspectionAlertSettings): void {
-  try {
-    memoryAlertSettings = { ...DEFAULT_ALERT_SETTINGS, ...settings };
-    localStorage.setItem(ALERT_SETTINGS_STORAGE_KEY, JSON.stringify(memoryAlertSettings));
-    apiDb.saveSetting(ALERT_SETTINGS_STORAGE_KEY, memoryAlertSettings, 'Inspection Alert Settings').catch(() => {});
-    window.dispatchEvent(new CustomEvent('hse_inspection_alert_settings_updated', { detail: memoryAlertSettings }));
-  } catch (err) {
-    console.error('Failed to save alert settings', err);
-  }
+  memoryAlertSettings = { ...DEFAULT_ALERT_SETTINGS, ...settings };
+  apiDb
+    .saveSetting(ALERT_SETTINGS_STORAGE_KEY, memoryAlertSettings, 'Inspection Alert Settings')
+    .then(() => {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('hse_inspection_alert_settings_updated', { detail: memoryAlertSettings }));
+      }
+    })
+    .catch((err) => {
+      console.error('Failed to save alert settings', err);
+      toast.error('خطا در ذخیره‌سازی تنظیمات هشدار بازرسی در پایگاه داده');
+    });
 }
 
 /**

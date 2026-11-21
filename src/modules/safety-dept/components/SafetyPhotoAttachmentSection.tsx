@@ -6,6 +6,7 @@ import {
 import { SafetyAuditPhoto } from '../types';
 import SafetyPhotoLightboxModal from './SafetyPhotoLightboxModal';
 import { compressImageFile } from '../../../utils/fileHelpers';
+import { toast } from 'react-hot-toast';
 
 interface Props {
   photos: SafetyAuditPhoto[];
@@ -45,7 +46,7 @@ export default function SafetyPhotoAttachmentSection({
     if (!files || files.length === 0) return;
 
     if (photos.length + files.length > maxPhotos) {
-      alert(isFa ? `حداکثر ${maxPhotos} تصویر مجاز است.` : `Max ${maxPhotos} photos allowed.`);
+      toast.error(isFa ? `حداکثر ${maxPhotos} تصویر مجاز است.` : `Max ${maxPhotos} photos allowed.`);
       return;
     }
 

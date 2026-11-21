@@ -33,6 +33,7 @@ import { requireAuth, checkUserHasPermission, isGlobalAdminUser } from '../../co
 import { auditService } from '../audit/audit.service.ts';
 import { broadcastDataMutation } from '../../core/socket.ts';
 import { logger } from '../../core/logger.ts';
+import { assertVersionMatch, extractExpectedVersion, extractExpectedUpdatedAt, sendConflictIfApplicable } from '../../core/occ.ts';
 import {
   CCPS_PILLARS,
   CCPS_20_ELEMENTS,
@@ -1026,6 +1027,7 @@ router.put('/projects/:id', requireAuth, async (req: Request, res: Response) => 
     }
     const existing = existingRows[0];
     const b = req.body || {};
+    assertVersionMatch(existing, extractExpectedVersion(b), extractExpectedUpdatedAt(b));
 
     const nextStartDate =
       b.startDate !== undefined ? toShamsiDisplayDate(b.startDate) : existing.startDate;
@@ -1153,6 +1155,7 @@ router.put('/projects/:id', requireAuth, async (req: Request, res: Response) => 
         overallStatus: nextStatus,
         overallProgress: b.overallProgress !== undefined ? Number(b.overallProgress) : existing.overallProgress,
         handoverData: b.handoverData !== undefined ? b.handoverData : existing.handoverData,
+        version: Number(existing.version ?? 1) + 1,
         updatedAt: new Date(),
       })
       .where(eq(psmProjects.id, id))
@@ -1174,7 +1177,12 @@ router.put('/projects/:id', requireAuth, async (req: Request, res: Response) => 
       normalizeProjectRecord(existing),
       normalizedUpdated
     );
-    broadcastDataMutation('psm:projects', 'update', normalizedUpdated);
+    broadcastDataMutation('psm:projects', 'update', normalizedUpdated, {
+      module: 'PSM',
+      recordId: id,
+      actorId: req.user?.uid,
+      version: updated.version,
+    });
 
     res.json({
       success: true,
@@ -1182,7 +1190,8 @@ router.put('/projects/:id', requireAuth, async (req: Request, res: Response) => 
       data: normalizedUpdated,
     });
   } catch (err: any) {
-    res.status(400).json({ success: false, error: err?.message || 'خطا در بروزرسانی پروژه PSM' });
+    if (sendConflictIfApplicable(res, err)) return;
+    res.status(err?.statusCode || 400).json({ success: false, error: err?.message || 'خطا در بروزرسانی پروژه PSM' });
   }
 });
 

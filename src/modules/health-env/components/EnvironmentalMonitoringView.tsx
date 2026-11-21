@@ -6,6 +6,8 @@ import {
 } from 'lucide-react';
 import { EnvMonitoringRecord, EnvMonitoringType, ComplianceStatus } from '../types';
 import { healthEnvService } from '../services/healthEnvService';
+import { toast } from 'react-hot-toast';
+import { showConfirmDialog } from '../../../components/common/ConfirmDialogModal';
 
 interface Props {
   language: 'fa' | 'en';
@@ -62,8 +64,7 @@ export default function EnvironmentalMonitoringView({ language, currentUser }: P
 
   useEffect(() => {
     const handleForce = () => {
-      if (typeof reloadData === 'function') reloadData();
-      else window.location.reload();
+      reloadData();
     };
     window.addEventListener('force_update', handleForce);
     return () => window.removeEventListener('force_update', handleForce);
@@ -167,7 +168,7 @@ export default function EnvironmentalMonitoringView({ language, currentUser }: P
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.stationOrLocation || !formData.parameter) {
-      alert('لطفاً ایستگاه/محل پایش و پارامتر را مشخص کنید.');
+      toast.error('لطفاً ایستگاه/محل پایش و پارامتر را مشخص کنید.');
       return;
     }
 
@@ -180,8 +181,15 @@ export default function EnvironmentalMonitoringView({ language, currentUser }: P
     reloadData();
   };
 
-  const handleDelete = (id: string) => {
-    if (window.confirm('آیا از حذف این رکورد پایش محیط زیست اطمینان دارید؟')) {
+  const handleDelete = async (id: string) => {
+    const ok = await showConfirmDialog({
+      title: 'حذف رکورد پایش محیط زیست',
+      message: 'آیا از حذف این رکورد پایش محیط زیست اطمینان دارید؟',
+      confirmLabel: 'حذف',
+      cancelLabel: 'انصراف',
+      tone: 'danger',
+    });
+    if (ok) {
       healthEnvService.deleteEnvMonitoring(id, currentUser?.fullName || 'admin');
       reloadData();
     }

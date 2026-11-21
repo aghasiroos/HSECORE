@@ -9,10 +9,116 @@ export interface ApiResponse<T = any> {
   data?: T;
   count?: number;
   removedCount?: number;
-  error?: string;
+  error?: any;
+  code?: string;
+  conflict?: ConflictDetails | null;
 }
 
-// In-flight request deduplicator and short-lived TTL cache (3.5 seconds)
+export interface ConflictDetails {
+  serverVersion?: number;
+  updatedAt?: string | null;
+  updatedBy?: string | null;
+  currentRecord?: any;
+}
+
+export class ApiError extends Error {
+  status: number;
+  code?: string;
+  conflict?: ConflictDetails | null;
+  requiresConfirmation?: boolean;
+  blockers?: any[];
+  existingRecord?: any;
+  details?: any;
+
+  constructor(
+    message: string,
+    opts: {
+      status?: number;
+      code?: string;
+      conflict?: ConflictDetails | null;
+      requiresConfirmation?: boolean;
+      blockers?: any[];
+      existingRecord?: any;
+      details?: any;
+    } = {}
+  ) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = opts.status ?? 500;
+    this.code = opts.code;
+    this.conflict = opts.conflict ?? null;
+    this.requiresConfirmation = opts.requiresConfirmation;
+    this.blockers = opts.blockers;
+    this.existingRecord = opts.existingRecord;
+    this.details = opts.details;
+  }
+}
+
+export function isConflictError(err: any): err is ApiError {
+  return Boolean(
+    err &&
+      (err.status === 409 ||
+        err.code === 'VERSION_CONFLICT' ||
+        (err.conflict && typeof err.conflict === 'object'))
+  );
+}
+
+export function extractApiError(
+  status: number,
+  json: any,
+  fallbackMessage: string
+): ApiError {
+  const errObj = json?.error && typeof json.error === 'object' ? json.error : null;
+  const msg =
+    (typeof json?.error === 'string' && json.error) ||
+    errObj?.message ||
+    json?.message ||
+    fallbackMessage;
+  const code =
+    json?.code ||
+    errObj?.code ||
+    (status === 409 ? 'VERSION_CONFLICT' : undefined);
+  const conflict =
+    json?.conflict ||
+    errObj?.conflict ||
+    (status === 409 && json?.existingRecord
+      ? {
+          serverVersion: json.existingRecord?.version,
+          updatedAt: json.existingRecord?.updatedAt,
+          updatedBy: json.existingRecord?.updatedBy,
+          currentRecord: json.existingRecord,
+        }
+      : null);
+
+  return new ApiError(msg, {
+    status,
+    code,
+    conflict,
+    requiresConfirmation: Boolean(json?.requiresConfirmation || errObj?.requiresConfirmation),
+    blockers: json?.blockers || errObj?.blockers,
+    existingRecord: json?.existingRecord,
+    details: errObj?.details ?? json?.details,
+  });
+}
+
+async function fetchJsonStrict<T = any>(
+  input: RequestInfo | URL,
+  init: RequestInit | undefined,
+  fallbackErrMsg: string
+): Promise<T> {
+  const res = await authFetch(input, init);
+  const parsed = await parseJsonSafely<any>(res);
+  if (!parsed.ok || parsed.data?.success === false) {
+    throw extractApiError(
+      parsed.status,
+      parsed.data,
+      parsed.error || fallbackErrMsg
+    );
+  }
+  return parsed.data as T;
+}
+
+// In-flight request deduplicator and short-lived TTL cache
 const inFlightPromises = new Map<string, Promise<any>>();
 const queryCache = new Map<string, { data: any; expiry: number }>();
 const CACHE_TTL_MS = 15000;
@@ -58,11 +164,11 @@ function getCachedOrFetch<T>(key: string, fetcher: () => Promise<T>, ttlMs = CAC
   return promise;
 }
 
-
-// In-memory authentication token with sessionStorage backup for tab persistence across page reloads
+// In-memory authentication token with sessionStorage backup for tab reload continuity (zero operational data)
 let inMemoryAuthToken: string | null = null;
 
 export function setAuthToken(token: string | null): void {
+  const changed = inMemoryAuthToken !== token;
   inMemoryAuthToken = token;
   try {
     if (typeof window !== 'undefined') {
@@ -70,6 +176,9 @@ export function setAuthToken(token: string | null): void {
         sessionStorage.setItem('hse_auth_token', token);
       } else {
         sessionStorage.removeItem('hse_auth_token');
+      }
+      if (changed) {
+        window.dispatchEvent(new CustomEvent('hse_auth_state_changed', { detail: { authenticated: Boolean(token) } }));
       }
     }
   } catch {}
@@ -87,7 +196,7 @@ export function getAuthToken(): string | null {
 export function getActiveClientUserHeaderPayload(): Record<string, string> {
   if (typeof window === 'undefined') return {};
   try {
-    const raw = sessionStorage.getItem('hse_current_user') || localStorage.getItem('hse_current_user');
+    const raw = sessionStorage.getItem('hse_current_user');
     if (!raw) return {};
     const u = JSON.parse(raw);
     if (!u || typeof u !== 'object') return {};
@@ -331,83 +440,71 @@ export const apiDb = {
   // --------------------------------------------------------------------------
   async getPersonnel(): Promise<any[]> {
     return getCachedOrFetch('personnel:list', async () => {
-      try {
-        const res = await authFetch('/api/v1/personnel');
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const json: ApiResponse = await res.json();
-        return json.data || [];
-      } catch {
-        return [];
-      }
+      const json = await fetchJsonStrict<ApiResponse>(
+        '/api/v1/personnel',
+        undefined,
+        'خطا در دریافت لیست پرسنل از پایگاه داده'
+      );
+      return Array.isArray(json.data) ? json.data : [];
     });
   },
 
   async getPersonnelById(identifier: string): Promise<any | null> {
     return getCachedOrFetch(`personnel:${identifier}`, async () => {
-      try {
-        const res = await authFetch(`/api/v1/personnel/${encodeURIComponent(identifier)}`);
-        if (!res.ok) return null;
-        const json: ApiResponse = await res.json();
-        return json.data || null;
-      } catch {
-        return null;
+      const res = await authFetch(`/api/v1/personnel/${encodeURIComponent(identifier)}`);
+      if (res.status === 404) return null;
+      const parsed = await parseJsonSafely<ApiResponse>(res);
+      if (!parsed.ok || parsed.data?.success === false) {
+        throw extractApiError(parsed.status, parsed.data, parsed.error || 'خطا در دریافت اطلاعات پرسنل');
       }
+      return parsed.data?.data || null;
     });
   },
 
   async savePersonnel(data: any): Promise<any> {
-    try {
-      invalidateCacheKeys('personnel', 'sync:full');
-      const res = await authFetch('/api/v1/personnel', {
+    invalidateCacheKeys('personnel', 'sync:full', 'dashboard');
+    const json = await fetchJsonStrict<ApiResponse>(
+      '/api/v1/personnel',
+      {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
-      });
-      const json: ApiResponse = await res.json();
-      return json.data;
-    } catch (e) {
-      console.error('Failed to save personnel:', e);
-      return null;
-    }
+      },
+      'خطا در ذخیره‌سازی اطلاعات پرسنل'
+    );
+    invalidateCacheKeys('personnel', 'sync:full', 'dashboard');
+    return json.data;
   },
 
   async batchSavePersonnel(records: any[]): Promise<boolean> {
     if (!Array.isArray(records) || records.length === 0) {
       return true;
     }
-    try {
-      invalidateCacheKeys('personnel', 'sync:full');
-      const res = await authFetch('/api/v1/personnel/batch', {
+    invalidateCacheKeys('personnel', 'sync:full', 'dashboard');
+    await fetchJsonStrict<ApiResponse>(
+      '/api/v1/personnel/batch',
+      {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ records }),
-      });
-      return res.ok;
-    } catch {
-      return false;
-    }
+      },
+      'خطا در ثبت گروهی پرسنل در پایگاه داده'
+    );
+    invalidateCacheKeys('personnel', 'sync:full', 'dashboard');
+    return true;
   },
 
   async deletePersonnel(id: string, deleteUser = false): Promise<boolean> {
-    try {
-      invalidateCacheKeys('personnel', 'users', 'sync:full');
-      let res = await authFetch(`/api/v1/personnel/${encodeURIComponent(id)}?deleteUser=${deleteUser}`, {
-        method: 'DELETE',
-      });
-      if (!res.ok && res.status === 404) {
-        res = await authFetch(`/api/database/personnel/${encodeURIComponent(id)}?deleteUser=${deleteUser}`, {
-          method: 'DELETE',
-        });
-      }
-      if (res.ok) {
-        invalidateCacheKeys('personnel', 'users', 'sync:full');
-        return true;
-      }
-      return false;
-    } catch (e) {
-      console.error('Failed to delete personnel:', e);
-      return false;
+    invalidateCacheKeys('personnel', 'users', 'sync:full', 'dashboard');
+    const res = await authFetch(`/api/v1/personnel/${encodeURIComponent(id)}?deleteUser=${deleteUser}`, {
+      method: 'DELETE',
+    });
+    const parsed = await parseJsonSafely<ApiResponse>(res);
+    if (!parsed.ok || parsed.data?.success === false) {
+      throw extractApiError(parsed.status, parsed.data, parsed.error || 'خطا در حذف پرسنل از پایگاه داده');
     }
+    invalidateCacheKeys('personnel', 'users', 'sync:full', 'dashboard');
+    return true;
   },
 
   // --------------------------------------------------------------------------
@@ -415,72 +512,63 @@ export const apiDb = {
   // --------------------------------------------------------------------------
   async getMedicalExams(year?: number): Promise<any[]> {
     return getCachedOrFetch(`medical-exams:${year || 'all'}`, async () => {
-      try {
-        const url = year ? `/api/v1/medical-exams?year=${year}` : '/api/v1/medical-exams';
-        const res = await authFetch(url);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const json: ApiResponse = await res.json();
-        return json.data || [];
-      } catch {
-        return [];
-      }
+      const url = year ? `/api/v1/medical-exams?year=${year}` : '/api/v1/medical-exams';
+      const json = await fetchJsonStrict<ApiResponse>(url, undefined, 'خطا در دریافت سوابق معاینات طب کار');
+      return Array.isArray(json.data) ? json.data : [];
     });
   },
 
   async getMedicalExamDetails(examId: number): Promise<any | null> {
     return getCachedOrFetch(`medical-exam-details:${examId}`, async () => {
-      try {
-        const res = await authFetch(`/api/v1/medical-exams/${examId}`);
-        if (!res.ok) return null;
-        const json: ApiResponse = await res.json();
-        return json.data || null;
-      } catch {
-        return null;
+      const res = await authFetch(`/api/v1/medical-exams/${examId}`);
+      if (res.status === 404) return null;
+      const parsed = await parseJsonSafely<ApiResponse>(res);
+      if (!parsed.ok || parsed.data?.success === false) {
+        throw extractApiError(parsed.status, parsed.data, parsed.error || 'خطا در دریافت جزئیات معاینه');
       }
+      return parsed.data?.data || null;
     });
   },
 
   async getPersonnelMedicalHistory(identifier: string): Promise<{ personnel: any; history: any[] }> {
     return getCachedOrFetch(`medical-history:${identifier}`, async () => {
-      try {
-        const res = await authFetch(`/api/v1/medical-exams/history/${encodeURIComponent(identifier)}`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const json: ApiResponse = await res.json();
-        return json.data || { personnel: null, history: [] };
-      } catch {
-        return { personnel: null, history: [] };
-      }
+      const json = await fetchJsonStrict<ApiResponse>(
+        `/api/v1/medical-exams/history/${encodeURIComponent(identifier)}`,
+        undefined,
+        'خطا در دریافت تاریخچه طب کار پرسنل'
+      );
+      return json.data || { personnel: null, history: [] };
     });
   },
 
   async saveMedicalExam(examPayload: any): Promise<any> {
-    try {
-      invalidateCacheKeys('medical-exam', 'medical-history', 'sync:full');
-      const res = await authFetch('/api/v1/medical-exams', {
+    invalidateCacheKeys('medical-exam', 'medical-history', 'sync:full', 'dashboard');
+    const json = await fetchJsonStrict<ApiResponse>(
+      '/api/v1/medical-exams',
+      {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(examPayload),
-      });
-      const json: ApiResponse = await res.json();
-      return json.data;
-    } catch (e) {
-      console.error('Failed to save medical exam to database:', e);
-      return null;
-    }
+      },
+      'خطا در ذخیره معاینه طب کار در پایگاه داده'
+    );
+    invalidateCacheKeys('medical-exam', 'medical-history', 'sync:full', 'dashboard');
+    return json.data;
   },
 
   async batchImportMedicalExams(records: any[]): Promise<boolean> {
-    try {
-      invalidateCacheKeys('medical-exam', 'medical-history', 'sync:full');
-      const res = await authFetch('/api/v1/medical-exams/batch-import', {
+    invalidateCacheKeys('medical-exam', 'medical-history', 'sync:full', 'dashboard');
+    await fetchJsonStrict<ApiResponse>(
+      '/api/v1/medical-exams/batch-import',
+      {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ records }),
-      });
-      return res.ok;
-    } catch {
-      return false;
-    }
+      },
+      'خطا در ورود گروهی معاینات طب کار'
+    );
+    invalidateCacheKeys('medical-exam', 'medical-history', 'sync:full', 'dashboard');
+    return true;
   },
 
   // --------------------------------------------------------------------------
@@ -488,68 +576,54 @@ export const apiDb = {
   // --------------------------------------------------------------------------
   async getWorkPermits(status?: string): Promise<any[]> {
     return getCachedOrFetch(`permits:${status || 'all'}`, async () => {
-      try {
-        const url = status ? `/api/v1/work-permits?status=${encodeURIComponent(status)}` : '/api/v1/work-permits';
-        const res = await authFetch(url);
-        const json: ApiResponse = await res.json();
-        return json.data || [];
-      } catch {
-        return [];
-      }
+      const url = status ? `/api/v1/work-permits?status=${encodeURIComponent(status)}` : '/api/v1/work-permits';
+      const json = await fetchJsonStrict<ApiResponse>(url, undefined, 'خطا در دریافت فهرست پروانه‌های کار');
+      return Array.isArray(json.data) ? json.data : [];
     });
   },
 
   async saveWorkPermit(permit: any): Promise<any> {
-    try {
-      invalidateCacheKeys('permits', 'sync:full');
-      const res = await authFetch('/api/v1/work-permits', {
+    invalidateCacheKeys('permits', 'sync:full', 'dashboard');
+    const json = await fetchJsonStrict<ApiResponse>(
+      '/api/v1/work-permits',
+      {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(permit),
-      });
-      const json: ApiResponse = await res.json();
-      return json.data;
-    } catch {
-      return null;
-    }
+      },
+      'خطا در ذخیره‌سازی پروانه کار در پایگاه داده'
+    );
+    invalidateCacheKeys('permits', 'sync:full', 'dashboard');
+    return json.data;
   },
 
   async deleteWorkPermit(idOrNumber: string | number): Promise<boolean> {
-    try {
-      invalidateCacheKeys('permits', 'sync:full');
-      const encoded = encodeURIComponent(String(idOrNumber));
-      const res = await authFetch(`/api/v1/work-permits/${encoded}`, {
-        method: 'DELETE',
-      });
-      let ok = res.ok;
-      if (!ok) {
-        const res2 = await authFetch(`/api/v1/permits/${encoded}`, {
-          method: 'DELETE',
-        });
-        ok = res2.ok;
-      }
-      invalidateCacheKeys('permits', 'sync:full');
-      return ok;
-    } catch (e) {
-      console.error('Failed to delete work permit:', e);
-      invalidateCacheKeys('permits', 'sync:full');
-      return false;
+    invalidateCacheKeys('permits', 'sync:full', 'dashboard');
+    const encoded = encodeURIComponent(String(idOrNumber));
+    const res = await authFetch(`/api/v1/work-permits/${encoded}`, {
+      method: 'DELETE',
+    });
+    const parsed = await parseJsonSafely<ApiResponse>(res);
+    invalidateCacheKeys('permits', 'sync:full', 'dashboard');
+    if (!parsed.ok || parsed.data?.success === false) {
+      throw extractApiError(parsed.status, parsed.data, parsed.error || 'خطا در حذف پروانه کار');
     }
+    return true;
   },
 
   async signWorkPermit(permitId: number, signature: any): Promise<any> {
-    try {
-      invalidateCacheKeys('permits', 'sync:full');
-      const res = await authFetch(`/api/v1/work-permits/${permitId}/signatures`, {
+    invalidateCacheKeys('permits', 'sync:full', 'dashboard');
+    const json = await fetchJsonStrict<ApiResponse>(
+      `/api/v1/work-permits/${permitId}/signatures`,
+      {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(signature),
-      });
-      const json: ApiResponse = await res.json();
-      return json.data;
-    } catch {
-      return null;
-    }
+      },
+      'خطا در ثبت امضای دیجیتال پروانه کار'
+    );
+    invalidateCacheKeys('permits', 'sync:full', 'dashboard');
+    return json.data;
   },
 
   // --------------------------------------------------------------------------
@@ -557,139 +631,102 @@ export const apiDb = {
   // --------------------------------------------------------------------------
   async getTrirRecords(): Promise<any[]> {
     return getCachedOrFetch('trir:list', async () => {
-      const json = await safeFetchJson<ApiResponse>('/api/v1/trir');
-      return Array.isArray(json?.data) ? json.data : [];
+      const json = await fetchJsonStrict<ApiResponse>('/api/v1/trir', undefined, 'خطا در دریافت آمار TRIR');
+      return Array.isArray(json.data) ? json.data : [];
     });
   },
 
   async saveTrirRecord(data: any): Promise<any> {
-    try {
-      invalidateCacheKeys('trir', 'sync:full');
-      const json = await safeFetchJson<ApiResponse>('/api/v1/trir', {
+    invalidateCacheKeys('trir', 'sync:full', 'dashboard');
+    const json = await fetchJsonStrict<ApiResponse>(
+      '/api/v1/trir',
+      {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
-      });
-      return json?.data || data;
-    } catch {
-      return data;
-    }
+      },
+      'خطا در ذخیره رکورد TRIR در پایگاه داده'
+    );
+    invalidateCacheKeys('trir', 'sync:full', 'dashboard');
+    return json.data;
   },
 
   async saveTrirBatch(records: any[]): Promise<any[]> {
     if (!Array.isArray(records)) return [];
-    try {
-      invalidateCacheKeys('trir', 'sync:full');
-      const json = await safeFetchJson<ApiResponse>('/api/v1/trir/batch', {
+    invalidateCacheKeys('trir', 'sync:full', 'dashboard');
+    const json = await fetchJsonStrict<ApiResponse>(
+      '/api/v1/trir/batch',
+      {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(records),
-      });
-      return Array.isArray(json?.data) ? json.data : records;
-    } catch {
-      return records;
-    }
+      },
+      'خطا در ذخیره گروهی رکوردهای TRIR'
+    );
+    invalidateCacheKeys('trir', 'sync:full', 'dashboard');
+    return Array.isArray(json.data) ? json.data : [];
   },
 
   async deleteTrirRecord(id: string | number, year?: number, month?: string): Promise<boolean> {
-    try {
-      invalidateCacheKeys('trir', 'sync:full');
-      // Purge any legacy browser storage keys
-      try {
-        localStorage.removeItem('hse_trir_records_backup');
-        localStorage.removeItem('hse_trir_records_v3');
-        localStorage.removeItem('trir_records');
-      } catch (_) {}
-
-      let url = `/api/v1/trir/${encodeURIComponent(String(id))}`;
-      if (year && month) {
-        url += `?year=${encodeURIComponent(String(year))}&month=${encodeURIComponent(String(month))}`;
-      }
-      const res = await authFetch(url, {
-        method: 'DELETE',
-      });
-      return res.ok;
-    } catch {
-      return false;
+    invalidateCacheKeys('trir', 'sync:full', 'dashboard');
+    let url = `/api/v1/trir/${encodeURIComponent(String(id))}`;
+    if (year && month) {
+      url += `?year=${encodeURIComponent(String(year))}&month=${encodeURIComponent(String(month))}`;
     }
+    await fetchJsonStrict<ApiResponse>(url, { method: 'DELETE' }, 'خطا در حذف رکورد TRIR');
+    invalidateCacheKeys('trir', 'sync:full', 'dashboard');
+    return true;
   },
 
   async clearAllTrirRecords(): Promise<boolean> {
-    try {
-      invalidateCacheKeys('trir', 'sync:full');
-      try {
-        localStorage.removeItem('hse_trir_records_backup');
-        localStorage.removeItem('hse_trir_records_v3');
-        localStorage.removeItem('trir_records');
-      } catch (_) {}
-
-      const res = await authFetch('/api/v1/trir', {
-        method: 'DELETE',
-      });
-      return res.ok;
-    } catch {
-      return false;
-    }
+    invalidateCacheKeys('trir', 'sync:full', 'dashboard');
+    await fetchJsonStrict<ApiResponse>('/api/v1/trir', { method: 'DELETE' }, 'خطا در پاکسازی آمار TRIR');
+    invalidateCacheKeys('trir', 'sync:full', 'dashboard');
+    return true;
   },
 
   async deduplicateTrirRecords(): Promise<number> {
-    try {
-      invalidateCacheKeys('trir', 'sync:full');
-      const res = await authFetch('/api/v1/trir/deduplicate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
-      const json: ApiResponse = await res.json();
-      return json.removedCount || 0;
-    } catch {
-      return 0;
-    }
+    invalidateCacheKeys('trir', 'sync:full', 'dashboard');
+    const json = await fetchJsonStrict<ApiResponse>(
+      '/api/v1/trir/deduplicate',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' } },
+      'خطا در حذف رکوردهای تکراری TRIR'
+    );
+    invalidateCacheKeys('trir', 'sync:full', 'dashboard');
+    return json.removedCount || 0;
   },
 
   async getIncidents(): Promise<any[]> {
     return getCachedOrFetch('incidents:list', async () => {
-      try {
-        const res = await authFetch('/api/v1/incidents');
-        const json: ApiResponse = await res.json();
-        return json.data || [];
-      } catch {
-        return [];
-      }
+      const json = await fetchJsonStrict<ApiResponse>('/api/v1/incidents', undefined, 'خطا در دریافت حوادث');
+      return Array.isArray(json.data) ? json.data : [];
     });
   },
 
   async saveIncident(incident: any): Promise<any> {
-    try {
-      invalidateCacheKeys('incidents', 'sync:full');
-      const res = await authFetch('/api/v1/incidents', {
+    invalidateCacheKeys('incidents', 'sync:full', 'dashboard');
+    const json = await fetchJsonStrict<ApiResponse>(
+      '/api/v1/incidents',
+      {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(incident),
-      });
-      invalidateCacheKeys('incidents', 'sync:full');
-      const json: ApiResponse = await res.json();
-      return json.data;
-    } catch {
-      invalidateCacheKeys('incidents', 'sync:full');
-      return null;
-    }
+      },
+      'خطا در ذخیره گزارش حادثه در پایگاه داده'
+    );
+    invalidateCacheKeys('incidents', 'sync:full', 'dashboard');
+    return json.data;
   },
 
   async deleteIncident(id: string | number): Promise<boolean> {
-    try {
-      invalidateCacheKeys('incidents', 'sync:full');
-      try {
-        localStorage.removeItem('hse_safety_incidents');
-      } catch (_) {}
-      const res = await authFetch(`/api/v1/incidents/${encodeURIComponent(String(id))}`, {
-        method: 'DELETE',
-      });
-      invalidateCacheKeys('incidents', 'sync:full');
-      return res.ok;
-    } catch {
-      invalidateCacheKeys('incidents', 'sync:full');
-      return false;
-    }
+    invalidateCacheKeys('incidents', 'sync:full', 'dashboard');
+    await fetchJsonStrict<ApiResponse>(
+      `/api/v1/incidents/${encodeURIComponent(String(id))}`,
+      { method: 'DELETE' },
+      'خطا در حذف گزارش حادثه'
+    );
+    invalidateCacheKeys('incidents', 'sync:full', 'dashboard');
+    return true;
   },
 
   // --------------------------------------------------------------------------
@@ -697,89 +734,68 @@ export const apiDb = {
   // --------------------------------------------------------------------------
   async getSafetyWarnings(): Promise<any[]> {
     return getCachedOrFetch('warnings:list', async () => {
-      try {
-        const res = await authFetch('/api/v1/warnings');
-        const json: ApiResponse = await res.json();
-        return json.data || [];
-      } catch {
-        return [];
-      }
+      const json = await fetchJsonStrict<ApiResponse>('/api/v1/warnings', undefined, 'خطا در دریافت اخطارهای ایمنی');
+      return Array.isArray(json.data) ? json.data : [];
     });
   },
 
   async saveSafetyWarning(warning: any): Promise<any> {
-    try {
-      invalidateCacheKeys('warnings', 'sync:full');
-      const res = await authFetch('/api/v1/warnings', {
+    invalidateCacheKeys('warnings', 'sync:full', 'dashboard');
+    const json = await fetchJsonStrict<ApiResponse>(
+      '/api/v1/warnings',
+      {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(warning),
-      });
-      const json: ApiResponse = await res.json();
-      return json.data;
-    } catch {
-      return null;
-    }
+      },
+      'خطا در ذخیره اخطار ایمنی در پایگاه داده'
+    );
+    invalidateCacheKeys('warnings', 'sync:full', 'dashboard');
+    return json.data;
   },
 
   async saveSafetyWarningsBatch(warnings: any[]): Promise<any[]> {
-    try {
-      invalidateCacheKeys('warnings', 'sync:full');
-      const res = await authFetch('/api/v1/warnings/batch', {
+    invalidateCacheKeys('warnings', 'sync:full', 'dashboard');
+    const json = await fetchJsonStrict<ApiResponse>(
+      '/api/v1/warnings/batch',
+      {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(warnings),
-      });
-      const json: ApiResponse = await res.json();
-      return json.data || [];
-    } catch {
-      return [];
-    }
+      },
+      'خطا در ذخیره گروهی اخطارهای ایمنی'
+    );
+    invalidateCacheKeys('warnings', 'sync:full', 'dashboard');
+    return Array.isArray(json.data) ? json.data : [];
   },
 
   async deleteSafetyWarning(id: string | number): Promise<boolean> {
-    try {
-      invalidateCacheKeys('warnings', 'warnings:list', 'sync:full');
-      try {
-        localStorage.removeItem('warning_records');
-      } catch (_) {}
-      const res = await authFetch(`/api/v1/warnings/${encodeURIComponent(String(id))}`, {
-        method: 'DELETE',
-      });
-      invalidateCacheKeys('warnings', 'warnings:list', 'sync:full');
-      const json: ApiResponse = await res.json();
-      return json.success || false;
-    } catch {
-      invalidateCacheKeys('warnings', 'warnings:list', 'sync:full');
-      return false;
-    }
+    invalidateCacheKeys('warnings', 'warnings:list', 'sync:full', 'dashboard');
+    await fetchJsonStrict<ApiResponse>(
+      `/api/v1/warnings/${encodeURIComponent(String(id))}`,
+      { method: 'DELETE' },
+      'خطا در حذف اخطار ایمنی'
+    );
+    invalidateCacheKeys('warnings', 'warnings:list', 'sync:full', 'dashboard');
+    return true;
   },
 
   async deduplicateSafetyWarnings(): Promise<number> {
-    try {
-      invalidateCacheKeys('warnings', 'sync:full');
-      const res = await authFetch('/api/v1/warnings/deduplicate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
-      const json: ApiResponse = await res.json();
-      return json.removedCount || 0;
-    } catch {
-      return 0;
-    }
+    invalidateCacheKeys('warnings', 'sync:full', 'dashboard');
+    const json = await fetchJsonStrict<ApiResponse>(
+      '/api/v1/warnings/deduplicate',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' } },
+      'خطا در پالایش تکراری اخطارها'
+    );
+    invalidateCacheKeys('warnings', 'sync:full', 'dashboard');
+    return json.removedCount || 0;
   },
 
   async clearAllSafetyWarnings(): Promise<boolean> {
-    try {
-      invalidateCacheKeys('warnings', 'sync:full');
-      const res = await authFetch('/api/v1/warnings', {
-        method: 'DELETE',
-      });
-      const json: ApiResponse = await res.json();
-      return json.success || false;
-    } catch {
-      return false;
-    }
+    invalidateCacheKeys('warnings', 'sync:full', 'dashboard');
+    await fetchJsonStrict<ApiResponse>('/api/v1/warnings', { method: 'DELETE' }, 'خطا در پاکسازی اخطارها');
+    invalidateCacheKeys('warnings', 'sync:full', 'dashboard');
+    return true;
   },
 
   // --------------------------------------------------------------------------
@@ -787,88 +803,69 @@ export const apiDb = {
   // --------------------------------------------------------------------------
   async getFireEquipment(): Promise<any[]> {
     return getCachedOrFetch('fire-equipment:list', async () => {
-      try {
-        const res = await authFetch('/api/v1/fire-equipment');
-        const json: ApiResponse = await res.json();
-        return json.data || [];
-      } catch {
-        return [];
-      }
+      const json = await fetchJsonStrict<ApiResponse>('/api/v1/fire-equipment', undefined, 'خطا در دریافت تجهیزات آتش‌نشانی');
+      return Array.isArray(json.data) ? json.data : [];
     });
   },
 
   async saveFireEquipment(item: any): Promise<any> {
-    invalidateCacheKeys('fire-equipment', 'sync:full');
-    const res = await authFetch('/api/v1/fire-equipment', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(item),
-    });
-    const json: any = await res.json().catch(() => ({}));
-    if (!res.ok || json?.success === false) {
-      const err: any = new Error(json?.error || 'خطا در ذخیره تجهیز در پایگاه داده');
-      err.status = res.status;
-      err.code = json?.code;
-      err.existingRecord = json?.existingRecord || null;
-      throw err;
-    }
-    invalidateCacheKeys('fire-equipment', 'sync:full');
+    invalidateCacheKeys('fire-equipment', 'sync:full', 'dashboard');
+    const json = await fetchJsonStrict<ApiResponse>(
+      '/api/v1/fire-equipment',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(item),
+      },
+      'خطا در ذخیره تجهیز در پایگاه داده'
+    );
+    invalidateCacheKeys('fire-equipment', 'sync:full', 'dashboard');
     return json.data;
   },
 
   async deleteFireEquipment(id: string | number): Promise<boolean> {
-    try {
-      invalidateCacheKeys('fire-equipment', 'sync:full');
-      const res = await authFetch(`/api/v1/fire-equipment/${encodeURIComponent(String(id))}`, {
-        method: 'DELETE',
-      });
-      const json: ApiResponse = await res.json();
-      return json.success;
-    } catch {
-      return false;
-    }
+    invalidateCacheKeys('fire-equipment', 'sync:full', 'dashboard');
+    await fetchJsonStrict<ApiResponse>(
+      `/api/v1/fire-equipment/${encodeURIComponent(String(id))}`,
+      { method: 'DELETE' },
+      'خطا در حذف تجهیز آتش‌نشانی'
+    );
+    invalidateCacheKeys('fire-equipment', 'sync:full', 'dashboard');
+    return true;
   },
 
   async getFiveSAudits(): Promise<any[]> {
     return getCachedOrFetch('five-s:list', async () => {
-      try {
-        const res = await authFetch('/api/v1/five-s');
-        const json: ApiResponse = await res.json();
-        return json.data || [];
-      } catch {
-        return [];
-      }
+      const json = await fetchJsonStrict<ApiResponse>('/api/v1/five-s', undefined, 'خطا در دریافت ممیزی‌های 5S');
+      return Array.isArray(json.data) ? json.data : [];
     });
   },
 
   async saveFiveSAudit(audit: any): Promise<any> {
-    try {
-      invalidateCacheKeys('five-s', 'sync:full');
-      const res = await authFetch('/api/v1/five-s', {
+    invalidateCacheKeys('five-s', 'sync:full', 'dashboard');
+    const json = await fetchJsonStrict<ApiResponse>(
+      '/api/v1/five-s',
+      {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(audit),
-      });
-      const json: ApiResponse = await res.json();
-      return json.data;
-    } catch {
-      return null;
-    }
+      },
+      'خطا در ذخیره ممیزی 5S'
+    );
+    invalidateCacheKeys('five-s', 'sync:full', 'dashboard');
+    return json.data;
   },
 
   // --------------------------------------------------------------------------
   // Central Sync & Full Database State
   // --------------------------------------------------------------------------
-  async getFullSyncSnapshot(): Promise<{ timestamp: string; status: string; data: Record<string, any> } | null> {
+  async getFullSyncSnapshot(): Promise<{ timestamp: string; status: string; data: Record<string, any> }> {
     return getCachedOrFetch('sync:full', async () => {
-      try {
-        const res = await authFetch('/api/v1/sync/full');
-        const parsed = await parseJsonSafely<any>(res);
-        if (!parsed.ok || !parsed.data) return null;
-        return parsed.data.success ? parsed.data : null;
-      } catch {
-        return null;
-      }
+      return await fetchJsonStrict<{ timestamp: string; status: string; data: Record<string, any> }>(
+        '/api/v1/sync/full',
+        undefined,
+        'خطا در همگام‌سازی کامل با پایگاه داده مرکزی'
+      );
     }, 4000);
   },
 
@@ -883,20 +880,33 @@ export const apiDb = {
     }
   },
 
+  async getMissedSyncEvents(sinceSeq: number): Promise<{ events: any[]; latestSeq: number; resyncRequired: boolean }> {
+    const json = await fetchJsonStrict<any>(
+      `/api/v1/sync/events/catchup?sinceSeq=${encodeURIComponent(String(sinceSeq))}`,
+      undefined,
+      'خطا در بازیابی رویدادهای همگام‌سازی'
+    );
+    const payload = json.data || json;
+    return {
+      events: Array.isArray(payload.events) ? payload.events : [],
+      latestSeq: Number(payload.latestSeq || 0),
+      resyncRequired: Boolean(payload.resyncRequired),
+    };
+  },
+
   async pushEntity(entityType: string, data: any): Promise<any> {
-    try {
-      invalidateCacheKeys(entityType, `${entityType}s`, 'sync:full');
-      const res = await authFetch('/api/v1/sync/push', {
+    invalidateCacheKeys(entityType, `${entityType}s`, 'sync:full', 'dashboard');
+    const json = await fetchJsonStrict<any>(
+      '/api/v1/sync/push',
+      {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ entityType, data }),
-      });
-      const parsed = await parseJsonSafely<any>(res);
-      return parsed.data?.data || null;
-    } catch (e) {
-      console.error(`Failed to push entity ${entityType} to central DB:`, e);
-      return null;
-    }
+      },
+      `خطا در ارسال اطلاعات (${entityType}) به پایگاه داده`
+    );
+    invalidateCacheKeys(entityType, `${entityType}s`, 'sync:full', 'dashboard');
+    return json.data;
   },
 
   // --------------------------------------------------------------------------
@@ -904,48 +914,41 @@ export const apiDb = {
   // --------------------------------------------------------------------------
   async getUsers(): Promise<any[]> {
     return getCachedOrFetch('users:list', async () => {
-      try {
-        const res = await authFetch('/api/v1/users');
-        const parsed = await parseJsonSafely<ApiResponse>(res);
-        if (!parsed.ok || !parsed.data) return [];
-        return parsed.data.data || [];
-      } catch {
-        return [];
-      }
+      const json = await fetchJsonStrict<ApiResponse>('/api/v1/users', undefined, 'خطا در دریافت لیست کاربران');
+      return Array.isArray(json.data) ? json.data : [];
     });
   },
 
   async saveUser(user: any): Promise<any> {
-    try {
-      invalidateCacheKeys('users', 'sync:full');
-      const res = await authFetch('/api/v1/users', {
+    invalidateCacheKeys('users', 'sync:full');
+    const json = await fetchJsonStrict<ApiResponse>(
+      '/api/v1/users',
+      {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(user),
-      });
-      const parsed = await parseJsonSafely<ApiResponse>(res);
-      return parsed.data?.data || null;
-    } catch (e) {
-      console.error('Failed to save user in central DB:', e);
-      return null;
-    }
+      },
+      'خطا در ذخیره اطلاعات کاربر در پایگاه داده'
+    );
+    invalidateCacheKeys('users', 'sync:full');
+    return json.data;
   },
 
   async deleteUser(uid: string): Promise<boolean> {
-    try {
-      invalidateCacheKeys('users', 'sync:full');
-      const res = await authFetch(`/api/v1/users/${encodeURIComponent(uid)}`, {
-        method: 'DELETE',
-      });
-      return res.ok;
-    } catch {
-      return false;
-    }
+    invalidateCacheKeys('users', 'sync:full');
+    await fetchJsonStrict<ApiResponse>(
+      `/api/v1/users/${encodeURIComponent(uid)}`,
+      { method: 'DELETE' },
+      'خطا در حذف حساب کاربری'
+    );
+    invalidateCacheKeys('users', 'sync:full');
+    return true;
   },
 
   async getCurrentUserFromServer(): Promise<any | null> {
     try {
       const res = await authFetch('/api/v1/auth/me');
+      if (!res.ok) return null;
       const parsed = await parseJsonSafely<ApiResponse>(res);
       return parsed.data?.data || null;
     } catch {
@@ -954,158 +957,133 @@ export const apiDb = {
   },
 
   async getUserPersonnelAssignments(uid: string): Promise<any> {
-    try {
-      const res = await authFetch(`/api/v1/users/${encodeURIComponent(uid)}/personnel-assignments`);
-      const parsed = await parseJsonSafely<ApiResponse>(res);
-      return parsed.data?.data || null;
-    } catch (e) {
-      console.error('Failed to fetch user personnel assignments:', e);
-      return null;
-    }
+    const json = await fetchJsonStrict<ApiResponse>(
+      `/api/v1/users/${encodeURIComponent(uid)}/personnel-assignments`,
+      undefined,
+      'خطا در دریافت تخصیص پرسنل کاربر'
+    );
+    return json.data || null;
   },
 
   async updateUserPersonnelAssignments(
     uid: string,
     payload: { scope: 'ALL' | 'ASSIGNED'; personnelIds: Array<string | number> }
   ): Promise<any> {
-    try {
-      invalidateCacheKeys('users', 'personnel', 'sync:full');
-      const res = await authFetch(`/api/v1/users/${encodeURIComponent(uid)}/personnel-assignments`, {
+    invalidateCacheKeys('users', 'personnel', 'sync:full', 'dashboard');
+    const json = await fetchJsonStrict<ApiResponse>(
+      `/api/v1/users/${encodeURIComponent(uid)}/personnel-assignments`,
+      {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
-      });
-      const parsed = await parseJsonSafely<ApiResponse>(res);
-      if (!res.ok || !parsed.data?.success) {
-        const errMsg =
-          (parsed.data as any)?.error?.message ||
-          (parsed.data as any)?.error ||
-          (parsed.data as any)?.message ||
-          'خطا در بروزرسانی اشخاص مرتبط کاربر';
-        throw new Error(errMsg);
-      }
-      invalidateCacheKeys('users', 'personnel', 'sync:full');
-      return parsed.data.data;
-    } catch (e) {
-      console.error('Failed to update user personnel assignments:', e);
-      throw e;
-    }
+      },
+      'خطا در بروزرسانی اشخاص مرتبط کاربر'
+    );
+    invalidateCacheKeys('users', 'personnel', 'sync:full', 'dashboard');
+    return json.data;
   },
 
   // --------------------------------------------------------------------------
   // Notifications
   // --------------------------------------------------------------------------
   async getNotifications(params?: { category?: string; priority?: string; sourceModule?: string; unreadOnly?: boolean }): Promise<any[]> {
+    if (!getAuthToken()) return [];
     return getCachedOrFetch('notifications:list', async () => {
-      try {
-        let url = '/api/v1/notifications';
-        if (params) {
-          const q = new URLSearchParams();
-          if (params.category) q.set('category', params.category);
-          if (params.priority) q.set('priority', params.priority);
-          if (params.sourceModule) q.set('sourceModule', params.sourceModule);
-          if (params.unreadOnly) q.set('unreadOnly', 'true');
-          url += `?${q.toString()}`;
-        }
-        const res = await authFetch(url);
-        if (!res.ok) return [];
-        const json: ApiResponse = await res.json();
-        return json.data || [];
-      } catch {
-        return [];
+      let url = '/api/v1/notifications';
+      if (params) {
+        const q = new URLSearchParams();
+        if (params.category) q.set('category', params.category);
+        if (params.priority) q.set('priority', params.priority);
+        if (params.sourceModule) q.set('sourceModule', params.sourceModule);
+        if (params.unreadOnly) q.set('unreadOnly', 'true');
+        url += `?${q.toString()}`;
       }
+      const json = await fetchJsonStrict<ApiResponse>(
+        url,
+        undefined,
+        'خطا در دریافت اعلان‌ها از پایگاه داده'
+      );
+      return json.data || [];
     }, 2000);
   },
 
   async saveNotification(notif: any): Promise<any> {
-    try {
-      invalidateCacheKeys('notifications', 'sync:full');
-      const res = await authFetch('/api/v1/notifications', {
+    invalidateCacheKeys('notifications', 'sync:full');
+    const json = await fetchJsonStrict<ApiResponse>(
+      '/api/v1/notifications',
+      {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(notif),
-      });
-      const json: ApiResponse = await res.json();
-      invalidateCacheKeys('notifications', 'sync:full');
-      return json.data;
-    } catch (e) {
-      console.error('Failed to persist notification:', e);
-      return null;
-    }
+      },
+      'خطا در ثبت و ذخیره اعلان در پایگاه داده'
+    );
+    invalidateCacheKeys('notifications', 'sync:full');
+    return json.data;
   },
 
   async markNotificationRead(id: string): Promise<boolean> {
-    try {
-      invalidateCacheKeys('notifications', 'sync:full');
-      const res = await authFetch(`/api/v1/notifications/${encodeURIComponent(id)}/read`, {
-        method: 'PATCH',
-      });
-      invalidateCacheKeys('notifications', 'sync:full');
-      return res.ok;
-    } catch (e) {
-      console.error('Failed to mark notification read:', e);
-      return false;
-    }
+    invalidateCacheKeys('notifications', 'sync:full');
+    await fetchJsonStrict<ApiResponse>(
+      `/api/v1/notifications/${encodeURIComponent(id)}/read`,
+      { method: 'PATCH' },
+      'خطا در ثبت وضعیت مطالعه اعلان'
+    );
+    invalidateCacheKeys('notifications', 'sync:full');
+    return true;
   },
 
   async markAllNotificationsRead(): Promise<boolean> {
-    try {
-      invalidateCacheKeys('notifications', 'sync:full');
-      const res = await authFetch('/api/v1/notifications/read', {
-        method: 'POST',
-      });
-      invalidateCacheKeys('notifications', 'sync:full');
-      return res.ok;
-    } catch (e) {
-      console.error('Failed to mark all notifications read:', e);
-      return false;
-    }
+    invalidateCacheKeys('notifications', 'sync:full');
+    await fetchJsonStrict<ApiResponse>(
+      '/api/v1/notifications/read',
+      { method: 'POST' },
+      'خطا در ثبت وضعیت مطالعه همه اعلان‌ها'
+    );
+    invalidateCacheKeys('notifications', 'sync:full');
+    return true;
   },
 
   async acknowledgeNotification(id: string, note?: string, acknowledgmentSource?: string): Promise<boolean> {
-    try {
-      invalidateCacheKeys('notifications', 'sync:full');
-      const res = await authFetch(`/api/v1/notifications/${encodeURIComponent(id)}/acknowledge`, {
+    invalidateCacheKeys('notifications', 'sync:full');
+    await fetchJsonStrict<ApiResponse>(
+      `/api/v1/notifications/${encodeURIComponent(id)}/acknowledge`,
+      {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ note, acknowledgmentSource: acknowledgmentSource || 'in_app_modal' }),
-      });
-      invalidateCacheKeys('notifications', 'sync:full');
-      return res.ok;
-    } catch (e) {
-      console.error('Failed to acknowledge notification:', e);
-      return false;
-    }
+      },
+      'خطا در ثبت تاییدیه دریافت هشدار در پایگاه داده'
+    );
+    invalidateCacheKeys('notifications', 'sync:full');
+    return true;
   },
 
   async getNotificationPreferences(): Promise<any> {
+    if (!getAuthToken()) return null;
     return getCachedOrFetch('notifications:preferences', async () => {
-      try {
-        const res = await authFetch('/api/v1/notifications/preferences');
-        if (!res.ok) return null;
-        const json: ApiResponse = await res.json();
-        return json.data;
-      } catch {
-        return null;
-      }
+      const json = await fetchJsonStrict<ApiResponse>(
+        '/api/v1/notifications/preferences',
+        undefined,
+        'خطا در خواندن تنظیمات اعلان‌ها از پایگاه داده'
+      );
+      return json.data;
     }, 10000);
   },
 
   async saveNotificationPreferences(prefs: any): Promise<any> {
-    try {
-      invalidateCacheKeys('notifications:preferences');
-      const res = await authFetch('/api/v1/notifications/preferences', {
+    invalidateCacheKeys('notifications:preferences');
+    const json = await fetchJsonStrict<ApiResponse>(
+      '/api/v1/notifications/preferences',
+      {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(prefs),
-      });
-      const json: ApiResponse = await res.json();
-      invalidateCacheKeys('notifications:preferences');
-      return json.data;
-    } catch (e) {
-      console.error('Failed to save notification preferences:', e);
-      return null;
-    }
+      },
+      'خطا در ذخیره تنظیمات اعلان‌ها در پایگاه داده'
+    );
+    invalidateCacheKeys('notifications:preferences');
+    return json.data;
   },
 
   async uploadCustomSiren(
@@ -1113,32 +1091,29 @@ export const apiDb = {
     fileName?: string,
     fileSize?: number
   ): Promise<{ success: boolean; audioUrl: string } | null> {
-    try {
-      invalidateCacheKeys('notifications:preferences', 'sync:full');
-      const res = await authFetch('/api/v1/notifications/custom-siren', {
+    invalidateCacheKeys('notifications:preferences', 'sync:full');
+    const json = await fetchJsonStrict<any>(
+      '/api/v1/notifications/custom-siren',
+      {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ audioData, fileName, fileSize }),
-      });
-      if (!res.ok) return null;
-      const json: ApiResponse = await res.json();
-      invalidateCacheKeys('notifications:preferences', 'sync:full');
-      return json.data || json;
-    } catch (e) {
-      console.error('Failed to upload custom siren:', e);
-      return null;
-    }
+      },
+      'خطا در آپلود فایل صوتی آژیر اختصاصی'
+    );
+    invalidateCacheKeys('notifications:preferences', 'sync:full');
+    return json.data || json;
   },
 
   async deleteCustomSiren(): Promise<boolean> {
-    try {
-      invalidateCacheKeys('notifications:preferences', 'sync:full');
-      const res = await authFetch('/api/v1/notifications/custom-siren', { method: 'DELETE' });
-      invalidateCacheKeys('notifications:preferences', 'sync:full');
-      return res.ok;
-    } catch {
-      return false;
-    }
+    invalidateCacheKeys('notifications:preferences', 'sync:full');
+    await fetchJsonStrict<any>(
+      '/api/v1/notifications/custom-siren',
+      { method: 'DELETE' },
+      'خطا در حذف فایل صوتی آژیر اختصاصی'
+    );
+    invalidateCacheKeys('notifications:preferences', 'sync:full');
+    return true;
   },
 
   async getPublicActiveEmergencyAlerts(sinceIso?: string): Promise<any[]> {
@@ -1150,8 +1125,7 @@ export const apiDb = {
       if (!res.ok) return [];
       const json: ApiResponse = await res.json();
       return json.data || [];
-    } catch (e) {
-      console.warn('Failed to fetch public emergency alerts:', e);
+    } catch {
       return [];
     }
   },
@@ -1162,9 +1136,10 @@ export const apiDb = {
     note?: string,
     acknowledgmentSource?: string
   ): Promise<boolean> {
-    try {
-      invalidateCacheKeys('notifications', 'sync:full');
-      const res = await fetch('/api/v1/notifications/public/acknowledge', {
+    invalidateCacheKeys('notifications', 'sync:full');
+    await fetchJsonStrict<ApiResponse>(
+      '/api/v1/notifications/public/acknowledge',
+      {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1173,13 +1148,11 @@ export const apiDb = {
           note,
           acknowledgmentSource: acknowledgmentSource || 'login_screen',
         }),
-      });
-      invalidateCacheKeys('notifications', 'sync:full');
-      return res.ok;
-    } catch (e) {
-      console.error('Failed to acknowledge public emergency:', e);
-      return false;
-    }
+      },
+      'خطا در ثبت تاییدیه هشدار اضطراری عمومی'
+    );
+    invalidateCacheKeys('notifications', 'sync:full');
+    return true;
   },
 
   async getVapidPublicKey(): Promise<string | null> {
@@ -1208,57 +1181,51 @@ export const apiDb = {
     osName?: string;
     clientSessionId?: string;
   }): Promise<any> {
-    try {
-      const res = await authFetch('/api/v1/notifications/public/push-subscribe', {
+    const json = await fetchJsonStrict<any>(
+      '/api/v1/notifications/public/push-subscribe',
+      {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
-      });
-      if (!res.ok) return null;
-      const json: any = await res.json();
-      return json?.data || true;
-    } catch {
-      return null;
-    }
+      },
+      'خطا در ثبت اشتراک Push مرورگر در پایگاه داده'
+    );
+    return json?.data || true;
   },
 
   async unsubscribeWebPush(endpoint: string): Promise<boolean> {
-    try {
-      const res = await authFetch('/api/v1/notifications/public/push-unsubscribe', {
+    await fetchJsonStrict<any>(
+      '/api/v1/notifications/public/push-unsubscribe',
+      {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ endpoint }),
-      });
-      return res.ok;
-    } catch {
-      return false;
-    }
+      },
+      'خطا در لغو اشتراک Push مرورگر'
+    );
+    return true;
   },
 
   async getPushSubscriptions(all?: boolean): Promise<any[]> {
-    try {
-      const url = all
-        ? '/api/v1/notifications/push-subscriptions?all=true'
-        : '/api/v1/notifications/push-subscriptions';
-      const res = await authFetch(url);
-      if (!res.ok) return [];
-      const json: any = await res.json();
-      return json?.data || [];
-    } catch {
-      return [];
-    }
+    if (!getAuthToken()) return [];
+    const url = all
+      ? '/api/v1/notifications/push-subscriptions?all=true'
+      : '/api/v1/notifications/push-subscriptions';
+    const json = await fetchJsonStrict<any>(
+      url,
+      undefined,
+      'خطا در دریافت لیست دستگاه‌های Push'
+    );
+    return json?.data || [];
   },
 
   async deletePushSubscription(idOrEndpoint: string): Promise<boolean> {
-    try {
-      const res = await authFetch(
-        `/api/v1/notifications/push-subscriptions/${encodeURIComponent(idOrEndpoint)}`,
-        { method: 'DELETE' }
-      );
-      return res.ok;
-    } catch {
-      return false;
-    }
+    await fetchJsonStrict<any>(
+      `/api/v1/notifications/push-subscriptions/${encodeURIComponent(idOrEndpoint)}`,
+      { method: 'DELETE' },
+      'خطا در حذف دستگاه Push از پایگاه داده'
+    );
+    return true;
   },
 
   async confirmNotificationViewed(
@@ -1288,76 +1255,63 @@ export const apiDb = {
   },
 
   async getNotificationById(id: string): Promise<any | null> {
-    try {
-      const res = await authFetch(`/api/v1/notifications/${encodeURIComponent(id)}`);
-      if (!res.ok) return null;
-      const json: any = await res.json();
-      return json?.data || null;
-    } catch {
-      return null;
-    }
+    if (!getAuthToken()) return null;
+    const json = await fetchJsonStrict<any>(
+      `/api/v1/notifications/${encodeURIComponent(id)}`,
+      undefined,
+      'خطا در دریافت جزئیات اعلان'
+    );
+    return json?.data || null;
   },
 
   async triggerTestAlert(payload?: any): Promise<any> {
-    try {
-      invalidateCacheKeys('notifications', 'sync:full');
-      const res = await authFetch('/api/v1/notifications/test-alert', {
+    invalidateCacheKeys('notifications', 'sync:full');
+    const json = await fetchJsonStrict<ApiResponse>(
+      '/api/v1/notifications/test-alert',
+      {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload || {}),
-      });
-      const json: ApiResponse = await res.json();
-      invalidateCacheKeys('notifications', 'sync:full');
-      return json.data;
-    } catch (e) {
-      console.error('Failed to trigger test alert:', e);
-      return null;
-    }
+      },
+      'خطا در ارسال هشدار آزمایشی'
+    );
+    invalidateCacheKeys('notifications', 'sync:full');
+    return json.data;
   },
 
   async deleteNotification(id: string): Promise<boolean> {
-    try {
-      invalidateCacheKeys('notifications', 'sync:full');
-      const res = await authFetch(`/api/v1/notifications/${encodeURIComponent(id)}`, {
-        method: 'DELETE',
-      });
-      invalidateCacheKeys('notifications', 'sync:full');
-      return res.ok;
-    } catch (e) {
-      console.error('Failed to delete notification:', e);
-      invalidateCacheKeys('notifications', 'sync:full');
-      return false;
-    }
+    invalidateCacheKeys('notifications', 'sync:full');
+    await fetchJsonStrict<ApiResponse>(
+      `/api/v1/notifications/${encodeURIComponent(id)}`,
+      { method: 'DELETE' },
+      'خطا در حذف اعلان از پایگاه داده'
+    );
+    invalidateCacheKeys('notifications', 'sync:full');
+    return true;
   },
 
   async clearAllNotifications(): Promise<boolean> {
-    try {
-      invalidateCacheKeys('notifications', 'sync:full');
-      const res = await authFetch('/api/v1/notifications', {
-        method: 'DELETE',
-      });
-      invalidateCacheKeys('notifications', 'sync:full');
-      return res.ok;
-    } catch (e) {
-      console.error('Failed to clear notifications:', e);
-      invalidateCacheKeys('notifications', 'sync:full');
-      return false;
-    }
+    invalidateCacheKeys('notifications', 'sync:full');
+    await fetchJsonStrict<ApiResponse>(
+      '/api/v1/notifications',
+      { method: 'DELETE' },
+      'خطا در پاک‌سازی اعلان‌ها در پایگاه داده'
+    );
+    invalidateCacheKeys('notifications', 'sync:full');
+    return true;
   },
 
   // --------------------------------------------------------------------------
-  // System Settings & Aliases
+  // System Settings, User Preferences & Atomic Collections
   // --------------------------------------------------------------------------
   async getSettings(): Promise<Record<string, any>> {
     return getCachedOrFetch('settings:all', async () => {
-      try {
-        const res = await authFetch('/api/v1/settings');
-        if (!res.ok) return {};
-        const json: ApiResponse = await res.json();
-        return json.data || {};
-      } catch {
-        return {};
-      }
+      const json = await fetchJsonStrict<ApiResponse>(
+        '/api/v1/settings',
+        undefined,
+        'خطا در دریافت تنظیمات سیستم از پایگاه داده'
+      );
+      return json.data || {};
     });
   },
 
@@ -1367,34 +1321,288 @@ export const apiDb = {
 
   async getSetting(key: string): Promise<any> {
     return getCachedOrFetch(`settings:${key}`, async () => {
-      try {
-        const res = await authFetch(`/api/v1/settings/${encodeURIComponent(key)}`);
-        if (!res.ok) return null;
-        const json = await res.json();
-        return json.value !== undefined ? json.value : json.data;
-      } catch {
-        return null;
-      }
+      const json = await fetchJsonStrict<any>(
+        `/api/v1/settings/${encodeURIComponent(key)}`,
+        undefined,
+        `خطا در خواندن تنظیمات (${key})`
+      );
+      return json.value !== undefined ? json.value : json.data;
     });
   },
 
-  async saveSetting(key: string, value: any, description?: string): Promise<boolean> {
-    try {
-      invalidateCacheKeys(`settings:${key}`, 'settings:all', 'sync:full');
-      const res = await authFetch(`/api/v1/settings/${encodeURIComponent(key)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ value, description }),
-      });
-      invalidateCacheKeys(`settings:${key}`, 'settings:all', 'sync:full');
-      return res.ok;
-    } catch {
-      return false;
-    }
+  async getSettingWithMeta(key: string): Promise<{ key: string; value: any; version: number; updatedAt?: string; updatedBy?: string }> {
+    return getCachedOrFetch(`settings-meta:${key}`, async () => {
+      const json = await fetchJsonStrict<any>(
+        `/api/v1/settings/${encodeURIComponent(key)}`,
+        undefined,
+        `خطا در خواندن متادیتای تنظیمات (${key})`
+      );
+      return {
+        key: json.key || key,
+        value: json.value !== undefined ? json.value : json.data,
+        version: Number(json.version ?? 0),
+        updatedAt: json.updatedAt,
+        updatedBy: json.updatedBy,
+      };
+    });
   },
 
-  async saveSystemSetting(key: string, value: any, description?: string): Promise<boolean> {
-    return this.saveSetting(key, value, description);
+  async saveSetting(
+    key: string,
+    value: any,
+    description?: string,
+    expectedVersion?: number
+  ): Promise<boolean> {
+    invalidateCacheKeys(`settings:${key}`, `settings-meta:${key}`, 'settings:all', 'sync:full', 'dashboard');
+    await fetchJsonStrict<any>(
+      `/api/v1/settings/${encodeURIComponent(key)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          value,
+          description,
+          ...(expectedVersion !== undefined ? { expectedVersion } : {}),
+        }),
+      },
+      `خطا در ذخیره تنظیمات (${key}) در پایگاه داده`
+    );
+    invalidateCacheKeys(`settings:${key}`, `settings-meta:${key}`, 'settings:all', 'sync:full', 'dashboard');
+    return true;
+  },
+
+  async saveSettingWithMeta(
+    key: string,
+    value: any,
+    description?: string,
+    expectedVersion?: number
+  ): Promise<{ key: string; value: any; version: number; updatedAt?: string }> {
+    invalidateCacheKeys(`settings:${key}`, `settings-meta:${key}`, 'settings:all', 'sync:full', 'dashboard');
+    const json = await fetchJsonStrict<any>(
+      `/api/v1/settings/${encodeURIComponent(key)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          value,
+          description,
+          ...(expectedVersion !== undefined ? { expectedVersion } : {}),
+        }),
+      },
+      `خطا در ذخیره تنظیمات (${key}) در پایگاه داده`
+    );
+    invalidateCacheKeys(`settings:${key}`, `settings-meta:${key}`, 'settings:all', 'sync:full', 'dashboard');
+    return {
+      key: json.key || key,
+      value: json.value !== undefined ? json.value : value,
+      version: Number(json.version ?? 1),
+      updatedAt: json.updatedAt,
+    };
+  },
+
+  async saveSystemSetting(
+    key: string,
+    value: any,
+    description?: string,
+    expectedVersion?: number
+  ): Promise<boolean> {
+    return this.saveSetting(key, value, description, expectedVersion);
+  },
+
+  userPreferences: {
+    getCached<T = any>(prefKey: string): T | null {
+      const entry = queryCache.get(`user-prefs:${prefKey}`);
+      if (entry && Date.now() < entry.expiry) {
+        return (entry.data?.value ?? null) as T | null;
+      }
+      const allEntry = queryCache.get('user-prefs:all');
+      if (allEntry && Date.now() < allEntry.expiry) {
+        const val = allEntry.data?.data?.[prefKey];
+        return (val !== undefined ? val : null) as T | null;
+      }
+      return null;
+    },
+
+    async getAll(): Promise<{ data: Record<string, any>; versions: Record<string, number> }> {
+      return getCachedOrFetch('user-prefs:all', async () => {
+        const json = await fetchJsonStrict<any>(
+          '/api/v1/user-preferences',
+          undefined,
+          'خطا در دریافت تنظیمات کاربری از پایگاه داده'
+        );
+        return {
+          data: json.data || {},
+          versions: json.versions || {},
+        };
+      }, 10000);
+    },
+
+    async get<T = any>(prefKey: string): Promise<{ prefKey: string; value: T | null; version: number; updatedAt?: string | null }> {
+      return getCachedOrFetch(`user-prefs:${prefKey}`, async () => {
+        const json = await fetchJsonStrict<any>(
+          `/api/v1/user-preferences/${encodeURIComponent(prefKey)}`,
+          undefined,
+          `خطا در خواندن تنظیمات کاربر (${prefKey})`
+        );
+        return {
+          prefKey: json.prefKey || prefKey,
+          value: (json.value ?? null) as T | null,
+          version: Number(json.version ?? 0),
+          updatedAt: json.updatedAt ?? null,
+        };
+      }, 10000);
+    },
+
+    async set<T = any>(
+      prefKey: string,
+      value: T,
+      expectedVersion?: number
+    ): Promise<{ prefKey: string; value: T; version: number; updatedAt?: string }> {
+      invalidateCacheKeys(`user-prefs:${prefKey}`, 'user-prefs:all');
+      const json = await fetchJsonStrict<any>(
+        `/api/v1/user-preferences/${encodeURIComponent(prefKey)}`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            value,
+            ...(expectedVersion !== undefined ? { expectedVersion } : {}),
+          }),
+        },
+        `خطا در ذخیره تنظیمات کاربر (${prefKey})`
+      );
+      invalidateCacheKeys(`user-prefs:${prefKey}`, 'user-prefs:all');
+      const result = {
+        prefKey: json.prefKey || prefKey,
+        value: json.value as T,
+        version: Number(json.version ?? 1),
+        updatedAt: json.updatedAt,
+      };
+      queryCache.set(`user-prefs:${prefKey}`, { data: result, expiry: Date.now() + 10000 });
+      return result;
+    },
+
+    async delete(prefKey: string): Promise<boolean> {
+      invalidateCacheKeys(`user-prefs:${prefKey}`, 'user-prefs:all');
+      await fetchJsonStrict<any>(
+        `/api/v1/user-preferences/${encodeURIComponent(prefKey)}`,
+        { method: 'DELETE' },
+        `خطا در حذف تنظیمات کاربر (${prefKey})`
+      );
+      invalidateCacheKeys(`user-prefs:${prefKey}`, 'user-prefs:all');
+      return true;
+    },
+  },
+
+  collection: {
+    async getAll<T = any>(collectionKey: string): Promise<T[]> {
+      const res = await apiDb.collection.getWithMeta<T>(collectionKey);
+      return res.items;
+    },
+
+    async getWithMeta<T = any>(collectionKey: string): Promise<{ items: T[]; version: number; updatedAt?: string | null }> {
+      return getCachedOrFetch(`collection:${collectionKey}`, async () => {
+        const json = await fetchJsonStrict<any>(
+          `/api/v1/collection/${encodeURIComponent(collectionKey)}`,
+          undefined,
+          `خطا در خواندن مجموعه (${collectionKey}) از پایگاه داده`
+        );
+        return {
+          items: Array.isArray(json.items) ? json.items : [],
+          version: Number(json.version ?? 0),
+          updatedAt: json.updatedAt ?? null,
+        };
+      }, 6000);
+    },
+
+    async upsertItem<T = any>(
+      collectionKey: string,
+      item: T,
+      opts?: { expectedVersion?: number; position?: 'start' | 'end' }
+    ): Promise<{ item: T; version: number }> {
+      invalidateCacheKeys(`collection:${collectionKey}`, `settings:${collectionKey}`, 'settings:all', 'sync:full', 'dashboard');
+      const json = await fetchJsonStrict<any>(
+        `/api/v1/collection/${encodeURIComponent(collectionKey)}/item`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            item,
+            ...(opts?.expectedVersion !== undefined ? { expectedVersion: opts.expectedVersion } : {}),
+            ...(opts?.position ? { position: opts.position } : {}),
+          }),
+        },
+        `خطا در ثبت رکورد در مجموعه (${collectionKey})`
+      );
+      invalidateCacheKeys(`collection:${collectionKey}`, `settings:${collectionKey}`, 'settings:all', 'sync:full', 'dashboard');
+      return { item: json.item as T, version: Number(json.version ?? 1) };
+    },
+
+    async updateItem<T = any>(
+      collectionKey: string,
+      itemId: string,
+      item: Partial<T>,
+      expectedVersion?: number
+    ): Promise<{ item: T; version: number }> {
+      invalidateCacheKeys(`collection:${collectionKey}`, `settings:${collectionKey}`, 'settings:all', 'sync:full', 'dashboard');
+      const json = await fetchJsonStrict<any>(
+        `/api/v1/collection/${encodeURIComponent(collectionKey)}/item/${encodeURIComponent(itemId)}`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            item,
+            ...(expectedVersion !== undefined ? { expectedVersion } : {}),
+          }),
+        },
+        `خطا در بروزرسانی رکورد (${itemId}) در مجموعه (${collectionKey})`
+      );
+      invalidateCacheKeys(`collection:${collectionKey}`, `settings:${collectionKey}`, 'settings:all', 'sync:full', 'dashboard');
+      return { item: json.item as T, version: Number(json.version ?? 1) };
+    },
+
+    async deleteItem(
+      collectionKey: string,
+      itemId: string,
+      expectedVersion?: number
+    ): Promise<{ deletedId: string; version: number }> {
+      invalidateCacheKeys(`collection:${collectionKey}`, `settings:${collectionKey}`, 'settings:all', 'sync:full', 'dashboard');
+      const qs = expectedVersion !== undefined ? `?expectedVersion=${encodeURIComponent(String(expectedVersion))}` : '';
+      const json = await fetchJsonStrict<any>(
+        `/api/v1/collection/${encodeURIComponent(collectionKey)}/item/${encodeURIComponent(itemId)}${qs}`,
+        { method: 'DELETE' },
+        `خطا در حذف رکورد (${itemId}) از مجموعه (${collectionKey})`
+      );
+      invalidateCacheKeys(`collection:${collectionKey}`, `settings:${collectionKey}`, 'settings:all', 'sync:full', 'dashboard');
+      return { deletedId: json.deletedId || itemId, version: Number(json.version ?? 1) };
+    },
+
+    async batch<T = any>(
+      collectionKey: string,
+      items: T[],
+      mode: 'merge' | 'replace' = 'merge',
+      expectedVersion?: number
+    ): Promise<{ items: T[]; version: number }> {
+      invalidateCacheKeys(`collection:${collectionKey}`, `settings:${collectionKey}`, 'settings:all', 'sync:full', 'dashboard');
+      const json = await fetchJsonStrict<any>(
+        `/api/v1/collection/${encodeURIComponent(collectionKey)}/batch`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            items,
+            mode,
+            ...(expectedVersion !== undefined ? { expectedVersion } : {}),
+          }),
+        },
+        `خطا در ذخیره‌سازی گروهی مجموعه (${collectionKey})`
+      );
+      invalidateCacheKeys(`collection:${collectionKey}`, `settings:${collectionKey}`, 'settings:all', 'sync:full', 'dashboard');
+      return {
+        items: Array.isArray(json.items) ? json.items : [],
+        version: Number(json.version ?? 1),
+      };
+    },
   },
 
   // --------------------------------------------------------------------------
@@ -1404,7 +1612,7 @@ export const apiDb = {
     let userScope = 'default';
     if (typeof window !== 'undefined') {
       try {
-        const raw = sessionStorage.getItem('hse_current_user') || localStorage.getItem('hse_current_user');
+        const raw = sessionStorage.getItem('hse_current_user');
         if (raw) {
           const parsed = JSON.parse(raw);
           userScope = String(parsed?.id || parsed?.username || 'default');
@@ -1412,62 +1620,54 @@ export const apiDb = {
       } catch {}
     }
     return getCachedOrFetch(`referrals:list:${userScope}`, async () => {
-      try {
-        const res = await authFetch('/api/v1/referrals');
-        if (!res.ok) return [];
-        const json = await res.json();
-        return Array.isArray(json.data) ? json.data : [];
-      } catch {
-        return [];
-      }
+      const json = await fetchJsonStrict<ApiResponse>(
+        '/api/v1/referrals',
+        undefined,
+        'خطا در دریافت ارجاعات اسناد'
+      );
+      return Array.isArray(json.data) ? json.data : [];
     }, 3000);
   },
 
   async saveReferrals(referrals: any[] | any): Promise<boolean> {
-    try {
-      invalidateCacheKeys('referrals', 'sync:full');
-      const res = await authFetch('/api/v1/referrals', {
+    invalidateCacheKeys('referrals', 'sync:full');
+    await fetchJsonStrict<ApiResponse>(
+      '/api/v1/referrals',
+      {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(referrals),
-      });
-      invalidateCacheKeys('referrals', 'sync:full');
-      return res.ok;
-    } catch {
-      return false;
-    }
+      },
+      'خطا در ذخیره ارجاعات در پایگاه داده'
+    );
+    invalidateCacheKeys('referrals', 'sync:full');
+    return true;
   },
 
   async executeReferralAction(referralId: string, actionData: any): Promise<any> {
-    try {
-      invalidateCacheKeys('referrals', 'sync:full');
-      const res = await authFetch(`/api/v1/referrals/${encodeURIComponent(referralId)}/action`, {
+    invalidateCacheKeys('referrals', 'sync:full');
+    const json = await fetchJsonStrict<any>(
+      `/api/v1/referrals/${encodeURIComponent(referralId)}/action`,
+      {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(actionData),
-      });
-      invalidateCacheKeys('referrals', 'sync:full');
-      const json = await res.json().catch(() => null);
-      if (res.ok) {
-        return json;
-      }
-      return json || { success: false, message: 'خطا در اجرای عملیات گردش کار' };
-    } catch {
-      return null;
-    }
+      },
+      'خطا در اجرای عملیات گردش کار'
+    );
+    invalidateCacheKeys('referrals', 'sync:full');
+    return json;
   },
 
   async deleteSetting(key: string): Promise<boolean> {
-    try {
-      invalidateCacheKeys(`settings:${key}`, 'settings:all', 'sync:full');
-      const res = await authFetch(`/api/v1/settings/${encodeURIComponent(key)}`, {
-        method: 'DELETE',
-      });
-      invalidateCacheKeys(`settings:${key}`, 'settings:all', 'sync:full');
-      return res.ok;
-    } catch {
-      return false;
-    }
+    invalidateCacheKeys(`settings:${key}`, `settings-meta:${key}`, 'settings:all', 'sync:full', 'dashboard');
+    await fetchJsonStrict<any>(
+      `/api/v1/settings/${encodeURIComponent(key)}`,
+      { method: 'DELETE' },
+      `خطا در حذف تنظیمات (${key})`
+    );
+    invalidateCacheKeys(`settings:${key}`, `settings-meta:${key}`, 'settings:all', 'sync:full', 'dashboard');
+    return true;
   },
 
   async deleteSystemSetting(key: string): Promise<boolean> {
@@ -1654,14 +1854,12 @@ export const apiDb = {
   async getOrgNodes(): Promise<any[]> {
     if (!getAuthToken()) return [];
     return getCachedOrFetch('organization:nodes', async () => {
-      try {
-        const res = await authFetch('/api/v1/organization/nodes');
-        if (!res.ok) return [];
-        const json: ApiResponse = await res.json();
-        return Array.isArray(json.data) ? json.data : [];
-      } catch {
-        return [];
-      }
+      const json = await fetchJsonStrict<ApiResponse>(
+        '/api/v1/organization/nodes',
+        undefined,
+        'خطا در دریافت گره‌های ساختار سازمانی'
+      );
+      return Array.isArray(json.data) ? json.data : [];
     });
   },
 
@@ -1670,48 +1868,41 @@ export const apiDb = {
   },
 
   async saveOrgNodes(nodes: any[]): Promise<boolean> {
-    if (!getAuthToken()) return false;
-    try {
-      invalidateCacheKeys('organization:nodes');
-      const res = await authFetch('/api/v1/organization/nodes', {
+    if (!getAuthToken()) throw new ApiError('نشست کاربری معتبر نیست', { status: 401 });
+    invalidateCacheKeys('organization:nodes', 'sync:full');
+    await fetchJsonStrict<ApiResponse>(
+      '/api/v1/organization/nodes',
+      {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(nodes),
-      });
-      return res.ok;
-    } catch {
-      return false;
-    }
+      },
+      'خطا در ذخیره ساختار سازمانی'
+    );
+    invalidateCacheKeys('organization:nodes', 'sync:full');
+    return true;
   },
 
   // --------------------------------------------------------------------------
-  // Environmental & Safety Submodule Persistence
+  // Environmental & Safety Submodule Persistence (Atomic Collection Storage)
   // --------------------------------------------------------------------------
   async getEnvironmentalLogs(): Promise<any[]> {
-    const logs = await this.getSetting('environmental_logs');
-    return Array.isArray(logs) ? logs : [];
+    return this.collection.getAll('environmental_logs');
   },
 
   async createEnvironmentalLog(data: any): Promise<boolean> {
-    const logs = await this.getEnvironmentalLogs();
-    logs.unshift(data);
-    return this.saveSetting('environmental_logs', logs);
+    await this.collection.upsertItem('environmental_logs', data, { position: 'start' });
+    return true;
   },
 
   async updateEnvironmentalLog(id: string, data: any): Promise<boolean> {
-    const logs = await this.getEnvironmentalLogs();
-    const idx = logs.findIndex((l: any) => l.id === id);
-    if (idx !== -1) {
-      logs[idx] = { ...logs[idx], ...data };
-      return this.saveSetting('environmental_logs', logs);
-    }
-    return false;
+    await this.collection.updateItem('environmental_logs', id, data);
+    return true;
   },
 
   async deleteEnvironmentalLog(id: string): Promise<boolean> {
-    const logs = await this.getEnvironmentalLogs();
-    const filtered = logs.filter((l: any) => l.id !== id);
-    return this.saveSetting('environmental_logs', filtered);
+    await this.collection.deleteItem('environmental_logs', id);
+    return true;
   },
 
   // --------------------------------------------------------------------------
@@ -1742,14 +1933,12 @@ export const apiDb = {
   // --------------------------------------------------------------------------
   async getRiskAssessments(): Promise<any[]> {
     return getCachedOrFetch('risk-assessments:all', async () => {
-      try {
-        const res = await authFetch('/api/v1/risk-assessments');
-        if (!res.ok) return [];
-        const json: ApiResponse = await res.json();
-        return json.data || [];
-      } catch {
-        return [];
-      }
+      const json = await fetchJsonStrict<ApiResponse>(
+        '/api/v1/risk-assessments',
+        undefined,
+        'خطا در دریافت ارزیابی‌های ریسک'
+      );
+      return Array.isArray(json.data) ? json.data : [];
     });
   },
 
@@ -1758,56 +1947,58 @@ export const apiDb = {
     const numericId = Number(data?.dbId || data?.id);
     const isExisting = Number.isInteger(numericId) && numericId > 0;
     const url = isExisting ? `/api/v1/risk-assessments/${numericId}` : '/api/v1/risk-assessments';
-    const res = await authFetch(url, {
-      method: isExisting ? 'PUT' : 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    });
-    const json: ApiResponse = await res.json();
-    if (!res.ok || !json.success) {
-      throw new Error(json.error || 'خطا در ذخیره‌سازی ارزیابی ریسک');
-    }
+    const json = await fetchJsonStrict<ApiResponse>(
+      url,
+      {
+        method: isExisting ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      },
+      'خطا در ذخیره‌سازی ارزیابی ریسک'
+    );
+    invalidateCacheKeys('risk-assessments', 'sync:full', 'dashboard');
     return json.data;
   },
 
   async updateRiskAssessment(id: string | number, data: any): Promise<any> {
     invalidateCacheKeys('risk-assessments', 'sync:full', 'dashboard');
-    const res = await authFetch(`/api/v1/risk-assessments/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    });
-    const json: ApiResponse = await res.json();
-    if (!res.ok || !json.success) {
-      throw new Error(json.error || 'خطا در بروزرسانی ارزیابی ریسک');
-    }
+    const json = await fetchJsonStrict<ApiResponse>(
+      `/api/v1/risk-assessments/${id}`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      },
+      'خطا در بروزرسانی ارزیابی ریسک'
+    );
+    invalidateCacheKeys('risk-assessments', 'sync:full', 'dashboard');
     return json.data;
   },
 
-  async transitionRiskWorkflow(id: string | number, payload: { status?: string; workflowStage?: string; notes?: string; approverName?: string }): Promise<any> {
+  async transitionRiskWorkflow(id: string | number, payload: { status?: string; workflowStage?: string; notes?: string; approverName?: string; expectedVersion?: number; version?: number }): Promise<any> {
     invalidateCacheKeys('risk-assessments', 'sync:full', 'dashboard');
-    const res = await authFetch(`/api/v1/risk-assessments/${id}/workflow`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    const json: ApiResponse = await res.json();
-    if (!res.ok || !json.success) {
-      throw new Error(json.error || 'خطا در تغییر وضعیت گردش کار ارزیابی ریسک');
-    }
+    const json = await fetchJsonStrict<ApiResponse>(
+      `/api/v1/risk-assessments/${id}/workflow`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      },
+      'خطا در تغییر وضعیت گردش کار ارزیابی ریسک'
+    );
+    invalidateCacheKeys('risk-assessments', 'sync:full', 'dashboard');
     return json.data;
   },
 
   async deleteRiskAssessment(id: string | number): Promise<boolean> {
-    try {
-      invalidateCacheKeys('risk-assessments', 'sync:full', 'dashboard');
-      const res = await authFetch(`/api/v1/risk-assessments/${id}`, {
-        method: 'DELETE',
-      });
-      return res.ok;
-    } catch {
-      return false;
-    }
+    invalidateCacheKeys('risk-assessments', 'sync:full', 'dashboard');
+    await fetchJsonStrict<ApiResponse>(
+      `/api/v1/risk-assessments/${id}`,
+      { method: 'DELETE' },
+      'خطا در حذف ارزیابی ریسک'
+    );
+    invalidateCacheKeys('risk-assessments', 'sync:full', 'dashboard');
+    return true;
   },
 
   async getSafetyInspections(): Promise<any[]> {
@@ -2038,19 +2229,10 @@ export const apiDb = {
     } catch {
       // Best effort logout audit on server
     } finally {
-      // Purge any legacy or user-scoped keys from browser storage to ensure zero residual operational data
+      queryCache.clear();
       try {
         sessionStorage.removeItem('hse_auth_token');
         sessionStorage.removeItem('hse_current_user');
-        sessionStorage.removeItem('hse_active_tab');
-        localStorage.removeItem('hse_auth_token');
-        localStorage.removeItem('hse_current_user');
-        localStorage.removeItem('hse_remember_user');
-        localStorage.removeItem('hse_users');
-        localStorage.removeItem('hse_active_tab');
-        localStorage.removeItem('hse_document_referrals_v1');
-        localStorage.removeItem('hse_integration_config');
-        localStorage.removeItem('hse_system_api_tokens');
       } catch {}
     }
   },
@@ -2068,88 +2250,81 @@ export const apiDb = {
     const cacheKey = `non-conformances:${qs || 'all'}`;
 
     return getCachedOrFetch(cacheKey, async () => {
-      try {
-        const res = await authFetch(`/api/v1/non-conformances${qs ? `?${qs}` : ''}`);
-        if (!res.ok) return [];
-        const json = await res.json();
-        return Array.isArray(json.data) ? json.data : [];
-      } catch {
-        return [];
-      }
+      const json = await fetchJsonStrict<ApiResponse>(
+        `/api/v1/non-conformances${qs ? `?${qs}` : ''}`,
+        undefined,
+        'خطا در دریافت فهرست عدم‌انطباق‌ها'
+      );
+      return Array.isArray(json.data) ? json.data : [];
     });
   },
 
   async getNonConformanceById(id: string | number): Promise<any | null> {
     return getCachedOrFetch(`non-conformance:${id}`, async () => {
-      try {
-        const res = await authFetch(`/api/v1/non-conformances/${encodeURIComponent(String(id))}`);
-        if (!res.ok) return null;
-        const json = await res.json();
-        return json.data || null;
-      } catch {
-        return null;
+      const res = await authFetch(`/api/v1/non-conformances/${encodeURIComponent(String(id))}`);
+      if (res.status === 404) return null;
+      const parsed = await parseJsonSafely<ApiResponse>(res);
+      if (!parsed.ok || parsed.data?.success === false) {
+        throw extractApiError(parsed.status, parsed.data, parsed.error || 'خطا در دریافت عدم انطباق');
       }
+      return parsed.data?.data || null;
     });
   },
 
   async createNonConformance(data: any): Promise<any> {
-    try {
-      invalidateCacheKeys('non-conformances', 'sync:full');
-      const res = await authFetch('/api/v1/non-conformances', {
+    invalidateCacheKeys('non-conformances', 'sync:full', 'dashboard');
+    const json = await fetchJsonStrict<ApiResponse>(
+      '/api/v1/non-conformances',
+      {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
-      });
-      const json = await res.json();
-      invalidateCacheKeys('non-conformances', 'sync:full');
-      return json.data || null;
-    } catch {
-      return null;
-    }
+      },
+      'خطا در ثبت عدم انطباق در پایگاه داده'
+    );
+    invalidateCacheKeys('non-conformances', 'sync:full', 'dashboard');
+    return json.data;
   },
 
   async updateNonConformance(id: string | number, data: any): Promise<any> {
-    try {
-      invalidateCacheKeys('non-conformances', 'sync:full');
-      const res = await authFetch(`/api/v1/non-conformances/${encodeURIComponent(String(id))}`, {
+    invalidateCacheKeys('non-conformances', 'sync:full', 'dashboard');
+    const json = await fetchJsonStrict<ApiResponse>(
+      `/api/v1/non-conformances/${encodeURIComponent(String(id))}`,
+      {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
-      });
-      const json = await res.json();
-      invalidateCacheKeys('non-conformances', 'sync:full');
-      return json.data || null;
-    } catch {
-      return null;
-    }
+      },
+      'خطا در بروزرسانی عدم انطباق'
+    );
+    invalidateCacheKeys('non-conformances', 'sync:full', 'dashboard');
+    return json.data;
   },
 
   async deleteNonConformance(id: string | number): Promise<boolean> {
-    try {
-      invalidateCacheKeys('non-conformances', 'sync:full');
-      const res = await authFetch(`/api/v1/non-conformances/${encodeURIComponent(String(id))}`, {
-        method: 'DELETE',
-      });
-      invalidateCacheKeys('non-conformances', 'sync:full');
-      return res.ok;
-    } catch {
-      return false;
-    }
+    invalidateCacheKeys('non-conformances', 'sync:full', 'dashboard');
+    await fetchJsonStrict<ApiResponse>(
+      `/api/v1/non-conformances/${encodeURIComponent(String(id))}`,
+      { method: 'DELETE' },
+      'خطا در حذف عدم انطباق'
+    );
+    invalidateCacheKeys('non-conformances', 'sync:full', 'dashboard');
+    return true;
   },
 
   async deleteBatchNonConformances(ids: Array<string | number>): Promise<boolean> {
-    try {
-      invalidateCacheKeys('non-conformances', 'sync:full');
-      const res = await authFetch('/api/v1/non-conformances/batch-delete', {
+    invalidateCacheKeys('non-conformances', 'sync:full', 'dashboard');
+    await fetchJsonStrict<ApiResponse>(
+      '/api/v1/non-conformances/batch-delete',
+      {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ids }),
-      });
-      invalidateCacheKeys('non-conformances', 'sync:full');
-      return res.ok;
-    } catch {
-      return false;
-    }
+      },
+      'خطا در حذف گروهی عدم انطباق‌ها'
+    );
+    invalidateCacheKeys('non-conformances', 'sync:full', 'dashboard');
+    return true;
   },
 
   // --------------------------------------------------------------------------

@@ -38,6 +38,7 @@ import {
   PSM_STAGE_GATES,
 } from './psmStandardsCatalog';
 import { PsmDeepLinkAction } from './psmGuidedEngine';
+import { getAuthToken } from '../../services/apiDatabaseClient';
 
 interface PsmSubViewsProps {
   activeSubTab: string;
@@ -797,7 +798,7 @@ export const PsmSubViews: React.FC<PsmSubViewsProps> = ({
   const handleUploadDocumentFile = async (file: File) => {
     setUploadingDocFile(true);
     try {
-      const token = sessionStorage.getItem('hse_auth_token') || localStorage.getItem('hse_auth_token');
+      const token = getAuthToken();
       const formData = new FormData();
       formData.append('file', file);
       formData.append('entityType', 'PSM_DOCUMENT');

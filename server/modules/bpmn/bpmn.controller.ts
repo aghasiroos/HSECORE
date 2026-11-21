@@ -31,7 +31,7 @@ export class BPMNController {
 
   async intervene(req: Request, res: Response) {
     const { instanceId, action, ...params } = req.body;
-    const result = await bpmnService.interveneInstance(instanceId, action, params);
+    const result = await bpmnService.interveneInstance(instanceId, action, params, req.user);
     return res.json(result);
   }
 
@@ -42,12 +42,15 @@ export class BPMNController {
 
   async uploadBpmn(req: Request, res: Response) {
     const { name, bpmnXml, status } = req.body;
-    const process = await bpmnService.uploadBpmn({
-      name,
-      bpmnXml,
-      status,
-      owner: (req.headers['x-user-name'] as string) || req.user?.name || 'admin',
-    });
+    const process = await bpmnService.uploadBpmn(
+      {
+        name,
+        bpmnXml,
+        status,
+        owner: (req.headers['x-user-name'] as string) || req.user?.name || 'admin',
+      },
+      req.user
+    );
     return res.json({ success: true, data: process });
   }
 
@@ -71,7 +74,7 @@ export class BPMNController {
 
   async deleteBpmn(req: Request, res: Response) {
     const id = parseInt(req.params.id, 10);
-    const result = await bpmnService.deleteBpmn(id);
+    const result = await bpmnService.deleteBpmn(id, req.user);
     return res.json(result);
   }
 }

@@ -34,6 +34,8 @@ import {
   deletePermitField,
   resetToDefaultFields
 } from './services/permitFieldConfigService';
+import { toast } from 'react-hot-toast';
+import { showConfirmDialog } from '../common/ConfirmDialogModal';
 
 interface PermitFieldManagerModalProps {
   isOpen: boolean;
@@ -209,7 +211,7 @@ export const PermitFieldManagerModal: React.FC<PermitFieldManagerModalProps> = (
 
   const handleToggleActive = async (f: PermitCustomField) => {
     if (!isAuthorized) {
-      alert('شما مجوز تغییر وضعیت فیلدهای فرم را ندارید.');
+      toast.error('شما مجوز تغییر وضعیت فیلدهای فرم را ندارید.');
       return;
     }
     await updatePermitField(f.id, { isActive: !f.isActive });
@@ -219,13 +221,20 @@ export const PermitFieldManagerModal: React.FC<PermitFieldManagerModalProps> = (
 
   const handleDelete = async (id: string) => {
     if (!isAuthorized) {
-      alert('شما مجوز حذف فیلدهای فرم را ندارید.');
+      toast.error('شما مجوز حذف فیلدهای فرم را ندارید.');
       return;
     }
     const f = fields.find(item => item.id === id);
     if (!f) return;
 
-    if (window.confirm(`آیا از غیرفعال‌سازی فیلد «${f.labelFa}» اطمینان دارید؟ جهت حفظ یکپارچگی اطلاعات تاریخی، داده‌های پروانه‌های ثبت‌شده قبلی کاملاً در دیتابیس محفوظ خواهند ماند.`)) {
+    const confirmed = await showConfirmDialog({
+      title: 'غیرفعال‌سازی فیلد فرم',
+      message: `آیا از غیرفعال‌سازی فیلد «${f.labelFa}» اطمینان دارید؟ جهت حفظ یکپارچگی اطلاعات تاریخی، داده‌های پروانه‌های ثبت‌شده قبلی کاملاً در دیتابیس محفوظ خواهند ماند.`,
+      confirmLabel: 'غیرفعال‌سازی',
+      cancelLabel: 'انصراف',
+      tone: 'warning',
+    });
+    if (confirmed) {
       // Soft-delete: mark inactive without erasing field definition
       await deletePermitField(id, false);
       await loadData();
@@ -248,10 +257,17 @@ export const PermitFieldManagerModal: React.FC<PermitFieldManagerModalProps> = (
 
   const handleResetDefaults = async () => {
     if (!isAuthorized) {
-      alert('شما مجوز بازنشانی تنظیمات فرم را ندارید.');
+      toast.error('شما مجوز بازنشانی تنظیمات فرم را ندارید.');
       return;
     }
-    if (window.confirm('آیا مایل به بازنشانی فیلدها به تنظیمات کارخانه و استانداردهای اولیه هستید؟')) {
+    const confirmed = await showConfirmDialog({
+      title: 'بازنشانی تنظیمات فرم',
+      message: 'آیا مایل به بازنشانی فیلدها به تنظیمات کارخانه و استانداردهای اولیه هستید؟',
+      confirmLabel: 'بازنشانی',
+      cancelLabel: 'انصراف',
+      tone: 'warning',
+    });
+    if (confirmed) {
       const reset = await resetToDefaultFields();
       setFields(reset);
       showToast('فیلدها به حالت استاندارد کارخانه بازنشانی شدند.');

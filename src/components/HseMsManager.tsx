@@ -33,6 +33,8 @@ import {
 import { apiDb } from '../services/apiDatabaseClient';
 import { isUserAdmin, addAuditLog } from '../utils/authHelper';
 import { sortRecordsByYearAndMonth, normalizeForMatching, getJalaliMonthIndex } from '../utils/textNormalization';
+import { toast } from 'react-hot-toast';
+import { showConfirmDialog } from './common/ConfirmDialogModal';
 
 interface HseMsManagerProps {
   trirRecords: TrirRecord[];
@@ -355,7 +357,7 @@ export default function HseMsManager({
 
   const handleOpenEditModal = (rec: TrirRecord) => {
     if (currentUser?.role && currentUser.role !== 'Administrator') {
-      alert(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی ویرایش اطلاعات را دارد.' : 'Only the main Administrator is authorized to edit records.');
+      toast.error(isFa ? 'تنها مدیر اصلی سیستم (Administrator) دسترسی ویرایش اطلاعات را دارد.' : 'Only the main Administrator is authorized to edit records.');
       return;
     }
     setEditingRecord(rec);
@@ -405,8 +407,9 @@ export default function HseMsManager({
         );
         onTrirRecordsUpdated(withRealId);
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('Failed to save TRIR record:', e);
+      toast.error(e?.message || (isFa ? 'خطا در ذخیره رکورد در پایگاه داده' : 'Failed to save TRIR record'));
     }
   };
 
@@ -439,11 +442,6 @@ export default function HseMsManager({
     setConfirmDeleteTrirId(null);
     try {
       await apiDb.deleteTrirRecord(id, targetYear, targetMonth);
-      try {
-        localStorage.removeItem('hse_trir_records_backup');
-        localStorage.removeItem('hse_trir_records_v3');
-        localStorage.removeItem('trir_records');
-      } catch (_) {}
 
       // Refresh authoritative list from server
       const fresh = await apiDb.getTrirRecords();
@@ -472,17 +470,19 @@ export default function HseMsManager({
       });
       return;
     }
-    if (!window.confirm(isFa ? 'آیا از حذف کلیه رکوردهای دفتر ثبت آمار اطمینان دارید؟ این عمل غیرقابل بازگشت است و تمام رکوردها برای همیشه حذف خواهند شد.' : 'Are you sure you want to delete ALL records permanently?')) {
+    const confirmed = await showConfirmDialog({
+      title: isFa ? 'حذف کلی رکوردهای دفتر آمار' : 'Delete All TRIR Records',
+      message: isFa ? 'آیا از حذف کلیه رکوردهای دفتر ثبت آمار اطمینان دارید؟ این عمل غیرقابل بازگشت است و تمام رکوردها برای همیشه حذف خواهند شد.' : 'Are you sure you want to delete ALL records permanently?',
+      confirmLabel: isFa ? 'حذف همه' : 'Delete All',
+      cancelLabel: isFa ? 'انصراف' : 'Cancel',
+      tone: 'danger',
+    });
+    if (!confirmed) {
       return;
     }
     onTrirRecordsUpdated([]);
     try {
       await apiDb.clearAllTrirRecords();
-      try {
-        localStorage.removeItem('hse_trir_records_backup');
-        localStorage.removeItem('hse_trir_records_v3');
-        localStorage.removeItem('trir_records');
-      } catch (_) {}
 
       const fresh = await apiDb.getTrirRecords();
       onTrirRecordsUpdated(Array.isArray(fresh) ? fresh : []);
@@ -541,7 +541,7 @@ export default function HseMsManager({
   const handleExportTrirPDF = () => {
     const jspdf_ = (window as any).jspdf;
     if (!jspdf_) {
-      alert(isFa ? "کتابخانه PDF در حال بارگذاری است... لطفاً چند لحظه دیگر مجدداً کلیک فرمایید." : "PDF library is loading... Please wait.");
+      toast.error(isFa ? "کتابخانه PDF در حال بارگذاری است... لطفاً چند لحظه دیگر مجدداً کلیک فرمایید." : "PDF library is loading... Please wait.");
       return;
     }
     const doc = new jspdf_.jsPDF({ orientation: 'landscape' });

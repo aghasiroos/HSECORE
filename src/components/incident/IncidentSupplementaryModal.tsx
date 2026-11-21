@@ -36,6 +36,8 @@ import {
   RotateCcw
 } from 'lucide-react';
 import PersianDatePicker from '../common/PersianDatePicker';
+import { toast } from 'react-hot-toast';
+import { showConfirmDialog } from '../common/ConfirmDialogModal';
 
 interface IncidentSupplementaryModalProps {
   isFa: boolean;
@@ -176,8 +178,15 @@ export default function IncidentSupplementaryModal({
   };
 
   // Reset/Clear form entirely (Requirement 3: no pre-filled values)
-  const handleClearForm = () => {
-    if (confirm(isFa ? 'آیا مطمئن هستید که می‌خواهید تمام فیلدهای این فرم را پاکسازی و خالی کنید؟' : 'Are you sure you want to clear all form fields?')) {
+  const handleClearForm = async () => {
+    const confirmed = await showConfirmDialog({
+      title: isFa ? 'پاکسازی فیلدهای فرم' : 'Clear Form Fields',
+      message: isFa ? 'آیا مطمئن هستید که می‌خواهید تمام فیلدهای این فرم را پاکسازی و خالی کنید؟' : 'Are you sure you want to clear all form fields?',
+      confirmLabel: isFa ? 'پاکسازی' : 'Clear',
+      cancelLabel: isFa ? 'انصراف' : 'Cancel',
+      tone: 'warning',
+    });
+    if (confirmed) {
       setFormData({
         id: `supp-${incident.id}`,
         incidentId: incident.id,
@@ -312,7 +321,7 @@ export default function IncidentSupplementaryModal({
 
   const handleFinalize = () => {
     if (!formData.briefDescription.trim()) {
-      alert(isFa ? 'لطفاً شرح مختصر رویداد را وارد نمایید.' : 'Please enter incident description.');
+      toast.error(isFa ? 'لطفاً شرح مختصر رویداد را وارد نمایید.' : 'Please enter incident description.');
       return;
     }
 

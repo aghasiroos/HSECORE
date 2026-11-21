@@ -25,6 +25,7 @@ import { DocumentWorkflowTrackerModal } from '../../../../components/referral/Do
 import { getReferralsForDocument } from '../../../../utils/referralHelper';
 import { getTodayJalaliDate, getJalaliDaysDifference } from '../../../../utils/inspectionScheduleHelper';
 import { downloadCsvFile } from '../../../../utils/fileHelpers';
+import { toast } from 'react-hot-toast';
 
 interface Props {
   language: 'fa' | 'en';
@@ -171,7 +172,7 @@ export default function HealthEnvChecklistsView({ language = 'fa', currentUser }
       }
       setDeletingInspectionId(null);
     } catch (err: any) {
-      alert(err?.message || 'خطا در حذف بازرسی');
+      toast.error(err?.message || 'خطا در حذف بازرسی');
     } finally {
       setIsDeleting(false);
     }
@@ -259,7 +260,7 @@ export default function HealthEnvChecklistsView({ language = 'fa', currentUser }
   // Export to Excel / CSV
   const handleExportCSV = () => {
     if (inspections.length === 0) {
-      alert('داده‌ای برای خروجی وجود ندارد.');
+      toast.error('داده‌ای برای خروجی وجود ندارد.');
       return;
     }
     const headers = ['شناسه', 'نوع چک‌لیست', 'عنوان', 'تاریخ', 'زمان‌بندی', 'موعد بعدی', 'موقعیت', 'بازرس', 'درصد انطباق', 'مطلوب', 'نامطلوب', 'وضعیت تأیید'];

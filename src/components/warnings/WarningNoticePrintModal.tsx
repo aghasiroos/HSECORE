@@ -20,6 +20,7 @@ import { CreateReferralModal } from '../referral/CreateReferralModal';
 import { DocumentWorkflowTrackerModal } from '../referral/DocumentWorkflowTrackerModal';
 import { getCurrentUser } from '../../utils/authHelper';
 import { normalizeDigits } from '../../utils/textNormalization';
+import { toast } from 'react-hot-toast';
 
 interface WarningNoticePrintModalProps {
   warning: WarningRecord;
@@ -131,17 +132,7 @@ export default function WarningNoticePrintModal({
   const [showTrackerModal, setShowTrackerModal] = useState<boolean>(false);
   const activeUser = useMemo(() => {
     if (propUser) return propUser;
-    try {
-      if (typeof getCurrentUser === 'function') {
-        const u = getCurrentUser();
-        if (u) return u;
-      }
-      const stored = sessionStorage.getItem('hse_current_user');
-      if (stored) return JSON.parse(stored);
-      const remember = localStorage.getItem('hse_remember_user');
-      if (remember) return JSON.parse(remember);
-    } catch {}
-    return null;
+    return getCurrentUser();
   }, [propUser]);
 
   // Find all distinct previous warnings for this recipient (excluding current notice & removing duplicates)
@@ -696,7 +687,7 @@ export default function WarningNoticePrintModal({
           onClose={() => setShowReferralModal(false)}
           onSuccess={() => {
             setShowReferralModal(false);
-            alert(isFa ? 'اخطار با موفقیت به کارتابل کاربر مقصد ارجاع گردید.' : 'Warning referred successfully.');
+            toast.success(isFa ? 'اخطار با موفقیت به کارتابل کاربر مقصد ارجاع گردید.' : 'Warning referred successfully.');
           }}
         />
       )}

@@ -33,6 +33,7 @@ import { WorkPermit, PermitCategory, PermitWorkflowStatus, UserProfile } from '.
 import { PERMIT_CATEGORIES_CONFIG } from './PermitTypes';
 import PersianDatePicker from '../common/PersianDatePicker';
 import { downloadCsvFile } from '../../utils/fileHelpers';
+import { apiDb } from '../../services/apiDatabaseClient';
 
 interface PermitDataGridProps {
   permits: WorkPermit[];
@@ -94,8 +95,13 @@ const ALL_COLUMNS: ColumnDef[] = [
   { key: 'actions', labelFa: 'عملیات', labelEn: 'Actions', sortable: false, defaultVisible: true, minWidth: '160px' },
 ];
 
-const PRESETS_STORAGE_KEY = 'ptw_datagrid_presets_v1';
-const VISIBLE_COLS_STORAGE_KEY = 'ptw_datagrid_visible_cols_v1';
+const PRESETS_PREF_KEY = 'ptw_datagrid_presets';
+const VISIBLE_COLS_PREF_KEY = 'ptw_datagrid_visible_cols';
+const DEFAULT_PRESETS: FilterPreset[] = [
+  { id: 'p1', name: 'پروانه‌های گرم فعال', category: 'Hot', status: 'Active', riskLevel: 'all', department: 'all' },
+  { id: 'p2', name: 'پروانه‌های تعلیق شده (Stop Work)', category: 'all', status: 'Suspended', riskLevel: 'all', department: 'all' },
+  { id: 'p3', name: 'فضای بسته و ریسک بحرانی', category: 'ConfinedSpace', status: 'all', riskLevel: 'Critical', department: 'all' }
+];
 
 interface FilterPreset {
   id: string;
@@ -146,12 +152,8 @@ export const PermitDataGrid: React.FC<PermitDataGridProps> = ({
 
   // Column Visibility
   const [visibleColumns, setVisibleColumns] = useState<Record<GridColumnKey, boolean>>(() => {
-    try {
-      const saved = localStorage.getItem(VISIBLE_COLS_STORAGE_KEY);
-      if (saved) return JSON.parse(saved);
-    } catch (e) {
-      // ignore
-    }
+    const cached = apiDb.userPreferences.getCached<Record<GridColumnKey, boolean>>(VISIBLE_COLS_PREF_KEY);
+    if (cached && typeof cached === 'object') return cached;
     const initial: Record<GridColumnKey, boolean> = {} as any;
     ALL_COLUMNS.forEach(c => { initial[c.key] = c.defaultVisible; });
     return initial;
@@ -159,28 +161,47 @@ export const PermitDataGrid: React.FC<PermitDataGridProps> = ({
 
   // Filter Presets
   const [presets, setPresets] = useState<FilterPreset[]>(() => {
-    try {
-      const saved = localStorage.getItem(PRESETS_STORAGE_KEY);
-      if (saved) return JSON.parse(saved);
-    } catch (e) {
-      // ignore
-    }
-    return [
-      { id: 'p1', name: 'پروانه‌های گرم فعال', category: 'Hot', status: 'Active', riskLevel: 'all', department: 'all' },
-      { id: 'p2', name: 'پروانه‌های تعلیق شده (Stop Work)', category: 'all', status: 'Suspended', riskLevel: 'all', department: 'all' },
-      { id: 'p3', name: 'فضای بسته و ریسک بحرانی', category: 'ConfinedSpace', status: 'all', riskLevel: 'Critical', department: 'all' }
-    ];
+    const cached = apiDb.userPreferences.getCached<FilterPreset[]>(PRESETS_PREF_KEY);
+    if (Array.isArray(cached) && cached.length > 0) return cached;
+    return DEFAULT_PRESETS;
   });
+
+  useEffect(() => {
+    let mounted = true;
+    const syncPrefs = () => {
+      const cachedCols = apiDb.userPreferences.getCached<Record<GridColumnKey, boolean>>(VISIBLE_COLS_PREF_KEY);
+      if (mounted && cachedCols && typeof cachedCols === 'object') {
+        setVisibleColumns(cachedCols);
+      }
+      const cachedPresets = apiDb.userPreferences.getCached<FilterPreset[]>(PRESETS_PREF_KEY);
+      if (mounted && Array.isArray(cachedPresets)) {
+        setPresets(cachedPresets);
+      }
+    };
+    apiDb.userPreferences.get<Record<GridColumnKey, boolean>>(VISIBLE_COLS_PREF_KEY).then((res) => {
+      if (mounted && res?.value && typeof res.value === 'object') setVisibleColumns(res.value);
+    }).catch(() => {});
+    apiDb.userPreferences.get<FilterPreset[]>(PRESETS_PREF_KEY).then((res) => {
+      if (mounted && Array.isArray(res?.value) && res.value.length > 0) setPresets(res.value);
+    }).catch(() => {});
+    window.addEventListener('hse_user_preferences_updated', syncPrefs);
+    window.addEventListener('hse_auth_state_changed', syncPrefs);
+    return () => {
+      mounted = false;
+      window.removeEventListener('hse_user_preferences_updated', syncPrefs);
+      window.removeEventListener('hse_auth_state_changed', syncPrefs);
+    };
+  }, []);
 
   const [newPresetName, setNewPresetName] = useState('');
   const [showSavePreset, setShowSavePreset] = useState(false);
   const [copiedSerial, setCopiedSerial] = useState<string | null>(null);
 
-  // Save visible columns to local storage
+  // Save visible columns to PostgreSQL user preferences
   const handleToggleColumn = (key: GridColumnKey) => {
     setVisibleColumns(prev => {
       const next = { ...prev, [key]: !prev[key] };
-      localStorage.setItem(VISIBLE_COLS_STORAGE_KEY, JSON.stringify(next));
+      void apiDb.userPreferences.set(VISIBLE_COLS_PREF_KEY, next).catch(() => {});
       return next;
     });
   };
@@ -222,7 +243,7 @@ export const PermitDataGrid: React.FC<PermitDataGridProps> = ({
     };
     const updated = [...presets, newPreset];
     setPresets(updated);
-    localStorage.setItem(PRESETS_STORAGE_KEY, JSON.stringify(updated));
+    void apiDb.userPreferences.set(PRESETS_PREF_KEY, updated).catch(() => {});
     setNewPresetName('');
     setShowSavePreset(false);
   };
@@ -231,7 +252,7 @@ export const PermitDataGrid: React.FC<PermitDataGridProps> = ({
     e.stopPropagation();
     const updated = presets.filter(p => p.id !== id);
     setPresets(updated);
-    localStorage.setItem(PRESETS_STORAGE_KEY, JSON.stringify(updated));
+    void apiDb.userPreferences.set(PRESETS_PREF_KEY, updated).catch(() => {});
   };
 
   const handleResetFilters = () => {
@@ -772,7 +793,7 @@ export const PermitDataGrid: React.FC<PermitDataGridProps> = ({
                   const reset: Record<GridColumnKey, boolean> = {} as any;
                   ALL_COLUMNS.forEach(c => { reset[c.key] = true; });
                   setVisibleColumns(reset);
-                  localStorage.removeItem(VISIBLE_COLS_STORAGE_KEY);
+                  void apiDb.userPreferences.set(VISIBLE_COLS_PREF_KEY, reset).catch(() => {});
                 }}
                 className="text-[11px] font-bold text-blue-600 hover:underline cursor-pointer"
               >

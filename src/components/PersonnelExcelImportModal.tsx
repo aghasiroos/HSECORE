@@ -22,6 +22,7 @@ import {
   downloadPersonnelExcelTemplate
 } from '../services/personnelImportService';
 import { VirtualizedDataTable, VirtualizedColumn } from './common/virtualized/VirtualizedDataTable';
+import { toast } from 'react-hot-toast';
 
 interface PersonnelExcelImportModalProps {
   isOpen: boolean;
@@ -101,7 +102,7 @@ export default function PersonnelExcelImportModal({
       setShowConfirmModal(false);
       onClose();
     } catch (err: any) {
-      alert('خطا در ثبت نهایی اطلاعات: ' + err?.message);
+      toast.error((isFa ? 'خطا در ثبت نهایی اطلاعات: ' : 'Import commit error: ') + (err?.message || ''));
     } finally {
       setIsCommitting(false);
     }

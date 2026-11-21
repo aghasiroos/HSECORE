@@ -738,9 +738,9 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
     const targetTab = getCardTargetTab(cardId);
     if (targetTab && onNavigate) {
       if (cardId === 'card-notifications') {
-        try {
-          sessionStorage.setItem('hse_system_settings_active_subtab', 'notifications');
-        } catch {}
+        if (window.location.hash !== '#system?sub=notifications') {
+          window.history.replaceState(null, '', '#system?sub=notifications');
+        }
         window.dispatchEvent(new CustomEvent('hse-navigate-subtab', {
           detail: { tab: 'system', subItem: 'notifications' }
         }));
