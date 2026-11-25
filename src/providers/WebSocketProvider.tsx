@@ -33,6 +33,7 @@ const SEEN_EVENT_IDS_CAP = 500;
 const seenEventIds: string[] = [];
 const seenEventIdSet = new Set<string>();
 let globalLastEventSeq = 0;
+let globalServerInstanceId = '';
 
 function trackIncomingEvent(payload: any): boolean {
   if (payload && typeof payload === 'object') {
@@ -232,6 +233,31 @@ export function dispatchGlobalDataMutation(payload: any) {
   if (rawType.includes('referral') || rawType.includes('cartable') || rawType.includes('document')) {
     window.dispatchEvent(new CustomEvent('hse_document_referrals_updated', { detail: payload }));
   }
+  if (rawType === 'system_restore' || rawType.includes('system_restore')) {
+    apiDb.invalidateCache();
+    centralSync.syncFull(true).then(() => {
+      window.dispatchEvent(new CustomEvent('hse_realtime_reconnected', { detail: { reason: 'system_restore' } }));
+      toast.success('اطلاعات سامانه پس از بازیابی پایگاه داده به‌صورت آنی بروزرسانی شد.', {
+        id: 'system-restore-live-sync',
+      });
+    }).catch(() => {});
+    return;
+  }
+  if (rawType.includes('dossier')) {
+    window.dispatchEvent(new CustomEvent('hse_medical_data_updated', { detail: payload }));
+  }
+  if (rawType.includes('document')) {
+    window.dispatchEvent(new CustomEvent('hse_documents_updated', { detail: payload }));
+  }
+  if (rawType.includes('automation')) {
+    window.dispatchEvent(new CustomEvent('hse_automation_updated', { detail: payload }));
+  }
+  if (rawType.includes('webhook')) {
+    window.dispatchEvent(new CustomEvent('hse_webhooks_updated', { detail: payload }));
+  }
+  if (rawType.includes('backup')) {
+    window.dispatchEvent(new CustomEvent('hse_backup_updated', { detail: payload }));
+  }
   if (rawType.includes('environment')) {
     window.dispatchEvent(new CustomEvent('hse_environmental_logs_updated', { detail: payload }));
   }
@@ -248,9 +274,147 @@ export const WebSocketProvider: React.FC<ProviderProps> = ({ children }) => {
   const [isConnected, setIsConnected] = useState(false);
   const [lastEventSeq, setLastEventSeq] = useState(0);
   const socketRef = useRef<Socket | null>(null);
+  const sseRef = useRef<EventSource | null>(null);
+  const sseFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    let isDisposed = false;
+
+    const triggerAuthoritativeResync = async (reason: string, nextSeq?: number, nextInstanceId?: string) => {
+      if (isDisposed) return;
+      apiDb.invalidateCache();
+      if (typeof nextInstanceId === 'string' && nextInstanceId) {
+        globalServerInstanceId = nextInstanceId;
+      }
+      if (typeof nextSeq === 'number' && nextSeq >= 0) {
+        globalLastEventSeq = nextSeq;
+        setLastEventSeq(globalLastEventSeq);
+      }
+      try {
+        await centralSync.syncFull(false);
+      } catch {
+        // Individual module listeners will still reload on hse_realtime_reconnected
+      }
+      if (!isDisposed) {
+        window.dispatchEvent(new CustomEvent('hse_realtime_reconnected', { detail: { reason } }));
+      }
+    };
+
+    const runHttpCatchup = async (reason: string) => {
+      if (isDisposed || !getCurrentUser()) return;
+      try {
+        const httpCatchup = await apiDb.getMissedSyncEvents(
+          globalLastEventSeq,
+          globalServerInstanceId || undefined
+        );
+        if (httpCatchup.serverInstanceId) {
+          if (globalServerInstanceId && httpCatchup.serverInstanceId !== globalServerInstanceId) {
+            await triggerAuthoritativeResync('server_restarted', httpCatchup.latestSeq, httpCatchup.serverInstanceId);
+            return;
+          }
+          globalServerInstanceId = httpCatchup.serverInstanceId;
+        }
+        if (httpCatchup.resyncRequired) {
+          await triggerAuthoritativeResync(`${reason}_resync`, httpCatchup.latestSeq, httpCatchup.serverInstanceId);
+        } else {
+          httpCatchup.events.forEach((ev) => dispatchGlobalDataMutation(ev));
+          if (httpCatchup.latestSeq > globalLastEventSeq) {
+            globalLastEventSeq = httpCatchup.latestSeq;
+          }
+          setLastEventSeq(globalLastEventSeq);
+          window.dispatchEvent(new CustomEvent('hse_realtime_reconnected', { detail: { reason } }));
+        }
+      } catch {
+        await triggerAuthoritativeResync(`${reason}_fallback`);
+      }
+    };
+
+    const closeSseFallback = () => {
+      if (sseFallbackTimerRef.current) {
+        clearTimeout(sseFallbackTimerRef.current);
+        sseFallbackTimerRef.current = null;
+      }
+      if (sseRef.current) {
+        sseRef.current.close();
+        sseRef.current = null;
+      }
+    };
+
+    const startSseFallback = () => {
+      if (isDisposed || sseRef.current || typeof EventSource === 'undefined') return;
+      if (!getCurrentUser()) return;
+
+      try {
+        const es = new EventSource('/api/v1/sync/events', { withCredentials: true });
+        sseRef.current = es;
+
+        es.onopen = () => {
+          if (!isDisposed) setIsConnected(true);
+        };
+
+        es.addEventListener('connected', (event: MessageEvent) => {
+          try {
+            const info = JSON.parse(event.data || '{}');
+            const incomingInstance = typeof info.serverInstanceId === 'string' ? info.serverInstanceId : '';
+            const incomingSeq = typeof info.latestSeq === 'number' ? info.latestSeq : 0;
+
+            if (incomingInstance && globalServerInstanceId && incomingInstance !== globalServerInstanceId) {
+              void triggerAuthoritativeResync('sse_server_restarted', incomingSeq, incomingInstance);
+              return;
+            }
+            if (incomingInstance && !globalServerInstanceId) {
+              globalServerInstanceId = incomingInstance;
+            }
+            if (globalLastEventSeq > 0 && incomingSeq < globalLastEventSeq) {
+              void triggerAuthoritativeResync('sse_seq_reset', incomingSeq, incomingInstance);
+              return;
+            }
+            if (globalLastEventSeq > 0 && incomingSeq > globalLastEventSeq) {
+              void runHttpCatchup('sse_connected');
+            } else if (incomingSeq > globalLastEventSeq) {
+              globalLastEventSeq = incomingSeq;
+              setLastEventSeq(globalLastEventSeq);
+            }
+          } catch {
+            // Ignore malformed SSE hello
+          }
+        });
+
+        es.addEventListener('data_mutated', (event: MessageEvent) => {
+          try {
+            const payload = JSON.parse(event.data || '{}');
+            dispatchGlobalDataMutation(payload);
+            if (typeof payload?.seq === 'number') {
+              setLastEventSeq(globalLastEventSeq);
+            }
+          } catch {
+            // Ignore malformed SSE mutation
+          }
+        });
+
+        es.onerror = () => {
+          if (!isDisposed && !socketRef.current?.connected) {
+            setIsConnected(false);
+          }
+        };
+      } catch {
+        // EventSource unavailable in environment
+      }
+    };
+
+    const scheduleSseFallback = () => {
+      if (isDisposed || sseRef.current || sseFallbackTimerRef.current) return;
+      if (!getCurrentUser()) return;
+      sseFallbackTimerRef.current = setTimeout(() => {
+        sseFallbackTimerRef.current = null;
+        if (!isDisposed && !socketRef.current?.connected) {
+          startSseFallback();
+        }
+      }, 3500);
+    };
+
     const createAuthenticatedSocket = () => {
+      closeSseFallback();
       if (socketRef.current) {
         socketRef.current.disconnect();
         socketRef.current = null;
@@ -270,48 +434,64 @@ export const WebSocketProvider: React.FC<ProviderProps> = ({ children }) => {
       });
 
       socketInstance.on('connect', () => {
+        closeSseFallback();
         setIsConnected(true);
       });
 
-      socketInstance.on('sync:hello', (hello: { authenticated?: boolean; latestSeq?: number }) => {
-        if (!hello?.authenticated || typeof hello.latestSeq !== 'number') return;
+      socketInstance.on(
+        'sync:hello',
+        (hello: { authenticated?: boolean; latestSeq?: number; serverInstanceId?: string }) => {
+          if (!hello?.authenticated || typeof hello.latestSeq !== 'number') return;
 
-        if (globalLastEventSeq > 0 && hello.latestSeq > globalLastEventSeq) {
-          socketInstance.emit('sync:catchup', { sinceSeq: globalLastEventSeq }, async (res: any) => {
-            if (res?.success && Array.isArray(res.events) && !res.resyncRequired) {
-              for (const ev of res.events) {
-                dispatchGlobalDataMutation(ev);
-              }
-              setLastEventSeq(globalLastEventSeq);
-            } else {
-              try {
-                const httpCatchup = await apiDb.getMissedSyncEvents(globalLastEventSeq);
-                if (httpCatchup.resyncRequired) {
-                  await centralSync.syncFull(false);
+          const incomingInstance = typeof hello.serverInstanceId === 'string' ? hello.serverInstanceId : '';
+
+          // Detect backend restart (new server instance ID or sequence rollback)
+          if (
+            (incomingInstance && globalServerInstanceId && incomingInstance !== globalServerInstanceId) ||
+            (globalLastEventSeq > 0 && hello.latestSeq < globalLastEventSeq)
+          ) {
+            void triggerAuthoritativeResync('server_restarted', hello.latestSeq, incomingInstance);
+            return;
+          }
+
+          if (incomingInstance && !globalServerInstanceId) {
+            globalServerInstanceId = incomingInstance;
+          }
+
+          if (globalLastEventSeq > 0 && hello.latestSeq > globalLastEventSeq) {
+            socketInstance.emit(
+              'sync:catchup',
+              { sinceSeq: globalLastEventSeq, serverInstanceId: globalServerInstanceId || undefined },
+              async (res: any) => {
+                if (res?.success && Array.isArray(res.events) && !res.resyncRequired) {
+                  for (const ev of res.events) {
+                    dispatchGlobalDataMutation(ev);
+                  }
+                  if (typeof res.latestSeq === 'number' && res.latestSeq > globalLastEventSeq) {
+                    globalLastEventSeq = res.latestSeq;
+                  }
+                  setLastEventSeq(globalLastEventSeq);
+                  window.dispatchEvent(new CustomEvent('hse_realtime_reconnected', { detail: { reason: 'ws_catchup' } }));
                 } else {
-                  httpCatchup.events.forEach((ev) => dispatchGlobalDataMutation(ev));
+                  await runHttpCatchup('ws_catchup_overflow');
                 }
-                if (httpCatchup.latestSeq > globalLastEventSeq) {
-                  globalLastEventSeq = httpCatchup.latestSeq;
-                }
-                setLastEventSeq(globalLastEventSeq);
-              } catch {
-                await centralSync.syncFull(false);
               }
-            }
-          });
-        } else if (hello.latestSeq > globalLastEventSeq) {
-          globalLastEventSeq = hello.latestSeq;
-          setLastEventSeq(globalLastEventSeq);
+            );
+          } else if (hello.latestSeq > globalLastEventSeq) {
+            globalLastEventSeq = hello.latestSeq;
+            setLastEventSeq(globalLastEventSeq);
+          }
         }
-      });
+      );
 
       socketInstance.on('connect_error', () => {
-        setIsConnected(false);
+        if (!sseRef.current) setIsConnected(false);
+        scheduleSseFallback();
       });
 
       socketInstance.on('disconnect', () => {
-        setIsConnected(false);
+        if (!sseRef.current) setIsConnected(false);
+        scheduleSseFallback();
       });
 
       socketInstance.on('system_notification', (data) => {
@@ -334,12 +514,24 @@ export const WebSocketProvider: React.FC<ProviderProps> = ({ children }) => {
     createAuthenticatedSocket();
 
     const handleAuthChanged = () => {
+      globalLastEventSeq = 0;
       createAuthenticatedSocket();
     };
+    const handleOnline = () => {
+      if (socketRef.current && !socketRef.current.connected) {
+        socketRef.current.connect();
+      }
+      void runHttpCatchup('network_online');
+    };
+
     window.addEventListener('hse_auth_state_changed', handleAuthChanged);
+    window.addEventListener('online', handleOnline);
 
     return () => {
+      isDisposed = true;
       window.removeEventListener('hse_auth_state_changed', handleAuthChanged);
+      window.removeEventListener('online', handleOnline);
+      closeSseFallback();
       if (socketRef.current) {
         socketRef.current.disconnect();
         socketRef.current = null;

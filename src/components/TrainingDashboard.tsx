@@ -29,6 +29,7 @@ interface CourseData {
   courseCode: string;
   hours: number;
   date?: string; // YYYY/MM/DD or Jalali string
+  status?: 'completed' | 'assigned' | 'in_progress' | 'expired';
 }
 
 interface ContractorData {
@@ -103,9 +104,10 @@ export default function TrainingDashboard({
     return Array.from(unitSet).sort();
   }, [courses]);
 
-  // Filtered Courses
+  // Filtered Completed Courses (excludes pending assigned records from completed KPI hours)
   const filteredCourses = useMemo(() => {
     return courses.filter(c => {
+      if (c.status === 'assigned' || c.status === 'in_progress') return false;
       if (selectedUnit !== 'all' && c.unit !== selectedUnit) return false;
       if (selectedYear !== 'all') {
         if (!c.date) return false;

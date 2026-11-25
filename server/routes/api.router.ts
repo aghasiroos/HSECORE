@@ -17,6 +17,7 @@ import psmRoutes from '../modules/psm/psm.routes.ts';
 import fireDesignRoutes from '../modules/fire-design/fireDesign.routes.ts';
 import sdsRoutes from '../modules/sds/sds.routes.ts';
 import liftingRoutes from '../modules/lifting/lifting.routes.ts';
+import scaffoldingRoutes from '../modules/scaffolding/scaffolding.routes.ts';
 import databaseRoutes from './database-routes.ts';
 import { settingsRouter } from './settings.router.ts';
 import { organizationRouter } from './organization.router.ts';
@@ -27,6 +28,7 @@ import { automationRouter } from './automation.router.ts';
 import { backupRouter } from './backup.router.ts';
 import { userPreferencesRouter } from './userPreferences.router.ts';
 import { collectionRouter } from './collection.router.ts';
+import { trainingRouter } from './training.router.ts';
 import { initBackupScheduler } from '../services/backup.service.ts';
 import { requireAuth, requireRole } from '../core/middleware/auth.ts';
 import { authController } from '../modules/auth/auth.controller.ts';
@@ -66,8 +68,10 @@ export function createApiRouter(): Router {
   v1.use('/fire-design', fireDesignRoutes);
   v1.use('/sds', sdsRoutes);
   v1.use('/lifting', liftingRoutes);
+  v1.use('/scaffolding', scaffoldingRoutes);
   v1.use('/referrals', referralRouter);
   v1.use('/automation', automationRouter);
+  v1.use('/training', trainingRouter);
 
   // Database core routes mounted on v1 root and v1 /database alias (both strictly secured)
   v1.use('/database', databaseRoutes);
@@ -122,6 +126,7 @@ export function createApiRouter(): Router {
   router.use('/fire-design', requireAuth, fireDesignRoutes);
   router.use('/sds', requireAuth, sdsRoutes);
   router.use('/lifting', requireAuth, liftingRoutes);
+  router.use('/scaffolding', requireAuth, scaffoldingRoutes);
 
   // Health and medical legacy routes
   router.use('/medical-exams', requireAuth, requireRole('ADMIN', 'ADMINISTRATOR', 'HSE_MANAGER', 'DOCTOR_OCCUPATIONAL', 'NUTRITIONIST', 'MEDICAL_STAFF', 'کارشناس تغذیه'), healthRoutes);

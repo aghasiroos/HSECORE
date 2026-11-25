@@ -1,0 +1,389 @@
+/* ==========================================================================
+   HSECORE Centralized Mobile-First Responsive Design System
+   Single Source of Truth for Breakpoints, Fluid Spacing, Touch Ergonomics,
+   RTL/Bidi Integrity, Auto Table-to-Card Transformation, and Modal Containment.
+   All current and future modules inherit these standards automatically.
+   ========================================================================== */
+
+:root {
+  /* Standard Breakpoint Reference Tokens */
+  --hse-bp-xs: 320px;
+  --hse-bp-sm: 640px;
+  --hse-bp-md: 768px;
+  --hse-bp-lg: 1024px;
+  --hse-bp-xl: 1280px;
+  --hse-bp-2xl: 1536px;
+  --hse-bp-3xl: 1920px;
+
+  /* Mobile-First Fluid Spacing & Control Tokens */
+  --hse-page-px: 0.75rem;
+  --hse-page-py: 0.75rem;
+  --hse-section-gap: 1rem;
+  --hse-card-p: 0.875rem;
+  --hse-card-radius: 1rem;
+  --hse-modal-pad: 0.5rem;
+  --hse-modal-radius: 1.25rem;
+  --hse-touch-min: 44px;
+  --hse-control-min-h: 40px;
+}
+
+@media (min-width: 640px) {
+  :root {
+    --hse-page-px: 1rem;
+    --hse-page-py: 1rem;
+    --hse-section-gap: 1.25rem;
+    --hse-card-p: 1.125rem;
+    --hse-card-radius: 1.25rem;
+    --hse-modal-pad: 1rem;
+    --hse-modal-radius: 1.5rem;
+    --hse-control-min-h: 38px;
+  }
+}
+
+@media (min-width: 1024px) {
+  :root {
+    --hse-page-px: 1.5rem;
+    --hse-page-py: 1.25rem;
+    --hse-section-gap: 1.5rem;
+    --hse-card-p: 1.25rem;
+    --hse-touch-min: 36px;
+    --hse-control-min-h: 36px;
+  }
+}
+
+/* ==========================================================================
+   1. Global Viewport Anti-Overflow, Safe Area & RTL/Bidi Discipline
+   ========================================================================== */
+html,
+body,
+#root {
+  max-width: 100%;
+  overflow-x: clip;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+main#app-main-stage {
+  overflow-x: clip;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+}
+
+/* Prevent flex & grid descendants from forcing horizontal overflow.
+   Do not set max-width: 100% on .recharts-wrapper because Recharts v3 mounts it inside
+   a width: 0 shrink-helper div (100% of 0px collapses the chart SVG to 0px). */
+#app-main-stage .recharts-responsive-container {
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Media elements never exceed container width (Leaflet map tiles remain isolated) */
+#app-main-stage img:not(.leaflet-tile):not(.leaflet-marker-icon):not(.leaflet-marker-shadow),
+#app-main-stage video {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Safe-area padding helpers for notched mobile devices */
+.hse-pb-safe {
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+}
+
+.hse-pt-safe {
+  padding-top: env(safe-area-inset-top);
+}
+
+/* Mixed Persian RTL + English/Numeric LTR isolation */
+.hse-bidi-ltr,
+[dir="rtl"] [dir="ltr"],
+[dir="rtl"] .dir-ltr {
+  unicode-bidi: isolate;
+}
+
+.hse-numeric,
+table td,
+table th {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ==========================================================================
+   2. Reusable Central Layout & Design System Primitives
+   ========================================================================== */
+.hse-page-container {
+  width: 100%;
+  max-width: 1920px;
+  margin-inline: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--hse-section-gap);
+  min-width: 0;
+}
+
+.hse-card-surface {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-card);
+  border-radius: var(--hse-card-radius);
+  padding: var(--hse-card-p);
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Horizontally scrollable tab & sub-tab rail on mobile/tablet */
+.hse-tabs-scroll {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  max-width: 100%;
+}
+
+.hse-tabs-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.hse-tabs-scroll > * {
+  flex-shrink: 0;
+}
+
+/* Safe responsive scroll container for wide tables & matrices */
+.hse-table-scroll-wrap {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+}
+
+/* ==========================================================================
+   2b. Global Flex Header & Nested-Sidebar Anti-Crush Safeguards
+   Prevents wide action/tab toolbars (.shrink-0) from crushing title/subtitle
+   blocks into narrow vertical 1-word-per-line columns at 640px–1366px viewports.
+   ========================================================================== */
+@media screen and (max-width: 1439.98px) {
+  /* Allow flex-row justify-between headers inside #app-main-stage to wrap cleanly when space is tight */
+  #app-main-stage div[class*="justify-between"][class*="sm:flex-row"],
+  #app-main-stage div[class*="justify-between"][class*="md:flex-row"],
+  #app-main-stage div[class*="justify-between"][class*="lg:flex-row"] {
+    flex-wrap: wrap;
+  }
+
+  /* Guarantee title/description blocks inside flex headers always retain readable minimum width */
+  #app-main-stage div[class*="justify-between"][class*="sm:flex-row"] > div:first-child,
+  #app-main-stage div[class*="justify-between"][class*="md:flex-row"] > div:first-child,
+  #app-main-stage div[class*="justify-between"][class*="lg:flex-row"] > div:first-child {
+    min-width: min(100%, 280px);
+    flex: 1 1 280px;
+  }
+
+  /* Prevent action/tab groups from overflowing their parent card or forcing horizontal scroll */
+  #app-main-stage div[class*="justify-between"][class*="sm:flex-row"] > div:last-child,
+  #app-main-stage div[class*="justify-between"][class*="md:flex-row"] > div:last-child,
+  #app-main-stage div[class*="justify-between"][class*="lg:flex-row"] > div:last-child {
+    max-width: 100%;
+  }
+}
+
+/* ==========================================================================
+   3. Automatic Mobile Table-to-Card Transformation (< 768px, Screen Only)
+   Zero data loss: every column label & cell value is preserved in RTL cards.
+   Complex matrices & print sheets stay untouched via data-hse-scroll-table.
+   ========================================================================== */
+@media screen and (max-width: 767.98px) {
+  /* Standard Data Tables -> Clean RTL Information Cards */
+  table[data-hse-card-table="true"] {
+    display: block !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    border-collapse: separate !important;
+    border: 0 !important;
+    background: transparent !important;
+  }
+
+  table[data-hse-card-table="true"] > thead {
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    padding: 0 !important;
+    margin: -1px !important;
+    overflow: hidden !important;
+    clip: rect(0, 0, 0, 0) !important;
+    white-space: nowrap !important;
+    border: 0 !important;
+  }
+
+  table[data-hse-card-table="true"] > tbody {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 0.75rem !important;
+    width: 100% !important;
+    padding: 0.375rem !important;
+  }
+
+  table[data-hse-card-table="true"] > tfoot {
+    display: block !important;
+    width: 100% !important;
+    padding: 0.5rem 0.375rem !important;
+  }
+
+  table[data-hse-card-table="true"] > tbody > tr {
+    display: flex !important;
+    flex-direction: column !important;
+    width: 100% !important;
+    background-color: var(--bg-card) !important;
+    border: 1px solid var(--border-card) !important;
+    border-radius: 1rem !important;
+    padding: 0.625rem 0.875rem !important;
+    box-shadow: 0 1px 4px rgba(15, 23, 42, 0.05) !important;
+    overflow: hidden;
+  }
+
+  html.dark table[data-hse-card-table="true"] > tbody > tr {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28) !important;
+  }
+
+  table[data-hse-card-table="true"] > tbody > tr > td {
+    display: flex !important;
+    align-items: flex-start !important;
+    justify-content: space-between !important;
+    gap: 0.75rem !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    padding: 0.45rem 0 !important;
+    border: 0 !important;
+    border-bottom: 1px dashed var(--border-subtle) !important;
+    text-align: end !important;
+    white-space: normal !important;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
+
+  table[data-hse-card-table="true"] > tbody > tr > td:last-child {
+    border-bottom: 0 !important;
+    padding-bottom: 0.15rem !important;
+  }
+
+  table[data-hse-card-table="true"] > tbody > tr > td:first-child {
+    padding-top: 0.15rem !important;
+  }
+
+  table[data-hse-card-table="true"] > tbody > tr > td[data-label]:not([data-label=""])::before {
+    content: attr(data-label);
+    font-weight: 600;
+    font-size: 0.72rem;
+    line-height: 1.45;
+    color: var(--text-muted);
+    text-align: start;
+    flex: 0 1 42%;
+    max-width: 44%;
+    white-space: normal;
+    word-break: break-word;
+  }
+
+  /* Empty state / full-span rows inside card tables */
+  table[data-hse-card-table="true"] > tbody > tr > td[colspan] {
+    display: block !important;
+    text-align: center !important;
+    padding: 1.25rem 0.5rem !important;
+    border-bottom: 0 !important;
+  }
+
+  table[data-hse-card-table="true"] > tbody > tr > td[colspan]::before {
+    display: none !important;
+    content: none !important;
+  }
+
+  /* Action cells (buttons / icon actions) wrap nicely with touch-friendly spacing */
+  table[data-hse-card-table="true"] > tbody > tr > td[data-hse-cell-actions="true"] {
+    align-items: center !important;
+    padding-top: 0.625rem !important;
+    margin-top: 0.125rem !important;
+    border-top: 1px solid var(--border-subtle) !important;
+    border-bottom: 0 !important;
+  }
+
+  table[data-hse-card-table="true"] > tbody > tr > td[data-hse-cell-actions="true"] > div {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 0.375rem;
+  }
+
+  /* Ensure card-table parent scroll containers don't show awkward horizontal borders */
+  .hse-card-table-parent {
+    overflow-x: visible !important;
+  }
+
+  /* ========================================================================
+     4. Automatic Mobile Modal & Dialog Containment (< 768px)
+     Guarantees zero horizontal clipping and reliable vertical scroll on
+     all 219+ dialogs across 320px–767px viewports.
+     ======================================================================== */
+  [data-hse-modal-backdrop="true"] {
+    padding: var(--hse-modal-pad) !important;
+    overflow-y: auto !important;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  [data-hse-modal-backdrop="true"] > div:not([aria-hidden="true"]) {
+    max-width: calc(100vw - 1rem) !important;
+    max-height: calc(100dvh - 1rem) !important;
+  }
+
+  /* ========================================================================
+     5. Mobile Touch Ergonomics & Form Controls (< 640px)
+     ======================================================================== */
+  @media (max-width: 639.98px) {
+    #app-main-stage input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]),
+    #app-main-stage select {
+      min-height: 38px;
+    }
+
+    /* Prevent horizontal scroll bleed from overflowing tab containers */
+    #app-main-stage [role="tablist"] {
+      overflow-x: auto;
+      max-width: 100%;
+      -webkit-overflow-scrolling: touch;
+    }
+  }
+}
+
+/* ==========================================================================
+   6. Ultra-Compact Viewport Safeguards (320px – 374px)
+   ========================================================================== */
+@media screen and (max-width: 374.98px) {
+  :root {
+    --hse-page-px: 0.5rem;
+    --hse-page-py: 0.5rem;
+    --hse-card-p: 0.75rem;
+    --hse-section-gap: 0.75rem;
+  }
+
+  #app-header {
+    padding-inline: 0.5rem !important;
+    gap: 0.375rem !important;
+  }
+
+  table[data-hse-card-table="true"] > tbody > tr {
+    padding: 0.5rem 0.65rem !important;
+  }
+
+  table[data-hse-card-table="true"] > tbody > tr > td {
+    gap: 0.5rem !important;
+    font-size: 0.78rem;
+  }
+}
+
+/* ==========================================================================
+   7. Touch Device Affordances (Coarse Pointers)
+   ========================================================================== */
+@media (pointer: coarse) {
+  .hse-touch-target {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}

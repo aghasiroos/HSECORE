@@ -703,6 +703,19 @@ export const apiDb = {
     });
   },
 
+  async getNextIncidentNumber(eventDate?: string, formType?: 'RHS-F68' | 'RHS-F28'): Promise<string> {
+    const params = new URLSearchParams();
+    if (eventDate) params.set('eventDate', eventDate);
+    if (formType) params.set('formType', formType);
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    const json = await fetchJsonStrict<ApiResponse>(
+      `/api/v1/incidents/next-number${qs}`,
+      undefined,
+      'خطا در دریافت کد گزارش بعدی'
+    );
+    return json?.data?.reportNumber || '';
+  },
+
   async saveIncident(incident: any): Promise<any> {
     invalidateCacheKeys('incidents', 'sync:full', 'dashboard');
     const json = await fetchJsonStrict<ApiResponse>(
@@ -716,6 +729,141 @@ export const apiDb = {
     );
     invalidateCacheKeys('incidents', 'sync:full', 'dashboard');
     return json.data;
+  },
+
+  async updateIncident(idOrNumber: string | number, incident: any): Promise<any> {
+    invalidateCacheKeys('incidents', 'sync:full', 'dashboard');
+    const json = await fetchJsonStrict<ApiResponse>(
+      `/api/v1/incidents/${encodeURIComponent(String(idOrNumber))}`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(incident),
+      },
+      'خطا در بروزرسانی گزارش در پایگاه داده'
+    );
+    invalidateCacheKeys('incidents', 'sync:full', 'dashboard');
+    return json.data;
+  },
+
+  async triageIncidentWorkflow(idOrNumber: string | number, payload: any): Promise<any> {
+    invalidateCacheKeys('incidents', 'sync:full', 'dashboard');
+    const json = await fetchJsonStrict<ApiResponse>(
+      `/api/v1/incidents/${encodeURIComponent(String(idOrNumber))}/workflow/triage`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      },
+      'خطا در ثبت بررسی اولیه واحد HSE'
+    );
+    invalidateCacheKeys('incidents', 'sync:full', 'dashboard');
+    return json.data;
+  },
+
+  async investigateIncidentWorkflow(idOrNumber: string | number, payload: any): Promise<any> {
+    invalidateCacheKeys('incidents', 'sync:full', 'dashboard');
+    const json = await fetchJsonStrict<ApiResponse>(
+      `/api/v1/incidents/${encodeURIComponent(String(idOrNumber))}/workflow/investigate`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      },
+      'خطا در ثبت بررسی کارشناس HSE و ارزیابی ریسک'
+    );
+    invalidateCacheKeys('incidents', 'sync:full', 'dashboard');
+    return json.data;
+  },
+
+  async finalApproveIncidentWorkflow(idOrNumber: string | number, payload: any): Promise<any> {
+    invalidateCacheKeys('incidents', 'sync:full', 'dashboard');
+    const json = await fetchJsonStrict<ApiResponse>(
+      `/api/v1/incidents/${encodeURIComponent(String(idOrNumber))}/workflow/final-approve`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      },
+      'خطا در ثبت جمع‌بندی نهایی رئیس HSE'
+    );
+    invalidateCacheKeys('incidents', 'sync:full', 'dashboard');
+    return json.data;
+  },
+
+  async saveIncidentRhsF34(idOrNumber: string | number, payload: any): Promise<any> {
+    invalidateCacheKeys('incidents', 'sync:full', 'dashboard', 'non_conformances');
+    const json = await fetchJsonStrict<ApiResponse>(
+      `/api/v1/incidents/${encodeURIComponent(String(idOrNumber))}/rhs-f34`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      },
+      'خطا در ذخیره فرم تجزیه و تحلیل حادثه (RHS-F34)'
+    );
+    invalidateCacheKeys('incidents', 'sync:full', 'dashboard', 'non_conformances');
+    return json.data;
+  },
+
+  async reviewIncidentRhsF34(idOrNumber: string | number, payload: any): Promise<any> {
+    invalidateCacheKeys('incidents', 'sync:full', 'dashboard', 'non_conformances');
+    const json = await fetchJsonStrict<ApiResponse>(
+      `/api/v1/incidents/${encodeURIComponent(String(idOrNumber))}/rhs-f34/review`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      },
+      'خطا در ثبت نتیجه بررسی رئیس HSE برای فرم RHS-F34'
+    );
+    invalidateCacheKeys('incidents', 'sync:full', 'dashboard', 'non_conformances');
+    return json.data;
+  },
+
+  async updateIncidentRhsF34NonConformance(idOrNumber: string | number, payload: any): Promise<any> {
+    invalidateCacheKeys('incidents', 'non_conformances', 'sync:full', 'dashboard');
+    const json = await fetchJsonStrict<ApiResponse>(
+      `/api/v1/incidents/${encodeURIComponent(String(idOrNumber))}/rhs-f34/non-conformance`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      },
+      'خطا در بروزرسانی عدم انطباق تأخیر تحلیل حادثه'
+    );
+    invalidateCacheKeys('incidents', 'non_conformances', 'sync:full', 'dashboard');
+    return json.data;
+  },
+
+  async uploadEntityFile(entityType: string, entityId: string, file: File): Promise<any> {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('entityType', entityType);
+    formData.append('entityId', entityId);
+    formData.append('originalFileName', file.name);
+    const res = await authFetch('/api/v1/files/upload', {
+      method: 'POST',
+      body: formData,
+    });
+    const parsed = await parseJsonSafely<any>(res);
+    if (!parsed.ok || !parsed.data?.success) {
+      throw extractApiError(
+        res.status,
+        parsed.data,
+        parsed.data?.error?.message || parsed.data?.message || 'خطا در بارگذاری فایل پیوست'
+      );
+    }
+    return parsed.data.data;
+  },
+
+  async getEntityFiles(entityType: string, entityId: string): Promise<any[]> {
+    const json = await fetchJsonStrict<ApiResponse>(
+      `/api/v1/files/entity/${encodeURIComponent(entityType)}/${encodeURIComponent(entityId)}`,
+      undefined,
+      'خطا در دریافت فایل‌های پیوست'
+    );
+    return Array.isArray(json.data) ? json.data : [];
   },
 
   async deleteIncident(id: string | number): Promise<boolean> {
@@ -880,9 +1028,16 @@ export const apiDb = {
     }
   },
 
-  async getMissedSyncEvents(sinceSeq: number): Promise<{ events: any[]; latestSeq: number; resyncRequired: boolean }> {
+  async getMissedSyncEvents(
+    sinceSeq: number,
+    serverInstanceId?: string
+  ): Promise<{ events: any[]; latestSeq: number; resyncRequired: boolean; serverInstanceId?: string }> {
+    const params = new URLSearchParams({ sinceSeq: String(sinceSeq) });
+    if (serverInstanceId) {
+      params.set('serverInstanceId', serverInstanceId);
+    }
     const json = await fetchJsonStrict<any>(
-      `/api/v1/sync/events/catchup?sinceSeq=${encodeURIComponent(String(sinceSeq))}`,
+      `/api/v1/sync/events/catchup?${params.toString()}`,
       undefined,
       'خطا در بازیابی رویدادهای همگام‌سازی'
     );
@@ -891,6 +1046,7 @@ export const apiDb = {
       events: Array.isArray(payload.events) ? payload.events : [],
       latestSeq: Number(payload.latestSeq || 0),
       resyncRequired: Boolean(payload.resyncRequired),
+      serverInstanceId: typeof payload.serverInstanceId === 'string' ? payload.serverInstanceId : undefined,
     };
   },
 
@@ -986,7 +1142,7 @@ export const apiDb = {
   // --------------------------------------------------------------------------
   // Notifications
   // --------------------------------------------------------------------------
-  async getNotifications(params?: { category?: string; priority?: string; sourceModule?: string; unreadOnly?: boolean }): Promise<any[]> {
+  async getNotifications(params?: { category?: string; priority?: string; sourceModule?: string; unreadOnly?: boolean; clientSessionId?: string }): Promise<any[]> {
     if (!getAuthToken()) return [];
     return getCachedOrFetch('notifications:list', async () => {
       let url = '/api/v1/notifications';
@@ -996,7 +1152,9 @@ export const apiDb = {
         if (params.priority) q.set('priority', params.priority);
         if (params.sourceModule) q.set('sourceModule', params.sourceModule);
         if (params.unreadOnly) q.set('unreadOnly', 'true');
-        url += `?${q.toString()}`;
+        if (params.clientSessionId) q.set('clientSessionId', params.clientSessionId);
+        const qs = q.toString();
+        if (qs) url += `?${qs}`;
       }
       const json = await fetchJsonStrict<ApiResponse>(
         url,
@@ -1022,11 +1180,15 @@ export const apiDb = {
     return json.data;
   },
 
-  async markNotificationRead(id: string): Promise<boolean> {
+  async markNotificationRead(id: string, clientSessionId?: string): Promise<boolean> {
     invalidateCacheKeys('notifications', 'sync:full');
     await fetchJsonStrict<ApiResponse>(
       `/api/v1/notifications/${encodeURIComponent(id)}/read`,
-      { method: 'PATCH' },
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientSessionId }),
+      },
       'خطا در ثبت وضعیت مطالعه اعلان'
     );
     invalidateCacheKeys('notifications', 'sync:full');
@@ -1044,14 +1206,23 @@ export const apiDb = {
     return true;
   },
 
-  async acknowledgeNotification(id: string, note?: string, acknowledgmentSource?: string): Promise<boolean> {
+  async acknowledgeNotification(
+    id: string,
+    note?: string,
+    acknowledgmentSource?: string,
+    clientSessionId?: string
+  ): Promise<boolean> {
     invalidateCacheKeys('notifications', 'sync:full');
     await fetchJsonStrict<ApiResponse>(
       `/api/v1/notifications/${encodeURIComponent(id)}/acknowledge`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ note, acknowledgmentSource: acknowledgmentSource || 'in_app_modal' }),
+        body: JSON.stringify({
+          note,
+          acknowledgmentSource: acknowledgmentSource || 'in_app_modal',
+          clientSessionId,
+        }),
       },
       'خطا در ثبت تاییدیه دریافت هشدار در پایگاه داده'
     );
@@ -1116,10 +1287,14 @@ export const apiDb = {
     return true;
   },
 
-  async getPublicActiveEmergencyAlerts(sinceIso?: string): Promise<any[]> {
+  async getPublicActiveEmergencyAlerts(sinceIso?: string, clientSessionId?: string): Promise<any[]> {
     try {
-      const url = sinceIso
-        ? `/api/v1/notifications/public/active?since=${encodeURIComponent(sinceIso)}`
+      const q = new URLSearchParams();
+      if (sinceIso) q.set('since', sinceIso);
+      if (clientSessionId) q.set('clientSessionId', clientSessionId);
+      const qs = q.toString();
+      const url = qs
+        ? `/api/v1/notifications/public/active?${qs}`
         : '/api/v1/notifications/public/active';
       const res = await fetch(url);
       if (!res.ok) return [];
@@ -1734,6 +1909,99 @@ export const apiDb = {
     return this.saveSetting('hse_training_contractors', contractors);
   },
 
+  async getContractorTrainingData(): Promise<{
+    records: any[];
+    companies: any[];
+    auditHistory: any[];
+    syncedContractors: any[];
+  }> {
+    const json = await fetchJsonStrict<{
+      success: boolean;
+      data: {
+        records: any[];
+        companies: any[];
+        auditHistory: any[];
+        syncedContractors: any[];
+      };
+    }>(
+      '/api/v1/training/contractor-records',
+      { method: 'GET' },
+      'خطا در دریافت سوابق آموزش شرکت‌ها و پیمانکاران'
+    );
+    return {
+      records: Array.isArray(json?.data?.records) ? json.data.records : [],
+      companies: Array.isArray(json?.data?.companies) ? json.data.companies : [],
+      auditHistory: Array.isArray(json?.data?.auditHistory) ? json.data.auditHistory : [],
+      syncedContractors: Array.isArray(json?.data?.syncedContractors) ? json.data.syncedContractors : [],
+    };
+  },
+
+  async createContractorTrainingRecord(payload: {
+    companyName: string;
+    personnelFullName: string;
+    jobTitle: string;
+    trainingHours: number;
+    trainingDate: string;
+    courseTitle?: string;
+    notes?: string;
+  }): Promise<any> {
+    const json = await fetchJsonStrict<{ success: boolean; data: any }>(
+      '/api/v1/training/contractor-records',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      },
+      'خطا در ثبت سابقه آموزشی پرسنل پیمانکار'
+    );
+    this.invalidateCache('settings');
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('hse_training_updated', { detail: { action: 'contractor_create' } }));
+    }
+    return json.data;
+  },
+
+  async updateContractorTrainingRecord(
+    recordId: string,
+    payload: {
+      companyName: string;
+      personnelFullName: string;
+      jobTitle: string;
+      trainingHours: number;
+      trainingDate: string;
+      courseTitle?: string;
+      notes?: string;
+    }
+  ): Promise<any> {
+    const json = await fetchJsonStrict<{ success: boolean; data: any }>(
+      `/api/v1/training/contractor-records/${encodeURIComponent(recordId)}`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      },
+      'خطا در ویرایش سابقه آموزشی پرسنل پیمانکار'
+    );
+    this.invalidateCache('settings');
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('hse_training_updated', { detail: { action: 'contractor_update' } }));
+    }
+    return json.data;
+  },
+
+  async deleteContractorTrainingRecord(recordId: string): Promise<any> {
+    const json = await fetchJsonStrict<{ success: boolean; data: any }>(
+      `/api/v1/training/contractor-records/${encodeURIComponent(recordId)}`,
+      { method: 'DELETE' },
+      'خطا در حذف سابقه آموزشی پرسنل پیمانکار'
+    );
+    this.invalidateCache('settings');
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('hse_training_updated', { detail: { action: 'contractor_delete' } }));
+    }
+    return json.data;
+  },
+
   async getTrainingCalendarEvents(): Promise<any[]> {
     const events = await this.getSetting('hse_training_calendar_events');
     return Array.isArray(events) ? events : [];
@@ -1750,6 +2018,54 @@ export const apiDb = {
 
   async saveTrainingCourseDefs(defs: any[]): Promise<boolean> {
     return this.saveSetting('hse_training_course_defs', defs);
+  },
+
+  async getTrainingBulkAssignments(): Promise<any[]> {
+    try {
+      const json = await fetchJsonStrict<{ success: boolean; data: any[] }>(
+        '/api/v1/training/bulk-assignments',
+        { method: 'GET' },
+        'خطا در دریافت سوابق تخصیص گروهی آموزش'
+      );
+      return Array.isArray(json?.data) ? json.data : [];
+    } catch {
+      const fallback = await this.getSetting('hse_training_bulk_assignments');
+      return Array.isArray(fallback) ? fallback : [];
+    }
+  },
+
+  async bulkAssignTrainingByJobTitle(payload: any): Promise<any> {
+    const json = await fetchJsonStrict<{ success: boolean; data: any }>(
+      '/api/v1/training/bulk-assign',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      },
+      'خطا در تخصیص گروهی دوره‌های آموزشی'
+    );
+    this.invalidateCache('settings');
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('hse_training_updated', { detail: { action: 'bulk_assign' } }));
+    }
+    return json.data;
+  },
+
+  async completeTrainingAssignment(recordId: string, date?: string): Promise<any> {
+    const json = await fetchJsonStrict<{ success: boolean; data: any }>(
+      `/api/v1/training/records/${encodeURIComponent(recordId)}/complete`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date }),
+      },
+      'خطا در ثبت اتمام دوره آموزشی'
+    );
+    this.invalidateCache('settings');
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('hse_training_updated', { detail: { action: 'complete', recordId } }));
+    }
+    return json.data;
   },
 
   // --------------------------------------------------------------------------
@@ -1786,12 +2102,13 @@ export const apiDb = {
   // PTW Audit Persistence
   // --------------------------------------------------------------------------
   async getPtwAuditRecords(): Promise<any[]> {
-    const records = await this.getSetting('hse_ptw_audit_records_v2');
+    const records = await this.collection.getAll('hse_ptw_audit_records_v2');
     return Array.isArray(records) ? records : [];
   },
 
   async savePtwAuditRecords(records: any[]): Promise<boolean> {
-    return this.saveSetting('hse_ptw_audit_records_v2', records);
+    await this.collection.batch('hse_ptw_audit_records_v2', records, 'replace');
+    return true;
   },
 
   // --------------------------------------------------------------------------

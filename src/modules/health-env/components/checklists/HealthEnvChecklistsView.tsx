@@ -286,55 +286,55 @@ export default function HealthEnvChecklistsView({ language = 'fa', currentUser }
     <div className="space-y-6 animate-in fade-in duration-200" dir="rtl">
       
       {/* Top Header Bar */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white dark:bg-slate-850 p-5 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-xs">
-        <div>
-          <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-2xl bg-teal-500/10 text-teal-600 flex items-center justify-center border border-teal-500/20">
+      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 bg-white dark:bg-slate-850 p-4 sm:p-5 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-xs">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-10 h-10 rounded-2xl bg-teal-500/10 text-teal-600 flex items-center justify-center border border-teal-500/20 shrink-0">
               <Building2 className="w-5 h-5" />
             </div>
-            <div>
-              <h1 className="text-base sm:text-lg font-black text-slate-900 dark:text-white">
+            <div className="min-w-0">
+              <h1 className="text-base sm:text-lg font-black text-slate-900 dark:text-white leading-snug">
                 چک‌لیست‌های عملیاتی بهداشت و محیط زیست
               </h1>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">
                 سامانه پایش استاندارد اماکن، آبدارخانه‌ها، رستوران، آمبولانس و سرویس‌های بهداشتی (ثبت پایدار در پایگاه داده مرکزی)
               </p>
             </div>
           </div>
         </div>
 
-        <div className="flex items-center flex-wrap gap-2.5">
+        <div className="flex items-center flex-wrap gap-2.5 max-w-full">
           <button
             type="button"
             onClick={() => setIsManageTemplatesOpen(true)}
-            className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-2xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer border border-slate-200 dark:border-slate-700"
+            className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-2xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer border border-slate-200 dark:border-slate-700 whitespace-nowrap"
           >
-            <Settings className="w-4 h-4 text-slate-500" />
+            <Settings className="w-4 h-4 text-slate-500 shrink-0" />
             <span>مدیریت الگوها و آیتم‌ها</span>
           </button>
 
           <button
             type="button"
             onClick={handleExportCSV}
-            className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-2xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer border border-slate-200 dark:border-slate-700"
+            className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-2xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer border border-slate-200 dark:border-slate-700 whitespace-nowrap"
           >
-            <Download className="w-4 h-4 text-slate-500" />
+            <Download className="w-4 h-4 text-slate-500 shrink-0" />
             <span>خروجی اکسل / CSV</span>
           </button>
 
           <button
             type="button"
             onClick={handleCreateNew}
-            className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-2xl text-xs font-black transition flex items-center gap-2 cursor-pointer shadow-md shadow-teal-600/20"
+            className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-2xl text-xs font-black transition flex items-center gap-2 cursor-pointer shadow-md shadow-teal-600/20 whitespace-nowrap"
           >
-            <Plus className="w-4 h-4" />
+            <Plus className="w-4 h-4 shrink-0" />
             <span>ثبت بازرسی بهداشتی جدید</span>
           </button>
         </div>
       </div>
 
       {/* KPI Stats Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3.5">
+      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3.5">
         <div className="bg-white dark:bg-slate-850 p-4 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-1">
           <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block">کل بازرسی‌های ثبت‌شده</span>
           <div className="flex items-baseline justify-between">
@@ -385,51 +385,9 @@ export default function HealthEnvChecklistsView({ language = 'fa', currentUser }
         </div>
       </div>
 
-      {/* Checklist Templates Category Filter Tabs */}
-      <div className="bg-white dark:bg-slate-850 p-2 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs flex items-center gap-1.5 overflow-x-auto text-xs">
-        <button
-          type="button"
-          onClick={() => setSelectedTypeTab('ALL')}
-          className={`px-4 py-2 rounded-xl font-bold transition shrink-0 cursor-pointer ${
-            selectedTypeTab === 'ALL'
-              ? 'bg-teal-600 text-white shadow-xs'
-              : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-          }`}
-        >
-          <span>همه چک‌لیست‌ها</span>
-          <span className="mr-1.5 px-1.5 py-0.5 rounded-full bg-black/10 text-[10px] font-mono">
-            {inspections.length}
-          </span>
-        </button>
-
-        {templates.map(tmpl => {
-          const count = inspections.filter(i => i.checklistTypeId === tmpl.id).length;
-          const active = selectedTypeTab === tmpl.id;
-          return (
-            <button
-              key={tmpl.id}
-              type="button"
-              onClick={() => setSelectedTypeTab(tmpl.id)}
-              className={`px-3.5 py-2 rounded-xl font-bold transition shrink-0 cursor-pointer flex items-center gap-1.5 ${
-                active
-                  ? 'bg-teal-600 text-white shadow-xs'
-                  : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-              }`}
-            >
-              <span>{tmpl.titleFa}</span>
-              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-mono ${
-                active ? 'bg-white/20 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
-              }`}>
-                {count}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-
       {/* Filter and Search Bar */}
-      <div className="bg-white dark:bg-slate-850 p-4 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-xs flex flex-col md:flex-row items-center justify-between gap-3 text-xs">
-        <div className="relative w-full md:w-80">
+      <div className="bg-white dark:bg-slate-850 p-4 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-3 text-xs">
+        <div className="relative w-full lg:w-72 shrink-0">
           <Search className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2" />
           <input
             type="text"
@@ -440,7 +398,25 @@ export default function HealthEnvChecklistsView({ language = 'fa', currentUser }
           />
         </div>
 
-        <div className="flex items-center flex-wrap gap-2 w-full md:w-auto">
+        <div className="flex items-center flex-wrap gap-2 w-full lg:w-auto">
+          {/* Checklist Type Dropdown */}
+          <select
+            aria-label="انتخاب نوع چک‌لیست عملیاتی"
+            value={selectedTypeTab}
+            onChange={e => setSelectedTypeTab(e.target.value as HealthEnvChecklistType | 'ALL')}
+            className="w-full sm:w-auto max-w-full px-3 py-2 rounded-xl border border-teal-200 dark:border-teal-800 bg-teal-50/70 dark:bg-teal-950/40 text-teal-900 dark:text-teal-200 text-xs font-bold focus:ring-2 focus:ring-teal-500/30 cursor-pointer"
+          >
+            <option value="ALL">همه چک‌لیست‌ها ({inspections.length})</option>
+            {templates.map(tmpl => {
+              const count = inspections.filter(i => i.checklistTypeId === tmpl.id).length;
+              return (
+                <option key={tmpl.id} value={tmpl.id}>
+                  {tmpl.titleFa} ({count})
+                </option>
+              );
+            })}
+          </select>
+
           {/* Schedule filter */}
           <select
             value={scheduleFilter}

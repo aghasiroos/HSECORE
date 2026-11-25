@@ -24,8 +24,6 @@
   },
   "dependencies": {
     "@camunda8/sdk": "^8.8.13",
-    "@types/three": "^0.187.0",
-    "axios": "^1.19.0",
     "bcryptjs": "^3.0.3",
     "compression": "^1.8.2",
     "cookie-parser": "^1.4.7",
@@ -38,10 +36,8 @@
     "multer": "^2.3.0",
     "pg": "^8.23.0",
     "socket.io": "^4.8.3",
-    "three": "^0.187.0",
     "uuid": "^14.0.1",
-    "web-push": "^3.6.7",
-    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "@bpmn-io/properties-panel": "^3.48.0",
@@ -57,9 +53,11 @@
     "@types/pg": "^8.23.1",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "@types/three": "^0.187.0",
     "@types/uuid": "^11.0.0",
     "@types/web-push": "^3.6.4",
     "@vitejs/plugin-react": "^5.0.4",
+    "axios": "^1.19.0",
     "bpmn-js": "^18.22.1",
     "bpmn-js-properties-panel": "^5.63.0",
     "camunda-bpmn-moddle": "^7.0.1",
@@ -79,9 +77,11 @@
     "recharts": "^3.9.2",
     "socket.io-client": "^4.8.3",
     "tailwindcss": "^4.1.14",
+    "three": "^0.187.0",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
-    "vite": "^6.4.3"
+    "vite": "^6.4.3",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "optionalDependencies": {
     "@rollup/rollup-linux-x64-gnu": "^4.34.9",

@@ -43,22 +43,29 @@ export default function PtwAuditModule({
   const [referralAudit, setReferralAudit] = useState<PtwAuditRecord | null>(null);
   const [workflowTrackerAudit, setWorkflowTrackerAudit] = useState<PtwAuditRecord | null>(null);
 
-  // Sync listener and IndexedDB hydration
+  // Authoritative PostgreSQL hydration & real-time sync listeners
   useEffect(() => {
-    // Hydrate from IndexedDB on mount
-    initPtwAuditStorage().then((loaded) => {
-      if (Array.isArray(loaded) && loaded.length > 0) {
-        setAudits(loaded);
-      }
-    }).catch(err => {
-      console.warn('Could not load PTW audits from IndexedDB:', err);
-    });
+    const hydrateFromServer = () => {
+      initPtwAuditStorage().then((loaded) => {
+        if (Array.isArray(loaded)) {
+          setAudits(loaded);
+        }
+      }).catch(err => {
+        console.warn('Could not load PTW audits from central PostgreSQL DB:', err);
+      });
+    };
+
+    hydrateFromServer();
 
     const handleUpdate = () => {
       setAudits(getPtwAudits());
     };
     window.addEventListener('hse_ptw_audits_updated', handleUpdate);
-    return () => window.removeEventListener('hse_ptw_audits_updated', handleUpdate);
+    window.addEventListener('hse_realtime_reconnected', hydrateFromServer);
+    return () => {
+      window.removeEventListener('hse_ptw_audits_updated', handleUpdate);
+      window.removeEventListener('hse_realtime_reconnected', hydrateFromServer);
+    };
   }, []);
 
   const handleAddNew = () => {

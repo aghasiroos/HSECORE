@@ -140,9 +140,6 @@ export default function FireDailyReportView({ language }: Props) {
             <h1 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white">
               {isFa ? 'گزارش روزانه ایستگاه آتش‌نشانی معین' : 'Fire Department Daily Reports'}
             </h1>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              {isFa ? 'ثبت و پایش دیجیتال گزارش‌های شیفت، ناوگان خودروها، تجهیزات اطفاء و اعلام حریق مجتمع پتروشیمی رجال' : 'Digital log for shift operations, fleet status, suppression & gas detection'}
-            </p>
           </div>
         </div>
 

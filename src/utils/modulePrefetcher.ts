@@ -71,12 +71,13 @@ export function prefetchModule(key: string): Promise<void> {
 export function prewarmCoreModules(): void {
   if (typeof window === 'undefined') return;
 
-  const coreKeys = ['dashboard', 'heat', 'health-env', 'safety-unit', 'fire-dept', 'permit', 'ptw-audit', 'user-mgmt'];
+  // Pre-warm only the primary entry views; heavy specialized modules load on sidebar hover or navigation
+  const coreKeys = ['dashboard', 'permit'];
 
   const runWarm = async () => {
     for (const k of coreKeys) {
       await prefetchModule(k);
-      await new Promise((resolve) => setTimeout(resolve, 250));
+      await new Promise((resolve) => setTimeout(resolve, 350));
     }
   };
 
@@ -87,6 +88,6 @@ export function prewarmCoreModules(): void {
   } else {
     setTimeout(() => {
       void runWarm();
-    }, 800);
+    }, 1200);
   }
 }

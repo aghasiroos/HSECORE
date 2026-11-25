@@ -8,7 +8,7 @@ import { weatherService } from '../weather/service.ts';
 import { isWeatherRecordStale } from '../weather/physics.ts';
 import { logger } from '../core/logger.ts';
 import { broadcastDataMutation } from '../core/socket.ts';
-import { DEFAULT_DASHBOARD_CARDS_LAYOUT } from '../../src/config/modulesConfig.ts';
+import { DEFAULT_DASHBOARD_CARDS_LAYOUT } from '../../shared/modulesCatalog.ts';
 
 export const dashboardRouter = Router();
 
@@ -19,9 +19,19 @@ export const CANONICAL_DEFAULT_DASHBOARD_LAYOUT = {
   updatedBy: 'Production Default Standard',
 };
 
-// Scoped short-TTL micro-cache keyed per permission boundary
+// Scoped short-TTL micro-cache keyed per permission boundary (bounded to prevent memory leaks)
 const scopedMetricsCache = new Map<string, { summary: any; timestamp: number }>();
-const CACHE_TTL_MS = 10000;
+const inFlightMetricsRequests = new Map<string, Promise<any>>();
+const CACHE_TTL_MS = 12000;
+const MAX_SCOPED_CACHE_ENTRIES = 200;
+
+function setBoundedMetricsCache(key: string, summary: any, timestamp: number) {
+  if (scopedMetricsCache.size >= MAX_SCOPED_CACHE_ENTRIES && !scopedMetricsCache.has(key)) {
+    const oldestKey = scopedMetricsCache.keys().next().value;
+    if (oldestKey !== undefined) scopedMetricsCache.delete(oldestKey);
+  }
+  scopedMetricsCache.set(key, { summary, timestamp });
+}
 
 export function invalidateDashboardCache() {
   scopedMetricsCache.clear();
@@ -44,6 +54,23 @@ dashboardRouter.get('/metrics', requireAuth, async (req: Request, res: Response)
         summary: cachedEntry.summary,
       });
     }
+
+    // Single-flight coalescing: prevent 50+ concurrent requests on a cold cache from triggering a 950-query DB stampede
+    if (!bypassCache) {
+      const existingInFlight = inFlightMetricsRequests.get(scopeKey);
+      if (existingInFlight) {
+        const sharedSummary = await existingInFlight;
+        res.setHeader('Cache-Control', 'private, max-age=10');
+        return res.json({
+          success: true,
+          cached: true,
+          timestamp: new Date().toISOString(),
+          summary: sharedSummary,
+        });
+      }
+    }
+
+    const computeMetrics = async () => {
 
     // Execute all PostgreSQL queries cleanly without swallowing DB outages
     const [
@@ -698,8 +725,23 @@ dashboardRouter.get('/metrics', requireAuth, async (req: Request, res: Response)
       notifications: allNotifs as any[],
     };
 
-    // Cache summary in memory per scope
-    scopedMetricsCache.set(scopeKey, { summary, timestamp: now });
+    // Cache summary in memory per scope (bounded)
+    setBoundedMetricsCache(scopeKey, summary, Date.now());
+    return summary;
+    };
+
+    const flightPromise = computeMetrics();
+    if (!bypassCache) {
+      inFlightMetricsRequests.set(scopeKey, flightPromise);
+    }
+    let summary: any;
+    try {
+      summary = await flightPromise;
+    } finally {
+      if (inFlightMetricsRequests.get(scopeKey) === flightPromise) {
+        inFlightMetricsRequests.delete(scopeKey);
+      }
+    }
 
     res.json({
       success: true,

@@ -43,17 +43,24 @@ export default function HealthEnvChecklistFormModal({
   onSave,
   currentUser
 }: Props) {
-  const [activeTab, setActiveTab] = useState<'info' | 'items' | 'schedule' | 'attachments' | 'summary'>('items');
+  const [activeTab, setActiveTab] = useState<'schedule' | 'info' | 'items' | 'attachments' | 'summary'>('schedule');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [attachmentUploadProgress, setAttachmentUploadProgress] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const selectableTemplates = React.useMemo(() => {
+    const active = templates.filter(t => t.isActive !== false);
+    return active.length > 0 ? active : templates;
+  }, [templates]);
+
   const [formData, setFormData] = useState<Partial<HealthEnvInspection>>(() => {
     const today = getTodayJalaliDate();
     const now = new Date();
     const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-    const selectedTmpl = templates.find(t => t.id === defaultTypeId) || templates[0];
+    const selectedTmpl = selectableTemplates.find(t => t.id === defaultTypeId) || selectableTemplates[0];
+    const defaultSchType = selectedTmpl?.defaultScheduleType || 'PERIODIC';
+    const defaultInterval = selectedTmpl?.defaultPeriodicInterval || 'MONTHLY';
 
     const initialItems: HealthEnvChecklistInspectionItem[] = selectedTmpl
       ? selectedTmpl.defaultItems.map(di => ({
@@ -72,7 +79,7 @@ export default function HealthEnvChecklistFormModal({
       : [];
 
     return {
-      checklistTypeId: defaultTypeId,
+      checklistTypeId: selectedTmpl ? selectedTmpl.id : defaultTypeId,
       checklistTypeNameFa: selectedTmpl ? selectedTmpl.titleFa : 'چک‌لیست اماکن و ساختمان‌ها',
       title: selectedTmpl ? `بازرسی ${selectedTmpl.titleFa} - ${today}` : `بازرسی بهداشت - ${today}`,
       inspectionDate: today,
@@ -91,9 +98,9 @@ export default function HealthEnvChecklistFormModal({
       immediateActionsTaken: '',
       recommendedCapa: '',
       photos: [],
-      scheduleType: 'PERIODIC',
-      periodicInterval: 'MONTHLY',
-      nextInspectionDate: calculateNextInspectionDate(today, 'PERIODIC', 'MONTHLY'),
+      scheduleType: defaultSchType,
+      periodicInterval: defaultSchType === 'PERIODIC' ? defaultInterval : undefined,
+      nextInspectionDate: defaultSchType === 'PERIODIC' ? calculateNextInspectionDate(today, 'PERIODIC', defaultInterval) : '',
       attachments: []
     };
   });
@@ -107,7 +114,9 @@ export default function HealthEnvChecklistFormModal({
         const today = getTodayJalaliDate();
         const now = new Date();
         const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-        const selectedTmpl = templates.find(t => t.id === defaultTypeId) || templates[0];
+        const selectedTmpl = selectableTemplates.find(t => t.id === defaultTypeId) || selectableTemplates[0];
+        const defaultSchType = selectedTmpl?.defaultScheduleType || 'PERIODIC';
+        const defaultInterval = selectedTmpl?.defaultPeriodicInterval || 'MONTHLY';
         
         const initialItems: HealthEnvChecklistInspectionItem[] = selectedTmpl
           ? selectedTmpl.defaultItems.map(di => ({
@@ -126,7 +135,7 @@ export default function HealthEnvChecklistFormModal({
           : [];
 
         setFormData({
-          checklistTypeId: defaultTypeId,
+          checklistTypeId: selectedTmpl ? selectedTmpl.id : defaultTypeId,
           checklistTypeNameFa: selectedTmpl ? selectedTmpl.titleFa : 'چک‌لیست بهداشت',
           title: selectedTmpl ? `بازرسی ${selectedTmpl.titleFa} - ${today}` : `بازرسی بهداشت - ${today}`,
           inspectionDate: today,
@@ -145,16 +154,16 @@ export default function HealthEnvChecklistFormModal({
           immediateActionsTaken: '',
           recommendedCapa: '',
           photos: [],
-          scheduleType: 'PERIODIC',
-          periodicInterval: 'MONTHLY',
-          nextInspectionDate: calculateNextInspectionDate(today, 'PERIODIC', 'MONTHLY'),
+          scheduleType: defaultSchType,
+          periodicInterval: defaultSchType === 'PERIODIC' ? defaultInterval : undefined,
+          nextInspectionDate: defaultSchType === 'PERIODIC' ? calculateNextInspectionDate(today, 'PERIODIC', defaultInterval) : '',
           attachments: []
         });
       }
-      setActiveTab('items');
+      setActiveTab('schedule');
       setError(null);
     }
-  }, [isOpen, initialData, defaultTypeId, templates, currentUser]);
+  }, [isOpen, initialData, defaultTypeId, selectableTemplates, currentUser]);
 
   // Recalculate next due date whenever schedule or inspection date changes
   const handleScheduleChange = (
@@ -196,6 +205,8 @@ export default function HealthEnvChecklistFormModal({
     if (!targetTmpl) return;
 
     const today = formData.inspectionDate || getTodayJalaliDate();
+    const defaultSchType = targetTmpl.defaultScheduleType || formData.scheduleType || 'PERIODIC';
+    const defaultInterval = targetTmpl.defaultPeriodicInterval || formData.periodicInterval || 'MONTHLY';
     const newItems: HealthEnvChecklistInspectionItem[] = targetTmpl.defaultItems.map(di => ({
       itemId: di.id,
       title: di.title,
@@ -215,6 +226,9 @@ export default function HealthEnvChecklistFormModal({
       checklistTypeId: typeId,
       checklistTypeNameFa: targetTmpl.titleFa,
       title: `بازرسی ${targetTmpl.titleFa} - ${today}`,
+      scheduleType: defaultSchType,
+      periodicInterval: defaultSchType === 'PERIODIC' ? defaultInterval : undefined,
+      nextInspectionDate: defaultSchType === 'PERIODIC' ? calculateNextInspectionDate(today, 'PERIODIC', defaultInterval) : '',
       items: newItems
     }));
   };
@@ -410,27 +424,38 @@ export default function HealthEnvChecklistFormModal({
           </button>
         </div>
 
-        {/* Template Selector (only for new inspections) */}
+        {/* Template Selector Dropdown (only for new inspections) */}
         {!initialData?.id && (
-          <div className="px-6 py-2.5 bg-slate-100 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 flex items-center gap-2 overflow-x-auto text-xs shrink-0">
-            <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 shrink-0">نوع بازرسی:</span>
-            {templates.map(tmpl => {
-              const active = formData.checklistTypeId === tmpl.id;
-              return (
-                <button
-                  key={tmpl.id}
-                  type="button"
-                  onClick={() => handleSwitchType(tmpl.id)}
-                  className={`px-3 py-1.5 rounded-xl font-bold transition shrink-0 cursor-pointer flex items-center gap-1.5 ${
-                    active
-                      ? 'bg-teal-600 text-white shadow-xs'
-                      : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-teal-50 border border-slate-200 dark:border-slate-700'
-                  }`}
-                >
-                  <span>{tmpl.titleFa}</span>
-                </button>
-              );
-            })}
+          <div className="px-4 sm:px-6 py-2.5 bg-slate-100 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 text-xs shrink-0">
+            <label
+              htmlFor="health-env-checklist-type-select"
+              className="text-[11px] font-bold text-slate-600 dark:text-slate-300 shrink-0"
+            >
+              نوع بازرسی (چک‌لیست عملیاتی):
+            </label>
+            <div className="flex items-center gap-2 flex-1 min-w-0">
+              <select
+                id="health-env-checklist-type-select"
+                value={formData.checklistTypeId || ''}
+                onChange={e => handleSwitchType(e.target.value as HealthEnvChecklistType)}
+                className="w-full sm:max-w-md px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-teal-500/40 focus:border-teal-500 cursor-pointer transition"
+              >
+                {selectableTemplates.map(tmpl => (
+                  <option key={tmpl.id} value={tmpl.id}>
+                    {tmpl.titleFa} ({tmpl.defaultItems?.length || 0} بند)
+                  </option>
+                ))}
+              </select>
+              {(() => {
+                const activeTmpl = selectableTemplates.find(t => t.id === formData.checklistTypeId);
+                if (!activeTmpl?.categoryFa) return null;
+                return (
+                  <span className="hidden md:inline-flex items-center px-2.5 py-1 rounded-lg bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800 text-[11px] font-bold shrink-0">
+                    {activeTmpl.categoryFa}
+                  </span>
+                );
+              })()}
+            </div>
           </div>
         )}
 
@@ -439,30 +464,15 @@ export default function HealthEnvChecklistFormModal({
           <div className="flex items-center gap-1">
             <button
               type="button"
-              onClick={() => setActiveTab('items')}
-              className={`px-4 py-2.5 font-black border-b-2 transition flex items-center gap-1.5 cursor-pointer ${
-                activeTab === 'items'
-                  ? 'border-teal-600 text-teal-600 dark:text-teal-400'
-                  : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-white'
-              }`}
-            >
-              <span>۱. چک‌لیست ارزیابی</span>
-              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 font-mono">
-                {items.length}
-              </span>
-            </button>
-
-            <button
-              type="button"
               onClick={() => setActiveTab('schedule')}
-              className={`px-4 py-2.5 font-black border-b-2 transition flex items-center gap-1.5 cursor-pointer ${
+              className={`px-3.5 py-2.5 font-black border-b-2 transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 ${
                 activeTab === 'schedule'
                   ? 'border-teal-600 text-teal-600 dark:text-teal-400'
                   : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-white'
               }`}
             >
-              <Repeat className="w-3.5 h-3.5" />
-              <span>۲. زمان‌بندی و تناوب</span>
+              <Repeat className="w-3.5 h-3.5 shrink-0" />
+              <span>۱. زمان‌بندی و تناوب</span>
               {formData.scheduleType === 'PERIODIC' && (
                 <span className="text-[9px] px-1.5 py-0.2 rounded bg-teal-100 dark:bg-teal-900/50 text-teal-700 font-bold">
                   دوره‌ای
@@ -473,25 +483,40 @@ export default function HealthEnvChecklistFormModal({
             <button
               type="button"
               onClick={() => setActiveTab('info')}
-              className={`px-4 py-2.5 font-black border-b-2 transition flex items-center gap-1.5 cursor-pointer ${
+              className={`px-3.5 py-2.5 font-black border-b-2 transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 ${
                 activeTab === 'info'
                   ? 'border-teal-600 text-teal-600 dark:text-teal-400'
                   : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-white'
               }`}
             >
-              <span>۳. مشخصات و مسئولان</span>
+              <span>۲. مشخصات و مسئولان</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('items')}
+              className={`px-3.5 py-2.5 font-black border-b-2 transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 ${
+                activeTab === 'items'
+                  ? 'border-teal-600 text-teal-600 dark:text-teal-400'
+                  : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-white'
+              }`}
+            >
+              <span>۳. چک‌لیست ارزیابی</span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 font-mono">
+                {items.length}
+              </span>
             </button>
 
             <button
               type="button"
               onClick={() => setActiveTab('attachments')}
-              className={`px-4 py-2.5 font-black border-b-2 transition flex items-center gap-1.5 cursor-pointer ${
+              className={`px-3.5 py-2.5 font-black border-b-2 transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 ${
                 activeTab === 'attachments'
                   ? 'border-teal-600 text-teal-600 dark:text-teal-400'
                   : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-white'
               }`}
             >
-              <Paperclip className="w-3.5 h-3.5" />
+              <Paperclip className="w-3.5 h-3.5 shrink-0" />
               <span>۴. پیوست‌ها و فایل‌ها</span>
               {(formData.attachments?.length || 0) > 0 && (
                 <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-teal-100 dark:bg-teal-900/60 text-teal-800 font-mono font-bold">
@@ -503,7 +528,7 @@ export default function HealthEnvChecklistFormModal({
             <button
               type="button"
               onClick={() => setActiveTab('summary')}
-              className={`px-4 py-2.5 font-black border-b-2 transition flex items-center gap-1.5 cursor-pointer ${
+              className={`px-3.5 py-2.5 font-black border-b-2 transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 ${
                 activeTab === 'summary'
                   ? 'border-teal-600 text-teal-600 dark:text-teal-400'
                   : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-white'

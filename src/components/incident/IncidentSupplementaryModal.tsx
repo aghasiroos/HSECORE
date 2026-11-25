@@ -1,43 +1,44 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { SafetyIncidentRecord, IncidentSupplementaryForm, UserProfile } from '../../types';
-import { 
-  getSupplementaryFormByIncidentId, 
-  saveSupplementaryForm, 
-  isUserAuthorizedToEditSupplementaryForm,
-  calculateDeadlineInfo,
-  getCurrentJalaliDate
-} from '../../utils/incidentSupplementaryHelper';
-import { 
-  getComplexPersonnelList, 
-  ComplexPersonnel 
-} from '../../utils/personnelHelper';
-import { useFinalSubmit } from '../../context/FinalSubmitContext';
-import { useSystemBranding } from '../../utils/systemBrandingHelper';
-import { HseLogo } from '../HseLogo';
-import { printService } from '../../services/printService';
+import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
-  FileText,
-  Printer,
-  Save,
+  AlertTriangle,
   CheckCircle2,
   Clock,
-  AlertTriangle,
-  Lock,
-  Unlock,
-  History,
-  X,
-  UserCheck,
-  Info,
-  Edit3,
-  Eye,
   FileCheck,
-  Search,
-  Users,
-  RotateCcw
+  FileSpreadsheet,
+  History,
+  Lock,
+  Paperclip,
+  Printer,
+  RotateCcw,
+  Save,
+  Send,
+  ShieldAlert,
+  ShieldCheck,
+  X,
 } from 'lucide-react';
-import PersianDatePicker from '../common/PersianDatePicker';
 import { toast } from 'react-hot-toast';
-import { showConfirmDialog } from '../common/ConfirmDialogModal';
+import {
+  IncidentSupplementaryForm,
+  RhsF68AttachmentItem,
+  SafetyIncidentRecord,
+  UserProfile,
+} from '../../types';
+import {
+  calculateDeadlineInfo,
+  getCurrentJalaliDate,
+  getSupplementaryFormByIncidentId,
+  isUserAuthorizedToEditSupplementaryForm,
+  isUserHseHeadForRhsF34,
+} from '../../utils/incidentSupplementaryHelper';
+import { toPersianDigits } from '../../utils/jalaliDate';
+import { apiDb } from '../../services/apiDatabaseClient';
+import { printService } from '../../services/printService';
+import { useSystemBranding } from '../../utils/systemBrandingHelper';
+import PersianDatePicker from '../common/PersianDatePicker';
+import CentralPersonnelSelector from '../CentralPersonnelSelector';
+import { DigitalSignaturePad } from '../referral/DigitalSignaturePad';
+import { RhsF68EvidencePanel } from './RhsF68EvidencePanel';
 
 interface IncidentSupplementaryModalProps {
   isFa: boolean;
@@ -45,7 +46,64 @@ interface IncidentSupplementaryModalProps {
   currentUser: UserProfile;
   isOpen: boolean;
   onClose: () => void;
-  onSaved?: (updatedForm: IncidentSupplementaryForm) => void;
+  onSaved?: (updatedForm: IncidentSupplementaryForm, updatedIncident?: SafetyIncidentRecord) => void;
+}
+
+const SEVERITY_OPTIONS: Array<{
+  value: 'High' | 'Medium' | 'Low' | 'Minimal';
+  labelFa: string;
+  descFa: string;
+  activeClass: string;
+}> = [
+  {
+    value: 'High',
+    labelFa: 'شدید (High)',
+    descFa: 'فوت، نقص عضو دائم یا خسارت عمده فرآیندی',
+    activeClass: 'border-rose-600 bg-rose-50 text-rose-900 dark:bg-rose-950/40 dark:text-rose-200',
+  },
+  {
+    value: 'Medium',
+    labelFa: 'متوسط (Medium)',
+    descFa: 'آسیب با روزهای تلف‌شده یا خسارت قابل توجه',
+    activeClass: 'border-amber-600 bg-amber-50 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200',
+  },
+  {
+    value: 'Low',
+    labelFa: 'کم (Low)',
+    descFa: 'کمک‌های اولیه یا خسارت محدود تجهیزاتی',
+    activeClass: 'border-sky-600 bg-sky-50 text-sky-900 dark:bg-sky-950/40 dark:text-sky-200',
+  },
+  {
+    value: 'Minimal',
+    labelFa: 'ناچیز (Minimal)',
+    descFa: 'اثر جزئی بدون توقف یا آسیب جدی',
+    activeClass: 'border-emerald-600 bg-emerald-50 text-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200',
+  },
+];
+
+function RegalPetrochemicalLogo() {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', direction: 'ltr' }}>
+      <svg width="34" height="34" viewBox="0 0 40 40" fill="none" aria-hidden="true">
+        <path
+          d="M20 4C11.16 4 4 11.16 4 20c0 5.45 2.73 10.26 6.9 13.15L14.5 28C11.78 26.15 10 23.27 10 20c0-5.52 4.48-10 10-10 4.47 0 8.25 2.94 9.53 7h6.16C34.33 9.56 27.82 4 20 4z"
+          fill="#1f2937"
+        />
+        <path
+          d="M17 15h8.2c2.8 0 4.8 1.7 4.8 4.2 0 1.9-1.1 3.3-2.9 3.9l3.6 5.9h-4.3l-3.1-5.2h-2.5V29H17V15zm3.8 5.9h3.9c1.1 0 1.8-.6 1.8-1.6s-.7-1.6-1.8-1.6h-3.9v3.2z"
+          fill="#0f172a"
+        />
+      </svg>
+      <div style={{ lineHeight: 1.05, textAlign: 'left' }}>
+        <div style={{ fontSize: '8px', fontWeight: 700, letterSpacing: '0.06em', color: '#334155' }}>
+          PETROCHEMICAL
+        </div>
+        <div style={{ fontSize: '15px', fontWeight: 900, color: '#0f172a', fontFamily: 'Georgia, serif' }}>
+          Regal
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function IncidentSupplementaryModal({
@@ -54,1690 +112,1560 @@ export default function IncidentSupplementaryModal({
   currentUser,
   isOpen,
   onClose,
-  onSaved
+  onSaved,
 }: IncidentSupplementaryModalProps) {
-  const { confirmFinalSubmit } = useFinalSubmit();
   const { branding } = useSystemBranding();
-  // Load form from storage or auto-populate from incident
-  const [formData, setFormData] = useState<IncidentSupplementaryForm>(() => {
-    return getSupplementaryFormByIncidentId(incident.id, incident, currentUser);
-  });
 
-  const [activeView, setActiveView] = useState<'form' | 'pdf_preview' | 'audit_log'>('form');
-  const [showSaveNotification, setShowSaveNotification] = useState<string | null>(null);
+  const [formData, setFormData] = useState<IncidentSupplementaryForm>(() =>
+    getSupplementaryFormByIncidentId(incident.id, incident, currentUser)
+  );
+  const [activeTab, setActiveTab] = useState<'form' | 'evidence' | 'nc' | 'print' | 'audit'>('form');
+  const [saving, setSaving] = useState(false);
 
-  // Personnel Search & Modal State
-  const [personnelModalOpen, setPersonnelModalOpen] = useState(false);
-  const [personnelTargetField, setPersonnelTargetField] = useState<'victim' | 'reporter' | 'hseExpert' | null>(null);
-  const [personnelSearchQuery, setPersonnelSearchQuery] = useState('');
-  const [personnelDeptFilter, setPersonnelDeptFilter] = useState('ALL');
-  
-  // Inline Autocomplete Suggestions State
-  const [showVictimCodeSuggestions, setShowVictimCodeSuggestions] = useState(false);
-  const [showVictimNameSuggestions, setShowVictimNameSuggestions] = useState(false);
-  const codeDropdownRef = useRef<HTMLDivElement>(null);
-  const nameDropdownRef = useRef<HTMLDivElement>(null);
+  // HSE Head review state
+  const [reviewNotes, setReviewNotes] = useState('');
+  const [headSignature, setHeadSignature] = useState('');
 
-  // All personnel list from settings
-  const [personnelListState, setPersonnelListState] = useState<ComplexPersonnel[]>(() => getComplexPersonnelList());
+  // Linked Non-Conformity editable state
+  const [ncOwnerCode, setNcOwnerCode] = useState('');
+  const [ncOwnerName, setNcOwnerName] = useState('');
+  const [ncDueDate, setNcDueDate] = useState('');
+  const [ncCorrectiveAction, setNcCorrectiveAction] = useState('');
+  const [ncStatus, setNcStatus] = useState('REGISTERED');
+  const [savingNc, setSavingNc] = useState(false);
 
   useEffect(() => {
-    const refresh = () => setPersonnelListState(getComplexPersonnelList());
-    refresh();
-    window.addEventListener('hse_personnel_updated', refresh);
-    window.addEventListener('app_data_mutated', refresh);
-    window.addEventListener('storage', refresh);
-    return () => {
-      window.removeEventListener('hse_personnel_updated', refresh);
-      window.removeEventListener('app_data_mutated', refresh);
-      window.removeEventListener('storage', refresh);
-    };
-  }, [isOpen]);
-
-  const allPersonnelList = personnelListState;
-
-  // Departments list for personnel filter
-  const departmentsList = useMemo<string[]>(() => {
-    const depts = new Set<string>();
-    allPersonnelList.forEach(p => {
-      if (p.department) depts.add(p.department);
-      if (p.unit) depts.add(p.unit);
-    });
-    return Array.from(depts).filter(Boolean);
-  }, [allPersonnelList]);
-
-  // Filtered personnel for modal picker
-  const filteredPersonnel = useMemo(() => {
-    const query = personnelSearchQuery.trim().toLowerCase();
-    return allPersonnelList.filter(p => {
-      const matchDept = personnelDeptFilter === 'ALL' || p.department === personnelDeptFilter || p.unit === personnelDeptFilter;
-      if (!matchDept) return false;
-      if (!query) return true;
-      return (
-        p.personnelCode?.toLowerCase().includes(query) ||
-        p.effectiveCode?.toLowerCase().includes(query) ||
-        p.fullName?.toLowerCase().includes(query) ||
-        p.firstName?.toLowerCase().includes(query) ||
-        p.lastName?.toLowerCase().includes(query) ||
-        p.nationalCode?.toLowerCase().includes(query) ||
-        p.jobTitle?.toLowerCase().includes(query) ||
-        p.department?.toLowerCase().includes(query) ||
-        p.unit?.toLowerCase().includes(query)
-      );
-    });
-  }, [allPersonnelList, personnelSearchQuery, personnelDeptFilter]);
-
-  // Inline suggestions for victim personnel code
-  const victimCodeSuggestions = useMemo(() => {
-    const q = (formData.victimPersonnelCode || '').trim().toLowerCase();
-    if (!q || q.length < 1) return [];
-    return allPersonnelList.filter(p => 
-      p.personnelCode?.toLowerCase().includes(q) ||
-      p.effectiveCode?.toLowerCase().includes(q) ||
-      p.nationalCode?.toLowerCase().includes(q)
-    ).slice(0, 6);
-  }, [allPersonnelList, formData.victimPersonnelCode]);
-
-  // Inline suggestions for victim full name
-  const victimNameSuggestions = useMemo(() => {
-    const q = (formData.victimName || '').trim().toLowerCase();
-    if (!q || q.length < 2) return [];
-    return allPersonnelList.filter(p => 
-      p.fullName?.toLowerCase().includes(q) ||
-      p.firstName?.toLowerCase().includes(q) ||
-      p.lastName?.toLowerCase().includes(q)
-    ).slice(0, 6);
-  }, [allPersonnelList, formData.victimName]);
-
-  // Select personnel and fill relevant fields
-  const handleSelectPersonnel = (person: ComplexPersonnel, target: 'victim' | 'reporter' | 'hseExpert') => {
-    if (target === 'victim') {
-      setFormData(prev => ({
-        ...prev,
-        victimPersonnelCode: person.personnelCode || person.effectiveCode || '',
-        victimName: person.fullName || `${person.firstName} ${person.lastName}`.trim(),
-        victimDepartment: person.department || person.unit || person.section || prev.victimDepartment,
-        victimOrgUnit: prev.victimOrgUnit || person.department || person.unit || '',
-        victimWorkExperience: prev.victimWorkExperience || (person.age && person.age > 22 ? `${person.age - 22} سال` : '')
-      }));
-      setShowVictimCodeSuggestions(false);
-      setShowVictimNameSuggestions(false);
-    } else if (target === 'reporter') {
-      const roleStr = person.jobTitle ? ` - ${person.jobTitle}` : (person.position ? ` - ${person.position}` : '');
-      setFormData(prev => ({
-        ...prev,
-        reporterNameAndRole: `${person.fullName}${roleStr}`
-      }));
-    } else if (target === 'hseExpert') {
-      setFormData(prev => ({
-        ...prev,
-        hseExpertName: person.fullName
-      }));
-    }
-    setPersonnelModalOpen(false);
-  };
-
-  // Reset/Clear form entirely (Requirement 3: no pre-filled values)
-  const handleClearForm = async () => {
-    const confirmed = await showConfirmDialog({
-      title: isFa ? 'پاکسازی فیلدهای فرم' : 'Clear Form Fields',
-      message: isFa ? 'آیا مطمئن هستید که می‌خواهید تمام فیلدهای این فرم را پاکسازی و خالی کنید؟' : 'Are you sure you want to clear all form fields?',
-      confirmLabel: isFa ? 'پاکسازی' : 'Clear',
-      cancelLabel: isFa ? 'انصراف' : 'Cancel',
-      tone: 'warning',
-    });
-    if (confirmed) {
-      setFormData({
-        id: `supp-${incident.id}`,
-        incidentId: incident.id,
-        incidentReportNumber: incident.reportNumber || '',
-        formCode: 'RHS – F34',
-        revision: '00',
-        formNumber: '',
-        formDate: '',
-        distributionList: 'توزیع نسخ: ۱- مدیریت امور مجتمع  ۲- واحد HSE  ۳- امور اداری',
-        eventDateTime: '',
-        eventDate: '',
-        eventTime: '',
-        exactLocation: '',
-        reportDateTime: '',
-        reportDate: '',
-        reportTime: '',
-        locationOccurrence: '',
-        reporterNameAndRole: '',
-        victimOrgUnit: '',
-        activityDuringIncident: '',
-        victimCount: '',
-        estimatedLoss: '',
-        briefDescription: '',
-        riskSeverityMatrix: '',
-        directCauses: '',
-        indirectCauses: '',
-        rootCauses: '',
-        victimName: '',
-        victimPersonnelCode: '',
-        victimDepartment: '',
-        victimWorkExperience: '',
-        injuryType: '',
-        injuredBodyPart: '',
-        medicalTreatment: '',
-        lostWorkDays: '',
-        capaFormNumber: '',
-        capaRequiredActions: '',
-        startDate: '',
-        endDate: '',
-        hseExpertName: '',
-        hseExpertApproved: false,
-        status: 'in_progress',
-        deadlineDate: '',
-        daysRemaining: 10,
-        isExpired: false,
-        auditLogs: [
-          ...(formData.auditLogs || []),
-          {
-            id: `audit-${Date.now()}`,
-            user: currentUser?.fullName || 'کاربر سیستم',
-            userCode: currentUser?.personnelNumber,
-            role: currentUser?.role || 'کارشناس HSE',
-            action: 'update',
-            actionFa: 'پاکسازی و خالی کردن فرم جهت ثبت مجدد',
-            timestamp: `${getCurrentJalaliDate()} - ${new Date().toLocaleTimeString('fa-IR')}`,
-            details: 'حذف کلیه داده‌های پیش‌فرض و ایجاد فرم خام'
-          }
-        ],
-        createdAt: formData.createdAt || `${getCurrentJalaliDate()} ${new Date().toLocaleTimeString('fa-IR')}`,
-        updatedAt: `${getCurrentJalaliDate()} ${new Date().toLocaleTimeString('fa-IR')}`
-      });
-      setShowSaveNotification(isFa ? 'تمامی فیلدهای فرم با موفقیت پاکسازی و خالی شدند.' : 'All fields cleared.');
-      setTimeout(() => setShowSaveNotification(null), 3000);
-    }
-  };
-
-  // Sync if incident changes
-  useEffect(() => {
-    if (incident) {
-      const loaded = getSupplementaryFormByIncidentId(incident.id, incident, currentUser);
-      setFormData(loaded);
-    }
-  }, [incident, currentUser]);
-
-  // Recalculate deadline metrics
-  const deadlineInfo = useMemo(() => {
-    return calculateDeadlineInfo(formData.startDate?.replace(/\./g, '/') || incident.eventDate, formData.status);
-  }, [formData.startDate, incident.eventDate, formData.status]);
-
-  const isAuthorized = useMemo(() => {
-    return isUserAuthorizedToEditSupplementaryForm(currentUser, formData);
-  }, [currentUser, formData]);
-
-  const isLocked = useMemo(() => {
-    // If expired and not authorized, lock the form
-    if (formData.status === 'expired' || deadlineInfo.isExpired) {
-      if (!isAuthorized) return true;
-    }
-    // If finalized/completed and not authorized, lock the form
-    if (formData.status === 'completed' && !isAuthorized) {
-      return true;
-    }
-    return false;
-  }, [formData.status, deadlineInfo.isExpired, isAuthorized]);
+    if (!isOpen || !incident) return;
+    const loaded = getSupplementaryFormByIncidentId(incident.id, incident, currentUser);
+    setFormData(loaded);
+    setReviewNotes(loaded.hseHeadReviewNotes || '');
+    setHeadSignature(loaded.hseHeadSignature || '');
+    setNcOwnerCode(loaded.nonConformanceAssignedTo || loaded.assignedExpertCode || '');
+    setNcOwnerName(loaded.nonConformanceAssignedToName || loaded.assignedExpertName || '');
+    setNcDueDate(loaded.nonConformanceDueDate || '');
+    setNcCorrectiveAction(loaded.nonConformanceCorrectiveAction || '');
+    setNcStatus(loaded.nonConformanceStatus || 'REGISTERED');
+  }, [isOpen, incident, currentUser]);
 
   if (!isOpen) return null;
 
-  const handleFieldChange = (field: keyof IncidentSupplementaryForm, value: any) => {
-    if (isLocked) return;
-    setFormData(prev => {
-      const updated = {
-        ...prev,
-        [field]: value
-      };
-      
-      // Auto-update endDate (10 days after) when startDate changes
-      if (field === 'startDate' && typeof value === 'string') {
-        const cleanStart = value.replace(/\./g, '/');
-        const dInfo = calculateDeadlineInfo(cleanStart);
-        updated.endDate = dInfo.deadlineDate;
+  const isHseHead = isUserHseHeadForRhsF34(currentUser);
+  const canEditBase = isUserAuthorizedToEditSupplementaryForm(currentUser, formData);
+  const isCompleted = formData.status === 'completed' || formData.workflowStage === 'COMPLETED';
+  const isPendingApproval = formData.workflowStage === 'PENDING_APPROVAL' || formData.status === 'pending_approval';
+  const isReturned = formData.workflowStage === 'RETURNED' || formData.status === 'returned';
+  const isReadOnly = isCompleted || (!canEditBase && !isHseHead);
+
+  const anchorDate =
+    formData.f28FinalApprovedDate ||
+    formData.startDate ||
+    incident.rhsF28?.hseCenterHeadSignedDate ||
+    incident.reportDate ||
+    getCurrentJalaliDate();
+  const deadlineInfo = calculateDeadlineInfo(anchorDate, formData.status);
+  const isOverdue = !isCompleted && (formData.isExpired || deadlineInfo.isExpired);
+  const isNearDeadline = !isCompleted && !isOverdue && (formData.isNearDeadline || deadlineInfo.isNearDeadline);
+
+  const fmt = (val?: string | number | null) => {
+    if (val === undefined || val === null || String(val).trim() === '') return '—';
+    return isFa ? toPersianDigits(String(val)) : String(val);
+  };
+
+  const setField = <K extends keyof IncidentSupplementaryForm>(key: K, value: IncidentSupplementaryForm[K]) => {
+    setFormData((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const handleSaveToServer = async (options?: {
+    submitForApproval?: boolean;
+    actionType?: 'draft_save' | 'update' | 'assign';
+    overrideForm?: Partial<IncidentSupplementaryForm>;
+  }) => {
+    const payloadForm: IncidentSupplementaryForm = {
+      ...formData,
+      ...(options?.overrideForm || {}),
+    };
+
+    if (options?.submitForApproval) {
+      if (!payloadForm.briefDescription?.trim()) {
+        toast.error('تکمیل بخش «۲- شرح مختصر رویداد» پیش از ارسال جهت تأیید الزامی است.');
+        return;
       }
-      
-      return updated;
+      if (!payloadForm.riskSeverityMatrix) {
+        toast.error('انتخاب سطح شدت ریسک در «۳- داده‌های ماتریس شدت» الزامی است.');
+        return;
+      }
+      if (!payloadForm.directCauses?.trim() && !payloadForm.rootCauses?.trim()) {
+        toast.error('ثبت حداقل «علل مستقیم» یا «علل ریشه‌ای» پیش از ارسال جهت تأیید الزامی است.');
+        return;
+      }
+    }
+
+    setSaving(true);
+    try {
+      const updatedIncident = await apiDb.saveIncidentRhsF34(incident.reportNumber || incident.id, {
+        form: payloadForm,
+        submitForApproval: Boolean(options?.submitForApproval),
+        actionType: options?.actionType || 'update',
+      });
+      const updatedForm: IncidentSupplementaryForm =
+        updatedIncident?.supplementaryForm || payloadForm;
+      setFormData(updatedForm);
+      onSaved?.(updatedForm, updatedIncident);
+      toast.success(
+        options?.submitForApproval
+          ? 'پرونده تجزیه و تحلیل حادثه (RHS-F34) با موفقیت تکمیل و جهت تأیید نهایی به رئیس HSE ارسال شد.'
+          : 'اطلاعات فرم تجزیه و تحلیل حادثه (RHS-F34) در پایگاه داده ذخیره شد.'
+      );
+    } catch (err: any) {
+      toast.error(err?.message || 'خطا در ذخیره فرم تجزیه و تحلیل حادثه (RHS-F34)');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleAttachmentsChange = async (nextAttachments: RhsF68AttachmentItem[]) => {
+    setFormData((prev) => ({ ...prev, attachments: nextAttachments }));
+    await handleSaveToServer({
+      actionType: 'update',
+      overrideForm: { attachments: nextAttachments },
     });
   };
 
-  const handleSaveDraft = () => {
-    const updated = saveSupplementaryForm(
-      {
-        ...formData,
-        status: formData.status === 'completed' ? 'completed' : 'in_progress'
-      },
-      currentUser,
-      'draft_save',
-      'ذخیره موقت تغییرات توسط کاربر'
-    );
-    setFormData(updated);
-    if (onSaved) onSaved(updated);
-    setShowSaveNotification(isFa ? 'پیش‌نویس فرم تکمیلی با موفقیت ذخیره شد.' : 'Draft saved successfully.');
-    setTimeout(() => setShowSaveNotification(null), 3500);
-  };
-
-  const handleFinalize = () => {
-    if (!formData.briefDescription.trim()) {
-      toast.error(isFa ? 'لطفاً شرح مختصر رویداد را وارد نمایید.' : 'Please enter incident description.');
+  const handleHeadReview = async (decision: 'APPROVE' | 'RETURN') => {
+    if (decision === 'RETURN' && !reviewNotes.trim()) {
+      toast.error('در صورت عودت پرونده جهت اصلاح، درج علت و نکات اصلاحی الزامی است.');
       return;
     }
 
-    confirmFinalSubmit({
-      isFa,
-      onConfirm: () => {
-        const updated = saveSupplementaryForm(
-          {
-            ...formData,
-            status: 'completed',
-            hseExpertApproved: true
-          },
-          currentUser,
-          'finalize',
-          'تکمیل و ثبت نهایی فرم تجزیه و تحلیل رویداد (RHS-F34)'
-        );
-        setFormData(updated);
-        if (onSaved) onSaved(updated);
-        setShowSaveNotification(isFa ? 'فرم تکمیلی با موفقیت تکمیل و به پرونده حادثه پیوست شد.' : 'Supplementary form completed & attached.');
-        setTimeout(() => setShowSaveNotification(null), 4000);
-      }
-    });
+    setSaving(true);
+    try {
+      const updatedIncident = await apiDb.reviewIncidentRhsF34(incident.reportNumber || incident.id, {
+        decision,
+        reviewNotes: reviewNotes.trim(),
+        reviewerName: currentUser.fullName || currentUser.username,
+        reviewerCode: currentUser.personnelNumber || '',
+        signature: headSignature,
+      });
+      const updatedForm: IncidentSupplementaryForm =
+        updatedIncident?.supplementaryForm || formData;
+      setFormData(updatedForm);
+      onSaved?.(updatedForm, updatedIncident);
+      toast.success(
+        decision === 'APPROVE'
+          ? 'تجزیه و تحلیل حادثه (RHS-F34) توسط رئیس HSE تأیید نهایی و مختومه شد.'
+          : 'پرونده بدون حذف سوابق قبلی جهت اصلاح به کارشناس HSE عودت داده شد.'
+      );
+    } catch (err: any) {
+      toast.error(err?.message || 'خطا در ثبت نتیجه بررسی رئیس HSE');
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const handlePrint = () => {
-    printService.printElement('rhs-f34-print-document', {
-      title: `فرم گزارش و بررسی تکمیلی حادثه (RHS-F34) - پرونده ${incident.reportNumber || ''}`,
-      orientation: 'portrait',
-      pageSize: 'A4',
-      documentCode: `RHS-F34 / ${incident.reportNumber || ''}`,
-      documentDate: incident.eventDate,
-      isFa: isFa,
-      autoPrint: true
-    });
+  const handleUpdateNonConformance = async () => {
+    setSavingNc(true);
+    try {
+      const res = await apiDb.updateIncidentRhsF34NonConformance(incident.reportNumber || incident.id, {
+        assignedTo: ncOwnerCode,
+        assignedToName: ncOwnerName,
+        dueDate: ncDueDate,
+        correctiveAction: ncCorrectiveAction,
+        status: ncStatus,
+      });
+      const updatedIncident = res?.incident;
+      const updatedForm: IncidentSupplementaryForm =
+        updatedIncident?.supplementaryForm || formData;
+      setFormData(updatedForm);
+      onSaved?.(updatedForm, updatedIncident);
+      toast.success('اطلاعات عدم انطباق تأخیر تحلیل حادثه با موفقیت بروزرسانی شد.');
+    } catch (err: any) {
+      toast.error(err?.message || 'خطا در بروزرسانی عدم انطباق مرتبط');
+    } finally {
+      setSavingNc(false);
+    }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 overflow-y-auto" dir={isFa ? 'rtl' : 'ltr'}>
-      {/* Print CSS specific to RHS-F34 exact layout */}
-      <style>{`
-        @media print {
-          body * {
-            visibility: hidden !important;
-          }
-          #rhs-f34-print-document, #rhs-f34-print-document * {
-            visibility: visible !important;
-          }
-          #rhs-f34-print-document {
-            position: absolute !important;
-            left: 0 !important;
-            top: 0 !important;
-            width: 100% !important;
-            max-width: 210mm !important;
-            margin: 0 auto !important;
-            padding: 8mm 10mm !important;
-            background: white !important;
-            color: black !important;
-            box-shadow: none !important;
-            border: none !important;
-            font-size: 11px !important;
-            line-height: 1.35 !important;
-          }
-          .no-print, .print\\:hidden {
-            display: none !important;
-          }
-          .page-break {
-            page-break-after: always;
-          }
-        }
-      `}</style>
+  const handlePrintA4 = () => {
+    const triggerPrint = () => {
+      printService.printElement('rhs-f34-a4-print-root', {
+        title: `تجزیه و تحلیل رویداد RHS-F34 - ${formData.formNumber || incident.reportNumber}`,
+      });
+    };
+    if (activeTab !== 'print') {
+      setActiveTab('print');
+      setTimeout(triggerPrint, 220);
+    } else {
+      triggerPrint();
+    }
+  };
 
-      <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-5xl w-full max-h-[94vh] shadow-2xl border border-slate-200 dark:border-slate-800 flex flex-col overflow-hidden">
-        
-        {/* MODAL HEADER & CONTROLS (NON-PRINT) */}
-        <div className="p-4 sm:p-5 bg-gradient-to-r from-slate-900 via-rose-950 to-slate-900 text-white flex flex-wrap items-center justify-between gap-3 shrink-0 print:hidden">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-rose-600/30 border border-rose-500/40 flex items-center justify-center text-rose-400">
-              <FileText className="w-5 h-5" />
+  const workflowStatusLabel = isCompleted
+    ? 'تکمیل و تأیید نهایی شده'
+    : isPendingApproval
+    ? 'در انتظار تأیید نهایی رئیس HSE'
+    : isReturned
+    ? 'عودت شده جهت اصلاح'
+    : isOverdue
+    ? `دارای تأخیر (${fmt(Math.abs(deadlineInfo.daysRemaining))} روز پس از مهلت)`
+    : 'در انتظار تکمیل / تأیید تحلیل';
+
+  const auditLogs = Array.isArray(formData.auditLogs) ? [...formData.auditLogs].reverse() : [];
+  const attachments = Array.isArray(formData.attachments) ? formData.attachments : [];
+
+  const renderMatrixMark = (target: 'High' | 'Medium' | 'Low' | 'Minimal') => {
+    if (formData.riskSeverityMatrix === target) {
+      return <span style={{ fontSize: '18px', fontWeight: 900, lineHeight: 1 }}>✽</span>;
+    }
+    return <span style={{ fontSize: '11px', color: '#444' }}>·</span>;
+  };
+
+  const formatPrintDate = (d?: string) => {
+    const clean = String(d || '').trim().replace(/\//g, '.');
+    return clean ? toPersianDigits(clean) : '';
+  };
+
+  return createPortal(
+    <div className="fixed inset-0 z-[99998] bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4">
+      <div
+        dir={isFa ? 'rtl' : 'ltr'}
+        className="bg-white dark:bg-slate-900 rounded-2xl max-w-6xl w-full max-h-[95vh] flex flex-col shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden"
+      >
+        {/* Top Modal Header */}
+        <div className="px-5 py-4 bg-slate-900 text-white flex flex-col lg:flex-row lg:items-center justify-between gap-3 shrink-0 border-b border-slate-800">
+          <div className="flex items-start gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center shrink-0">
+              <FileSpreadsheet className="w-5 h-5 text-white" />
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="bg-rose-500 text-white text-[10px] font-black px-2 py-0.5 rounded uppercase tracking-wider font-mono">
-                  RHS – F34
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap text-[11px] text-slate-300">
+                <span className="font-mono font-black text-indigo-300">RHS – F34 (Rev 00)</span>
+                <span aria-hidden="true">·</span>
+                <span className="font-mono tabular-nums text-white font-bold">
+                  {formData.formNumber || 'RGC-HSE'}
                 </span>
-                <span className="text-[11px] text-rose-200 font-bold">
-                  {isFa ? 'فرم تکمیلی تجزیه و تحلیل رویداد' : 'Incident Analysis Supplementary Form'}
+                <span aria-hidden="true">·</span>
+                <span>متصل به حادثه {incident.reportNumber}</span>
+                <span aria-hidden="true">·</span>
+                <span
+                  className={`font-black ${
+                    isCompleted
+                      ? 'text-emerald-300'
+                      : isOverdue
+                      ? 'text-rose-300'
+                      : isNearDeadline
+                      ? 'text-amber-300'
+                      : 'text-sky-300'
+                  }`}
+                >
+                  {workflowStatusLabel}
                 </span>
               </div>
-              <h2 className="text-sm sm:text-base font-black text-white mt-0.5">
-                {incident.title}
-                <span className="text-xs text-slate-300 font-mono mr-2">
-                  ({incident.reportNumber})
-                </span>
+              <h2 className="text-sm sm:text-base font-black text-white mt-1 truncate">
+                تجزیه و تحلیل حادثه / رویداد — واحد HSE پتروشیمی رجال
               </h2>
             </div>
           </div>
 
-          {/* Navigation Views & Actions */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <div className="bg-white/10 p-1 rounded-xl flex items-center gap-1">
-              <button
-                onClick={() => setActiveView('form')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
-                  activeView === 'form' 
-                    ? 'bg-rose-600 text-white shadow-sm' 
-                    : 'text-slate-200 hover:text-white hover:bg-white/10'
-                }`}
-              >
-                <Edit3 className="w-3.5 h-3.5" />
-                {isFa ? 'تکمیل فرم' : 'Edit Form'}
-              </button>
-
-              <button
-                onClick={() => setActiveView('pdf_preview')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
-                  activeView === 'pdf_preview' 
-                    ? 'bg-rose-600 text-white shadow-sm' 
-                    : 'text-slate-200 hover:text-white hover:bg-white/10'
-                }`}
-              >
-                <Eye className="w-3.5 h-3.5" />
-                {isFa ? 'نمای سند PDF' : 'PDF Preview'}
-              </button>
-
-              <button
-                onClick={() => setActiveView('audit_log')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
-                  activeView === 'audit_log' 
-                    ? 'bg-rose-600 text-white shadow-sm' 
-                    : 'text-slate-200 hover:text-white hover:bg-white/10'
-                }`}
-              >
-                <History className="w-3.5 h-3.5" />
-                {isFa ? 'سوابق تغییرات' : 'Audit Logs'}
-              </button>
-            </div>
-
+          <div className="flex items-center gap-2 shrink-0 flex-wrap">
             <button
-              onClick={handlePrint}
-              className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow-sm"
-              title={isFa ? 'چاپ استاندارد A4' : 'Print A4 Form'}
+              type="button"
+              onClick={handlePrintA4}
+              className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer transition"
             >
               <Printer className="w-3.5 h-3.5" />
-              <span>{isFa ? 'چاپ A4' : 'Print'}</span>
+              <span>چاپ رسمی A4 / PDF</span>
             </button>
-
             <button
+              type="button"
               onClick={onClose}
-              className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-slate-300 hover:text-white flex items-center justify-center transition"
+              aria-label="بستن"
+              className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white cursor-pointer transition"
             >
               <X className="w-4 h-4" />
             </button>
           </div>
         </div>
 
-        {/* NOTIFICATION TOAST */}
-        {showSaveNotification && (
-          <div className="bg-emerald-600 text-white px-4 py-2.5 text-xs font-bold flex items-center justify-between shrink-0 shadow-inner animate-fade-in print:hidden">
-            <div className="flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-200" />
-              <span>{showSaveNotification}</span>
-            </div>
-            <button onClick={() => setShowSaveNotification(null)} className="text-white/80 hover:text-white font-bold">✕</button>
-          </div>
-        )}
-
-        {/* DEADLINE & EXPIRY STATUS BAR (NON-PRINT) */}
-        <div className="bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 p-3 sm:px-6 flex flex-wrap items-center justify-between gap-3 text-xs shrink-0 print:hidden">
-          <div className="flex items-center gap-2 sm:gap-4 flex-wrap">
-            {/* Status Badge */}
-            <div className="flex items-center gap-1.5">
-              <span className="text-slate-500 font-medium">{isFa ? 'وضعیت فرم:' : 'Status:'}</span>
-              <span className={`px-2.5 py-1 rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm ${
-                formData.status === 'completed' 
-                  ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' 
-                  : formData.status === 'expired' || deadlineInfo.isExpired
-                  ? 'bg-rose-100 text-rose-800 border border-rose-300'
-                  : formData.status === 'in_progress'
-                  ? 'bg-amber-100 text-amber-900 border border-blue-300'
-                  : 'bg-slate-200 text-slate-700 border border-slate-300'
-              }`}>
-                {formData.status === 'completed' && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />}
-                {formData.status === 'expired' && <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />}
-                {(formData.status === 'in_progress' || formData.status === 'not_started') && <Clock className="w-3.5 h-3.5 text-amber-600" />}
-                <span>
-                  {formData.status === 'completed' ? (isFa ? 'تکمیل شده (پیوست نهایی)' : 'Completed') :
-                   formData.status === 'expired' || deadlineInfo.isExpired ? (isFa ? 'مهلت تکمیل به پایان رسیده (منقضی)' : 'Expired') :
-                   formData.status === 'in_progress' ? (isFa ? 'در حال تکمیل' : 'In Progress') :
-                   (isFa ? 'تکمیل نشده' : 'Not Started')}
-                </span>
-              </span>
-            </div>
-
-            {/* 10-Day Countdown Info */}
-            <div className="flex items-center gap-1.5 bg-white dark:bg-slate-900 px-3 py-1 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
-              <Clock className="w-3.5 h-3.5 text-indigo-600" />
-              <span className="font-bold text-slate-700 dark:text-slate-200">
-                {isFa ? 'مهلت ۱۰ روزه:' : '10-Day Deadline:'}
-              </span>
-              <span className="font-mono text-slate-500">
-                ({formData.startDate} تا {deadlineInfo.deadlineDate})
-              </span>
-              <span className={`font-black px-2 py-0.5 rounded-md text-[11px] ${
-                formData.status === 'completed'
-                  ? 'bg-emerald-50 text-emerald-700 font-bold'
-                  : deadlineInfo.daysRemaining > 3
-                  ? 'bg-emerald-50 text-emerald-700'
-                  : deadlineInfo.daysRemaining >= 0
-                  ? 'bg-amber-50 text-amber-800 animate-pulse'
-                  : 'bg-rose-50 text-rose-700'
-              }`}>
-                {formData.status === 'completed' 
-                  ? (isFa ? 'تکمیل در موعد مقرر' : 'Completed')
-                  : deadlineInfo.daysRemaining > 0 
-                  ? (isFa ? `${deadlineInfo.daysRemaining} روز باقیمانده` : `${deadlineInfo.daysRemaining} days left`)
-                  : deadlineInfo.daysRemaining === 0
-                  ? (isFa ? 'امروز آخرین مهلت است' : 'Last day')
-                  : (isFa ? `${Math.abs(deadlineInfo.daysRemaining)} روز تأخیر و انقضا` : 'Overdue & Expired')}
-              </span>
-            </div>
+        {/* Legal 10-Day SLA Bar */}
+        <div
+          className={`px-5 py-2.5 border-b text-xs flex flex-wrap items-center justify-between gap-3 shrink-0 ${
+            isCompleted
+              ? 'bg-emerald-50/80 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-900 text-emerald-900 dark:text-emerald-200'
+              : isOverdue
+              ? 'bg-rose-50/90 dark:bg-rose-950/30 border-rose-200 dark:border-rose-900 text-rose-900 dark:text-rose-200'
+              : isNearDeadline
+              ? 'bg-amber-50/90 dark:bg-amber-950/30 border-amber-200 dark:border-amber-900 text-amber-900 dark:text-amber-200'
+              : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300'
+          }`}
+        >
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            <span className="inline-flex items-center gap-1.5 font-black">
+              {isCompleted ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+              ) : isOverdue ? (
+                <ShieldAlert className="w-4 h-4 text-rose-600" />
+              ) : (
+                <Clock className="w-4 h-4 text-indigo-600" />
+              )}
+              <span>مهلت قانونی ۱۰ روز تقویمی:</span>
+            </span>
+            <span>
+              شروع (تأیید نهایی RHS-F28):{' '}
+              <strong className="font-mono tabular-nums">{fmt(anchorDate)}</strong>
+            </span>
+            <span aria-hidden="true">·</span>
+            <span>
+              پایان مهلت:{' '}
+              <strong className="font-mono tabular-nums">
+                {fmt(formData.deadlineDate || deadlineInfo.deadlineDate)}
+              </strong>
+            </span>
+            <span aria-hidden="true">·</span>
+            <span className="font-black">
+              {isCompleted
+                ? `تکمیل در ${fmt(formData.completedAt)}`
+                : isOverdue
+                ? `عبور از مهلت (${fmt(Math.abs(deadlineInfo.daysRemaining))} روز تأخیر)`
+                : `${fmt(deadlineInfo.daysRemaining)} روز باقی‌مانده`}
+            </span>
           </div>
 
-          {/* Access / Lock indicator */}
-          <div className="flex items-center gap-2">
-            {isLocked ? (
-              <div className="flex items-center gap-1.5 bg-rose-50 text-rose-800 px-3 py-1 rounded-xl border border-rose-200 text-[11px] font-bold">
-                <Lock className="w-3.5 h-3.5 text-rose-600" />
-                <span>{isFa ? '🔒 ویرایش قفل است (مهلت پایان یافته)' : 'Locked'}</span>
-              </div>
-            ) : isAuthorized && (formData.status === 'expired' || deadlineInfo.isExpired) ? (
-              <div className="flex items-center gap-1.5 bg-emerald-50 text-emerald-800 px-3 py-1 rounded-xl border border-emerald-200 text-[11px] font-bold">
-                <Unlock className="w-3.5 h-3.5 text-emerald-600" />
-                <span>{isFa ? '✓ ویرایش فعال با سطح دسترسی مجاز' : 'Admin Override Active'}</span>
-              </div>
-            ) : null}
-
-            <div className="text-[11px] text-slate-400">
-              {isFa ? 'کد فرم:' : 'Code:'} <strong className="font-mono text-slate-700 dark:text-slate-300">RHS – F34</strong>
-            </div>
-          </div>
+          {formData.nonConformanceTrackingCode && (
+            <button
+              type="button"
+              onClick={() => setActiveTab('nc')}
+              className="px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-black inline-flex items-center gap-1.5 cursor-pointer transition"
+            >
+              <AlertTriangle className="w-3.5 h-3.5" />
+              <span>عدم انطباق خودکار: {formData.nonConformanceTrackingCode}</span>
+            </button>
+          )}
         </div>
 
-        {/* MODAL BODY CONTAINER */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-100/60 dark:bg-slate-950/40">
-          
-          {/* TAB 1: FORM COMPLETION / EDIT MODE */}
-          {activeView === 'form' && (
-            <div className="max-w-4xl mx-auto space-y-5">
-              
-              {/* Form Warning Banner if Expired */}
-              {(formData.status === 'expired' || deadlineInfo.isExpired) && (
-                <div className="p-3.5 rounded-2xl bg-amber-50 border border-blue-200 text-amber-900 flex items-start gap-3 text-xs">
-                  <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-                  <div>
-                    <strong className="block font-black mb-0.5">
-                      {isFa ? 'توجه: مهلت ۱۰ روزه تکمیل این فرم منقضی شده است' : 'Attention: The 10-day completion deadline has expired'}
-                    </strong>
-                    <p className="text-amber-800 leading-relaxed">
-                      {isAuthorized 
-                        ? (isFa ? 'شما با دسترسی مدیریت / کارشناسی ارشد HSE مجاز به ویرایش، تکمیل و بازنگری این فرم می‌باشید.' : 'You are authorized to edit and finalize this form.')
-                        : (isFa ? 'امکان ویرایش عادی برای این فرم غیرفعال است. جهت ویرایش و ثبت با مدیر واحد HSE تماس حاصل فرمایید.' : 'Editing is disabled. Contact HSE Admin.')}
-                    </p>
+        {/* Navigation Tabs */}
+        <div className="px-5 py-2.5 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex items-center gap-1.5 overflow-x-auto shrink-0">
+          {[
+            { id: 'form' as const, label: 'فرم تجزیه و تحلیل (RHS-F34)', icon: FileCheck },
+            { id: 'evidence' as const, label: `مستندات و پیوست‌ها (${fmt(attachments.length)})`, icon: Paperclip },
+            {
+              id: 'nc' as const,
+              label: formData.nonConformanceTrackingCode
+                ? `عدم انطباق تأخیر (${formData.nonConformanceTrackingCode})`
+                : 'کنترل عدم انطباق تأخیر',
+              icon: ShieldAlert,
+            },
+            { id: 'print' as const, label: 'پیش‌نمایش رسمی A4 / PDF', icon: Printer },
+            { id: 'audit' as const, label: `سوابق و رهگیری (${fmt(auditLogs.length)})`, icon: History },
+          ].map((tab) => {
+            const Icon = tab.icon;
+            const active = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTab(tab.id)}
+                className={`px-3 py-2 rounded-lg text-xs font-black inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer transition ${
+                  active
+                    ? 'bg-slate-900 dark:bg-indigo-600 text-white'
+                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+              >
+                <Icon className="w-3.5 h-3.5" />
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Scrollable Content */}
+        <div className="flex-1 overflow-y-auto p-5 space-y-5 text-xs">
+          {/* TAB 1: FORM & APPROVAL WORKFLOW */}
+          {activeTab === 'form' && (
+            <div className="space-y-5">
+              {/* Return banner if returned */}
+              {isReturned && formData.hseHeadReviewNotes && (
+                <div className="p-4 rounded-xl border border-rose-300 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200 space-y-1">
+                  <div className="font-black flex items-center gap-1.5">
+                    <RotateCcw className="w-4 h-4" />
+                    <span>عودت شده جهت اصلاح توسط {formData.hseHeadReviewerName || 'رئیس HSE'}:</span>
                   </div>
+                  <p className="leading-relaxed">{formData.hseHeadReviewNotes}</p>
                 </div>
               )}
 
-              {/* PDF MATCHING DOCUMENT CONTAINER (Exact visual schema) */}
-              <div id="rhs-f34-print-document" className="bg-white rounded-2xl p-5 sm:p-8 shadow-sm border border-slate-300 text-slate-900 font-sans space-y-4">
-                
-                {/* 1. DOCUMENT HEADER (Matching PDF) */}
-                <div className="border-b-2 border-slate-800 pb-3 flex items-center justify-between gap-4">
-                  {/* Right Logo (Only Logo, No Text) */}
-                  <div className="flex items-center justify-center min-w-[70px] h-14 bg-white p-1 rounded-lg border border-slate-200 overflow-hidden">
-                    {branding.logoUrl ? (
-                      <img 
-                        src={branding.logoUrl} 
-                        alt="Logo" 
-                        className="max-h-full max-w-full object-contain select-none"
-                      />
-                    ) : (
-                      <HseLogo size="md" target="header" showShadow={false} />
-                    )}
+              {/* Assignment & Form Number Bar */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3 p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/40">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-500 mb-1">شماره فرم تحلیل</label>
+                  <input
+                    type="text"
+                    disabled={isReadOnly}
+                    value={formData.formNumber}
+                    onChange={(e) => setField('formNumber', e.target.value)}
+                    dir="ltr"
+                    className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono text-xs font-bold disabled:opacity-60"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-500 mb-1">تاریخ فرم</label>
+                  <PersianDatePicker
+                    value={formData.formDate.replace(/\./g, '/')}
+                    onChange={(v) => setField('formDate', v.replace(/\//g, '.'))}
+                    disabled={isReadOnly}
+                    className="w-full"
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-[11px] font-bold text-slate-500 mb-1">
+                    کارشناس مسئول پیگیری و تجزیه و تحلیل HSE
+                  </label>
+                  <CentralPersonnelSelector
+                    isFa={isFa}
+                    value={formData.assignedExpertName || formData.hseExpertName}
+                    disabled={isReadOnly}
+                    placeholder="انتخاب کارشناس HSE از فهرست پرسنل..."
+                    onSelect={(person) => {
+                      if (!person) {
+                        setFormData((prev) => ({
+                          ...prev,
+                          assignedExpertName: '',
+                          assignedExpertCode: '',
+                        }));
+                        return;
+                      }
+                      setFormData((prev) => ({
+                        ...prev,
+                        assignedExpertName: person.fullName || '',
+                        assignedExpertCode: person.personnelCode || person.effectiveCode || '',
+                        hseExpertName: person.fullName || prev.hseExpertName,
+                        hseExpertPersonnelCode: person.personnelCode || person.effectiveCode || prev.hseExpertPersonnelCode,
+                      }));
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Section 1: Auto-Linked Base Event Data from RHS-F28 */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-2">
+                  <h3 className="font-black text-sm text-slate-900 dark:text-white">
+                    ۱- اطلاعات پایه رویداد و محل وقوع (فراخوانی خودکار از RHS-F28)
+                  </h3>
+                  <span className="text-[11px] text-slate-500 font-mono">گزارش مرجع: {incident.reportNumber}</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">تاریخ رویداد</label>
+                    <PersianDatePicker
+                      value={formData.eventDate}
+                      onChange={(v) => setField('eventDate', v)}
+                      disabled={isReadOnly}
+                      className="w-full"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">ساعت رویداد</label>
+                    <input
+                      type="text"
+                      disabled={isReadOnly}
+                      value={formData.eventTime}
+                      onChange={(e) => setField('eventTime', e.target.value)}
+                      placeholder="10:30"
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono disabled:opacity-60"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">محل دقیق رویداد</label>
+                    <input
+                      type="text"
+                      disabled={isReadOnly}
+                      value={formData.exactLocation}
+                      onChange={(e) => setField('exactLocation', e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 disabled:opacity-60"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">مکان بروز</label>
+                    <input
+                      type="text"
+                      disabled={isReadOnly}
+                      value={formData.locationOccurrence}
+                      onChange={(e) => setField('locationOccurrence', e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 disabled:opacity-60"
+                    />
                   </div>
 
-                  {/* Center Titles */}
-                  <div className="text-center flex-1">
-                    <h1 className="text-base sm:text-lg font-black text-slate-900">
-                      تجزيه و تحليل رويداد
-                    </h1>
-                    <h2 className="text-xs sm:text-sm font-bold text-slate-700 mt-0.5">
-                      واحد بهداشت ، ايمني و محيط زيست پتروشيمي رجال
-                    </h2>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">تاریخ گزارش رویداد</label>
+                    <PersianDatePicker
+                      value={formData.reportDate}
+                      onChange={(v) => setField('reportDate', v)}
+                      disabled={isReadOnly}
+                      className="w-full"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">ساعت گزارش رویداد</label>
+                    <input
+                      type="text"
+                      disabled={isReadOnly}
+                      value={formData.reportTime}
+                      onChange={(e) => setField('reportTime', e.target.value)}
+                      placeholder="11:00"
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono disabled:opacity-60"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">نام و سمت گزارش‌دهنده</label>
+                    <input
+                      type="text"
+                      disabled={isReadOnly}
+                      value={formData.reporterNameAndRole}
+                      onChange={(e) => setField('reporterNameAndRole', e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 disabled:opacity-60"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">واحد سازمانی مصدوم</label>
+                    <input
+                      type="text"
+                      disabled={isReadOnly}
+                      value={formData.victimOrgUnit}
+                      onChange={(e) => setField('victimOrgUnit', e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 disabled:opacity-60"
+                    />
                   </div>
 
-                  {/* Left Metadata (Date & Form Number) */}
-                  <div className="text-left font-mono text-xs space-y-1">
-                    <div className="flex items-center gap-2 justify-end">
-                      <span className="font-bold text-slate-700">تاريخ :</span>
-                      <input
-                        type="text"
-                        disabled={isLocked}
-                        value={formData.formDate}
-                        onChange={e => handleFieldChange('formDate', e.target.value)}
-                        className="w-24 text-center p-1 border border-slate-300 rounded font-mono text-xs bg-slate-50"
+                  <div className="sm:col-span-2 lg:col-span-3">
+                    <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">فعالیت حین حادثه</label>
+                    <input
+                      type="text"
+                      disabled={isReadOnly}
+                      value={formData.activityDuringIncident}
+                      onChange={(e) => setField('activityDuringIncident', e.target.value)}
+                      placeholder="شرح دقیق عملیات یا فعالیت در حال انجام حین بروز حادثه..."
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 disabled:opacity-60"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">تعداد مصدومین / قربانیان</label>
+                    <input
+                      type="number"
+                      min={0}
+                      disabled={isReadOnly}
+                      value={formData.victimCount}
+                      onChange={(e) => setField('victimCount', e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono tabular-nums disabled:opacity-60"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Section 2 & Estimated Loss */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div>
+                  <label className="block font-black text-slate-900 dark:text-white mb-1.5">
+                    ۲- شرح مختصر رویداد <span className="text-rose-600">*</span>
+                  </label>
+                  <textarea
+                    rows={4}
+                    disabled={isReadOnly}
+                    value={formData.briefDescription}
+                    onChange={(e) => setField('briefDescription', e.target.value)}
+                    placeholder="شرح دقیق توالی رویداد و نحوه وقوع حادثه..."
+                    className="w-full p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 leading-relaxed disabled:opacity-60"
+                  />
+                </div>
+                <div>
+                  <label className="block font-black text-slate-900 dark:text-white mb-1.5">
+                    برآورد میزان خسارات جانی / مالی
+                  </label>
+                  <textarea
+                    rows={4}
+                    disabled={isReadOnly}
+                    value={formData.estimatedLoss}
+                    onChange={(e) => setField('estimatedLoss', e.target.value)}
+                    placeholder="برآورد خسارات جانی، تجهیزاتی، توقف تولید و هزینه‌های مرتبط..."
+                    className="w-full p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 leading-relaxed disabled:opacity-60"
+                  />
+                </div>
+              </div>
+
+              {/* Section 3: Risk Severity Matrix */}
+              <div className="space-y-2">
+                <label className="block font-black text-slate-900 dark:text-white">
+                  ۳- داده‌های ماتریس شدت (شدت ریسک) <span className="text-rose-600">*</span>
+                </label>
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
+                  {SEVERITY_OPTIONS.map((opt) => {
+                    const selected = formData.riskSeverityMatrix === opt.value;
+                    return (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        disabled={isReadOnly}
+                        onClick={() => setField('riskSeverityMatrix', opt.value)}
+                        className={`p-3 rounded-xl border text-right transition cursor-pointer disabled:cursor-not-allowed ${
+                          selected
+                            ? `${opt.activeClass} ring-2 ring-offset-1 ring-slate-900/10`
+                            : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:border-slate-300'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between font-black">
+                          <span>{opt.labelFa}</span>
+                          {selected && <CheckCircle2 className="w-4 h-4 shrink-0" />}
+                        </div>
+                        <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">{opt.descFa}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Sections 4, 5, 6: Causes */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <div>
+                  <label className="block font-black text-slate-900 dark:text-white mb-1.5">
+                    ۴- علل مستقیم <span className="text-rose-600">*</span>
+                  </label>
+                  <textarea
+                    rows={4}
+                    disabled={isReadOnly}
+                    value={formData.directCauses}
+                    onChange={(e) => setField('directCauses', e.target.value)}
+                    placeholder="اعمال و شرایط ناایمن بلاواسطه منجر به وقوع حادثه..."
+                    className="w-full p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 leading-relaxed disabled:opacity-60"
+                  />
+                </div>
+                <div>
+                  <label className="block font-black text-slate-900 dark:text-white mb-1.5">۵- علل غیرمستقیم</label>
+                  <textarea
+                    rows={4}
+                    disabled={isReadOnly}
+                    value={formData.indirectCauses}
+                    onChange={(e) => setField('indirectCauses', e.target.value)}
+                    placeholder="عوامل زمینه‌ای، فردی، فنی و محیطی مؤثر..."
+                    className="w-full p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 leading-relaxed disabled:opacity-60"
+                  />
+                </div>
+                <div>
+                  <label className="block font-black text-slate-900 dark:text-white mb-1.5">
+                    ۶- علل ریشه‌ای <span className="text-rose-600">*</span>
+                  </label>
+                  <textarea
+                    rows={4}
+                    disabled={isReadOnly}
+                    value={formData.rootCauses}
+                    onChange={(e) => setField('rootCauses', e.target.value)}
+                    placeholder="نقص‌های سیستمی، مدیریتی، آموزشی یا دستورالعملی..."
+                    className="w-full p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 leading-relaxed disabled:opacity-60"
+                  />
+                </div>
+              </div>
+
+              {/* Section 7: Victim Info */}
+              <div className="space-y-3 p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-950/30">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-slate-200 dark:border-slate-800">
+                  <h3 className="font-black text-sm text-slate-900 dark:text-white">۷- اطلاعات مصدوم (قربانی)</h3>
+                  {!isReadOnly && (
+                    <div className="w-full sm:w-72">
+                      <CentralPersonnelSelector
+                        isFa={isFa}
+                        value={formData.victimName}
+                        placeholder="انتخاب سریع مصدوم از فهرست پرسنل..."
+                        onSelect={(person) => {
+                          if (!person) return;
+                          setFormData((prev) => ({
+                            ...prev,
+                            victimName: person.fullName || prev.victimName,
+                            victimPersonnelCode: person.personnelCode || person.effectiveCode || prev.victimPersonnelCode,
+                            victimDepartment: person.department || person.unit || prev.victimDepartment,
+                            victimOrgUnit: prev.victimOrgUnit || person.department || person.unit || '',
+                          }));
+                        }}
                       />
                     </div>
-                    <div className="flex items-center gap-2 justify-end">
-                      <span className="font-bold text-slate-700">شماره :</span>
-                      <input
-                        type="text"
-                        disabled={isLocked}
-                        value={formData.formNumber}
-                        onChange={e => handleFieldChange('formNumber', e.target.value)}
-                        className="w-32 text-center p-1 border border-slate-300 rounded font-mono text-xs bg-slate-50 font-bold text-rose-700"
-                      />
-                    </div>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">نام و نام خانوادگی</label>
+                    <input
+                      type="text"
+                      disabled={isReadOnly}
+                      value={formData.victimName}
+                      onChange={(e) => setField('victimName', e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 disabled:opacity-60"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">شماره پرسنلی</label>
+                    <input
+                      type="text"
+                      disabled={isReadOnly}
+                      value={formData.victimPersonnelCode}
+                      onChange={(e) => setField('victimPersonnelCode', e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono disabled:opacity-60"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">واحد سازمانی</label>
+                    <input
+                      type="text"
+                      disabled={isReadOnly}
+                      value={formData.victimDepartment}
+                      onChange={(e) => setField('victimDepartment', e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 disabled:opacity-60"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">سابقه کار</label>
+                    <input
+                      type="text"
+                      disabled={isReadOnly}
+                      value={formData.victimWorkExperience}
+                      onChange={(e) => setField('victimWorkExperience', e.target.value)}
+                      placeholder="مثلاً ۶ سال"
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 disabled:opacity-60"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">نوع آسیب</label>
+                    <input
+                      type="text"
+                      disabled={isReadOnly}
+                      value={formData.injuryType}
+                      onChange={(e) => setField('injuryType', e.target.value)}
+                      placeholder="بریدگی، سوختگی، کوفتگی..."
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 disabled:opacity-60"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">عضو آسیب‌دیده</label>
+                    <input
+                      type="text"
+                      disabled={isReadOnly}
+                      value={formData.injuredBodyPart}
+                      onChange={(e) => setField('injuredBodyPart', e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 disabled:opacity-60"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">اقدام درمانی</label>
+                    <input
+                      type="text"
+                      disabled={isReadOnly}
+                      value={formData.medicalTreatment}
+                      onChange={(e) => setField('medicalTreatment', e.target.value)}
+                      placeholder="پانسمان، اعزام به درمانگاه / بیمارستان..."
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 disabled:opacity-60"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">تعداد روزهای تلف‌شده</label>
+                    <input
+                      type="number"
+                      min={0}
+                      disabled={isReadOnly}
+                      value={formData.lostWorkDays}
+                      onChange={(e) => setField('lostWorkDays', e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono tabular-nums disabled:opacity-60"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Section 8: CAPA & Expert Sign-off */}
+              <div className="space-y-4 p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-end">
+                  <div className="lg:col-span-2">
+                    <label className="block font-black text-slate-900 dark:text-white mb-1.5">
+                      ۸- اقدام اصلاحی و پیشگیرانه مورد نیاز
+                    </label>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      شماره فرم اقدام اصلاحی / پیشگیرانه
+                    </label>
+                    <input
+                      type="text"
+                      dir="ltr"
+                      disabled={isReadOnly}
+                      value={formData.capaFormNumber}
+                      onChange={(e) => setField('capaFormNumber', e.target.value)}
+                      placeholder="R\1405\E112\21212"
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono disabled:opacity-60"
+                    />
                   </div>
                 </div>
 
-                {/* 2. SECTION 1: EVENT & REPORT DETAILS TABLE (Matching PDF) */}
-                <div className="overflow-x-auto">
-                  <table className="w-full border-collapse border border-slate-400 text-xs">
+                <textarea
+                  rows={4}
+                  disabled={isReadOnly}
+                  value={formData.capaRequiredActions}
+                  onChange={(e) => setField('capaRequiredActions', e.target.value)}
+                  placeholder="فهرست اقدامات اصلاحی و پیشگیرانه، مسئولین اجرا و الزامات رفع علل ریشه‌ای..."
+                  className="w-full p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 leading-relaxed disabled:opacity-60"
+                />
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-500 mb-1">
+                      تاریخ شروع (مبدأ تأیید RHS-F28)
+                    </label>
+                    <input
+                      type="text"
+                      disabled
+                      value={fmt(anchorDate)}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 font-mono tabular-nums font-bold text-slate-700 dark:text-slate-300"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-500 mb-1">تاریخ پایان اقدامات</label>
+                    <PersianDatePicker
+                      value={formData.endDate}
+                      onChange={(v) => setField('endDate', v)}
+                      disabled={isReadOnly}
+                      className="w-full"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-500 mb-1">
+                      نام و نام خانوادگی کارشناس واحد HSE
+                    </label>
+                    <input
+                      type="text"
+                      disabled={isReadOnly}
+                      value={formData.hseExpertName}
+                      onChange={(e) => setField('hseExpertName', e.target.value)}
+                      placeholder="نام کارشناس تحلیل‌گر HSE..."
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold disabled:opacity-60"
+                    />
+                  </div>
+                </div>
+
+                {!isReadOnly && (
+                  <div className="pt-2">
+                    <div className="text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1.5">
+                      امضای دیجیتال کارشناس واحد HSE:
+                    </div>
+                    <DigitalSignaturePad
+                      initialSignature={formData.hseExpertSignature || ''}
+                      onSave={(sig) => setField('hseExpertSignature', sig)}
+                      onClear={() => setField('hseExpertSignature', '')}
+                      isFa={isFa}
+                      signerTarget={currentUser}
+                    />
+                  </div>
+                )}
+
+                {!isReadOnly && (
+                  <div className="flex flex-wrap items-center justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
+                    <button
+                      type="button"
+                      disabled={saving}
+                      onClick={() => handleSaveToServer({ actionType: 'draft_save', submitForApproval: false })}
+                      className="px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 text-slate-800 dark:text-slate-100 text-xs font-black inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                    >
+                      <Save className="w-3.5 h-3.5" />
+                      <span>{saving ? 'در حال ذخیره...' : 'ذخیره تغییرات'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={saving}
+                      onClick={() => handleSaveToServer({ submitForApproval: true })}
+                      className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black inline-flex items-center gap-1.5 shadow-sm cursor-pointer disabled:opacity-50"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                      <span>{saving ? 'در حال ارسال...' : 'ارسال جهت بررسی و تأیید نهایی رئیس HSE'}</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* HSE Head Approval / Return Box */}
+              <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/40 space-y-3">
+                <div className="flex items-center justify-between gap-2 pb-2 border-b border-slate-200 dark:border-slate-800">
+                  <h3 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                    <span>تأیید نهایی یا عودت اصلاحی رئیس مرکز HSE</span>
+                  </h3>
+                  {isCompleted ? (
+                    <span className="text-xs font-black text-emerald-700 dark:text-emerald-400 inline-flex items-center gap-1">
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>تأیید نهایی شده</span>
+                    </span>
+                  ) : !isHseHead ? (
+                    <span className="text-[11px] font-bold text-slate-500 inline-flex items-center gap-1">
+                      <Lock className="w-3.5 h-3.5" />
+                      <span>در اختیار رئیس مرکز HSE</span>
+                    </span>
+                  ) : null}
+                </div>
+
+                {isCompleted ? (
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div className="space-y-1">
+                      <div className="font-bold text-slate-900 dark:text-white">
+                        تأییدکننده نهایی: {fmt(formData.hseHeadReviewerName || formData.completedBy)}
+                      </div>
+                      <div className="text-[11px] text-slate-500">
+                        زمان تأیید نهایی: <span className="font-mono tabular-nums">{fmt(formData.hseHeadApprovedAt || formData.completedAt)}</span>
+                      </div>
+                      {formData.hseHeadReviewNotes && (
+                        <div className="text-xs text-slate-700 dark:text-slate-300 mt-1">
+                          توضیحات: {formData.hseHeadReviewNotes}
+                        </div>
+                      )}
+                    </div>
+                    {formData.hseHeadSignature && (
+                      <img
+                        src={formData.hseHeadSignature}
+                        alt="امضای رئیس HSE"
+                        className="h-14 object-contain bg-white rounded-lg border border-slate-200 p-1"
+                      />
+                    )}
+                  </div>
+                ) : isHseHead ? (
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                        نظریه رئیس HSE (در صورت عودت برای اصلاح، درج توضیحات الزامی است):
+                      </label>
+                      <textarea
+                        rows={2}
+                        value={reviewNotes}
+                        onChange={(e) => setReviewNotes(e.target.value)}
+                        placeholder="ملاحظات تأیید نهایی یا موارد نیازمند اصلاح توسط کارشناس HSE..."
+                        className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
+                      />
+                    </div>
+
+                    <DigitalSignaturePad
+                      initialSignature={headSignature}
+                      onSave={setHeadSignature}
+                      onClear={() => setHeadSignature('')}
+                      isFa={isFa}
+                      signerTarget={currentUser}
+                    />
+
+                    <div className="flex flex-wrap items-center justify-end gap-2 pt-2">
+                      <button
+                        type="button"
+                        disabled={saving}
+                        onClick={() => handleHeadReview('RETURN')}
+                        className="px-4 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 text-xs font-black inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>عودت برای اصلاح (حفظ سوابق قبلی)</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={saving}
+                        onClick={() => handleHeadReview('APPROVE')}
+                        className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black inline-flex items-center gap-1.5 shadow-sm cursor-pointer disabled:opacity-50"
+                      >
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>{saving ? 'در حال ثبت...' : 'تأیید نهایی و اختتام تحلیل RHS-F34'}</span>
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-slate-500">
+                    پس از تکمیل و ارسال فرم توسط کارشناس HSE، پرونده جهت بررسی و تأیید نهایی در اختیار رئیس مرکز HSE قرار می‌گیرد.
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* TAB 2: EVIDENCE & ATTACHMENTS */}
+          {activeTab === 'evidence' && (
+            <RhsF68EvidencePanel
+              entityId={`RHS-F34-${incident.reportNumber || incident.id}`}
+              attachments={attachments}
+              onChange={handleAttachmentsChange}
+              readOnly={isReadOnly}
+              isFa={isFa}
+            />
+          )}
+
+          {/* TAB 3: AUTOMATIC OVERDUE NON-CONFORMITY */}
+          {activeTab === 'nc' && (
+            <div className="space-y-4">
+              {!formData.nonConformanceId ? (
+                <div className="p-8 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/30 text-center space-y-2">
+                  <CheckCircle2 className="w-8 h-8 text-emerald-600 mx-auto" />
+                  <div className="font-black text-slate-900 dark:text-white text-sm">
+                    عدم انطباق تأخیری برای این پرونده ثبت نشده است
+                  </div>
+                  <p className="text-slate-500 max-w-xl mx-auto leading-relaxed">
+                    در صورت عدم تکمیل و تأیید نهایی فرم تجزیه و تحلیل حادثه (RHS-F34) تا پایان مهلت قانونی ۱۰ روز تقویمی (
+                    <span className="font-mono font-bold">{fmt(formData.deadlineDate || deadlineInfo.deadlineDate)}</span>
+                    )، سامانه به‌صورت خودکار عدم انطباق «عدم تکمیل تجزیه و تحلیل حادثه در مهلت مقرر» را ثبت و به این پرونده متصل می‌کند.
+                  </p>
+                </div>
+              ) : (
+                <div className="p-5 rounded-xl border border-rose-200 dark:border-rose-900 bg-rose-50/40 dark:bg-rose-950/20 space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-rose-200 dark:border-rose-900/60">
+                    <div>
+                      <div className="text-[11px] font-bold text-rose-700 dark:text-rose-300 font-mono">
+                        کد عدم انطباق خودکار: {formData.nonConformanceTrackingCode || formData.nonConformanceId}
+                      </div>
+                      <h3 className="text-sm font-black text-slate-900 dark:text-white mt-0.5">
+                        {formData.nonConformanceTitle || 'عدم تکمیل تجزیه و تحلیل حادثه در مهلت مقرر'}
+                      </h3>
+                    </div>
+                    <span className="text-xs font-black text-rose-700 dark:text-rose-300">
+                      متصل به حادثه {incident.reportNumber}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                        مسئول پیگیری عدم انطباق
+                      </label>
+                      <CentralPersonnelSelector
+                        isFa={isFa}
+                        value={ncOwnerName}
+                        disabled={!canEditBase && !isHseHead}
+                        placeholder="انتخاب مسئول پیگیری..."
+                        onSelect={(person) => {
+                          setNcOwnerName(person?.fullName || '');
+                          setNcOwnerCode(person?.personnelCode || person?.effectiveCode || '');
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                        مهلت اصلاح عدم انطباق
+                      </label>
+                      <PersianDatePicker
+                        value={ncDueDate}
+                        onChange={setNcDueDate}
+                        disabled={!canEditBase && !isHseHead}
+                        className="w-full"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                        وضعیت عدم انطباق
+                      </label>
+                      <select
+                        value={ncStatus}
+                        disabled={!canEditBase && !isHseHead}
+                        onChange={(e) => setNcStatus(e.target.value)}
+                        className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold"
+                      >
+                        <option value="REGISTERED">ثبت شده (باز)</option>
+                        <option value="IN_PROGRESS">در دست اقدام اصلاحی</option>
+                        <option value="PENDING_VERIFICATION">در انتظار ارزیابی اثربخشی</option>
+                        <option value="CLOSED">بسته شده / رفع عدم انطباق</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                      اقدامات اصلاحی ثبت‌شده جهت رفع تأخیر و جلوگیری از تکرار:
+                    </label>
+                    <textarea
+                      rows={3}
+                      disabled={!canEditBase && !isHseHead}
+                      value={ncCorrectiveAction}
+                      onChange={(e) => setNcCorrectiveAction(e.target.value)}
+                      placeholder="شرح علت تأخیر و اقدام اصلاحی مصوب جهت تکمیل فوری تحلیل حادثه..."
+                      className="w-full p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
+                    />
+                  </div>
+
+                  {(canEditBase || isHseHead) && (
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        disabled={savingNc}
+                        onClick={handleUpdateNonConformance}
+                        className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-black inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                      >
+                        <Save className="w-3.5 h-3.5" />
+                        <span>{savingNc ? 'در حال ذخیره...' : 'ذخیره اطلاعات عدم انطباق'}</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB 4: EXACT A4 PRINT / PDF PREVIEW (RHS-F34 REJAL PETROCHEMICAL) */}
+          {activeTab === 'print' && (
+            <div className="flex flex-col items-center space-y-4">
+              <div className="w-full flex items-center justify-between bg-slate-100 dark:bg-slate-800/60 px-4 py-2.5 rounded-xl">
+                <span className="text-xs font-bold text-slate-700 dark:text-slate-200">
+                  پیش‌نمایش استاندارد چاپی A4 — مطابق فرم رسمی RHS-F34 پتروشیمی رجال
+                </span>
+                <button
+                  type="button"
+                  onClick={handlePrintA4}
+                  className="px-4 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-black inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>چاپ / خروجی PDF</span>
+                </button>
+              </div>
+
+              <div className="w-full overflow-x-auto pb-4 flex justify-center">
+                <div
+                  id="rhs-f34-a4-print-root"
+                  dir="rtl"
+                  style={{
+                    width: '210mm',
+                    minHeight: '297mm',
+                    backgroundColor: '#ffffff',
+                    color: '#000000',
+                    padding: '10mm 12mm 8mm 12mm',
+                    fontFamily: 'Vazirmatn, Tahoma, Arial, sans-serif',
+                    fontSize: '11px',
+                    lineHeight: 1.5,
+                    boxSizing: 'border-box',
+                    boxShadow: '0 4px 20px rgba(0,0,0,0.12)',
+                  }}
+                >
+                  {/* Top Header Outside Outer Frame */}
+                  <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '6px' }}>
                     <tbody>
-                      {/* Row 1 */}
-                      <tr className="border-b border-slate-400">
-                        <td className="w-1/4 p-2 bg-slate-100/70 border-l border-slate-400 font-bold text-slate-800">
-                          تاریخ و ساعت رویداد :
-                        </td>
-                        <td className="w-1/4 p-1.5 border-l border-slate-400">
-                          <div className="flex items-center gap-1.5">
-                            <div className="flex-1 min-w-[110px]">
-                              <PersianDatePicker
-                                disabled={isLocked}
-                                includeTime={false}
-                                value={formData.eventDate}
-                                onChange={(jStr) => handleFieldChange('eventDate', jStr)}
-                                isFa={isFa}
-                                inputClassName="p-1 text-xs"
-                              />
-                            </div>
-                            <div className="flex items-center gap-1 shrink-0">
-                              <span className="text-[10px] font-bold text-slate-500">ساعت:</span>
-                              <input
-                                type="text"
-                                disabled={isLocked}
-                                value={formData.eventTime || ''}
-                                onChange={e => handleFieldChange('eventTime', e.target.value)}
-                                placeholder="14:30"
-                                dir="ltr"
-                                className="w-14 p-1 text-center border border-slate-300 rounded font-mono text-xs bg-white"
-                              />
-                            </div>
-                          </div>
-                        </td>
-                        <td className="w-1/4 p-2 bg-slate-100/70 border-l border-slate-400 font-bold text-slate-800">
-                          محل دقيق رويداد :
-                        </td>
-                        <td className="w-1/4 p-1.5">
-                          <input
-                            type="text"
-                            disabled={isLocked}
-                            value={formData.exactLocation}
-                            onChange={e => handleFieldChange('exactLocation', e.target.value)}
-                            placeholder="نام کارگاه، طبقه، موقعیت جغرافیایی..."
-                            className="w-full p-1 border border-slate-200 rounded text-xs"
-                          />
-                        </td>
-                      </tr>
-
-                      {/* Row 2 */}
-                      <tr className="border-b border-slate-400">
-                        <td className="w-1/4 p-2 bg-slate-100/70 border-l border-slate-400 font-bold text-slate-800">
-                          تاریخ و ساعت گزارش رویداد :
-                        </td>
-                        <td className="w-1/4 p-1.5 border-l border-slate-400">
-                          <div className="flex items-center gap-1.5">
-                            <div className="flex-1 min-w-[110px]">
-                              <PersianDatePicker
-                                disabled={isLocked}
-                                includeTime={false}
-                                value={formData.reportDate}
-                                onChange={(jStr) => handleFieldChange('reportDate', jStr)}
-                                isFa={isFa}
-                                inputClassName="p-1 text-xs"
-                              />
-                            </div>
-                            <div className="flex items-center gap-1 shrink-0">
-                              <span className="text-[10px] font-bold text-slate-500">ساعت:</span>
-                              <input
-                                type="text"
-                                disabled={isLocked}
-                                value={formData.reportTime || ''}
-                                onChange={e => handleFieldChange('reportTime', e.target.value)}
-                                placeholder="14:30"
-                                dir="ltr"
-                                className="w-14 p-1 text-center border border-slate-300 rounded font-mono text-xs bg-white"
-                              />
-                            </div>
-                          </div>
-                        </td>
-                        <td className="w-1/4 p-2 bg-slate-100/70 border-l border-slate-400 font-bold text-slate-800">
-                          مکان بروز :
-                        </td>
-                        <td className="w-1/4 p-1.5">
-                          <input
-                            type="text"
-                            disabled={isLocked}
-                            value={formData.locationOccurrence}
-                            onChange={e => handleFieldChange('locationOccurrence', e.target.value)}
-                            placeholder="واحد عملیاتی / اداری..."
-                            className="w-full p-1 border border-slate-200 rounded text-xs"
-                          />
-                        </td>
-                      </tr>
-
-                      {/* Row 3 */}
-                      <tr className="border-b border-slate-400">
-                        <td className="w-1/4 p-2 bg-slate-100/70 border-l border-slate-400 font-bold text-slate-800">
-                          نام و سمت گزارش دهنده :
-                        </td>
-                        <td className="w-1/4 p-1.5 border-l border-slate-400">
-                          <div className="flex items-center gap-1">
-                            <input
-                              type="text"
-                              disabled={isLocked}
-                              value={formData.reporterNameAndRole}
-                              onChange={e => handleFieldChange('reporterNameAndRole', e.target.value)}
-                              placeholder="نام، نام خانوادگی و سمت..."
-                              className="w-full p-1 border border-slate-200 rounded text-xs font-bold"
-                            />
-                            {!isLocked && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setPersonnelTargetField('reporter');
-                                  setPersonnelSearchQuery('');
-                                  setPersonnelModalOpen(true);
-                                }}
-                                title="انتخاب از بانک پرسنل مجتمع"
-                                className="p-1 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 border border-slate-300 rounded text-slate-600 transition shrink-0"
-                              >
-                                <Users className="w-3.5 h-3.5" />
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                        <td className="w-1/4 p-2 bg-slate-100/70 border-l border-slate-400 font-bold text-slate-800">
-                          واحد سازمانی مصدوم :
-                        </td>
-                        <td className="w-1/4 p-1.5">
-                          <input
-                            type="text"
-                            disabled={isLocked}
-                            value={formData.victimOrgUnit}
-                            onChange={e => handleFieldChange('victimOrgUnit', e.target.value)}
-                            placeholder="واحد سازمانی..."
-                            className="w-full p-1 border border-slate-200 rounded text-xs"
-                          />
-                        </td>
-                      </tr>
-
-                      {/* Row 4 */}
-                      <tr className="border-b border-slate-400">
-                        <td className="w-1/4 p-2 bg-slate-100/70 border-l border-slate-400 font-bold text-slate-800">
-                          فعاليت حين حادثه :
-                        </td>
-                        <td className="w-1/4 p-1.5 border-l border-slate-400">
-                          <input
-                            type="text"
-                            disabled={isLocked}
-                            value={formData.activityDuringIncident}
-                            onChange={e => handleFieldChange('activityDuringIncident', e.target.value)}
-                            className="w-full p-1 border border-slate-200 rounded text-xs"
-                          />
-                        </td>
-                        <td className="w-1/4 p-2 bg-slate-100/70 border-l border-slate-400 font-bold text-slate-800">
-                          تعداد مصدومين /قربانيان :
-                        </td>
-                        <td className="w-1/4 p-1.5">
-                          <input
-                            type="number"
-                            disabled={isLocked}
-                            value={formData.victimCount}
-                            onChange={e => handleFieldChange('victimCount', e.target.value)}
-                            className="w-full p-1 border border-slate-200 rounded text-xs font-mono font-bold text-rose-700"
-                          />
-                        </td>
-                      </tr>
-
-                      {/* Row 5: Damage Assessment */}
                       <tr>
-                        <td className="w-1/4 p-2 bg-slate-100/70 border-l border-slate-400 font-bold text-slate-800">
-                          برآورد ميزان خسارات جاني / مالي :
+                        <td style={{ width: '28%', verticalAlign: 'middle', textAlign: 'right' }}>
+                          {(branding?.formalHeader?.useCustom && branding?.formalHeader?.logoUrl) || branding?.logoUrl ? (
+                            <img
+                              src={(branding?.formalHeader?.useCustom && branding?.formalHeader?.logoUrl) || branding?.logoUrl || ''}
+                              alt="لوگوی پتروشیمی رجال"
+                              referrerPolicy="no-referrer"
+                              style={{ maxHeight: '40px', maxWidth: '130px', objectFit: 'contain' }}
+                            />
+                          ) : (
+                            <RegalPetrochemicalLogo />
+                          )}
                         </td>
-                        <td colSpan={3} className="p-1.5">
-                          <input
-                            type="text"
-                            disabled={isLocked}
-                            value={formData.estimatedLoss}
-                            onChange={e => handleFieldChange('estimatedLoss', e.target.value)}
-                            placeholder="شرح برآورد خسارت جانی، تجهیزاتی و مالی..."
-                            className="w-full p-1.5 border border-slate-200 rounded text-xs"
-                          />
+                        <td style={{ width: '44%', verticalAlign: 'middle', textAlign: 'center' }}>
+                          <div style={{ fontSize: '15px', fontWeight: 900, color: '#000' }}>
+                            تجزیه و تحلیل رویداد
+                          </div>
+                          <div style={{ fontSize: '12px', fontWeight: 800, color: '#000', marginTop: '2px' }}>
+                            واحد بهداشت ، ایمنی و محیط زیست پتروشیمی رجال
+                          </div>
+                        </td>
+                        <td style={{ width: '28%', verticalAlign: 'middle', textAlign: 'left', fontSize: '11px' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                            <tbody>
+                              <tr>
+                                <td style={{ textAlign: 'right', fontWeight: 700, width: '46px' }}>تاریخ :</td>
+                                <td style={{ textAlign: 'center', fontFamily: 'monospace', fontWeight: 700, direction: 'ltr' }}>
+                                  {formatPrintDate(formData.formDate || formData.deadlineDate)}
+                                </td>
+                              </tr>
+                              <tr>
+                                <td style={{ textAlign: 'right', fontWeight: 700, paddingTop: '4px' }}>شماره :</td>
+                                <td style={{ textAlign: 'center', fontFamily: 'monospace', fontWeight: 700, paddingTop: '4px', direction: 'ltr' }}>
+                                  {formData.formNumber || `RGC-HSE/${incident.reportNumber}`}
+                                </td>
+                              </tr>
+                            </tbody>
+                          </table>
                         </td>
                       </tr>
                     </tbody>
                   </table>
-                </div>
 
-                {/* 3. SECTION 2: BRIEF INCIDENT DESCRIPTION */}
-                <div className="border border-slate-400 rounded p-2.5 space-y-1.5">
-                  <label className="block font-black text-slate-900 text-xs">
-                    ۲- شرح مختصر رويداد :
-                  </label>
-                  <textarea
-                    rows={3}
-                    disabled={isLocked}
-                    value={formData.briefDescription}
-                    onChange={e => handleFieldChange('briefDescription', e.target.value)}
-                    placeholder="شرح کامل چگونگی وقوع حادثه و جزییات عملیاتی..."
-                    className="w-full p-2 border border-slate-300 rounded text-xs leading-relaxed focus:ring-2 focus:ring-rose-500 bg-white"
-                  />
-                </div>
+                  {/* Outer Black Frame */}
+                  <div style={{ border: '1.5px solid #000000' }}>
+                    {/* Empty Top Strip matching official PDF */}
+                    <div style={{ height: '16px', borderBottom: '1px solid #000000' }} />
 
-                {/* 4. SECTION 3: SEVERITY MATRIX DATA (Matching PDF 4 blocks) */}
-                <div className="border border-slate-400 rounded p-2.5 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <label className="block font-black text-slate-900 text-xs">
-                      ۳- داده هاي ماتريس شدت ( شدت ريسك ) :
-                    </label>
-                    <span className="text-[10px] text-slate-500 font-bold">
-                      {isFa ? 'سطح منتخب با علامت * مشخص می‌گردد' : 'Selected level marked with *'}
-                    </span>
-                  </div>
+                    {/* 1. Base Event Metadata Table (4x4) */}
+                    <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+                      <colgroup>
+                        <col style={{ width: '21%' }} />
+                        <col style={{ width: '29%' }} />
+                        <col style={{ width: '21%' }} />
+                        <col style={{ width: '29%' }} />
+                      </colgroup>
+                      <tbody>
+                        <tr>
+                          <td style={{ borderBottom: '1px solid #000', borderLeft: '1px solid #000', padding: '4px 6px', fontWeight: 700 }}>
+                            تاریخ و ساعت رویداد :
+                          </td>
+                          <td style={{ borderBottom: '1px solid #000', borderLeft: '1px solid #000', padding: '4px 6px', textAlign: 'center' }}>
+                            {toPersianDigits([formData.eventDate, formData.eventTime].filter(Boolean).join(' - '))}
+                          </td>
+                          <td style={{ borderBottom: '1px solid #000', borderLeft: '1px solid #000', padding: '4px 6px', fontWeight: 700 }}>
+                            محل دقیق رویداد:
+                          </td>
+                          <td style={{ borderBottom: '1px solid #000', padding: '4px 6px', textAlign: 'center' }}>
+                            {formData.exactLocation}
+                          </td>
+                        </tr>
+                        <tr>
+                          <td style={{ borderBottom: '1px solid #000', borderLeft: '1px solid #000', padding: '4px 6px', fontWeight: 700 }}>
+                            تاریخ و ساعت گزارش رویداد :
+                          </td>
+                          <td style={{ borderBottom: '1px solid #000', borderLeft: '1px solid #000', padding: '4px 6px', textAlign: 'center' }}>
+                            {toPersianDigits([formData.reportDate, formData.reportTime].filter(Boolean).join(' - '))}
+                          </td>
+                          <td style={{ borderBottom: '1px solid #000', borderLeft: '1px solid #000', padding: '4px 6px', fontWeight: 700 }}>
+                            مکان بروز :
+                          </td>
+                          <td style={{ borderBottom: '1px solid #000', padding: '4px 6px', textAlign: 'center' }}>
+                            {formData.locationOccurrence}
+                          </td>
+                        </tr>
+                        <tr>
+                          <td style={{ borderBottom: '1px solid #000', borderLeft: '1px solid #000', padding: '4px 6px', fontWeight: 700 }}>
+                            نام و سمت گزارش دهنده :
+                          </td>
+                          <td style={{ borderBottom: '1px solid #000', borderLeft: '1px solid #000', padding: '4px 6px', textAlign: 'center' }}>
+                            {formData.reporterNameAndRole}
+                          </td>
+                          <td style={{ borderBottom: '1px solid #000', borderLeft: '1px solid #000', padding: '4px 6px', fontWeight: 700 }}>
+                            واحد سازمانی مصدوم :
+                          </td>
+                          <td style={{ borderBottom: '1px solid #000', padding: '4px 6px', textAlign: 'center' }}>
+                            {formData.victimOrgUnit}
+                          </td>
+                        </tr>
+                        <tr>
+                          <td style={{ borderBottom: '1px solid #000', borderLeft: '1px solid #000', padding: '4px 6px', fontWeight: 700 }}>
+                            فعالیت حین حادثه :
+                          </td>
+                          <td style={{ borderBottom: '1px solid #000', borderLeft: '1px solid #000', padding: '4px 6px', textAlign: 'center' }}>
+                            {formData.activityDuringIncident}
+                          </td>
+                          <td style={{ borderBottom: '1px solid #000', borderLeft: '1px solid #000', padding: '4px 6px', fontWeight: 700 }}>
+                            تعداد مصدومین /قربانیان :
+                          </td>
+                          <td style={{ borderBottom: '1px solid #000', padding: '4px 6px', textAlign: 'center', fontWeight: 700 }}>
+                            {formData.victimCount !== '' && formData.victimCount !== undefined
+                              ? toPersianDigits(String(formData.victimCount))
+                              : '۰'}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
 
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                    {[
-                      { key: 'High', labelFa: 'High (بحرانی / شدت بالا)', color: 'border-rose-300 bg-rose-50' },
-                      { key: 'Medium', labelFa: 'Medium (شدت متوسط)', color: 'border-blue-300 bg-amber-50' },
-                      { key: 'Low', labelFa: 'Low (شدت پایین)', color: 'border-sky-300 bg-sky-50' },
-                      { key: 'Minimal', labelFa: 'Minimal (ناچیز / جزئی)', color: 'border-emerald-300 bg-emerald-50' }
-                    ].map((matrix) => {
-                      const isSelected = formData.riskSeverityMatrix === matrix.key;
-                      return (
-                        <button
-                          key={matrix.key}
-                          type="button"
-                          disabled={isLocked}
-                          onClick={() => handleFieldChange('riskSeverityMatrix', matrix.key)}
-                          className={`p-2.5 rounded-lg border-2 text-center transition flex flex-col items-center justify-center gap-1 ${
-                            isSelected 
-                              ? 'border-rose-600 bg-rose-50/80 font-black shadow-sm' 
-                              : 'border-slate-300 hover:border-slate-400 bg-white text-slate-700'
-                          }`}
-                        >
-                          <div className="flex items-center gap-1.5 text-xs">
-                            <span className={`w-4 h-4 rounded-full flex items-center justify-center border ${isSelected ? 'border-rose-600 bg-rose-600 text-white font-bold' : 'border-slate-400'}`}>
-                              {isSelected ? '✓' : ''}
-                            </span>
-                            <span className="font-bold">{matrix.key}</span>
-                            {isSelected && <span className="text-rose-600 font-black">*</span>}
-                          </div>
-                          <span className="text-[10px] text-slate-500">{matrix.labelFa}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
+                    {/* 2. Brief Description */}
+                    <div style={{ borderBottom: '1px solid #000', padding: '5px 8px', minHeight: '56px' }}>
+                      <div style={{ fontWeight: 900, marginBottom: '3px' }}>۲- شرح مختصر رویداد :</div>
+                      <div style={{ whiteSpace: 'pre-wrap' }}>{formData.briefDescription}</div>
+                    </div>
 
-                {/* 5. SECTIONS 4, 5, 6: CAUSES (Direct, Indirect, Root) */}
-                <div className="space-y-2">
-                  <div className="border border-slate-400 rounded p-2.5 space-y-1">
-                    <label className="block font-black text-slate-900 text-xs">
-                      ۴- علل مستقيم :
-                    </label>
-                    <textarea
-                      rows={2}
-                      disabled={isLocked}
-                      value={formData.directCauses}
-                      onChange={e => handleFieldChange('directCauses', e.target.value)}
-                      placeholder="علل مستقیم، اعمال ناایمن و خطاهای رخ داده در صحنه..."
-                      className="w-full p-2 border border-slate-300 rounded text-xs bg-white"
-                    />
-                  </div>
+                    {/* Estimated Loss */}
+                    <div style={{ borderBottom: '1px solid #000', padding: '5px 8px', minHeight: '42px' }}>
+                      <div style={{ fontWeight: 900, marginBottom: '3px' }}>برآورد میزان خسارات جانی / مالی :</div>
+                      <div style={{ whiteSpace: 'pre-wrap' }}>{formData.estimatedLoss}</div>
+                    </div>
 
-                  <div className="border border-slate-400 rounded p-2.5 space-y-1">
-                    <label className="block font-black text-slate-900 text-xs">
-                      ۵- علل غيرمستقيم :
-                    </label>
-                    <textarea
-                      rows={2}
-                      disabled={isLocked}
-                      value={formData.indirectCauses}
-                      onChange={e => handleFieldChange('indirectCauses', e.target.value)}
-                      placeholder="علل غیرمستقیم، شرایط محیطی، وضعیت نگهداری تجهیزات و..."
-                      className="w-full p-2 border border-slate-300 rounded text-xs bg-white"
-                    />
-                  </div>
+                    {/* 3. Severity Matrix (Exact 2x2 Layout) */}
+                    <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+                      <colgroup>
+                        <col style={{ width: '32%' }} />
+                        <col style={{ width: '18%' }} />
+                        <col style={{ width: '16%' }} />
+                        <col style={{ width: '16%' }} />
+                        <col style={{ width: '18%' }} />
+                      </colgroup>
+                      <tbody>
+                        <tr>
+                          <td
+                            rowSpan={2}
+                            style={{
+                              borderBottom: '1px solid #000',
+                              borderLeft: '1px solid #000',
+                              padding: '6px 8px',
+                              fontWeight: 900,
+                              verticalAlign: 'top',
+                            }}
+                          >
+                            ۳- داده های ماتریس شدت ( شدت ریسک ):
+                          </td>
+                          <td style={{ borderBottom: '1px solid #000', borderLeft: '1px solid #000', padding: '5px', textAlign: 'center', fontFamily: 'serif', fontSize: '12px', fontWeight: 700 }}>
+                            High
+                          </td>
+                          <td style={{ borderBottom: '1px solid #000', borderLeft: '1px solid #000', padding: '5px', textAlign: 'center' }}>
+                            {renderMatrixMark('High')}
+                          </td>
+                          <td style={{ borderBottom: '1px solid #000', borderLeft: '1px solid #000', padding: '5px', textAlign: 'center', fontFamily: 'serif', fontSize: '12px', fontWeight: 700 }}>
+                            Medium
+                          </td>
+                          <td style={{ borderBottom: '1px solid #000', padding: '5px', textAlign: 'center' }}>
+                            {renderMatrixMark('Medium')}
+                          </td>
+                        </tr>
+                        <tr>
+                          <td style={{ borderBottom: '1px solid #000', borderLeft: '1px solid #000', padding: '5px', textAlign: 'center', fontFamily: 'serif', fontSize: '12px', fontWeight: 700 }}>
+                            Minimal
+                          </td>
+                          <td style={{ borderBottom: '1px solid #000', borderLeft: '1px solid #000', padding: '5px', textAlign: 'center' }}>
+                            {renderMatrixMark('Minimal')}
+                          </td>
+                          <td style={{ borderBottom: '1px solid #000', borderLeft: '1px solid #000', padding: '5px', textAlign: 'center', fontFamily: 'serif', fontSize: '12px', fontWeight: 700 }}>
+                            Low
+                          </td>
+                          <td style={{ borderBottom: '1px solid #000', padding: '5px', textAlign: 'center' }}>
+                            {renderMatrixMark('Low')}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
 
-                  <div className="border border-slate-400 rounded p-2.5 space-y-1">
-                    <label className="block font-black text-slate-900 text-xs">
-                      ۶- علل ريشه اي :
-                    </label>
-                    <textarea
-                      rows={2}
-                      disabled={isLocked}
-                      value={formData.rootCauses}
-                      onChange={e => handleFieldChange('rootCauses', e.target.value)}
-                      placeholder="علل ریشه‌ای سیستمی، مدیریتی، دستورالعمل‌ها و آموزش‌های دوره‌ای..."
-                      className="w-full p-2 border border-slate-300 rounded text-xs bg-white"
-                    />
-                  </div>
-                </div>
+                    {/* 4. Direct Causes */}
+                    <div style={{ borderBottom: '1px solid #000', padding: '5px 8px', minHeight: '72px' }}>
+                      <div style={{ fontWeight: 900, marginBottom: '3px' }}>۴- علل مستقیم :</div>
+                      <div style={{ whiteSpace: 'pre-wrap' }}>{formData.directCauses}</div>
+                    </div>
 
-                {/* 6. SECTION 7: VICTIM / INJURED PERSON TABLE (With Personnel Code Search) */}
-                <div className="border border-slate-400 rounded p-2.5 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <label className="block font-black text-slate-900 text-xs">
-                      ۷- اطلاعات مصدوم (قرباني) :
-                    </label>
-                    {!isLocked && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setPersonnelTargetField('victim');
-                          setPersonnelSearchQuery('');
-                          setPersonnelModalOpen(true);
-                        }}
-                        className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-bold flex items-center gap-1.5 transition"
-                      >
-                        <Search className="w-3.5 h-3.5" />
-                        <span>جستجو در پرسنل مجتمع</span>
-                      </button>
-                    )}
-                  </div>
+                    {/* 5. Indirect Causes */}
+                    <div style={{ borderBottom: '1px solid #000', padding: '5px 8px', minHeight: '72px' }}>
+                      <div style={{ fontWeight: 900, marginBottom: '3px' }}>۵- علل غیرمستقیم :</div>
+                      <div style={{ whiteSpace: 'pre-wrap' }}>{formData.indirectCauses}</div>
+                    </div>
 
-                  <div className="overflow-x-auto w-full"><table className="w-full min-w-[540px] border-collapse border border-slate-400 text-xs">
-                    <tbody>
-                      <tr className="border-b border-slate-400">
-                        <td className="w-1/4 p-2 bg-slate-100/70 border-l border-slate-400 font-bold">
-                          نام و نام خانوادگي :
-                        </td>
-                        <td className="w-1/4 p-1.5 border-l border-slate-400 relative">
-                          <div className="relative">
-                            <input
-                              type="text"
-                              disabled={isLocked}
-                              value={formData.victimName}
-                              onChange={e => {
-                                handleFieldChange('victimName', e.target.value);
-                                setShowVictimNameSuggestions(true);
+                    {/* 6. Root Causes */}
+                    <div style={{ borderBottom: '1px solid #000', padding: '5px 8px', minHeight: '48px' }}>
+                      <div style={{ fontWeight: 900, marginBottom: '3px' }}>۶- علل ریشه ای :</div>
+                      <div style={{ whiteSpace: 'pre-wrap' }}>{formData.rootCauses}</div>
+                    </div>
+
+                    {/* 7. Victim Details Header + 4x4 Table */}
+                    <div style={{ borderBottom: '1px solid #000', padding: '4px 8px', fontWeight: 900 }}>
+                      ۷- اطلاعات مصدوم (قربانی) :
+                    </div>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+                      <colgroup>
+                        <col style={{ width: '18%' }} />
+                        <col style={{ width: '32%' }} />
+                        <col style={{ width: '18%' }} />
+                        <col style={{ width: '32%' }} />
+                      </colgroup>
+                      <tbody>
+                        <tr>
+                          <td style={{ borderBottom: '1px solid #000', borderLeft: '1px solid #000', padding: '4px 6px', fontWeight: 700 }}>
+                            نام و نام خانوادگی :
+                          </td>
+                          <td style={{ borderBottom: '1px solid #000', borderLeft: '1px solid #000', padding: '4px 6px', textAlign: 'center' }}>
+                            {formData.victimName || '-'}
+                          </td>
+                          <td style={{ borderBottom: '1px solid #000', borderLeft: '1px solid #000', padding: '4px 6px', fontWeight: 700 }}>
+                            شماره پرسنلی :
+                          </td>
+                          <td style={{ borderBottom: '1px solid #000', padding: '4px 6px', textAlign: 'center' }}>
+                            {formData.victimPersonnelCode ? toPersianDigits(formData.victimPersonnelCode) : '-'}
+                          </td>
+                        </tr>
+                        <tr>
+                          <td style={{ borderBottom: '1px solid #000', borderLeft: '1px solid #000', padding: '4px 6px', fontWeight: 700 }}>
+                            واحد سازمانی :
+                          </td>
+                          <td style={{ borderBottom: '1px solid #000', borderLeft: '1px solid #000', padding: '4px 6px', textAlign: 'center' }}>
+                            {formData.victimDepartment || '-'}
+                          </td>
+                          <td style={{ borderBottom: '1px solid #000', borderLeft: '1px solid #000', padding: '4px 6px', fontWeight: 700 }}>
+                            سابقه کار :
+                          </td>
+                          <td style={{ borderBottom: '1px solid #000', padding: '4px 6px', textAlign: 'center' }}>
+                            {formData.victimWorkExperience ? toPersianDigits(formData.victimWorkExperience) : '-'}
+                          </td>
+                        </tr>
+                        <tr>
+                          <td style={{ borderBottom: '1px solid #000', borderLeft: '1px solid #000', padding: '4px 6px', fontWeight: 700 }}>
+                            نوع آسیب :
+                          </td>
+                          <td style={{ borderBottom: '1px solid #000', borderLeft: '1px solid #000', padding: '4px 6px', textAlign: 'center' }}>
+                            {formData.injuryType || '-'}
+                          </td>
+                          <td style={{ borderBottom: '1px solid #000', borderLeft: '1px solid #000', padding: '4px 6px', fontWeight: 700 }}>
+                            عضو آسیب دیده :
+                          </td>
+                          <td style={{ borderBottom: '1px solid #000', padding: '4px 6px', textAlign: 'center' }}>
+                            {formData.injuredBodyPart || '-'}
+                          </td>
+                        </tr>
+                        <tr>
+                          <td style={{ borderBottom: '1px solid #000', borderLeft: '1px solid #000', padding: '4px 6px', fontWeight: 700 }}>
+                            اقدام درمانی :
+                          </td>
+                          <td style={{ borderBottom: '1px solid #000', borderLeft: '1px solid #000', padding: '4px 6px', textAlign: 'center' }}>
+                            {formData.medicalTreatment || '-'}
+                          </td>
+                          <td style={{ borderBottom: '1px solid #000', borderLeft: '1px solid #000', padding: '4px 6px', fontWeight: 700 }}>
+                            تعداد روزهای تلف شده :
+                          </td>
+                          <td style={{ borderBottom: '1px solid #000', padding: '4px 6px', textAlign: 'center' }}>
+                            {formData.lostWorkDays !== '' && formData.lostWorkDays !== undefined
+                              ? toPersianDigits(String(formData.lostWorkDays))
+                              : '-'}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+
+                    {/* 8. Corrective & Preventive Actions with Top-Left CAPA Form Box */}
+                    <div style={{ borderBottom: '1px solid #000', minHeight: '205px', position: 'relative' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                        <tbody>
+                          <tr>
+                            <td style={{ padding: '5px 8px', fontWeight: 900, width: '50%' }}>
+                              ۸- اقدام اصلاحی و پیشگیرانه مورد نیاز :
+                            </td>
+                            <td style={{ padding: '5px 8px', textAlign: 'left', fontWeight: 700, width: '32%', fontSize: '10.5px' }}>
+                              شماره فرم اقدام اصلاحی/ پیشگیرانه
+                            </td>
+                            <td
+                              style={{
+                                width: '18%',
+                                borderRight: '1px solid #000',
+                                borderBottom: '1px solid #000',
+                                padding: '4px 6px',
+                                textAlign: 'center',
+                                fontFamily: 'monospace',
+                                fontWeight: 800,
+                                fontSize: '10.5px',
+                                direction: 'ltr',
                               }}
-                              onFocus={() => setShowVictimNameSuggestions(true)}
-                              placeholder="نام و نام خانوادگی..."
-                              className="w-full p-1 border border-slate-200 rounded text-xs font-bold"
-                            />
-                            {/* Inline name suggestions dropdown */}
-                            {showVictimNameSuggestions && victimNameSuggestions.length > 0 && !isLocked && (
-                              <div 
-                                ref={nameDropdownRef}
-                                className="absolute z-20 top-full right-0 left-0 mt-1 bg-white border border-indigo-200 rounded-lg shadow-xl max-h-48 overflow-y-auto"
-                              >
-                                <div className="p-1 text-[10px] bg-indigo-50 text-indigo-700 font-bold border-b border-indigo-100 flex items-center justify-between">
-                                  <span>پیشنهادها از پرسنل مجتمع:</span>
-                                  <button 
-                                    type="button" 
-                                    onClick={() => setShowVictimNameSuggestions(false)}
-                                    className="text-slate-400 hover:text-slate-600"
-                                  >
-                                    <X className="w-3 h-3" />
-                                  </button>
-                                </div>
-                                {victimNameSuggestions.map((person) => (
-                                  <div
-                                    key={person.id}
-                                    onClick={() => handleSelectPersonnel(person, 'victim')}
-                                    className="p-1.5 hover:bg-indigo-50/80 cursor-pointer border-b border-slate-100 last:border-0 text-right transition"
-                                  >
-                                    <div className="font-bold text-slate-800 text-xs">{person.fullName}</div>
-                                    <div className="text-[10px] text-slate-500 flex items-center gap-2">
-                                      <span className="font-mono">کد: {person.personnelCode}</span>
-                                      <span>|</span>
-                                      <span>{person.department || person.unit || 'بدون واحد'}</span>
-                                    </div>
-                                  </div>
-                                ))}
+                            >
+                              {formData.capaFormNumber || '\u00A0'}
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                      <div style={{ padding: '6px 10px 10px 10px', whiteSpace: 'pre-wrap' }}>
+                        {formData.capaRequiredActions}
+                      </div>
+                    </div>
+
+                    {/* Bottom Signature Strip */}
+                    <table style={{ width: '100%', borderCollapse: 'collapse', height: '58px' }}>
+                      <tbody>
+                        <tr>
+                          <td style={{ width: '28%', padding: '6px 10px', verticalAlign: 'middle' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '3px' }}>
+                              <span style={{ fontWeight: 700 }}>تاریخ شروع :</span>
+                              <span style={{ fontFamily: 'monospace', fontWeight: 700, direction: 'ltr' }}>
+                                {formatPrintDate(formData.startDate || anchorDate)}
+                              </span>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span style={{ fontWeight: 700 }}>تاریخ پایان :</span>
+                              <span style={{ fontFamily: 'monospace', fontWeight: 700, direction: 'ltr' }}>
+                                {formatPrintDate(formData.endDate || formData.deadlineDate)}
+                              </span>
+                            </div>
+                          </td>
+                          <td style={{ width: '44%', padding: '6px 10px', verticalAlign: 'top', textAlign: 'center' }}>
+                            <span style={{ fontWeight: 700 }}>نام و نام خانوادگی کارشناس واحد HSE : </span>
+                            <span style={{ fontWeight: 900, marginRight: '8px' }}>
+                              {formData.hseExpertName || formData.assignedExpertName || ''}
+                            </span>
+                            {formData.hseHeadReviewerName && isCompleted && (
+                              <div style={{ fontSize: '9.5px', marginTop: '6px', color: '#111' }}>
+                                تأیید نهایی رئیس HSE: <strong>{formData.hseHeadReviewerName}</strong>
                               </div>
                             )}
-                          </div>
-                        </td>
-                        <td className="w-1/4 p-2 bg-slate-100/70 border-l border-slate-400 font-bold">
-                          شماره پرسنلي :
-                        </td>
-                        <td className="w-1/4 p-1.5 relative">
-                          <div className="relative flex items-center gap-1">
-                            <input
-                              type="text"
-                              disabled={isLocked}
-                              value={formData.victimPersonnelCode}
-                              onChange={e => {
-                                handleFieldChange('victimPersonnelCode', e.target.value);
-                                setShowVictimCodeSuggestions(true);
-                              }}
-                              onFocus={() => setShowVictimCodeSuggestions(true)}
-                              placeholder="مثال: 94012"
-                              className="w-full p-1 border border-slate-200 rounded text-xs font-mono font-bold"
-                            />
-                            {!isLocked && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setPersonnelTargetField('victim');
-                                  setPersonnelSearchQuery(formData.victimPersonnelCode || '');
-                                  setPersonnelModalOpen(true);
-                                }}
-                                title="جستجوی پرسنل مجتمع با شماره پرسنلی"
-                                className="p-1 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 border border-slate-300 rounded text-slate-600 transition shrink-0"
-                              >
-                                <Search className="w-3.5 h-3.5" />
-                              </button>
-                            )}
-
-                            {/* Inline personnel code suggestions */}
-                            {showVictimCodeSuggestions && victimCodeSuggestions.length > 0 && !isLocked && (
-                              <div 
-                                ref={codeDropdownRef}
-                                className="absolute z-20 top-full right-0 left-0 mt-1 bg-white border border-indigo-200 rounded-lg shadow-xl max-h-48 overflow-y-auto"
-                              >
-                                <div className="p-1 text-[10px] bg-indigo-50 text-indigo-700 font-bold border-b border-indigo-100 flex items-center justify-between">
-                                  <span>کدهای مشابه در پرسنل مجتمع:</span>
-                                  <button 
-                                    type="button" 
-                                    onClick={() => setShowVictimCodeSuggestions(false)}
-                                    className="text-slate-400 hover:text-slate-600"
-                                  >
-                                    <X className="w-3 h-3" />
-                                  </button>
-                                </div>
-                                {victimCodeSuggestions.map((person) => (
-                                  <div
-                                    key={person.id}
-                                    onClick={() => handleSelectPersonnel(person, 'victim')}
-                                    className="p-1.5 hover:bg-indigo-50/80 cursor-pointer border-b border-slate-100 last:border-0 text-right transition"
-                                  >
-                                    <div className="flex items-center justify-between">
-                                      <span className="font-mono font-bold text-indigo-700 text-xs">{person.personnelCode}</span>
-                                      <span className="font-bold text-slate-800 text-xs">{person.fullName}</span>
-                                    </div>
-                                    <div className="text-[10px] text-slate-500">
-                                      {person.department || person.unit || 'بدون واحد'} {person.jobTitle ? `(${person.jobTitle})` : ''}
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-
-                      <tr className="border-b border-slate-400">
-                        <td className="w-1/4 p-2 bg-slate-100/70 border-l border-slate-400 font-bold">
-                          واحد سازماني :
-                        </td>
-                        <td className="w-1/4 p-1.5 border-l border-slate-400">
-                          <input
-                            type="text"
-                            disabled={isLocked}
-                            value={formData.victimDepartment}
-                            onChange={e => handleFieldChange('victimDepartment', e.target.value)}
-                            placeholder="واحد سازماني..."
-                            className="w-full p-1 border border-slate-200 rounded text-xs"
-                          />
-                        </td>
-                        <td className="w-1/4 p-2 bg-slate-100/70 border-l border-slate-400 font-bold">
-                          سابقه كار :
-                        </td>
-                        <td className="w-1/4 p-1.5">
-                          <input
-                            type="text"
-                            disabled={isLocked}
-                            value={formData.victimWorkExperience}
-                            onChange={e => handleFieldChange('victimWorkExperience', e.target.value)}
-                            placeholder="مثال: ۵ سال"
-                            className="w-full p-1 border border-slate-200 rounded text-xs"
-                          />
-                        </td>
-                      </tr>
-
-                      <tr className="border-b border-slate-400">
-                        <td className="w-1/4 p-2 bg-slate-100/70 border-l border-slate-400 font-bold">
-                          نوع آسيب :
-                        </td>
-                        <td className="w-1/4 p-1.5 border-l border-slate-400">
-                          <input
-                            type="text"
-                            disabled={isLocked}
-                            value={formData.injuryType}
-                            onChange={e => handleFieldChange('injuryType', e.target.value)}
-                            placeholder="سوختگی، بریدگی، کوفتگی..."
-                            className="w-full p-1 border border-slate-200 rounded text-xs font-bold text-rose-700"
-                          />
-                        </td>
-                        <td className="w-1/4 p-2 bg-slate-100/70 border-l border-slate-400 font-bold">
-                          عضو آسيب ديده :
-                        </td>
-                        <td className="w-1/4 p-1.5">
-                          <input
-                            type="text"
-                            disabled={isLocked}
-                            value={formData.injuredBodyPart}
-                            onChange={e => handleFieldChange('injuredBodyPart', e.target.value)}
-                            placeholder="دست راست، مچ، چشم..."
-                            className="w-full p-1 border border-slate-200 rounded text-xs"
-                          />
-                        </td>
-                      </tr>
-
-                      <tr>
-                        <td className="w-1/4 p-2 bg-slate-100/70 border-l border-slate-400 font-bold">
-                          اقدام درماني :
-                        </td>
-                        <td className="w-1/4 p-1.5 border-l border-slate-400">
-                          <input
-                            type="text"
-                            disabled={isLocked}
-                            value={formData.medicalTreatment}
-                            onChange={e => handleFieldChange('medicalTreatment', e.target.value)}
-                            placeholder="پانسمان سرپایی، اعزام به بیمارستان..."
-                            className="w-full p-1 border border-slate-200 rounded text-xs"
-                          />
-                        </td>
-                        <td className="w-1/4 p-2 bg-slate-100/70 border-l border-slate-400 font-bold">
-                          تعداد روزهاي تلف شده :
-                        </td>
-                        <td className="w-1/4 p-1.5">
-                          <input
-                            type="number"
-                            disabled={isLocked}
-                            value={formData.lostWorkDays}
-                            onChange={e => handleFieldChange('lostWorkDays', e.target.value)}
-                            placeholder="۰"
-                            className="w-full p-1 border border-slate-200 rounded text-xs font-mono font-bold text-rose-700"
-                          />
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table></div>
-                </div>
-
-                {/* 7. SECTION 8: CORRECTIVE & PREVENTIVE ACTIONS (CAPA) */}
-                <div className="border border-slate-400 rounded p-2.5 space-y-2">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                    <label className="block font-black text-slate-900 text-xs">
-                      ۸- اقدام اصلاحي و پيشگيرانه مورد نياز :
-                    </label>
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-slate-700 text-xs">شماره فرم اقدام اصلاحي/ پيشگيرانه :</span>
-                      <input
-                        type="text"
-                        disabled={isLocked}
-                        value={formData.capaFormNumber}
-                        onChange={e => handleFieldChange('capaFormNumber', e.target.value)}
-                        placeholder="مثال: CAPA-1403-08"
-                        className="w-48 p-1 border border-slate-300 rounded font-mono text-xs bg-slate-50 font-bold text-slate-900"
-                      />
-                    </div>
+                          </td>
+                          <td style={{ width: '28%', padding: '4px 10px', verticalAlign: 'middle', textAlign: 'center' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                              {formData.hseExpertSignature && (
+                                <img
+                                  src={formData.hseExpertSignature}
+                                  alt="امضای کارشناس HSE"
+                                  style={{ maxHeight: '42px', maxWidth: '88px', objectFit: 'contain' }}
+                                />
+                              )}
+                              {formData.hseHeadSignature && isCompleted && (
+                                <img
+                                  src={formData.hseHeadSignature}
+                                  alt="امضای رئیس HSE"
+                                  style={{ maxHeight: '42px', maxWidth: '88px', objectFit: 'contain' }}
+                                />
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
                   </div>
 
-                  <textarea
-                    rows={3}
-                    disabled={isLocked}
-                    value={formData.capaRequiredActions}
-                    onChange={e => handleFieldChange('capaRequiredActions', e.target.value)}
-                    placeholder="شرح اقدامات اصلاحی و پیشگیرانه، بازه زمانی اجرا و مسئولین اقدام..."
-                    className="w-full p-2 border border-slate-300 rounded text-xs bg-white"
-                  />
-                </div>
-
-                {/* 8. SIGNATURE & HSE EXPERT DETAILS (Matching PDF) */}
-                <div className="border border-slate-400 rounded p-3 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs items-center">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-slate-700 whitespace-nowrap">تاريخ شروع :</span>
-                      <div className="w-36">
-                        <PersianDatePicker
-                          disabled={isLocked}
-                          value={formData.startDate}
-                          onChange={(jStr) => handleFieldChange('startDate', jStr)}
-                          isFa={isFa}
-                          inputClassName="p-1 text-xs"
-                        />
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-slate-700 whitespace-nowrap">تاريخ پايان :</span>
-                      <div className="w-36">
-                        <PersianDatePicker
-                          disabled={true}
-                          value={deadlineInfo.deadlineDate}
-                          onChange={(jStr) => handleFieldChange('endDate', jStr)}
-                          isFa={isFa}
-                          inputClassName="p-1 text-xs bg-slate-100 text-slate-500 cursor-not-allowed"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <span className="block font-bold text-slate-700">نام و نام خانوادگي كارشناس واحد HSE:</span>
-                    <div className="flex items-center gap-1">
-                      <input
-                        type="text"
-                        disabled={isLocked}
-                        value={formData.hseExpertName}
-                        onChange={e => handleFieldChange('hseExpertName', e.target.value)}
-                        placeholder="نام کارشناس HSE..."
-                        className="w-full p-1 border border-slate-300 rounded font-bold text-xs bg-slate-50"
-                      />
-                      {!isLocked && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setPersonnelTargetField('hseExpert');
-                            setPersonnelSearchQuery('');
-                            setPersonnelModalOpen(true);
-                          }}
-                          title="انتخاب کارشناس از بانک پرسنل"
-                          className="p-1 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 border border-slate-300 rounded text-slate-600 transition shrink-0"
-                        >
-                          <Users className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Stamp & E-Signature Box */}
-                  <div className="p-2 border border-dashed border-slate-300 rounded-xl bg-slate-50 text-center flex flex-col items-center justify-center min-h-[60px]">
-                    <span className="text-[10px] text-slate-500 font-bold mb-1">امضا و تأیید کارشناس واحد HSE</span>
-                    <div className="font-serif italic font-bold text-indigo-900 text-sm flex items-center gap-1">
-                      <FileCheck className="w-4 h-4 text-emerald-600" />
-                      <span>{formData.hseExpertName || 'کارشناس HSE'}</span>
-                    </div>
-                    <span className="text-[9px] text-emerald-600 font-mono">
-                      {formData.completedAt ? `تأیید سیستمی: ${formData.completedAt}` : 'تأیید الکترونیکی HSE'}
-                    </span>
-                  </div>
-                </div>
-
-                {/* 9. FOOTER (Matching PDF exactly) */}
-                <div className="pt-3 border-t border-slate-400 flex flex-wrap items-center justify-between text-[11px] font-bold text-slate-700 gap-2">
-                  <div>
-                    <span>کد فرم: </span>
-                    <strong className="font-mono text-slate-900">RHS – F34</strong>
-                  </div>
-                  <div>
-                    <span>بازنگري: </span>
-                    <strong className="font-mono text-slate-900">00</strong>
-                  </div>
-                  <div>
-                    <span>توزيع نسخ: ۱- مديريت امور مجتمع ۲- واحد HSE ۳- امور اداري</span>
-                  </div>
-                </div>
-
-              </div>
-
-              {/* FORM ACTION CONTROLS */}
-              <div className="flex flex-wrap items-center justify-between gap-3 p-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm print:hidden">
-                <div className="flex items-center gap-2">
-                  {!isLocked && (
-                    <button
-                      type="button"
-                      onClick={handleClearForm}
-                      className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-xs rounded-xl flex items-center gap-1.5 transition"
-                      title="پاکسازی تمام فیلدها و ساخت فرم خام بدون پیش‌فرض"
-                    >
-                      <RotateCcw className="w-3.5 h-3.5" />
-                      <span>{isFa ? 'پاکسازی فیلدها (فرم خام)' : 'Clear Form'}</span>
-                    </button>
-                  )}
-                  <div className="flex items-center gap-2 text-xs text-slate-500">
-                    <Info className="w-4 h-4 text-slate-400" />
-                    <span>
-                      {formData.status === 'completed' 
-                        ? (isFa ? '✓ فرم نهایی شده و در پرونده حادثه ثبت گردیده است.' : 'Form finalized.') 
-                        : (isFa ? 'می‌توانید فرم را ذخیره موقت کرده یا پس از تکمیل، ثبت نهایی نمایید.' : 'Save draft or submit final.')}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={onClose}
-                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition"
-                  >
-                    {isFa ? 'بستن' : 'Close'}
-                  </button>
-
-                  <button
-                    type="button"
-                    disabled={isLocked}
-                    onClick={handleSaveDraft}
-                    className={`px-4 py-2 font-bold text-xs rounded-xl flex items-center gap-1.5 transition ${
-                      isLocked 
-                        ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                        : 'bg-amber-500 hover:bg-amber-600 text-white shadow-md'
-                    }`}
-                  >
-                    <Save className="w-3.5 h-3.5" />
-                    <span>{isFa ? 'ذخیره موقت' : 'Save Draft'}</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    disabled={isLocked}
-                    onClick={handleFinalize}
-                    className={`px-5 py-2 font-black text-xs rounded-xl flex items-center gap-1.5 transition shadow-lg ${
-                      isLocked
-                        ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
-                        : 'bg-emerald-600 hover:bg-emerald-500 text-white'
-                    }`}
-                  >
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span>{isFa ? 'تکمیل و ثبت نهایی فرم' : 'Finalize & Attach'}</span>
-                  </button>
-                </div>
-              </div>
-
-            </div>
-          )}
-
-          {/* TAB 2: PDF PREVIEW VIEW */}
-          {activeView === 'pdf_preview' && (
-            <div className="max-w-4xl mx-auto space-y-4">
-              <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-2xl flex items-center justify-between gap-3 text-xs text-indigo-900 print:hidden">
-                <div className="flex items-center gap-2">
-                  <Eye className="w-4 h-4 text-indigo-600" />
-                  <span>{isFa ? 'پیش‌نمایش خروجی سند رسمی استاندارد (A4 Portrait) جهت چاپ یا صدور PDF' : 'Print / Export Ready Document View'}</span>
-                </div>
-                <button
-                  onClick={handlePrint}
-                  className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl flex items-center gap-1.5 transition shadow-sm"
-                >
-                  <Printer className="w-3.5 h-3.5" />
-                  <span>{isFa ? 'چاپ یا دریافت PDF' : 'Print / Export PDF'}</span>
-                </button>
-              </div>
-
-              {/* READONLY PERFECT REPLICA */}
-              <div className="bg-white rounded-2xl p-6 sm:p-10 shadow-lg border border-slate-300 text-slate-900 font-sans space-y-4">
-                {/* Header */}
-                <div className="border-b-2 border-slate-800 pb-3 flex items-center justify-between gap-4">
-                  {/* Right Logo (Only Logo, No Text) */}
-                  <div className="flex items-center justify-center min-w-[70px] h-14 bg-white p-1 rounded-lg border border-slate-200 overflow-hidden">
-                    {branding.logoUrl ? (
-                      <img 
-                        src={branding.logoUrl} 
-                        alt="Logo" 
-                        className="max-h-full max-w-full object-contain select-none"
-                      />
-                    ) : (
-                      <HseLogo size="md" target="header" showShadow={false} />
-                    )}
-                  </div>
-
-                  <div className="text-center flex-1">
-                    <h1 className="text-lg font-black text-slate-900">تجزيه و تحليل رويداد</h1>
-                    <h2 className="text-xs font-bold text-slate-700 mt-0.5">واحد بهداشت ، ايمني و محيط زيست پتروشيمي رجال</h2>
-                  </div>
-
-                  <div className="text-left font-mono text-xs space-y-1">
-                    <div><span className="font-bold text-slate-700">تاريخ : </span><strong>{formData.formDate}</strong></div>
-                    <div><span className="font-bold text-slate-700">شماره : </span><strong className="text-rose-700">{formData.formNumber}</strong></div>
-                  </div>
-                </div>
-
-                {/* Table 1 */}
-                <div className="overflow-x-auto w-full"><table className="w-full border-collapse border border-slate-400 text-xs">
-                  <tbody>
-                    <tr className="border-b border-slate-400">
-                      <td className="w-1/4 p-2 bg-slate-100 border-l border-slate-400 font-bold">تاریخ و ساعت رویداد :</td>
-                      <td className="w-1/4 p-2 border-l border-slate-400 font-mono">
-                        {formData.eventDate || formData.eventDateTime || '-'} {formData.eventTime ? `ساعت ${formData.eventTime}` : ''}
-                      </td>
-                      <td className="w-1/4 p-2 bg-slate-100 border-l border-slate-400 font-bold">محل دقيق رويداد :</td>
-                      <td className="w-1/4 p-2">{formData.exactLocation}</td>
-                    </tr>
-                    <tr className="border-b border-slate-400">
-                      <td className="w-1/4 p-2 bg-slate-100 border-l border-slate-400 font-bold">تاریخ و ساعت گزارش رویداد :</td>
-                      <td className="w-1/4 p-2 border-l border-slate-400 font-mono">
-                        {formData.reportDate || formData.reportDateTime || '-'} {formData.reportTime ? `ساعت ${formData.reportTime}` : ''}
-                      </td>
-                      <td className="w-1/4 p-2 bg-slate-100 border-l border-slate-400 font-bold">مکان بروز :</td>
-                      <td className="w-1/4 p-2">{formData.locationOccurrence}</td>
-                    </tr>
-                    <tr className="border-b border-slate-400">
-                      <td className="w-1/4 p-2 bg-slate-100 border-l border-slate-400 font-bold">نام و سمت گزارش دهنده :</td>
-                      <td className="w-1/4 p-2 border-l border-slate-400 font-bold">{formData.reporterNameAndRole}</td>
-                      <td className="w-1/4 p-2 bg-slate-100 border-l border-slate-400 font-bold">واحد سازمانی مصدوم :</td>
-                      <td className="w-1/4 p-2">{formData.victimOrgUnit}</td>
-                    </tr>
-                    <tr className="border-b border-slate-400">
-                      <td className="w-1/4 p-2 bg-slate-100 border-l border-slate-400 font-bold">فعاليت حين حادثه :</td>
-                      <td className="w-1/4 p-2 border-l border-slate-400">{formData.activityDuringIncident}</td>
-                      <td className="w-1/4 p-2 bg-slate-100 border-l border-slate-400 font-bold">تعداد مصدومين /قربانيان :</td>
-                      <td className="w-1/4 p-2 font-mono font-bold">{formData.victimCount}</td>
-                    </tr>
-                    <tr>
-                      <td className="w-1/4 p-2 bg-slate-100 border-l border-slate-400 font-bold">برآورد ميزان خسارات جاني / مالي :</td>
-                      <td colSpan={3} className="p-2">{formData.estimatedLoss || '-'}</td>
-                    </tr>
-                  </tbody>
-                </table></div>
-
-                {/* Section 2 */}
-                <div className="border border-slate-400 rounded p-2.5 space-y-1">
-                  <div className="font-black text-xs">۲- شرح مختصر رويداد :</div>
-                  <p className="text-xs leading-relaxed text-slate-800 whitespace-pre-wrap">{formData.briefDescription}</p>
-                </div>
-
-                {/* Section 3 */}
-                <div className="border border-slate-400 rounded p-2.5 space-y-1.5">
-                  <div className="font-black text-xs">۳- داده هاي ماتريس شدت ( شدت ريسك ):</div>
-                  <div className="grid grid-cols-4 gap-2 text-center text-xs">
-                    {['High', 'Medium', 'Low', 'Minimal'].map(sev => (
-                      <div key={sev} className={`p-2 rounded border ${formData.riskSeverityMatrix === sev ? 'border-slate-900 bg-slate-100 font-black' : 'border-slate-300'}`}>
-                        {sev} {formData.riskSeverityMatrix === sev ? '*' : ''}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Sections 4, 5, 6 */}
-                <div className="border border-slate-400 rounded p-2.5 space-y-1">
-                  <div className="font-black text-xs">۴- علل مستقيم :</div>
-                  <p className="text-xs leading-relaxed text-slate-800 whitespace-pre-wrap">{formData.directCauses || '-'}</p>
-                </div>
-
-                <div className="border border-slate-400 rounded p-2.5 space-y-1">
-                  <div className="font-black text-xs">۵- علل غيرمستقيم :</div>
-                  <p className="text-xs leading-relaxed text-slate-800 whitespace-pre-wrap">{formData.indirectCauses || '-'}</p>
-                </div>
-
-                <div className="border border-slate-400 rounded p-2.5 space-y-1">
-                  <div className="font-black text-xs">۶- علل ريشه اي :</div>
-                  <p className="text-xs leading-relaxed text-slate-800 whitespace-pre-wrap">{formData.rootCauses || '-'}</p>
-                </div>
-
-                {/* Section 7 */}
-                <div className="border border-slate-400 rounded p-2.5 space-y-1">
-                  <div className="font-black text-xs">۷- اطلاعات مصدوم (قرباني) :</div>
-                  <div className="overflow-x-auto w-full"><table className="w-full border-collapse border border-slate-400 text-xs">
-                    <tbody>
-                      <tr className="border-b border-slate-400">
-                        <td className="w-1/4 p-2 bg-slate-100 border-l border-slate-400 font-bold">نام و نام خانوادگي :</td>
-                        <td className="w-1/4 p-2 border-l border-slate-400 font-bold">{formData.victimName}</td>
-                        <td className="w-1/4 p-2 bg-slate-100 border-l border-slate-400 font-bold">شماره پرسنلي :</td>
-                        <td className="w-1/4 p-2 font-mono">{formData.victimPersonnelCode}</td>
-                      </tr>
-                      <tr className="border-b border-slate-400">
-                        <td className="w-1/4 p-2 bg-slate-100 border-l border-slate-400 font-bold">واحد سازماني :</td>
-                        <td className="w-1/4 p-2 border-l border-slate-400">{formData.victimDepartment}</td>
-                        <td className="w-1/4 p-2 bg-slate-100 border-l border-slate-400 font-bold">سابقه كار :</td>
-                        <td className="w-1/4 p-2">{formData.victimWorkExperience}</td>
-                      </tr>
-                      <tr className="border-b border-slate-400">
-                        <td className="w-1/4 p-2 bg-slate-100 border-l border-slate-400 font-bold">نوع آسيب :</td>
-                        <td className="w-1/4 p-2 border-l border-slate-400 font-bold text-rose-700">{formData.injuryType}</td>
-                        <td className="w-1/4 p-2 bg-slate-100 border-l border-slate-400 font-bold">عضو آسيب ديده :</td>
-                        <td className="w-1/4 p-2">{formData.injuredBodyPart}</td>
-                      </tr>
-                      <tr>
-                        <td className="w-1/4 p-2 bg-slate-100 border-l border-slate-400 font-bold">اقدام درماني :</td>
-                        <td className="w-1/4 p-2 border-l border-slate-400">{formData.medicalTreatment}</td>
-                        <td className="w-1/4 p-2 bg-slate-100 border-l border-slate-400 font-bold">تعداد روزهاي تلف شده :</td>
-                        <td className="w-1/4 p-2 font-mono font-bold">{formData.lostWorkDays}</td>
-                      </tr>
-                    </tbody>
-                  </table></div>
-                </div>
-
-                {/* Section 8 */}
-                <div className="border border-slate-400 rounded p-2.5 space-y-1.5">
-                  <div className="flex items-center justify-between text-xs">
-                    <strong className="font-black">۸- اقدام اصلاحي و پيشگيرانه مورد نياز :</strong>
-                    <div><span className="font-bold">شماره فرم اقدام اصلاحي/ پيشگيرانه : </span><span className="font-mono font-bold">{formData.capaFormNumber}</span></div>
-                  </div>
-                  <p className="text-xs leading-relaxed text-slate-800 whitespace-pre-wrap">{formData.capaRequiredActions || '-'}</p>
-                </div>
-
-                {/* Signatures */}
-                <div className="border border-slate-400 rounded p-3 flex items-center justify-between text-xs">
-                  <div className="space-y-1">
-                    <div><span className="font-bold">تاريخ شروع : </span><span className="font-mono">{formData.startDate}</span></div>
-                    <div><span className="font-bold">تاريخ پايان : </span><span className="font-mono">{deadlineInfo.deadlineDate}</span></div>
-                  </div>
-
-                  <div>
-                    <span className="font-bold">نام و نام خانوادگي كارشناس واحد HSE : </span>
-                    <strong>{formData.hseExpertName}</strong>
-                  </div>
-
-                  <div className="text-center font-serif italic text-indigo-900 font-bold text-sm">
-                    {formData.hseExpertName} (تأیید الکترونیک)
-                  </div>
-                </div>
-
-                {/* Footer */}
-                <div className="pt-2 border-t border-slate-400 flex items-center justify-between text-[10px] text-slate-600 font-bold">
-                  <div>کد فرم : <span className="font-mono">RHS – F34</span></div>
-                  <div>بازنگري : <span className="font-mono">00</span></div>
-                  <div>توزيع نسخ: ۱- مديريت امور مجتمع ۲- واحد HSE ۳- امور اداري</div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 3: AUDIT LOGS VIEW */}
-          {activeView === 'audit_log' && (
-            <div className="max-w-3xl mx-auto space-y-4">
-              <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
-                  <h3 className="font-black text-sm text-slate-800 dark:text-slate-100 flex items-center gap-2">
-                    <History className="w-4 h-4 text-indigo-600" />
-                    {isFa ? 'سوابق ثبت، ویرایش و تغییرات فرم تکمیلی (Audit Trail)' : 'Supplementary Form Audit Trail'}
-                  </h3>
-                  <span className="text-xs text-slate-400 font-mono font-bold">
-                    {formData.auditLogs?.length || 0} {isFa ? 'رویداد ثبت‌شده' : 'Events'}
-                  </span>
-                </div>
-
-                <div className="space-y-3">
-                  {formData.auditLogs && formData.auditLogs.length > 0 ? (
-                    formData.auditLogs.map((log, idx) => (
-                      <div key={log.id || idx} className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/60 space-y-1.5">
-                        <div className="flex items-center justify-between text-xs">
-                          <div className="flex items-center gap-2">
-                            <span className="w-2 h-2 rounded-full bg-indigo-600"></span>
-                            <strong className="text-slate-900 dark:text-slate-100 font-bold">{log.actionFa}</strong>
-                            <span className="text-[10px] text-slate-500 bg-slate-200/70 dark:bg-slate-700 px-2 py-0.5 rounded font-medium">
-                              {log.role}
-                            </span>
-                          </div>
-                          <span className="font-mono text-[11px] text-slate-500">
-                            {log.timestamp}
-                          </span>
-                        </div>
-
-                        <div className="text-xs text-slate-600 dark:text-slate-300 flex items-center justify-between">
-                          <span>کاربر ثبت‌کننده: <strong className="text-slate-800 dark:text-slate-200">{log.user}</strong> {log.userCode ? `(کد: ${log.userCode})` : ''}</span>
-                          {log.details && (
-                            <span className="text-slate-400 text-[11px]">{log.details}</span>
-                          )}
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="text-center py-6 text-slate-400 text-xs font-bold">
-                      {isFa ? 'هیچ رکوردی در تاریخچه ثبت نشده است.' : 'No audit records.'}
-                    </p>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
-        </div>
-      </div>
-
-      {/* COMPLEX PERSONNEL SEARCH & SELECTION MODAL */}
-      {personnelModalOpen && (
-        <div className="fixed inset-0 z-60 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6" dir={isFa ? 'rtl' : 'ltr'}>
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-            {/* Header */}
-            <div className="p-4 bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-md">
-                  <Users className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="font-black text-sm text-slate-900 dark:text-slate-100">
-                    {personnelTargetField === 'victim' && (isFa ? 'جستجو و انتخاب مصدوم از پرسنل مجتمع' : 'Select Victim Personnel')}
-                    {personnelTargetField === 'reporter' && (isFa ? 'جستجو و انتخاب گزارش‌دهنده از پرسنل مجتمع' : 'Select Reporter')}
-                    {personnelTargetField === 'hseExpert' && (isFa ? 'جستجو و انتخاب کارشناس واحد HSE' : 'Select HSE Expert')}
-                  </h3>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                    {isFa ? 'جستجو بر اساس شماره پرسنلی، نام، کدملی یا واحد سازمانی تعریف شده در تنظیمات' : 'Search by code, name, national ID or department'}
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setPersonnelModalOpen(false)}
-                className="w-8 h-8 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 flex items-center justify-center text-slate-500 transition"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Filter & Search Bar */}
-            <div className="p-3.5 bg-slate-50/50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row items-center gap-2.5">
-              <div className="relative flex-1 w-full">
-                <Search className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  autoFocus
-                  value={personnelSearchQuery}
-                  onChange={e => setPersonnelSearchQuery(e.target.value)}
-                  placeholder={isFa ? 'جستجوی شماره پرسنلی، نام و نام خانوادگی، کدملی...' : 'Search by code or name...'}
-                  className="w-full pr-9 pl-3 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition"
-                />
-              </div>
-
-              {departmentsList.length > 0 && (
-                <div className="w-full sm:w-48 shrink-0">
-                  <select
-                    value={personnelDeptFilter}
-                    onChange={e => setPersonnelDeptFilter(e.target.value)}
-                    className="w-full py-2 px-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-700 dark:text-slate-300"
-                  >
-                    <option value="ALL">{isFa ? 'همه واحدها' : 'All Departments'}</option>
-                    {departmentsList.map(dept => (
-                      <option key={dept} value={dept}>{dept}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-            </div>
-
-            {/* Personnel List */}
-            <div className="flex-1 overflow-y-auto p-3 space-y-2 divide-y divide-slate-100 dark:divide-slate-800">
-              {filteredPersonnel.length > 0 ? (
-                filteredPersonnel.map((person) => (
+                  {/* Outer Footer matching exact PDF */}
                   <div
-                    key={person.id}
-                    onClick={() => personnelTargetField && handleSelectPersonnel(person, personnelTargetField)}
-                    className="pt-2 first:pt-0 p-2.5 rounded-xl hover:bg-indigo-50/70 dark:hover:bg-indigo-950/40 cursor-pointer flex items-center justify-between gap-3 transition group border border-transparent hover:border-indigo-200 dark:hover:border-indigo-800"
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      marginTop: '6px',
+                      fontSize: '10px',
+                      fontWeight: 800,
+                      color: '#000',
+                    }}
                   >
-                    <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-full bg-slate-100 dark:bg-slate-800 group-hover:bg-indigo-100 dark:group-hover:bg-indigo-900/60 text-slate-700 dark:text-slate-300 group-hover:text-indigo-600 flex items-center justify-center font-bold text-xs shrink-0 transition overflow-hidden">
-                        {person.profilePhoto ? (
-                          <img src={person.profilePhoto} alt={person.fullName} className="w-full h-full object-cover" />
-                        ) : (
-                          person.fullName ? person.fullName.charAt(0) : 'P'
+                    <div>
+                      <span>کد فرم : {formData.formCode || 'RHS – F34'}</span>
+                      <span style={{ marginRight: '18px' }}>بازنگری : {formData.revision || '00'}</span>
+                    </div>
+                    <div>
+                      {formData.distributionList || 'توزیع نسخ: ۱- مدیریت امور مجتمع ۲- واحد HSE ۳- امور اداری'}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 5: IMMUTABLE AUDIT LOG */}
+          {activeTab === 'audit' && (
+            <div className="space-y-3">
+              {auditLogs.length === 0 ? (
+                <div className="p-8 text-center text-slate-400 font-bold">سابقه‌ای ثبت نشده است.</div>
+              ) : (
+                auditLogs.map((log) => (
+                  <div
+                    key={log.id}
+                    className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/40 flex flex-col sm:flex-row sm:items-start justify-between gap-3"
+                  >
+                    <div className="space-y-1">
+                      <div className="font-black text-slate-900 dark:text-white">{log.actionFa}</div>
+                      <div className="text-[11px] text-slate-600 dark:text-slate-300 flex flex-wrap items-center gap-x-2">
+                        <span>
+                          اقدام‌کننده: <strong>{log.user}</strong>
+                        </span>
+                        {log.userCode && <span>({fmt(log.userCode)})</span>}
+                        {log.outcome && (
+                          <>
+                            <span aria-hidden="true">·</span>
+                            <span className="font-bold text-indigo-700 dark:text-indigo-300">
+                              نتیجه: {log.outcome}
+                            </span>
+                          </>
                         )}
                       </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-xs text-slate-900 dark:text-slate-100 group-hover:text-indigo-600 transition">
-                            {person.fullName}
-                          </span>
-                          <span className="font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-indigo-50 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 border border-indigo-100 dark:border-indigo-800">
-                            کد پرسنلی: {person.personnelCode || person.effectiveCode}
-                          </span>
-                        </div>
-                        <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 flex flex-wrap items-center gap-2">
-                          <span>{person.jobTitle || person.position || 'پرسنل مجتمع'}</span>
-                          {person.department && (
-                            <>
-                              <span>•</span>
-                              <span>{person.department}</span>
-                            </>
-                          )}
-                          {person.unit && (
-                            <>
-                              <span>•</span>
-                              <span>واحد {person.unit}</span>
-                            </>
-                          )}
-                          {person.nationalCode && (
-                            <>
-                              <span>•</span>
-                              <span className="font-mono text-[10px]">کدملی: {person.nationalCode}</span>
-                            </>
-                          )}
-                        </div>
-                      </div>
+                      {log.details && (
+                        <div className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">{log.details}</div>
+                      )}
                     </div>
-
-                    <button
-                      type="button"
-                      className="px-3 py-1.5 bg-indigo-600 group-hover:bg-indigo-500 text-white rounded-lg text-xs font-bold shrink-0 transition flex items-center gap-1 shadow-sm"
-                    >
-                      <UserCheck className="w-3.5 h-3.5" />
-                      <span>{isFa ? 'انتخاب' : 'Select'}</span>
-                    </button>
+                    <div className="font-mono text-[11px] text-slate-500 tabular-nums shrink-0">
+                      {fmt(log.timestamp)}
+                    </div>
                   </div>
                 ))
-              ) : (
-                <div className="text-center py-10 space-y-2">
-                  <Users className="w-8 h-8 text-slate-300 mx-auto" />
-                  <p className="text-xs text-slate-500 font-bold">
-                    {isFa ? 'هیچ پرسنلی با این مشخصات یافت نشد.' : 'No personnel found.'}
-                  </p>
-                  <p className="text-[11px] text-slate-400">
-                    {isFa ? 'می‌توانید اطلاعات پرسنل را در بخش «تنظیمات سامانه > مدیریت پرسنل» ثبت و بروزرسانی فرمایید.' : 'You can add personnel in System Settings.'}
-                  </p>
-                </div>
               )}
             </div>
-
-            {/* Footer */}
-            <div className="p-3 bg-slate-50 dark:bg-slate-800/80 border-t border-slate-200 dark:border-slate-700 flex items-center justify-between text-xs text-slate-500">
-              <span>{filteredPersonnel.length} {isFa ? 'نفر از کل پرسنل مجتمع' : 'personnel found'}</span>
-              <button
-                type="button"
-                onClick={() => setPersonnelModalOpen(false)}
-                className="px-4 py-1.5 bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-bold rounded-xl transition"
-              >
-                {isFa ? 'انصراف' : 'Cancel'}
-              </button>
-            </div>
-          </div>
+          )}
         </div>
-      )}
-
-    </div>
+      </div>
+    </div>,
+    document.body
   );
 }

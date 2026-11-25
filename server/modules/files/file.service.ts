@@ -96,6 +96,9 @@ const ALLOWED_MIME_TYPES = new Set([
   'image/jpeg',
   'image/png',
   'image/webp',
+  'video/mp4',
+  'video/webm',
+  'video/quicktime',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // xlsx
   'application/vnd.ms-excel',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // docx
@@ -273,6 +276,30 @@ export function verifyActualFileSignature(
       return { valid: true, detectedMime: 'application/vnd.ms-excel', safeExtension: '.xls' };
     }
     return { valid: true, detectedMime: 'application/msword', safeExtension: '.doc' };
+  }
+
+  // 7. MP4 / MOV ISO Base Media File Format: bytes 4..7 === "ftyp"
+  if (
+    buffer.length >= 12 &&
+    buffer.toString('ascii', 4, 8) === 'ftyp'
+  ) {
+    const majorBrand = buffer.toString('ascii', 8, 12);
+    const ext = path.extname(originalName || '').toLowerCase();
+    if (majorBrand.startsWith('qt') || ext === '.mov' || mimeType === 'video/quicktime') {
+      return { valid: true, detectedMime: 'video/quicktime', safeExtension: '.mov' };
+    }
+    return { valid: true, detectedMime: 'video/mp4', safeExtension: '.mp4' };
+  }
+
+  // 8. WebM / Matroska EBML header: 1A 45 DF A3
+  if (
+    buffer.length >= 4 &&
+    buffer[0] === 0x1a &&
+    buffer[1] === 0x45 &&
+    buffer[2] === 0xdf &&
+    buffer[3] === 0xa3
+  ) {
+    return { valid: true, detectedMime: 'video/webm', safeExtension: '.webm' };
   }
 
   return { valid: false };
@@ -478,23 +505,29 @@ export class FileService {
     let resolvedMime = params.mimeType;
     let safeExt = path.extname(params.originalName).toLowerCase() || '.bin';
 
-    // 2. Strict Magic-Byte Signature Verification for Documents & Images
-    if (
+    // 2. Strict Magic-Byte Signature Verification for Documents, Images & Videos
+    const extLower = path.extname(params.originalName || '').toLowerCase();
+    const requiresMagicByteCheck =
       params.entityType === 'DOCUMENT' ||
       DOCUMENT_ALLOWED_MIMES.has(params.mimeType) ||
-      ['.pdf', '.jpg', '.jpeg', '.png', '.webp', '.docx', '.doc', '.xlsx', '.xls'].includes(safeExt)
-    ) {
+      ['video/mp4', 'video/webm', 'video/quicktime'].includes(params.mimeType) ||
+      ['.pdf', '.jpg', '.jpeg', '.png', '.webp', '.docx', '.doc', '.xlsx', '.xls', '.mp4', '.webm', '.mov'].includes(extLower);
+
+    if (requiresMagicByteCheck) {
       const sig = verifyActualFileSignature(params.fileBuffer, params.originalName, params.mimeType);
       if (!sig.valid || !sig.detectedMime || !sig.safeExtension) {
         throw new ValidationError(
-          'نوع واقعی فایل (امضای باینری) معتبر نیست. تنها فایل‌های استاندارد و واقعی با فرمت PDF، JPG، PNG، WEBP، Word و Excel مجاز هستند.'
+          'نوع واقعی فایل (امضای باینری) معتبر نیست. تنها فایل‌های استاندارد و واقعی با فرمت PDF، تصویر (JPG/PNG/WEBP)، ویدیو (MP4/WEBM/MOV)، Word و Excel مجاز هستند.'
         );
+      }
+      if (params.entityType === 'DOCUMENT' && !DOCUMENT_ALLOWED_MIMES.has(sig.detectedMime)) {
+        throw new ValidationError('برای مستندات سازمانی فقط فرمت‌های PDF، تصویر، Word و Excel مجاز هستند.');
       }
       resolvedMime = sig.detectedMime;
       safeExt = sig.safeExtension;
     } else if (!ALLOWED_MIME_TYPES.has(params.mimeType)) {
       throw new ValidationError(
-        `فرمت فایل '${params.mimeType}' مجاز نیست. فرمت‌های مجاز: PDF, PNG, JPG, WEBP, DOCX, XLSX`
+        `فرمت فایل '${params.mimeType}' مجاز نیست. فرمت‌های مجاز: PDF, PNG, JPG, WEBP, MP4, WEBM, MOV, DOCX, XLSX`
       );
     }
 

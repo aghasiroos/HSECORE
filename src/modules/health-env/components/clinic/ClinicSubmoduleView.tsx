@@ -203,34 +203,34 @@ export default function ClinicSubmoduleView({ language, currentUser }: Props) {
     <div className="w-full p-4 sm:p-6 space-y-6 max-w-7xl 2xl:max-w-[1720px] mx-auto" dir="rtl">
       
       {/* Top Banner & Actions */}
-      <div className="bg-white dark:bg-slate-800 p-5 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-3.5">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-teal-600 to-cyan-600 text-white flex items-center justify-center shadow-lg shadow-teal-600/20 shrink-0">
+      <div className="bg-white dark:bg-slate-800 p-4 sm:p-5 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+        <div className="flex items-center gap-3.5 min-w-0 flex-1">
+          <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl bg-gradient-to-tr from-teal-600 to-cyan-600 text-white flex items-center justify-center shadow-lg shadow-teal-600/20 shrink-0">
             <Stethoscope className="w-6 h-6" />
           </div>
-          <div>
-            <h1 className="text-base sm:text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
+          <div className="min-w-0">
+            <h1 className="text-base sm:text-lg font-black text-slate-900 dark:text-white flex items-center gap-2 leading-snug">
               <span>زیرماژول بهداری و مراجعات سرپایی</span>
             </h1>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">
               مدیریت مراجعات روزانه، تریاژ، علائم حیاتی، اقدامات بالینی، داروها، استراحت پزشکی و اعزام به مراکز درمانی
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex flex-wrap items-center gap-2 max-w-full">
           <button
             onClick={handleExportCsv}
             disabled={filteredVisits.length === 0}
-            className="px-3.5 py-2.5 bg-slate-100 dark:bg-slate-700/80 hover:bg-slate-200 text-slate-700 dark:text-slate-200 text-xs font-bold rounded-2xl flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+            className="px-3.5 py-2.5 bg-slate-100 dark:bg-slate-700/80 hover:bg-slate-200 text-slate-700 dark:text-slate-200 text-xs font-bold rounded-2xl flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50 whitespace-nowrap"
             title="خروجی اکسل و CSV"
           >
-            <Download className="w-4 h-4 text-emerald-600" />
+            <Download className="w-4 h-4 text-emerald-600 shrink-0" />
             <span>خروجی اکسل</span>
           </button>
           <button
             onClick={loadVisits}
-            className="p-2.5 bg-slate-100 dark:bg-slate-700/80 hover:bg-slate-200 text-slate-700 dark:text-slate-200 rounded-2xl transition cursor-pointer"
+            className="p-2.5 bg-slate-100 dark:bg-slate-700/80 hover:bg-slate-200 text-slate-700 dark:text-slate-200 rounded-2xl transition cursor-pointer shrink-0"
             title="بازخوانی داده‌ها"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
@@ -240,16 +240,16 @@ export default function ClinicSubmoduleView({ language, currentUser }: Props) {
               setEditingVisit(null);
               setIsModalOpen(true);
             }}
-            className="px-4 py-2.5 bg-teal-600 hover:bg-teal-700 active:scale-95 text-white font-black text-xs rounded-2xl flex items-center gap-2 transition cursor-pointer shadow-lg shadow-teal-600/25"
+            className="px-4 py-2.5 bg-teal-600 hover:bg-teal-700 active:scale-95 text-white font-black text-xs rounded-2xl flex items-center gap-2 transition cursor-pointer shadow-lg shadow-teal-600/25 whitespace-nowrap"
           >
-            <Plus className="w-4 h-4" />
+            <Plus className="w-4 h-4 shrink-0" />
             <span>ثبت مراجعه جدید به بهداری</span>
           </button>
         </div>
       </div>
 
       {/* Real Statistics Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
         <div className="p-3.5 bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-2xs">
           <span className="text-[11px] text-slate-400 block font-bold">کل مراجعات ثبت‌شده</span>
           <div className="flex items-baseline justify-between mt-1">

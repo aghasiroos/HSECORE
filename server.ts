@@ -11,7 +11,7 @@ import { errorHandlerMiddleware } from './server/core/middleware/errorHandler.ts
 import { createApiRouter } from './server/routes/api.router.ts';
 import { requireAuth, requireRole } from './server/core/middleware/auth.ts';
 import { startWorkers } from './server/modules/process-management/worker.ts';
-import { startAutomationWorker } from './server/services/automation/automationWorker.ts';
+import { startAutomationWorker, stopAutomationWorker } from './server/services/automation/automationWorker.ts';
 import { weatherService } from './server/weather/service.ts';
 import { evaluateAndDispatchHeatStressWebhook } from './server/services/webhookDispatcher.ts';
 import { monitoringService } from './server/modules/monitoring/monitoring.service.ts';
@@ -19,6 +19,7 @@ import { openApiSpec } from './server/modules/monitoring/openapi.doc.ts';
 import cookieParser from 'cookie-parser';
 import compression from 'compression';
 import { socketService } from './server/core/socket.ts';
+import { pool as pgPool } from './src/db/index.ts';
 
 dotenv.config();
 
@@ -27,7 +28,6 @@ const APP_VERSION = process.env.APP_VERSION || '0.2.8';
 const BUILD_ID = process.env.BUILD_ID || '20260913-001';
 const RELEASE_ID = process.env.RELEASE_ID || 'dev-release';
 
-import * as dbServices from './server/db-services.ts';
 export { runMigrations } from './server/migrate.ts';
 
 async function startServer() {
@@ -274,20 +274,50 @@ async function startServer() {
     { lat: 31.320, lon: 48.683, city: 'مناطق نفت‌خیز جنوب', locality: 'اهواز', countryName: 'Iran' },
   ];
 
+  const GEOCODE_CACHE_TTL_MS = 15 * 60 * 1000;
+  const GEOCODE_CACHE_MAX = 250;
+  const geocodeCache = new Map<string, { data: any; expiresAt: number }>();
+
+  const getCachedGeocode = (key: string) => {
+    const hit = geocodeCache.get(key);
+    if (!hit) return null;
+    if (hit.expiresAt <= Date.now()) {
+      geocodeCache.delete(key);
+      return null;
+    }
+    return hit.data;
+  };
+
+  const setCachedGeocode = (key: string, data: any) => {
+    if (geocodeCache.size >= GEOCODE_CACHE_MAX && !geocodeCache.has(key)) {
+      const oldest = geocodeCache.keys().next().value;
+      if (oldest !== undefined) geocodeCache.delete(oldest);
+    }
+    geocodeCache.set(key, { data, expiresAt: Date.now() + GEOCODE_CACHE_TTL_MS });
+  };
+
   app.get('/api/reverse-geocode', async (req, res) => {
     const latNum = parseFloat(req.query.lat as string);
     const lonNum = parseFloat(req.query.lon as string);
 
-    if (!isNaN(latNum) && !isNaN(lonNum)) {
-      const match = KNOWN_INDUSTRIAL_HUBS.find(h => 
-        Math.abs(h.lat - latNum) < 0.08 && Math.abs(h.lon - lonNum) < 0.08
-      );
-      if (match) {
-        return res.json({
-          ...match,
-          displayName: `${match.locality} - ${match.city}`
-        });
-      }
+    if (!Number.isFinite(latNum) || !Number.isFinite(lonNum) || latNum < -90 || latNum > 90 || lonNum < -180 || lonNum > 180) {
+      return res.status(400).json({ error: true, message: 'مختصات جغرافیایی نامعتبر است.' });
+    }
+
+    const match = KNOWN_INDUSTRIAL_HUBS.find(h => 
+      Math.abs(h.lat - latNum) < 0.08 && Math.abs(h.lon - lonNum) < 0.08
+    );
+    if (match) {
+      return res.json({
+        ...match,
+        displayName: `${match.locality} - ${match.city}`
+      });
+    }
+
+    const cacheKey = `rev:${latNum.toFixed(3)},${lonNum.toFixed(3)}`;
+    const cached = getCachedGeocode(cacheKey);
+    if (cached) {
+      return res.json(cached);
     }
 
     try {
@@ -308,24 +338,28 @@ async function startServer() {
         const city = addr.city || addr.county || addr.state || nomData?.name || '';
         const countryName = addr.country || 'ایران';
         const combined = [locality, city].filter(Boolean).join('، ') || nomData?.display_name?.split('،')?.slice(0, 2)?.join('،') || 'موقعیت شناسایی‌شده';
-        return res.json({
+        const payload = {
           city: city || combined,
           locality: locality || city,
           countryName,
           displayName: combined
-        });
+        };
+        setCachedGeocode(cacheKey, payload);
+        return res.json(payload);
       }
 
       if (bdcRes && bdcRes.ok) {
         const data = await bdcRes.json();
         const city = data.city || data.locality || data.principalSubdivision || 'موقعیت فعلی';
         const locality = data.locality || data.city || '';
-        return res.json({
+        const payload = {
           ...data,
           city,
           locality,
           displayName: locality && locality !== city ? `${city}، ${locality}` : city
-        });
+        };
+        setCachedGeocode(cacheKey, payload);
+        return res.json(payload);
       }
 
       throw new Error('Reverse geocode providers unreachable');
@@ -405,14 +439,29 @@ async function startServer() {
         return res.json({ results: matchedHubs });
       }
 
+      const geoCacheKey = `fwd:${qStr}`;
+      const cachedGeo = getCachedGeocode(geoCacheKey);
+      if (cachedGeo) {
+        return res.json(cachedGeo);
+      }
+
       const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(String(query))}&count=6&language=en`;
       const response = await fetch(url, { signal: AbortSignal.timeout(3500) });
       if (!response.ok) throw new Error(`Status ${response.status}`);
       const data = await response.json();
+      setCachedGeocode(geoCacheKey, data);
       res.json(data);
     } catch {
       res.json({ results: [] });
     }
+  });
+
+  // Ensure API responses default to no-store unless an endpoint explicitly sets a private cache header
+  app.use('/api', (_req, res, next) => {
+    if (!res.getHeader('Cache-Control')) {
+      res.setHeader('Cache-Control', 'no-store');
+    }
+    next();
   });
 
   // 5. Master Unified Modular Monolith API Router
@@ -478,12 +527,6 @@ async function startServer() {
     const distPath = fs.existsSync(path.join(cwdDist, 'index.html')) ? cwdDist : localDist;
 
     logger.info(`Serving production assets from: ${distPath}`);
-    
-    // API routes should not be cached
-    app.use('/api', (req, res, next) => {
-      res.setHeader('Cache-Control', 'no-store');
-      next();
-    });
 
     // Hash versioned assets can be cached aggressively
     app.use('/assets', express.static(path.join(distPath, 'assets'), {
@@ -534,6 +577,35 @@ async function startServer() {
   } catch (err) {
     logger.error('Failed to initialize Socket.IO', err);
   }
+
+  // Graceful shutdown for Docker / systemd stop signals (prevents dropped DB transactions)
+  let shuttingDown = false;
+  const gracefulShutdown = async (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    logger.info(`[HSE Enterprise Platform] Received ${signal}. Starting graceful shutdown...`);
+    try {
+      stopAutomationWorker();
+    } catch {}
+    try {
+      socketService.close();
+    } catch {}
+    await new Promise<void>((resolve) => {
+      const forceTimer = setTimeout(() => resolve(), 8000);
+      if (forceTimer.unref) forceTimer.unref();
+      server.close(() => {
+        clearTimeout(forceTimer);
+        resolve();
+      });
+    });
+    try {
+      await pgPool.end();
+    } catch {}
+    process.exit(0);
+  };
+
+  process.on('SIGTERM', () => void gracefulShutdown('SIGTERM'));
+  process.on('SIGINT', () => void gracefulShutdown('SIGINT'));
 }
 
 // Global process resilience handlers to protect dev server pre-warming

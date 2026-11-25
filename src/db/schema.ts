@@ -468,22 +468,35 @@ export const riskAssessments = pgTable('risk_assessments', {
 export const incidents = pgTable('incidents', {
   id: serial('id').primaryKey(),
   incidentNumber: text('incident_number').unique(),
+  title: text('title'),
+  reportDate: text('report_date'),
   incidentDate: text('incident_date').notNull(),
   incidentTime: text('incident_time'),
-  incidentType: text('incident_type').notNull(), // LTI, FAC, MTC, NEAR_MISS, PROPERTY_DAMAGE, ENVIRONMENTAL
+  incidentType: text('incident_type').notNull(), // UNSAFE_ACT, UNSAFE_CONDITION, NEAR_MISS, LTI, FAC, MTC, PROPERTY_DAMAGE, ENVIRONMENTAL
   severity: text('severity').default('MINOR'),
+  companyName: text('company_name'),
+  department: text('department'),
   location: text('location').notNull(),
+  exactLocation: text('exact_location'),
   unitId: integer('unit_id').references(() => orgUnits.id, { onDelete: 'set null' }),
   involvedPersonnelId: integer('involved_personnel_id').references(() => personnel.id, { onDelete: 'set null' }),
   personnelName: text('personnel_name'),
+  reporterPersonnelCode: text('reporter_personnel_code'),
+  reporterName: text('reporter_name'),
+  reporterJobTitle: text('reporter_job_title'),
   description: text('description').notNull(),
   immediateCauses: text('immediate_causes'),
   rootCauses: text('root_causes'),
   correctiveActions: text('corrective_actions'),
   lostWorkDays: integer('lost_work_days').default(0),
   financialLoss: doublePrecision('financial_loss').default(0),
-  status: text('status').default('REPORTED').notNull(), // REPORTED, UNDER_INVESTIGATION, CLOSED
+  status: text('status').default('REPORTED').notNull(), // DRAFT, REPORTED, UNDER_INVESTIGATION, CAPA_IN_PROGRESS, CLOSED
+  workflowStage: text('workflow_stage').default('HSE_HEAD_TRIAGE').notNull(), // DRAFT, HSE_HEAD_TRIAGE, HSE_EXPERT_REVIEW, ACTION_IN_PROGRESS, HSE_FINAL_APPROVAL, CLOSED, RETURNED
+  isDraft: boolean('is_draft').default(false).notNull(),
+  rpn: integer('rpn'),
+  riskLevel: text('risk_level'), // L | M | H | E
   investigator: text('investigator'),
+  payload: jsonb('payload').$type<Record<string, any>>().default({}),
   closedAt: timestamp('closed_at'),
   version: integer('version').default(1).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
@@ -2248,5 +2261,136 @@ export const userPreferences = pgTable(
     index('idx_user_preferences_uid').on(table.userUid),
   ]
 );
+
+// ==========================================
+// 23. Scaffolding Inspection & Tag Status Management (Safety Unit)
+// ==========================================
+export const scaffolds = pgTable(
+  'scaffolds',
+  {
+    id: serial('id').primaryKey(),
+    scaffoldCode: text('scaffold_code').notNull().unique(), // e.g., SCF-1405-0001
+    requestDate: text('request_date').notNull(), // تاریخ درخواست نصب (شمسی)
+    requestingUnit: text('requesting_unit').notNull(), // واحد درخواست‌کننده
+    orgUnitId: integer('org_unit_id').references(() => orgUnits.id, { onDelete: 'set null' }),
+    installationLocation: text('installation_location').notNull(), // محل نصب
+    areaName: text('area_name'), // ناحیه
+    unitName: text('unit_name'), // واحد محل نصب
+    equipmentName: text('equipment_name'), // تجهیز مربوطه
+    activityDescription: text('activity_description').notNull(), // شرح فعالیت و علت نصب داربست
+    permitId: integer('permit_id').references(() => workPermits.id, { onDelete: 'set null' }), // اتصال واقعی به PTW
+    permitNumber: text('permit_number'),
+    workRequestId: integer('work_request_id').references(() => workflowInstances.id, { onDelete: 'set null' }), // اتصال واقعی به درخواست کار
+    workRequestNumber: text('work_request_number'),
+    contractorName: text('contractor_name').notNull(), // نام پیمانکار
+    erectorSupervisorName: text('erector_supervisor_name').notNull(), // نام مسئول نصب داربست
+    inspectorPersonnelId: integer('inspector_personnel_id').references(() => personnel.id, { onDelete: 'set null' }),
+    inspectorPersonnelCode: text('inspector_personnel_code'),
+    inspectorName: text('inspector_name').notNull(), // نام بازرس HSE
+    installationCompletedDate: text('installation_completed_date'), // تاریخ تکمیل نصب
+    heightMeters: doublePrecision('height_meters').notNull(), // ارتفاع داربست (متر)
+    scaffoldType: text('scaffold_type').notNull(), // نوع داربست
+    notes: text('notes'), // توضیحات تکمیلی
+    beforePhotos: jsonb('before_photos').$type<any[]>().default([]).notNull(),
+    afterPhotos: jsonb('after_photos').$type<any[]>().default([]).notNull(),
+    workflowStatus: text('workflow_status').default('INSTALLATION_REQUESTED').notNull(),
+    tagStatus: text('tag_status').default('RED').notNull(), // GREEN | YELLOW | RED
+    tagIssuedAt: timestamp('tag_issued_at'),
+    tagValidUntil: text('tag_valid_until'),
+    tagIssuedBy: text('tag_issued_by'),
+    hasOpenDefects: boolean('has_open_defects').default(false).notNull(),
+    hasCriticalDefect: boolean('has_critical_defect').default(false).notNull(),
+    openDefectsCount: integer('open_defects_count').default(0).notNull(),
+    criticalDefectsCount: integer('critical_defects_count').default(0).notNull(),
+    latestInspectionId: integer('latest_inspection_id'),
+    latestInspectionDate: text('latest_inspection_date'),
+    nextInspectionDueDate: text('next_inspection_due_date'),
+    inspectionsCount: integer('inspections_count').default(0).notNull(),
+    approvedBy: text('approved_by'),
+    approvedByUid: text('approved_by_uid'),
+    approvedAt: timestamp('approved_at'),
+    approvalComment: text('approval_comment'),
+    createdByUid: text('created_by_uid'),
+    createdByName: text('created_by_name'),
+    version: integer('version').default(1).notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('idx_scaffolds_code').on(table.scaffoldCode),
+    index('idx_scaffolds_tag_status').on(table.tagStatus),
+    index('idx_scaffolds_workflow_status').on(table.workflowStatus),
+    index('idx_scaffolds_permit_id').on(table.permitId),
+    index('idx_scaffolds_requesting_unit').on(table.requestingUnit),
+    index('idx_scaffolds_contractor').on(table.contractorName),
+  ]
+);
+
+export const scaffoldInspections = pgTable(
+  'scaffold_inspections',
+  {
+    id: serial('id').primaryKey(),
+    scaffoldId: integer('scaffold_id')
+      .references(() => scaffolds.id, { onDelete: 'cascade' })
+      .notNull(),
+    inspectionNumber: text('inspection_number').notNull(),
+    inspectionReason: text('inspection_reason').notNull(), // INITIAL_POST_INSTALL | PERIODIC_WEEKLY | STRUCTURAL_MODIFICATION | ADVERSE_WEATHER | INCIDENT_OCCURRENCE | DEFECT_REPORT | RE_INSPECTION
+    inspectionDate: text('inspection_date').notNull(),
+    inspectionTime: text('inspection_time'),
+    nextDueDate: text('next_due_date'),
+    inspectorPersonnelId: integer('inspector_personnel_id').references(() => personnel.id, { onDelete: 'set null' }),
+    inspectorPersonnelCode: text('inspector_personnel_code'),
+    inspectorName: text('inspector_name').notNull(),
+    inspectorUid: text('inspector_uid'),
+    checklistItems: jsonb('checklist_items').$type<any[]>().default([]).notNull(),
+    totalItems: integer('total_items').default(15).notNull(),
+    passedCount: integer('passed_count').default(0).notNull(),
+    failedCount: integer('failed_count').default(0).notNull(),
+    naCount: integer('na_count').default(0).notNull(),
+    criticalDefectCount: integer('critical_defect_count').default(0).notNull(),
+    complianceScore: integer('compliance_score').default(100).notNull(),
+    overallResult: text('overall_result').notNull(), // APPROVED_SAFE | CONDITIONAL_YELLOW | REJECTED_UNSAFE
+    recommendedTag: text('recommended_tag').notNull(), // GREEN | YELLOW | RED
+    summaryNotes: text('summary_notes'),
+    weatherCondition: text('weather_condition'),
+    maxLoadCapacityKg: doublePrecision('max_load_capacity_kg'),
+    inspectorSignature: text('inspector_signature'),
+    supervisorSignature: text('supervisor_signature'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_scaffold_inspections_scaffold_id').on(table.scaffoldId),
+    index('idx_scaffold_inspections_date').on(table.inspectionDate),
+    index('idx_scaffold_inspections_reason').on(table.inspectionReason),
+  ]
+);
+
+export const scaffoldTagHistory = pgTable(
+  'scaffold_tag_history',
+  {
+    id: serial('id').primaryKey(),
+    scaffoldId: integer('scaffold_id')
+      .references(() => scaffolds.id, { onDelete: 'cascade' })
+      .notNull(),
+    inspectionId: integer('inspection_id').references(() => scaffoldInspections.id, { onDelete: 'set null' }),
+    previousTag: text('previous_tag').notNull(), // NONE | GREEN | YELLOW | RED
+    newTag: text('new_tag').notNull(), // GREEN | YELLOW | RED
+    previousWorkflowStatus: text('previous_workflow_status'),
+    newWorkflowStatus: text('new_workflow_status'),
+    reason: text('reason').notNull(),
+    validUntil: text('valid_until'),
+    changedByUid: text('changed_by_uid'),
+    changedByName: text('changed_by_name').notNull(),
+    changedByRole: text('changed_by_role'),
+    changedDateJalali: text('changed_date_jalali').notNull(),
+    changedTime: text('changed_time').notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_scaffold_tag_history_scaffold_id').on(table.scaffoldId),
+    index('idx_scaffold_tag_history_created_at').on(table.createdAt),
+  ]
+);
+
 
 

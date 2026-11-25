@@ -3125,7 +3125,7 @@ export default function OrganizationMgmt({ isFa, currentUser }: { isFa: boolean;
                 />
               </div>
 
-              <div className="grid grid-cols-3 gap-3 bg-slate-50 dark:bg-slate-800/50 p-3 rounded-2xl border border-slate-200 dark:border-slate-800">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50 dark:bg-slate-800/50 p-3 rounded-2xl border border-slate-200 dark:border-slate-800">
                 <div>
                   <label className="block font-bold text-slate-700 dark:text-slate-200 mb-1">{isFa ? 'موجودی کل' : 'Total Stock'}</label>
                   <input

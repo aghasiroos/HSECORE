@@ -37,3 +37,6 @@ Dockerfile*
 scripts/*
 !scripts/test-db-connection.ts
 !scripts/build-windows-icon.js
+.aistudio
+public/catalog
+*.tar.gz

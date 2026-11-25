@@ -980,30 +980,204 @@ export interface CapaAction {
   verificationNotes?: string;
 }
 
+export type RhsF68RiskLevel = 'L' | 'M' | 'H' | 'E';
+
+export type RhsF68WorkflowStage =
+  | 'DRAFT'
+  | 'HSE_HEAD_TRIAGE'
+  | 'HSE_EXPERT_REVIEW'
+  | 'ACTION_IN_PROGRESS'
+  | 'HSE_FINAL_APPROVAL'
+  | 'CLOSED'
+  | 'RETURNED';
+
+export interface RhsF68InvolvedPerson {
+  id: string;
+  personnelCode?: string;
+  fullName: string;
+  company?: string;
+  department?: string;
+  jobTitle?: string;
+  isContractor?: boolean;
+  roleInEvent?: string;
+}
+
+export interface RhsF68AttachmentItem {
+  fileId: string;
+  originalName: string;
+  mimeType: string;
+  fileSize: number;
+  fileUrl?: string;
+  uploadedAt?: string;
+  uploadedBy?: string;
+}
+
+export interface RhsF68EventFactorCategory {
+  selectedItems: string[];
+  customNote?: string;
+}
+
+export interface RhsF68EventFactors {
+  hazardousPosition: RhsF68EventFactorCategory;
+  hazardousActions: RhsF68EventFactorCategory;
+  hseRulesViolation: RhsF68EventFactorCategory;
+  recklessDriving: RhsF68EventFactorCategory;
+  workersPosition: RhsF68EventFactorCategory;
+  standardActions: RhsF68EventFactorCategory;
+  standardConditions: RhsF68EventFactorCategory;
+  basicCauses: RhsF68EventFactorCategory;
+}
+
+export interface RhsF68HseUnitReview {
+  inspectionStatus: 'INSPECTED' | 'NO_INSPECTION_NEEDED' | 'PENDING';
+  inspectionResult?: string;
+  actionRequired: boolean;
+  assignedExpertCode?: string;
+  assignedExpertName?: string;
+  assignedExpertJobTitle?: string;
+  hseHeadNotes?: string;
+  hseHeadName?: string;
+  hseHeadPersonnelCode?: string;
+  hseHeadSignature?: string;
+  hseHeadSignedDate?: string;
+}
+
+export interface RhsF68RiskAssessment {
+  probability: number; // 1 to 5 (احتمال وقوع)
+  severity: number;    // 1 to 5 (شدت پیامد)
+  detection: number;   // 1 to 5 (قابلیت تشخیص)
+  rpn: number;         // P * S * D (1 to 125)
+  riskLevel: RhsF68RiskLevel; // L (1-10) | M (11-24) | H (25-49) | E (50-125)
+  riskLevelFa: string;
+  assessedBy?: string;
+  assessedDate?: string;
+}
+
+export interface RhsF68CorrectiveFollowUp {
+  correctiveActionNumber?: string;
+  workOrderNumber?: string;
+  letterNumber?: string;
+  actionsTakenDescription?: string;
+  actionDate?: string;
+  dueDate?: string;
+  responsibleUnit?: string;
+  responsiblePerson?: string;
+  responsiblePersonnelCode?: string;
+  actionResults?: string;
+  followUpStatus?: 'OPEN' | 'IN_PROGRESS' | 'COMPLETED' | 'VERIFIED';
+  expertName?: string;
+  expertPersonnelCode?: string;
+  expertSignature?: string;
+  expertSignedDate?: string;
+}
+
+export interface RhsF68FinalConclusion {
+  decision?: 'APPROVE_CLOSE' | 'RETURN_FOR_REVISION' | '';
+  conclusionNotes?: string;
+  finalHseHeadName?: string;
+  finalHseHeadPersonnelCode?: string;
+  finalHseHeadSignature?: string;
+  finalApprovedDate?: string;
+}
+
+export interface RhsF68AuditEntry {
+  id: string;
+  timestamp: string;
+  jalaliDateTime?: string;
+  actorName: string;
+  actorUsername?: string;
+  actorRole?: string;
+  actorPersonnelCode?: string;
+  action: string;
+  fromStage?: RhsF68WorkflowStage | string;
+  toStage?: RhsF68WorkflowStage | string;
+  details?: string;
+  referredToName?: string;
+  referredToCode?: string;
+  referralNote?: string;
+}
+
+export interface RhsF68Data {
+  formCode: 'RHS-F68 Rev.01';
+  reportDate: string;
+  companyName?: string;
+  reporterJobTitle?: string;
+  exactLocation?: string;
+  referTargetType?: 'HSE_HEAD' | 'HSE_EXPERT';
+  involvedPersonnel: RhsF68InvolvedPerson[];
+  suggestions?: string;
+  reporterSignature?: string;
+  reporterSignedDate?: string;
+  attachments: RhsF68AttachmentItem[];
+  hseUnitReview: RhsF68HseUnitReview;
+  eventFactors: RhsF68EventFactors;
+  riskAssessment?: RhsF68RiskAssessment;
+  correctiveFollowUp: RhsF68CorrectiveFollowUp;
+  finalConclusion: RhsF68FinalConclusion;
+  auditHistory: RhsF68AuditEntry[];
+}
+
+export interface RhsF28Data {
+  formCode: 'RHS-F28 Rev.01';
+  reportDate: string;
+  reporterName: string;
+  reporterPersonnelCode: string;
+  department: string;
+  observationDate: string;
+  observationTime: string;
+  locationSite: string;
+  exactLocation?: string;
+  isIncidentEvent: boolean;
+  injuredPersonName: string;
+  injuredPersonCode?: string;
+  injuredPersonJobTitle: string;
+  injuredBodyPart: string;
+  description: string;
+  damagesOrInjuries: string;
+  actionsTaken: string;
+  recommendations: string;
+  otherNotes: string;
+  attachments: RhsF68AttachmentItem[];
+  reporterSignature?: string;
+  reporterSignedDate?: string;
+  hseCenterHeadNotes?: string;
+  hseCenterHeadName?: string;
+  hseCenterHeadPersonnelCode?: string;
+  hseCenterHeadSignature?: string;
+  hseCenterHeadSignedDate?: string;
+  auditHistory: RhsF68AuditEntry[];
+}
+
 export interface SafetyIncidentRecord {
   id: string;
-  reportNumber: string; // e.g., REGAL-1405-001
+  reportNumber: string; // e.g., RHS-F68-1405-001 or RHS-F28-1405-001
+  formVariant?: 'RHS-F68' | 'RHS-F28';
   category: IncidentCategory;
   categoryFa: AnomalyTypeFa;
   incidentTypeId?: string; // Links to configured HSE Incident Categories in Organization Management
   title: string;
+  reportDate?: string;
   eventDate: string; // YYYY/MM/DD
   eventTime: string; // HH:mm
   locationSite: string; // e.g., 'کارخانه اصلی - واحد تولید'
   department: string;
+  companyName?: string;
+  exactLocation?: string;
   reporterName: string;
   reporterPersonnelCode?: string;
+  reporterJobTitle?: string;
   reporterRole: string;
   
-  // Risk Assessment (for Unsafe Act / Unsafe Condition)
+  // Risk Assessment (for Unsafe Act / Unsafe Condition / Near Miss)
   riskAssessment?: {
     probability: number;  // 1 to 5 (ضریب احتمال)
     severity: number;     // 1 to 5 (ضریب شدت)
-    detection: number;    // 1 to 5 (ضریب کشف)
-    envSeverity: number;  // 1 to 5 (ضریب شدت جنبه‌های زیست‌محیطی)
+    detection: number;    // 1 to 5 (ضریب کشف / قابلیت تشخیص)
+    envSeverity?: number; // legacy optional
     rpn: number;          // Calculated RPN (1 to 125)
-    riskLevelFa: string;  // 'ریسک پایین' | 'ریسک متوسط' | 'ریسک بالا'
-    riskLevelColor: 'green' | 'yellow' | 'red';
+    riskLevel?: RhsF68RiskLevel;
+    riskLevelFa: string;  // 'پایین (L)' | 'متوسط (M)' | 'بالا (H)' | 'شدید / بارز (E)'
+    riskLevelColor: 'green' | 'yellow' | 'orange' | 'red';
   };
 
   // Incident Details
@@ -1048,30 +1222,64 @@ export interface SafetyIncidentRecord {
   supplementaryFormStatus?: SupplementaryFormStatus;
   supplementaryForm?: IncidentSupplementaryForm;
 
+  // RHS-F68 Rev.01 & RHS-F28 Rev.01 Structured Workflow & Form Payloads
+  workflowStage?: RhsF68WorkflowStage;
+  isDraft?: boolean;
+  attachedFileIds?: string[];
+  rhsF68?: RhsF68Data;
+  rhsF28?: RhsF28Data;
+  version?: number;
+  updatedAt?: string;
+
   status: 'Submitted' | 'Under Investigation' | 'CAPA In Progress' | 'Resolved & Closed';
   attachmentsCount?: number;
   createdDate: string;
 }
 
 // --- RHS-F34 Supplementary Incident Analysis Form Types ---
-export type SupplementaryFormStatus = 'not_started' | 'in_progress' | 'completed' | 'expired';
+export type SupplementaryFormStatus =
+  | 'not_started'
+  | 'in_progress'
+  | 'pending_approval'
+  | 'returned'
+  | 'completed'
+  | 'expired';
+
+export type RhsF34WorkflowStage =
+  | 'PENDING_ANALYSIS'
+  | 'IN_PROGRESS'
+  | 'PENDING_APPROVAL'
+  | 'RETURNED'
+  | 'COMPLETED';
 
 export interface IncidentFormAuditLog {
   id: string;
   user: string;
   userCode?: string;
   role: string;
-  action: 'create' | 'update' | 'draft_save' | 'finalize' | 'unlock_edit';
+  action:
+    | 'create'
+    | 'update'
+    | 'draft_save'
+    | 'finalize'
+    | 'unlock_edit'
+    | 'assign'
+    | 'submit_approval'
+    | 'approve'
+    | 'return'
+    | 'auto_nc'
+    | 'update_nc';
   actionFa: string;
   timestamp: string; // Persian date & time or ISO
   details?: string;
+  outcome?: string;
 }
 
 export interface IncidentSupplementaryForm {
-  id: string; // e.g., 'supp-inc-104'
+  id: string; // e.g., 'rhs-f34-104'
   incidentId: string;
   incidentReportNumber: string;
-  
+
   // Header Meta (matching PDF)
   formCode: string; // 'RHS – F34'
   revision: string; // '00'
@@ -1125,20 +1333,49 @@ export interface IncidentSupplementaryForm {
   capaFormNumber: string; // شماره فرم اقدام اصلاحی / پیشگیرانه (e.g., R\1405\E112\21212)
   capaRequiredActions: string; // شرح اقدام اصلاحی و پیشگیرانه مورد نیاز
 
-  // تاریخ‌ها و امضا
-  startDate: string; // تاریخ شروع (e.g. 1405.05.18)
-  endDate: string; // تاریخ پایان (e.g. 1405.05.28)
-  hseExpertName: string; // نام و نام خانوادگی کارشناس واحد HSE (e.g. سید ایوب میراحمدیان)
+  // تاریخ‌ها و امضا (10-day legal window anchored on RHS-F28 final approval date)
+  startDate: string; // تاریخ شروع مهلت (تاریخ تأیید نهایی RHS-F28)
+  endDate: string; // تاریخ پایان مهلت / اتمام (حداکثر ۱۰ روز تقویمی)
+  f28FinalApprovedDate?: string; // مبدأ رسمی محاسبه مهلت (تأیید نهایی RHS-F28)
+  f28ApprovedAtIso?: string;
+  hseExpertName: string; // نام و نام خانوادگی کارشناس واحد HSE
+  hseExpertPersonnelCode?: string;
   hseExpertSignature?: string; // امضا کارشناس
   hseExpertApproved?: boolean;
 
-  // وضعیت و فرآیند
+  // ارجاع و تأییدیه رئیس HSE
+  workflowStage?: RhsF34WorkflowStage;
+  assignedExpertCode?: string;
+  assignedExpertName?: string;
+  hseHeadReviewerName?: string;
+  hseHeadReviewerCode?: string;
+  hseHeadSignature?: string;
+  hseHeadReviewNotes?: string;
+  hseHeadApprovedAt?: string;
+
+  // مستندات و پیوست‌ها
+  attachments?: RhsF68AttachmentItem[];
+
+  // وضعیت و فرآیند مهلت قانونی ۱۰ روزه
   status: SupplementaryFormStatus;
-  deadlineDate: string; // محاسبه ۱۰ روز مهلت از تاریخ وقوع/ثبت
+  deadlineDate: string; // تاریخ پایان مهلت ۱۰ روز تقویمی از تأیید نهایی RHS-F28
   daysRemaining: number;
+  daysPassed?: number;
+  isNearDeadline?: boolean;
   isExpired: boolean;
-  
-  // سوابق تغییرات
+
+  // عدم انطباق خودکار ناشی از عبور از مهلت ۱۰ روزه
+  nonConformanceId?: number | string;
+  nonConformanceTrackingCode?: string;
+  nonConformanceTitle?: string;
+  nonConformanceStatus?: string;
+  nonConformanceAssignedTo?: string;
+  nonConformanceAssignedToName?: string;
+  nonConformanceDueDate?: string;
+  nonConformanceCorrectiveAction?: string;
+  nonConformanceCreatedAt?: string;
+
+  // سوابق تغییرات و رهگیری کامل مراحل
   auditLogs: IncidentFormAuditLog[];
   createdAt: string;
   updatedAt: string;

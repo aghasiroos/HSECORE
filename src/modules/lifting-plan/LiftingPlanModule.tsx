@@ -373,7 +373,7 @@ export default function LiftingPlanModule({ currentUser: _currentUser }: Props) 
               {menuOpen && (
                 <div
                   role="menu"
-                  className="absolute right-0 mt-1.5 w-[320px] sm:w-[370px] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl z-40 py-2 max-h-[70vh] overflow-y-auto custom-scrollbar"
+                  className="absolute right-0 mt-1.5 w-[min(370px,calc(100vw-1.5rem))] max-w-[calc(100vw-1.5rem)] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl z-40 py-2 max-h-[70vh] overflow-y-auto custom-scrollbar"
                 >
                   {LIFTING_DROPDOWN_GROUPS.map((group, gIdx) => (
                     <div

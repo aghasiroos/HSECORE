@@ -1,3 +1,4 @@
+import { toast } from 'react-hot-toast';
 import { apiDb } from '../../../services/apiDatabaseClient';
 import { 
   PtwAuditRecord, 
@@ -88,6 +89,11 @@ if (typeof window !== 'undefined') {
         }
       }).catch(() => {});
     }
+    if (entity === PTW_HISTORICAL_YEARS_STORAGE_KEY.toLowerCase()) {
+      initHistoricalYearStorage().then((cleanList) => {
+        window.dispatchEvent(new CustomEvent('hse_ptw_historical_years_updated', { detail: cleanList }));
+      }).catch(() => {});
+    }
     if (entity.includes('permit')) {
       apiDb.getWorkPermits().then(list => {
         if (Array.isArray(list)) cachedPermitsForPtwAudit = list;
@@ -95,7 +101,17 @@ if (typeof window !== 'undefined') {
     }
   };
 
+  const handleFullReconnect = () => {
+    void initPtwAuditStorage();
+    void initHistoricalYearStorage().then((cleanList) => {
+      window.dispatchEvent(new CustomEvent('hse_ptw_historical_years_updated', { detail: cleanList }));
+    });
+  };
+
   window.addEventListener('app_data_mutated', handleRemoteAuditMutation);
+  window.addEventListener('hse_data_mutated', handleRemoteAuditMutation);
+  window.addEventListener('hse_realtime_reconnected', handleFullReconnect);
+  window.addEventListener('hse_central_data_synced', handleFullReconnect);
   window.addEventListener('hse_permits_updated', () => {
     apiDb.getWorkPermits().then(list => {
       if (Array.isArray(list)) cachedPermitsForPtwAudit = list;
@@ -400,8 +416,12 @@ export function getPtwAudits(): PtwAuditRecord[] {
 export function clearAllPtwAudits(): PtwAuditRecord[] {
   memoryAuditsCache = [];
 
-  // Clear in پایگاه داده backend
-  apiDb.savePtwAuditRecords([]).catch(console.error);
+  // Authoritative clear in PostgreSQL backend with rollback on failure
+  apiDb.savePtwAuditRecords([]).catch((err) => {
+    console.error('[PTW Audit] Failed to clear audits in DB:', err);
+    toast.error('خطا در پاک‌سازی ممیزی‌های پروانه کار در پایگاه داده. اطلاعات بازیابی شد.');
+    void initPtwAuditStorage();
+  });
 
   window.dispatchEvent(new CustomEvent('hse_ptw_audits_updated', { detail: [] }));
   return [];
@@ -435,11 +455,17 @@ export function savePtwAudit(record: PtwAuditRecord): PtwAuditRecord[] {
     updatedList = [enriched, ...current];
   }
 
-  // 1. Update in-memory cache immediately
+  // 1. Optimistic in-memory update
   memoryAuditsCache = updatedList;
 
-  // 2. Authoritative persistence in پایگاه داده
-  apiDb.savePtwAuditRecords(updatedList).catch(console.error);
+  // 2. Atomic locked persistence in PostgreSQL (prevents concurrent user overwrites)
+  apiDb.collection
+    .upsertItem<PtwAuditRecord>(PTW_AUDIT_STORAGE_KEY, enriched, { position: 'start' })
+    .catch((err) => {
+      console.error('[PTW Audit] Failed to persist audit in DB:', err);
+      toast.error('خطا در ذخیره ممیزی پروانه کار در پایگاه داده مرکزی. داده‌ها از سرور بازخوانی شدند.');
+      void initPtwAuditStorage();
+    });
 
   // 3. Notify app listeners
   window.dispatchEvent(new CustomEvent('hse_ptw_audits_updated', { detail: updatedList }));
@@ -451,11 +477,15 @@ export function deletePtwAudit(id: string): PtwAuditRecord[] {
   const current = getPtwAudits();
   const updatedList = current.filter(a => a.id !== id);
 
-  // 1. Update in-memory cache
+  // 1. Optimistic in-memory update
   memoryAuditsCache = updatedList;
 
-  // 2. Authoritative persistence in پایگاه داده
-  apiDb.savePtwAuditRecords(updatedList).catch(console.error);
+  // 2. Atomic locked deletion in PostgreSQL with rollback on failure
+  apiDb.collection.deleteItem(PTW_AUDIT_STORAGE_KEY, id).catch((err) => {
+    console.error('[PTW Audit] Failed to delete audit in DB:', err);
+    toast.error('خطا در حذف ممیزی پروانه کار در پایگاه داده مرکزی. داده‌ها بازخوانی شدند.');
+    void initPtwAuditStorage();
+  });
 
   // 3. Notify app listeners
   window.dispatchEvent(new CustomEvent('hse_ptw_audits_updated', { detail: updatedList }));
@@ -618,7 +648,15 @@ function saveHistoricalYearsToStorage(stats: PtwHistoricalYearStat[]) {
   });
   const cleanList = Array.from(yearMap.values()).sort((a, b) => a.year.localeCompare(b.year));
   memoryHistoricalYearsCache = cleanList;
-  apiDb.saveSetting(PTW_HISTORICAL_YEARS_STORAGE_KEY, cleanList, 'PTW Historical Years Statistics').catch(console.error);
+  apiDb
+    .saveSetting(PTW_HISTORICAL_YEARS_STORAGE_KEY, cleanList, 'PTW Historical Years Statistics')
+    .catch((err) => {
+      console.error('[PTW Audit] Failed to persist historical year stats:', err);
+      toast.error('خطا در ذخیره آمار سنوات گذشته در پایگاه داده مرکزی.');
+      void initHistoricalYearStorage().then((reloaded) => {
+        window.dispatchEvent(new CustomEvent('hse_ptw_historical_years_updated', { detail: reloaded }));
+      });
+    });
   window.dispatchEvent(new CustomEvent('hse_ptw_historical_years_updated', { detail: cleanList }));
 }
 

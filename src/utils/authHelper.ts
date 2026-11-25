@@ -478,6 +478,20 @@ export const HIERARCHICAL_PERMISSION_NODES: HierarchicalPermissionNode[] = [
     level: 2,
     applicableActions: ['view', 'details', 'create', 'edit', 'delete', 'configure']
   },
+  {
+    id: 'safety_dept.scaffolding',
+    legacyId: 'Safety Unit',
+    parentId: 'safety_dept',
+    titleFa: 'واحد ایمنی: بازرسی و وضعیت داربست‌بندی',
+    titleEn: 'Safety Dept: Scaffolding Inspection & Tag Status',
+    category: 'departments',
+    categoryTitleFa: 'دپارتمان‌های تخصصی HSE',
+    categoryTitleEn: 'Specialized HSE Departments',
+    iconName: 'Layers',
+    descriptionFa: 'ثبت داربست‌ها، اتصال به PTW و درخواست کار، چک‌لیست استاندارد، مدیریت تگ سبز/زرد/قرمز و تأیید بازرس HSE',
+    level: 2,
+    applicableActions: ['view', 'details', 'create', 'edit', 'delete', 'approve', 'sign', 'export', 'print']
+  },
 
   // 2.2 Fire Department
   {

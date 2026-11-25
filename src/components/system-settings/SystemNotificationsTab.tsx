@@ -1446,7 +1446,7 @@ export const SystemNotificationsTab: React.FC<SystemNotificationsTabProps> = ({
 
               {/* Device Type Picker */}
               <div className="space-y-2.5 bg-slate-50 dark:bg-slate-800/60 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-700">
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   {[
                     { id: 'desktop' as DevicePlatformType, label: 'کامپیوتر رومیزی', icon: Monitor },
                     { id: 'laptop' as DevicePlatformType, label: 'لپ‌تاپ', icon: Laptop },

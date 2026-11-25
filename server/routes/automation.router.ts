@@ -18,6 +18,7 @@ import {
   getAutomationQueueStats,
   processOutboxBatch,
 } from '../services/automation/automationWorker.ts';
+import { broadcastDataMutation } from '../core/socket.ts';
 
 export const automationRouter = Router();
 
@@ -111,6 +112,12 @@ automationRouter.post('/rules', requireAuth, requireAutomationAccess, async (req
       })
       .returning();
 
+    broadcastDataMutation('automation', 'create', { id: created.id, ruleCode: created.ruleCode }, {
+      module: 'AUTOMATION',
+      recordId: String(created.id),
+      actorId: (req as any).user?.uid,
+    });
+
     res.status(201).json({
       success: true,
       message: 'قانون اتوماسیون با موفقیت ایجاد شد.',
@@ -170,6 +177,12 @@ automationRouter.put('/rules/:id', requireAuth, requireAutomationAccess, async (
       });
     }
 
+    broadcastDataMutation('automation', 'update', { id: updated.id, ruleCode: updated.ruleCode }, {
+      module: 'AUTOMATION',
+      recordId: String(updated.id),
+      actorId: (req as any).user?.uid,
+    });
+
     res.json({
       success: true,
       message: 'قانون اتوماسیون با موفقیت بروزرسانی شد.',
@@ -208,6 +221,12 @@ automationRouter.patch('/rules/:id/toggle', requireAuth, requireAutomationAccess
       .where(eq(automationRules.id, id))
       .returning();
 
+    broadcastDataMutation('automation', 'toggle', { id: updated.id, isActive: nextState }, {
+      module: 'AUTOMATION',
+      recordId: String(updated.id),
+      actorId: (req as any).user?.uid,
+    });
+
     res.json({
       success: true,
       message: nextState ? 'قانون فعال شد.' : 'قانون غیرفعال گردید.',
@@ -226,6 +245,12 @@ automationRouter.delete('/rules/:id', requireAuth, requireAutomationAccess, asyn
   try {
     const id = Number(req.params.id);
     await db.delete(automationRules).where(eq(automationRules.id, id));
+    broadcastDataMutation('automation', 'delete', { id }, {
+      module: 'AUTOMATION',
+      recordId: String(id),
+      actorId: (req as any).user?.uid,
+    });
+
     res.json({
       success: true,
       message: 'قانون اتوماسیون با موفقیت حذف شد.',
@@ -262,6 +287,12 @@ automationRouter.post('/outbox/:id/retry', requireAuth, requireAutomationAccess,
   try {
     const id = Number(req.params.id);
     await retryOutboxEventById(id);
+    broadcastDataMutation('automation', 'retry', { outboxId: id }, {
+      module: 'AUTOMATION',
+      recordId: String(id),
+      actorId: (req as any).user?.uid,
+    });
+
     res.json({
       success: true,
       message: 'رویداد با موفقیت به صف پردازش مجدد ارسال گردید.',

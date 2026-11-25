@@ -196,8 +196,8 @@ export class NotificationService {
     return notificationRepository.removePushSubscription(idOrEndpoint, requestingUserId, isAdmin);
   }
 
-  async getAllNotifications(userId?: string): Promise<{ notifications: NotificationRecord[]; unreadCount: number }> {
-    const list = await notificationRepository.getAll(userId);
+  async getAllNotifications(userIdOrIds?: string | string[]): Promise<{ notifications: NotificationRecord[]; unreadCount: number }> {
+    const list = await notificationRepository.getAll(userIdOrIds);
     const unreadCount = list.filter((n) => !n.read).length;
     return { notifications: list, unreadCount };
   }
@@ -397,9 +397,10 @@ export class NotificationService {
       const targetType: TargetAudienceType = fullRecord.targetType || 'all';
       const targetValues = (fullRecord.targetValues || []).map((v) => String(v).trim().toLowerCase());
 
-      // Deep-link URL so clicking the OS notification opens the exact Alert Details page in HSECORE
+      // Deep-link URL so clicking the OS notification opens the exact target route/report or Alert Details page
       const deepLinkUrl =
-        fullRecord.actionUrl && fullRecord.actionUrl.includes('alertId=')
+        fullRecord.actionUrl &&
+        (fullRecord.actionUrl.includes('alertId=') || fullRecord.actionUrl.includes('report=') || fullRecord.actionUrl.startsWith('#'))
           ? fullRecord.actionUrl
           : `/#notifications?alertId=${encodeURIComponent(fullRecord.notifId)}`;
 
@@ -473,7 +474,9 @@ export class NotificationService {
           return (
             targetValues.includes(uidLower) ||
             (unameLower && targetValues.includes(unameLower)) ||
-            (userEntry?.username && targetValues.includes(userEntry.username.toLowerCase()))
+            (userEntry?.username && targetValues.includes(userEntry.username.toLowerCase())) ||
+            (userEntry?.personnelCode && targetValues.includes(userEntry.personnelCode.toLowerCase())) ||
+            (userEntry?.fullName && targetValues.includes(userEntry.fullName.trim().toLowerCase()))
           );
         }
 
@@ -629,8 +632,8 @@ export class NotificationService {
     return ok;
   }
 
-  async getPublicActiveEmergencies(sinceIso?: string) {
-    return notificationRepository.getPublicActiveEmergencies(sinceIso);
+  async getPublicActiveEmergencies(sinceIso?: string, clientSessionId?: string) {
+    return notificationRepository.getPublicActiveEmergencies(sinceIso, clientSessionId);
   }
 
   async acknowledgePublic(
@@ -667,8 +670,8 @@ export class NotificationService {
     return success;
   }
 
-  async markRead(idOrNotifId: string | number, userId?: string): Promise<boolean> {
-    const success = await notificationRepository.markRead(idOrNotifId, userId);
+  async markRead(idOrNotifId: string | number, userId?: string, clientSessionId?: string): Promise<boolean> {
+    const success = await notificationRepository.markRead(idOrNotifId, userId, clientSessionId);
     broadcastDataMutation('notifications', 'mark_single_read', { id: idOrNotifId, userId });
     this.broadcastSSE('mark_read', { id: idOrNotifId, userId });
     return success;
@@ -682,6 +685,7 @@ export class NotificationService {
     extra?: {
       acknowledgmentSource?: string;
       clientIp?: string;
+      clientSessionId?: string;
     }
   ): Promise<boolean> {
     const success = await notificationRepository.acknowledge(idOrNotifId, userId, userName, note, extra);

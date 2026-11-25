@@ -43,6 +43,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'documents:*',
     'notifications:*',
     'orgstructure:*',
+    'scaffolding:*',
   ],
   EXECUTIVE_MANAGER: [
     'ptw:*',
@@ -58,6 +59,9 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'documents:read',
     'documents:create',
     'documents:update',
+    'scaffolding:read',
+    'scaffolding:report',
+    'scaffolding:approve',
   ],
   EXECUTIVEMANAGER: [
     'ptw:*',
@@ -73,6 +77,9 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'documents:read',
     'documents:create',
     'documents:update',
+    'scaffolding:read',
+    'scaffolding:report',
+    'scaffolding:approve',
   ],
   FIRE_OFFICER: [
     'fire_equipment:*',
@@ -121,6 +128,13 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'documents:update',
     'notifications:read',
     'notifications:create',
+    'scaffolding:read',
+    'scaffolding:create',
+    'scaffolding:update',
+    'scaffolding:inspect',
+    'scaffolding:approve',
+    'scaffolding:tag',
+    'scaffolding:report',
   ],
   SAFETY_INSPECTOR: [
     'ptw:read',
@@ -140,6 +154,13 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'documents:read',
     'documents:create',
     'documents:update',
+    'scaffolding:read',
+    'scaffolding:create',
+    'scaffolding:update',
+    'scaffolding:inspect',
+    'scaffolding:approve',
+    'scaffolding:tag',
+    'scaffolding:report',
   ],
   SAFETYINSPECTOR: [
     'ptw:read',
@@ -159,6 +180,13 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'documents:read',
     'documents:create',
     'documents:update',
+    'scaffolding:read',
+    'scaffolding:create',
+    'scaffolding:update',
+    'scaffolding:inspect',
+    'scaffolding:approve',
+    'scaffolding:tag',
+    'scaffolding:report',
   ],
   DOCTOR_OCCUPATIONAL: [
     'health:*',
@@ -211,6 +239,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'health:read_own',
     'notifications:read',
     'documents:read',
+    'scaffolding:read',
   ],
   CONTRACTOR: [
     'ptw:read',
@@ -218,6 +247,8 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'incidents:create',
     'notifications:read',
     'documents:read',
+    'scaffolding:read',
+    'scaffolding:create',
   ],
   AUDITOR: [
     'ptw:read',
@@ -228,6 +259,8 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'documents:read',
     'documents:create',
     'documents:update',
+    'scaffolding:read',
+    'scaffolding:report',
   ],
   PROJECT_MANAGER: [
     'ptw:*',
@@ -237,6 +270,10 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'documents:read',
     'documents:create',
     'documents:update',
+    'scaffolding:read',
+    'scaffolding:create',
+    'scaffolding:update',
+    'scaffolding:report',
   ],
   PROJECTMANAGER: [
     'ptw:*',
@@ -246,6 +283,10 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'documents:read',
     'documents:create',
     'documents:update',
+    'scaffolding:read',
+    'scaffolding:create',
+    'scaffolding:update',
+    'scaffolding:report',
   ],
   MAINTENANCE_MANAGER: [
     'ptw:*',
@@ -256,6 +297,10 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'documents:read',
     'documents:create',
     'documents:update',
+    'scaffolding:read',
+    'scaffolding:create',
+    'scaffolding:update',
+    'scaffolding:report',
   ],
   MAINTENANCEMANAGER: [
     'ptw:*',
@@ -266,6 +311,10 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'documents:read',
     'documents:create',
     'documents:update',
+    'scaffolding:read',
+    'scaffolding:create',
+    'scaffolding:update',
+    'scaffolding:report',
   ],
   SUPERVISOR: [
     'ptw:read',
@@ -278,6 +327,10 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'documents:read',
     'documents:create',
     'documents:update',
+    'scaffolding:read',
+    'scaffolding:create',
+    'scaffolding:update',
+    'scaffolding:report',
   ],
   VISITOR: [
     'notifications:read',
@@ -292,6 +345,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'incidents:create',
     'notifications:read',
     'documents:read',
+    'scaffolding:read',
   ],
   // Custom roles must receive only explicitly configured permissions.
   // An unknown/custom role must never inherit broad module access by default.
@@ -432,7 +486,8 @@ export function checkUserHasPermission(user: UserContext | undefined, permission
         (cleanReqMod.includes('notification') && (cleanModKey.includes('notification') || cleanModKey.includes('اعلان') || cleanModKey.includes('alert'))) ||
         (cleanReqMod.includes('orgstructure') && (cleanModKey.includes('orgstructure') || cleanModKey.includes('organization') || cleanModKey.includes('ساختار'))) ||
         (cleanReqMod.includes('audit') && (cleanModKey.includes('audit') || cleanModKey.includes('لاگ') || cleanModKey.includes('ممیزی'))) ||
-        (cleanReqMod.includes('risk') && (cleanModKey.includes('risk') || cleanModKey.includes('ریسک')));
+        (cleanReqMod.includes('risk') && (cleanModKey.includes('risk') || cleanModKey.includes('ریسک'))) ||
+        (cleanReqMod.includes('scaffolding') && (cleanModKey.includes('scaffolding') || cleanModKey.includes('داربست')));
 
       if (matches && typeof actions === 'object' && actions !== null) {
         if (actions['all'] === true) return true;
@@ -445,6 +500,9 @@ export function checkUserHasPermission(user: UserContext | undefined, permission
         if (reqAction === 'edit' && actions['update'] === true) return true;
         if (reqAction === 'create' && actions['create'] === true) return true;
         if (reqAction === 'delete' && actions['delete'] === true) return true;
+        if (reqAction === 'inspect' && (actions['inspect'] === true || actions['edit'] === true || actions['sign'] === true)) return true;
+        if (reqAction === 'tag' && (actions['tag'] === true || actions['approve'] === true || actions['sign'] === true)) return true;
+        if (reqAction === 'report' && (actions['report'] === true || actions['export'] === true || actions['print'] === true || actions['view'] === true)) return true;
         if (reqAction === 'sign' && (actions['sign'] === true || actions['approve'] === true)) return true;
         if (reqAction === 'reject' && (actions['reject'] === true || actions['approve'] === true)) return true;
         if (reqAction === 'refer' && (actions['refer'] === true || actions['approve'] === true)) return true;
@@ -453,6 +511,8 @@ export function checkUserHasPermission(user: UserContext | undefined, permission
 
         if (reqAction === 'read' && actions['view'] === false) explicitlyDenied = true;
         if (reqAction === 'update' && actions['edit'] === false) explicitlyDenied = true;
+        if (reqAction === 'approve' && actions['approve'] === false) explicitlyDenied = true;
+        if (reqAction === 'tag' && actions['approve'] === false && actions['sign'] === false) explicitlyDenied = true;
         if (typeof actions[reqAction] === 'boolean' && actions[reqAction] === false) explicitlyDenied = true;
       }
     }
@@ -472,7 +532,7 @@ export function checkUserHasPermission(user: UserContext | undefined, permission
 
 const liveUserPermsCache = new Map<string, { role: string; permissions: any; expiresAt: number }>();
 
-async function resolveLiveUserContext(user: UserContext): Promise<UserContext> {
+export async function resolveLiveUserContext(user: UserContext): Promise<UserContext> {
   if (!user.uid) return user;
   const cached = liveUserPermsCache.get(user.uid);
   if (cached && cached.expiresAt > Date.now()) {

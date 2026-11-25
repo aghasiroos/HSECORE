@@ -1,7 +1,15 @@
-import { SafetyIncidentRecord, IncidentSupplementaryForm, IncidentFormAuditLog, SupplementaryFormStatus, UserProfile } from '../types';
+import {
+  SafetyIncidentRecord,
+  IncidentSupplementaryForm,
+  IncidentFormAuditLog,
+  SupplementaryFormStatus,
+  UserProfile,
+} from '../types';
 import { apiDb } from '../services/apiDatabaseClient';
 
 export const SUPPLEMENTARY_FORMS_STORAGE_KEY = 'hse_incident_supplementary_forms';
+export const RHS_F34_DEADLINE_DAYS = 10;
+export const RHS_F34_NEAR_DEADLINE_DAYS = 3;
 
 let memorySupplementaryForms: Record<string, IncidentSupplementaryForm> = {};
 
@@ -11,36 +19,59 @@ export function setMemorySupplementaryForms(forms: Record<string, IncidentSupple
   }
 }
 
+function normalizeDigits(str: string): string {
+  return String(str || '')
+    .replace(/[۰-۹]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d).toString())
+    .replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d).toString());
+}
+
 /**
- * Calculates Persian / Solar Hijri date addition or days difference.
+ * Parses a Jalali date string like 1405/05/18, 1405.05.18, or 1405-05-18.
  */
 export function parseJalaliDateString(dateStr?: string): { year: number; month: number; day: number } | null {
   if (!dateStr) return null;
-  // Handle formats like 1405/05/18 or 1405.05.18 or 1405-05-18
-  const clean = dateStr.replace(/[\.\-]/g, '/');
-  const parts = clean.split('/');
-  if (parts.length >= 3) {
-    const year = parseInt(parts[0], 10);
-    const month = parseInt(parts[1], 10);
-    const day = parseInt(parts[2], 10);
-    if (!isNaN(year) && !isNaN(month) && !isNaN(day)) {
+  const clean = normalizeDigits(dateStr).trim().replace(/[.\-]/g, '/');
+  const match = clean.match(/(\d{4})\/(\d{1,2})\/(\d{1,2})/);
+  if (match) {
+    const year = parseInt(match[1], 10);
+    const month = parseInt(match[2], 10);
+    const day = parseInt(match[3], 10);
+    if (!isNaN(year) && !isNaN(month) && !isNaN(day) && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
       return { year, month, day };
     }
   }
   return null;
 }
 
+function isJalaliLeapYear(year: number): boolean {
+  const mod = (((year - 474) % 2820) + 2820) % 2820;
+  return (((mod + 474 + 38) * 682) % 2816) < 682;
+}
+
+function jalaliMonthLength(year: number, month: number): number {
+  if (month <= 6) return 31;
+  if (month <= 11) return 30;
+  return isJalaliLeapYear(year) ? 30 : 29;
+}
+
 /**
- * Converts a Jalali approximate date to day index for comparison.
+ * Accurate Jalali day counter from 1300/01/01 (matches server-side rhsF34.helper.ts).
  */
 function jalaliToDayNumber(year: number, month: number, day: number): number {
-  let days = year * 365 + Math.floor(year / 4); // Approximate leap years
-  if (month <= 6) {
-    days += (month - 1) * 31;
+  let days = 0;
+  if (year >= 1300) {
+    for (let y = 1300; y < year; y++) {
+      days += isJalaliLeapYear(y) ? 366 : 365;
+    }
   } else {
-    days += 6 * 31 + (month - 7) * 30;
+    for (let y = year; y < 1300; y++) {
+      days -= isJalaliLeapYear(y) ? 366 : 365;
+    }
   }
-  days += day;
+  for (let m = 1; m < month; m++) {
+    days += jalaliMonthLength(year, m);
+  }
+  days += day - 1;
   return days;
 }
 
@@ -50,21 +81,25 @@ function jalaliToDayNumber(year: number, month: number, day: number): number {
 export function addDaysToJalali(dateStr: string, daysToAdd: number): string {
   const parsed = parseJalaliDateString(dateStr);
   if (!parsed) return dateStr;
-  
-  let { year, month, day } = parsed;
-  day += daysToAdd;
 
-  while (true) {
-    const maxDaysInMonth = month <= 6 ? 31 : (month <= 11 ? 30 : 29); // 29 for Esfand
-    if (day <= maxDaysInMonth) {
-      break;
-    }
-    day -= maxDaysInMonth;
+  let { year, month, day } = parsed;
+  day += Math.round(daysToAdd);
+
+  while (day > jalaliMonthLength(year, month)) {
+    day -= jalaliMonthLength(year, month);
     month++;
     if (month > 12) {
       month = 1;
       year++;
     }
+  }
+  while (day < 1) {
+    month--;
+    if (month < 1) {
+      month = 12;
+      year--;
+    }
+    day += jalaliMonthLength(year, month);
   }
 
   return `${year}/${String(month).padStart(2, '0')}/${String(day).padStart(2, '0')}`;
@@ -76,169 +111,174 @@ export function addDaysToJalali(dateStr: string, daysToAdd: number): string {
 export function getCurrentJalaliDate(): string {
   try {
     const now = new Date();
-    // Use Intl DateTimeFormat for fa-IR
     const parts = new Intl.DateTimeFormat('fa-IR', {
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
     }).format(now);
-    
-    // Convert Persian digits to English digits
-    const englishDigits = parts.replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d).toString());
-    const clean = englishDigits.replace(/[\.\-]/g, '/');
-    return clean;
+
+    return normalizeDigits(parts).replace(/[.\-]/g, '/');
   } catch {
     return '1405/05/28';
   }
 }
 
 /**
- * Calculates days passed and days remaining from incident date with a 10-day deadline.
+ * Calculates days passed, days remaining, near-deadline warning, and expiration
+ * from the RHS-F28 final approval date with a strict 10-calendar-day legal deadline.
  */
-export function calculateDeadlineInfo(startDateStr: string, formStatus?: SupplementaryFormStatus): {
+export function calculateDeadlineInfo(
+  startDateStr: string,
+  formStatus?: SupplementaryFormStatus
+): {
   deadlineDate: string;
   daysPassed: number;
   daysRemaining: number;
+  isNearDeadline: boolean;
   isExpired: boolean;
   status: SupplementaryFormStatus;
 } {
   const defaultCurrent = getCurrentJalaliDate();
-  const startParsed = parseJalaliDateString(startDateStr) || parseJalaliDateString(defaultCurrent) || { year: 1405, month: 5, day: 18 };
+  const startParsed =
+    parseJalaliDateString(startDateStr) ||
+    parseJalaliDateString(defaultCurrent) || { year: 1405, month: 5, day: 18 };
   const currentParsed = parseJalaliDateString(defaultCurrent) || { year: 1405, month: 5, day: 28 };
 
   const startDayNum = jalaliToDayNumber(startParsed.year, startParsed.month, startParsed.day);
   const currentDayNum = jalaliToDayNumber(currentParsed.year, currentParsed.month, currentParsed.day);
 
   const daysPassed = Math.max(0, currentDayNum - startDayNum);
-  const daysRemaining = 10 - daysPassed;
-  const isExpired = daysRemaining < 0;
+  const daysRemaining = RHS_F34_DEADLINE_DAYS - daysPassed;
+  const isCompleted = formStatus === 'completed';
+  const isExpired = !isCompleted && daysRemaining < 0;
+  const isNearDeadline = !isCompleted && !isExpired && daysRemaining <= RHS_F34_NEAR_DEADLINE_DAYS;
 
-  const deadlineDate = addDaysToJalali(startDateStr, 10);
+  const cleanStart = `${startParsed.year}/${String(startParsed.month).padStart(2, '0')}/${String(startParsed.day).padStart(2, '0')}`;
+  const deadlineDate = addDaysToJalali(cleanStart, RHS_F34_DEADLINE_DAYS);
 
   let finalStatus: SupplementaryFormStatus = formStatus || 'not_started';
-  if (finalStatus !== 'completed') {
-    if (isExpired) {
-      finalStatus = 'expired';
-    } else if (finalStatus === 'not_started' && daysPassed > 0) {
-      // Keep not_started or in_progress depending on edits
-    }
+  if (!isCompleted && isExpired) {
+    finalStatus = 'expired';
   }
 
   return {
     deadlineDate,
     daysPassed,
     daysRemaining,
+    isNearDeadline,
     isExpired,
     status: finalStatus,
   };
 }
 
 /**
- * Generates an initial clean Supplementary Form (RHS-F34) where all fields start blank for user completion.
+ * Generates an RHS-F34 form pre-populated with shared RHS-F28 / Incident fields
+ * and anchored on the RHS-F28 final approval date (+10 calendar days).
  */
 export function createDefaultSupplementaryForm(
   incident: SafetyIncidentRecord,
   currentUser?: UserProfile
 ): IncidentSupplementaryForm {
-  const defaultForm: IncidentSupplementaryForm = {
-    id: `supp-${incident.id}`,
+  const f28 = incident.rhsF28;
+  const anchorDate =
+    (f28?.hseCenterHeadSignedDate && parseJalaliDateString(f28.hseCenterHeadSignedDate)
+      ? f28.hseCenterHeadSignedDate
+      : '') ||
+    incident.reportDate ||
+    getCurrentJalaliDate();
+  const deadlineInfo = calculateDeadlineInfo(anchorDate, 'not_started');
+
+  const parsedYear = parseJalaliDateString(anchorDate)?.year || parseInt(getCurrentJalaliDate().slice(0, 4), 10) || 1405;
+  const seqMatch = String(incident.reportNumber || '').match(/(\d+)\s*$/);
+  const seq = seqMatch ? String(parseInt(seqMatch[1], 10)) : String(incident.id || '1');
+
+  const reporterName = f28?.reporterName || incident.reporterName || '';
+  const reporterCode = f28?.reporterPersonnelCode || incident.reporterPersonnelCode || '';
+  const dept = f28?.department || incident.department || '';
+  const reporterNameAndRole = [reporterName, reporterCode ? `(${reporterCode})` : '', dept ? `- ${dept}` : '']
+    .filter(Boolean)
+    .join(' ');
+  const injuredName = f28?.injuredPersonName || incident.injuredPersonName || '';
+
+  return {
+    id: `rhs-f34-${incident.id}`,
     incidentId: incident.id,
     incidentReportNumber: incident.reportNumber || '',
-    
-    // Header
+
     formCode: 'RHS – F34',
     revision: '00',
-    formNumber: '',
-    formDate: '',
+    formNumber: `RGC-HSE/${parsedYear}-${seq}`,
+    formDate: deadlineInfo.deadlineDate.replace(/\//g, '.'),
     distributionList: 'توزیع نسخ: ۱- مدیریت امور مجتمع  ۲- واحد HSE  ۳- امور اداری',
 
-    // ۱- رویداد و گزارش (Date & Time separated, blank by default)
-    eventDateTime: '',
-    eventDate: '',
-    eventTime: '',
-    exactLocation: '',
-    reportDateTime: '',
-    reportDate: '',
-    reportTime: '',
-    locationOccurrence: '',
-    reporterNameAndRole: '',
-    victimOrgUnit: '',
-    activityDuringIncident: '',
-    victimCount: '',
+    eventDate: f28?.observationDate || incident.eventDate || '',
+    eventTime: f28?.observationTime || incident.eventTime || '',
+    exactLocation: f28?.exactLocation || incident.exactLocation || f28?.locationSite || incident.locationSite || '',
+    reportDate: f28?.reportDate || incident.reportDate || '',
+    reportTime: f28?.observationTime || incident.eventTime || '',
+    locationOccurrence: f28?.locationSite || incident.locationSite || '',
+    reporterNameAndRole,
+    victimOrgUnit: dept,
+    activityDuringIncident: f28?.injuredPersonJobTitle || '',
+    victimCount: injuredName ? 1 : 0,
 
-    // برآورد خسارات
-    estimatedLoss: '',
-
-    // ۲- شرح مختصر رویداد
-    briefDescription: '',
-
-    // ۳- داده های ماتریس شدت
+    estimatedLoss: f28?.damagesOrInjuries || '',
+    briefDescription: f28?.description || incident.description || '',
     riskSeverityMatrix: '',
-
-    // ۴- علل مستقیم
     directCauses: '',
-
-    // ۵- علل غیرمستقیم
     indirectCauses: '',
-
-    // ۶- علل ریشه ای
     rootCauses: '',
 
-    // ۷- اطلاعات مصدوم (قربانی)
-    victimName: '',
-    victimPersonnelCode: '',
-    victimDepartment: '',
+    victimName: injuredName,
+    victimPersonnelCode: f28?.injuredPersonCode || incident.injuredPersonCode || '',
+    victimDepartment: dept,
     victimWorkExperience: '',
     injuryType: '',
-    injuredBodyPart: '',
-    medicalTreatment: '',
-    lostWorkDays: '',
+    injuredBodyPart: f28?.injuredBodyPart || '',
+    medicalTreatment: incident.medicalTreatmentType && incident.medicalTreatmentType !== 'N/A' ? incident.medicalTreatmentType : '',
+    lostWorkDays: incident.lostDays || '',
 
-    // ۸- اقدام اصلاحی و پیشگیرانه مورد نیاز
     capaFormNumber: '',
-    capaRequiredActions: '',
+    capaRequiredActions: f28?.recommendations || '',
 
-    // تاریخ‌ها و کارشناس HSE
-    startDate: '',
-    endDate: '',
+    startDate: anchorDate.replace(/\./g, '/'),
+    endDate: deadlineInfo.deadlineDate,
+    f28FinalApprovedDate: anchorDate.replace(/\./g, '/'),
     hseExpertName: '',
     hseExpertApproved: false,
+    workflowStage: 'PENDING_ANALYSIS',
+    attachments: [],
 
-    // وضعیت
-    status: 'not_started',
-    deadlineDate: '',
-    daysRemaining: 10,
-    isExpired: false,
+    status: deadlineInfo.status,
+    deadlineDate: deadlineInfo.deadlineDate,
+    daysPassed: deadlineInfo.daysPassed,
+    daysRemaining: deadlineInfo.daysRemaining,
+    isNearDeadline: deadlineInfo.isNearDeadline,
+    isExpired: deadlineInfo.isExpired,
 
-    // Audit logs
     auditLogs: [
       {
         id: `audit-${Date.now()}`,
-        user: currentUser?.fullName || 'کاربر سیستم',
+        user: currentUser?.fullName || 'سامانه HSECORE',
         userCode: currentUser?.personnelNumber,
         role: currentUser?.role || 'کارشناس HSE',
         action: 'create',
-        actionFa: 'ایجاد فرم تکمیلی تجزیه و تحلیل رویداد',
+        actionFa: 'ایجاد پرونده تجزیه و تحلیل حادثه (RHS-F34)',
         timestamp: `${getCurrentJalaliDate()} - ${new Date().toLocaleTimeString('fa-IR')}`,
-        details: 'ایجاد فرم خام جهت تکمیل توسط کاربر'
-      }
+        details: `مبدأ مهلت ۱۰ روزه: ${anchorDate} | پایان مهلت: ${deadlineInfo.deadlineDate}`,
+      },
     ],
     createdAt: `${getCurrentJalaliDate()} ${new Date().toLocaleTimeString('fa-IR')}`,
-    updatedAt: `${getCurrentJalaliDate()} ${new Date().toLocaleTimeString('fa-IR')}`
+    updatedAt: `${getCurrentJalaliDate()} ${new Date().toLocaleTimeString('fa-IR')}`,
   };
-
-  return defaultForm;
 }
 
-/**
- * Loads all saved supplementary forms from in-memory / backend state.
- */
 export function getAllSupplementaryForms(): Record<string, IncidentSupplementaryForm> {
   return memorySupplementaryForms;
 }
 
 /**
- * Gets a specific supplementary form by incidentId.
+ * Resolves the authoritative RHS-F34 form for an incident (backend-persisted incident.supplementaryForm first).
  */
 export function getSupplementaryFormByIncidentId(
   incidentId: string,
@@ -246,14 +286,18 @@ export function getSupplementaryFormByIncidentId(
   currentUser?: UserProfile
 ): IncidentSupplementaryForm {
   const allForms = getAllSupplementaryForms();
-  let form = allForms[incidentId];
+  let form: IncidentSupplementaryForm | undefined =
+    incident?.supplementaryForm
+      ? { ...incident.supplementaryForm }
+      : allForms[incidentId]
+      ? { ...allForms[incidentId] }
+      : undefined;
 
   if (!form && incident) {
     form = createDefaultSupplementaryForm(incident, currentUser);
   }
 
   if (form) {
-    // Migration helper: if eventDate or reportDate are missing, populate from eventDateTime/reportDateTime if present
     if (!form.eventDate && form.eventDateTime) {
       const parts = form.eventDateTime.trim().split(/\s+/);
       form.eventDate = parts[0] || '';
@@ -265,10 +309,13 @@ export function getSupplementaryFormByIncidentId(
       form.reportTime = form.reportTime || parts.slice(1).join(' ') || '';
     }
 
-    // Re-evaluate deadline dynamically if startDate exists
-    if (form.startDate) {
-      const deadlineInfo = calculateDeadlineInfo(form.startDate.replace(/\./g, '/'), form.status);
+    const anchor = form.f28FinalApprovedDate || form.startDate;
+    if (anchor) {
+      const deadlineInfo = calculateDeadlineInfo(anchor.replace(/\./g, '/'), form.status);
+      form.deadlineDate = form.deadlineDate || deadlineInfo.deadlineDate;
+      form.daysPassed = deadlineInfo.daysPassed;
       form.daysRemaining = deadlineInfo.daysRemaining;
+      form.isNearDeadline = deadlineInfo.isNearDeadline;
       form.isExpired = deadlineInfo.isExpired;
       if (form.status !== 'completed' && deadlineInfo.isExpired) {
         form.status = 'expired';
@@ -276,11 +323,11 @@ export function getSupplementaryFormByIncidentId(
     }
   }
 
-  return form;
+  return form!;
 }
 
 /**
- * Saves or updates a supplementary form in state and persists to backend database.
+ * Legacy helper kept for backward compatibility; mirrors state into memory cache.
  */
 export function saveSupplementaryForm(
   form: IncidentSupplementaryForm,
@@ -289,14 +336,13 @@ export function saveSupplementaryForm(
   actionDetails?: string
 ): IncidentSupplementaryForm {
   const allForms = getAllSupplementaryForms();
-  
   const nowJalali = `${getCurrentJalaliDate()} - ${new Date().toLocaleTimeString('fa-IR')}`;
-  
+
   const actionFaMap: Record<string, string> = {
-    draft_save: 'ذخیره موقت پیش‌نویس فرم تکمیلی',
-    finalize: 'تکمیل و ثبت نهایی فرم تکمیلی حادثه',
-    update: 'ویرایش اطلاعات فرم تکمیلی',
-    unlock_edit: 'ویرایش ویژه پس از انقضای مهلت (دسترسی مجاز)'
+    draft_save: 'ذخیره موقت پیش‌نویس فرم تجزیه و تحلیل حادثه',
+    finalize: 'تکمیل و ثبت نهایی فرم تجزیه و تحلیل حادثه',
+    update: 'ویرایش اطلاعات فرم تجزیه و تحلیل حادثه',
+    unlock_edit: 'ویرایش ویژه پس از انقضای مهلت (دسترسی مجاز)',
   };
 
   const newAuditEntry: IncidentFormAuditLog = {
@@ -307,7 +353,7 @@ export function saveSupplementaryForm(
     action: actionType,
     actionFa: actionFaMap[actionType] || 'بروزرسانی فرم',
     timestamp: nowJalali,
-    details: actionDetails || (actionType === 'finalize' ? 'تأیید نهایی فرم و الصاق به پرونده رویداد' : 'ذخیره تغییرات')
+    details: actionDetails || (actionType === 'finalize' ? 'تأیید نهایی فرم و الصاق به پرونده رویداد' : 'ذخیره تغییرات'),
   };
 
   const updatedForm: IncidentSupplementaryForm = {
@@ -315,43 +361,51 @@ export function saveSupplementaryForm(
     auditLogs: [...(form.auditLogs || []), newAuditEntry],
     updatedAt: nowJalali,
     completedAt: actionType === 'finalize' ? nowJalali : form.completedAt,
-    completedBy: actionType === 'finalize' ? currentUser?.fullName : form.completedBy
+    completedBy: actionType === 'finalize' ? currentUser?.fullName : form.completedBy,
   };
 
-  // Update in-memory reactive state
   memorySupplementaryForms = {
     ...allForms,
-    [form.incidentId]: updatedForm
+    [form.incidentId]: updatedForm,
   };
 
-  // Persist directly to central database via apiDb
-  apiDb.saveSetting('hse_incident_supplementary_forms', memorySupplementaryForms).catch((err) => {
-    console.warn('[IncidentHelper] Non-fatal error persisting supplementary forms to database:', err);
-  });
-
+  apiDb.saveSetting('hse_incident_supplementary_forms', memorySupplementaryForms).catch(() => {});
   return updatedForm;
 }
 
-/**
- * Checks if user is authorized to edit the supplementary form even after expiration.
- */
 export function isUserAuthorizedToEditSupplementaryForm(user?: UserProfile, form?: IncidentSupplementaryForm): boolean {
   if (!user) return false;
-  
-  const role = (user.role || '').toLowerCase();
+  const role = (user.role || '').toLowerCase().replace(/[\s_]+/g, '');
   const job = (user.jobTitle || '').toLowerCase();
 
-  // Admin, Safety Inspector, HSE Head/Manager, or explicit permissions
-  const isSuperUser = 
-    role === 'administrator' || 
-    role === 'safetyinspector' || 
-    role === 'executivemanager' || 
-    job.includes('hse') || 
-    job.includes('ایمنی') || 
-    job.includes('رئیس') || 
-    job.includes('مدیر') || 
-    job.includes('سرپرست') ||
-    Boolean(user.permissions?.Incidents?.edit || user.permissions?.Incidents?.approve);
+  const matchesAssigned =
+    (Boolean(form?.assignedExpertCode) && Boolean(user.personnelNumber) && form?.assignedExpertCode === user.personnelNumber) ||
+    (Boolean(form?.assignedExpertName) &&
+      (form?.assignedExpertName === user.fullName || form?.assignedExpertName === user.username));
 
-  return isSuperUser;
+  return (
+    matchesAssigned ||
+    role === 'administrator' ||
+    role === 'admin' ||
+    role === 'hsemanager' ||
+    role === 'safetyofficer' ||
+    role === 'safetyinspector' ||
+    role === 'executivemanager' ||
+    job.includes('hse') ||
+    job.includes('ایمنی') ||
+    job.includes('رئیس') ||
+    job.includes('مدیر') ||
+    job.includes('سرپرست') ||
+    Boolean(user.permissions?.Incidents?.edit || user.permissions?.Incidents?.approve)
+  );
+}
+
+export function isUserHseHeadForRhsF34(user?: UserProfile): boolean {
+  if (!user) return false;
+  const role = (user.role || '').toUpperCase().replace(/[\s_]+/g, '');
+  return (
+    ['ADMIN', 'ADMINISTRATOR', 'HSEMANAGER', 'EXECUTIVEMANAGER'].includes(role) ||
+    role.includes('ADMIN') ||
+    Boolean(user.permissions?.Incidents?.approve)
+  );
 }

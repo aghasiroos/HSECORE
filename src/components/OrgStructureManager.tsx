@@ -1366,7 +1366,7 @@ export default function OrgStructureManager({ isFa, currentUser, onUpdate, onOpe
                 <label className="text-xs font-black text-slate-700 dark:text-slate-200 block">
                   {isFa ? 'وضعیت عملیاتی واحد' : 'Operational Status'}
                 </label>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <button
                     type="button"
                     onClick={() => setFormData({ ...formData, status: 'active' })}

@@ -73,7 +73,7 @@ export function securityHeadersMiddleware(req: Request, res: Response, next: Nex
  * - localhost / 127.0.0.1 only when NODE_ENV !== production
  * - Google Cloud / AI Studio host suffixes only when ALLOW_PREVIEW_ORIGINS=true
  */
-function isAllowedOrigin(req: Request, origin: string): boolean {
+export function isAllowedOrigin(req: Request, origin: string): boolean {
   if (!origin) return true;
   const normalizedOrigin = origin.trim().replace(/\/$/, '');
 

@@ -8,8 +8,20 @@ import { broadcastDataMutation } from '../../core/socket.ts';
 
 export class NotificationController {
   async getNotifications(req: Request, res: Response) {
-    const userId = req.user?.uid;
-    const { notifications, unreadCount } = await notificationService.getAllNotifications(userId);
+    const user = req.user as any;
+    const clientSessionId =
+      typeof req.query.clientSessionId === 'string' && req.query.clientSessionId.trim()
+        ? req.query.clientSessionId.trim()
+        : undefined;
+    const userIdentifiers = [
+      user?.uid,
+      user?.username,
+      user?.fullName,
+      clientSessionId ? `guest_${clientSessionId.slice(0, 24)}` : undefined,
+    ].filter(Boolean) as string[];
+    const { notifications, unreadCount } = await notificationService.getAllNotifications(
+      userIdentifiers.length > 0 ? userIdentifiers : undefined
+    );
 
     // Apply optional query filters
     let filtered = notifications;
@@ -108,7 +120,8 @@ export class NotificationController {
       return res.status(400).json({ success: false, error: 'شناسه اعلان الزامی است.' });
     }
     const userId = req.user?.uid || 'user';
-    await notificationService.markRead(id, userId);
+    const clientSessionId = typeof req.body?.clientSessionId === 'string' ? req.body.clientSessionId : undefined;
+    await notificationService.markRead(id, userId, clientSessionId);
     return res.json({ success: true, message: 'اعلان به عنوان خوانده‌شده علامت‌گذاری شد.' });
   }
 
@@ -128,11 +141,13 @@ export class NotificationController {
     const userName = user?.fullName || user?.username || 'کاربر سیستم';
     const note = req.body?.note;
     const acknowledgmentSource = req.body?.acknowledgmentSource || 'in_app_modal';
+    const clientSessionId = typeof req.body?.clientSessionId === 'string' ? req.body.clientSessionId : undefined;
     const ip = req.ip || (req.socket as any)?.remoteAddress || 'unknown';
 
     await notificationService.acknowledge(id, userId, userName, note, {
       acknowledgmentSource,
       clientIp: ip,
+      clientSessionId,
     });
     return res.json({ success: true, message: 'اعلان با موفقیت توسط شما تأیید گردید و آژیر متوقف شد.' });
   }
@@ -455,7 +470,9 @@ export class NotificationController {
 
   async getPublicActiveEmergencies(req: Request, res: Response) {
     const since = typeof req.query.since === 'string' ? req.query.since : undefined;
-    const list = await notificationService.getPublicActiveEmergencies(since);
+    const clientSessionId =
+      typeof req.query.clientSessionId === 'string' ? req.query.clientSessionId : undefined;
+    const list = await notificationService.getPublicActiveEmergencies(since, clientSessionId);
     return res.json({
       success: true,
       data: list,

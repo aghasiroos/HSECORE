@@ -501,21 +501,21 @@ export default function FiveSModuleView({ language, currentUser }: Props) {
   return (
     <div className="w-full p-4 md:p-6 space-y-6 max-w-7xl 2xl:max-w-[1720px] mx-auto" dir={isFa ? 'rtl' : 'ltr'}>
       {/* Top Header & Navigation Banner */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white dark:bg-slate-800 p-5 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-xs">
-        <div className="flex items-center gap-3.5">
-          <div className="p-3 bg-gradient-to-tr from-emerald-600 to-teal-500 text-white rounded-2xl shadow-md">
+      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 bg-white dark:bg-slate-800 p-4 sm:p-5 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-xs">
+        <div className="flex items-center gap-3.5 min-w-0 flex-1">
+          <div className="p-3 bg-gradient-to-tr from-emerald-600 to-teal-500 text-white rounded-2xl shadow-md shrink-0">
             <CheckSquare className="w-6 h-6" />
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-xl font-black text-slate-900 dark:text-white">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-base sm:text-xl font-black text-slate-900 dark:text-white leading-snug">
                 {isFa ? 'سامانه جامع ارزیابی و ممیزی 5S' : '5S Workplace Organization System'}
               </h1>
-              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300">
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300 whitespace-nowrap shrink-0">
                 محیط زیست و بهره‌وری
               </span>
             </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">
               {isFa 
                 ? 'پایش پنج اصل ساماندهی (تفکیک، نظم، پاکیزگی، استانداردسازی و انضباط)، پیگیری عدم انطباق‌ها و رتبه‌بندی واحدها' 
                 : 'Pillar-based 5S audits, non-conformance tracking, corrective actions (CAPA) and unit benchmarking.'}

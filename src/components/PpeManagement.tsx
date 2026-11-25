@@ -962,7 +962,7 @@ export default function PpeManagement({ isFa, currentUser }: PpeManagementProps)
                 </select>
               </div>
 
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block font-bold text-slate-700 dark:text-slate-200 mb-1">{isFa ? 'تعداد' : 'Quantity'}</label>
                   <input

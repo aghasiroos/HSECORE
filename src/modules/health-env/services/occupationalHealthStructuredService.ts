@@ -10,7 +10,7 @@ import {
 } from '../types';
 import { getComplexPersonnelList } from '../../../utils/personnelHelper';
 import { addAuditLog } from '../../../utils/authHelper';
-import { apiDb } from '../../../services/apiDatabaseClient';
+import { apiDb, getAuthToken } from '../../../services/apiDatabaseClient';
 
 const INITIAL_MEDICAL_ITEMS_CATALOG: MedicalTestCatalogItem[] = [];
 
@@ -205,6 +205,12 @@ class OccupationalHealthStructuredService {
 
   public async reloadFromServer() {
     if (this.isReloading) return;
+    if (!getAuthToken()) {
+      if (this.referenceRules.length === 0) {
+        this.referenceRules = [...INITIAL_REFERENCE_RULES];
+      }
+      return;
+    }
     this.isReloading = true;
     try {
       const [catalogs, rules, sessions, results] = await Promise.all([
@@ -237,8 +243,10 @@ class OccupationalHealthStructuredService {
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('hse_occ_health_updated'));
       }
-    } catch (e) {
-      console.error('Failed to reload OccHealthService from server:', e);
+    } catch (e: any) {
+      if (e?.status !== 401 && e?.status !== 403) {
+        console.error('Failed to reload OccHealthService from server:', e);
+      }
     } finally {
       this.isReloading = false;
     }

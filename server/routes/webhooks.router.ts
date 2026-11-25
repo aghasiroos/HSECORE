@@ -13,6 +13,7 @@ import {
   verifyWebhookSignature,
 } from '../services/webhookDispatcher.ts';
 import { syncSettingsMemoryCache } from './settings.router.ts';
+import { broadcastDataMutation } from '../core/socket.ts';
 import { logger } from '../core/logger.ts';
 
 export const webhooksRouter = Router();
@@ -65,10 +66,16 @@ webhooksRouter.post('/config', requireAuth, requireWebhookAdmin, async (req: Req
     const { config, validation } = await saveIntegrationConfigToDb(incoming);
     syncSettingsMemoryCache('hse_integration_config', config);
 
+    const maskedConfig = maskIntegrationConfigForClient(config);
+    broadcastDataMutation('webhooks', 'update', { config: maskedConfig }, {
+      module: 'WEBHOOKS',
+      actorId: (req as any).user?.uid,
+    });
+
     res.json({
       success: true,
       message: 'تنظیمات وب‌هوک و یکپارچه‌سازی اتوماسیون با موفقیت در پایگاه داده اصلی ذخیره شد.',
-      data: maskIntegrationConfigForClient(config),
+      data: maskedConfig,
       urlValidation: validation,
     });
   } catch (err: any) {
@@ -91,11 +98,17 @@ webhooksRouter.post('/rotate-secret', requireAuth, requireWebhookAdmin, async (_
     const { config } = await saveIntegrationConfigToDb({ webhookSecret: newSecret });
     syncSettingsMemoryCache('hse_integration_config', config);
 
+    const maskedSecret = maskIntegrationConfigForClient(config).webhookSecret;
+    broadcastDataMutation('webhooks', 'rotate_secret', { maskedSecret }, {
+      module: 'WEBHOOKS',
+      actorId: (_req as any).user?.uid,
+    });
+
     res.json({
       success: true,
       message: 'کلید امنیتی HMAC-SHA256 جدید تولید و در پایگاه داده ذخیره شد.',
       newSecretOnce: newSecret,
-      maskedSecret: maskIntegrationConfigForClient(config).webhookSecret,
+      maskedSecret,
     });
   } catch (err: any) {
     res.status(500).json({
@@ -220,6 +233,11 @@ webhooksRouter.get('/logs', requireAuth, requireWebhookAdmin, async (req: Reques
 webhooksRouter.delete('/logs', requireAuth, requireWebhookAdmin, async (_req: Request, res: Response) => {
   try {
     await clearWebhookDeliveryLogs();
+    broadcastDataMutation('webhooks', 'clear_logs', { cleared: true }, {
+      module: 'WEBHOOKS',
+      actorId: (_req as any).user?.uid,
+    });
+
     res.json({
       success: true,
       message: 'سوابق ارسال وب‌هوک با موفقیت پاک‌سازی شد.',
@@ -240,6 +258,12 @@ webhooksRouter.post('/logs/:id/retry', requireAuth, requireWebhookAdmin, async (
   try {
     const actor = (req as any).user?.username || 'admin';
     const retried = await retryWebhookDeliveryById(req.params.id, actor);
+    broadcastDataMutation('webhooks', 'retry', { id: req.params.id, status: retried.status }, {
+      module: 'WEBHOOKS',
+      recordId: String(req.params.id),
+      actorId: (req as any).user?.uid,
+    });
+
     res.json({
       success: retried.status === 'DELIVERED' && retried.verifiedWorkflowAck,
       message: retried.verificationReason,

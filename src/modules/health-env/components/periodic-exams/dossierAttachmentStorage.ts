@@ -1,4 +1,4 @@
-// Central Database & IndexedDB Storage engine for Personnel Periodic Medical Exams Attachments
+// Central PostgreSQL Database Storage Engine for Personnel Periodic Medical Exams Attachments
 import { apiDb } from '../../../../services/apiDatabaseClient';
 import { formatFileSize } from '../../../../utils/fileHelpers';
 
@@ -100,7 +100,7 @@ let initPromise: Promise<void> | null = null;
 
 export async function reloadDossierAttachmentsFromServer(): Promise<void> {
   try {
-    const remoteList = await apiDb.getSetting(CENTRAL_SETTING_KEY);
+    const remoteList = await apiDb.collection.getAll<DossierAttachment>(CENTRAL_SETTING_KEY);
     if (Array.isArray(remoteList)) {
       memoryCache = [...remoteList].sort(
         (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
@@ -124,6 +124,12 @@ if (typeof window !== 'undefined') {
   };
   window.addEventListener('app_data_mutated', handleRemoteMutation);
   window.addEventListener('hse_data_mutated', handleRemoteMutation);
+  window.addEventListener('hse_realtime_reconnected', () => {
+    void reloadDossierAttachmentsFromServer();
+  });
+  window.addEventListener('hse_central_data_synced', () => {
+    void reloadDossierAttachmentsFromServer();
+  });
   window.addEventListener('hse_auth_state_changed', () => {
     isDbInitialized = false;
     void reloadDossierAttachmentsFromServer();
@@ -136,7 +142,7 @@ export async function initDossierAttachmentStorage(): Promise<void> {
 
   initPromise = (async () => {
     try {
-      const remoteList = await apiDb.getSetting(CENTRAL_SETTING_KEY).catch(() => null);
+      const remoteList = await apiDb.collection.getAll<DossierAttachment>(CENTRAL_SETTING_KEY).catch(() => null);
       const remoteArr: DossierAttachment[] = Array.isArray(remoteList) ? remoteList : [];
       memoryCache = [...remoteArr].sort(
         (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
@@ -192,9 +198,8 @@ export async function addDossierAttachment(
     createdAt: new Date().toISOString()
   };
 
-  const nextCache = [newAttachment, ...memoryCache];
-  await apiDb.saveSetting(CENTRAL_SETTING_KEY, nextCache, 'Periodic Medical Exam Dossier Attachments');
-  memoryCache = nextCache;
+  await apiDb.collection.upsertItem<DossierAttachment>(CENTRAL_SETTING_KEY, newAttachment, { position: 'start' });
+  memoryCache = [newAttachment, ...memoryCache.filter((item) => item.id !== newAttachment.id)];
 
   return newAttachment;
 }
@@ -213,9 +218,9 @@ export async function updateDossierAttachment(
     ...updates
   };
 
+  await apiDb.collection.updateItem<DossierAttachment>(CENTRAL_SETTING_KEY, id, updated);
   const nextCache = [...memoryCache];
   nextCache[index] = updated;
-  await apiDb.saveSetting(CENTRAL_SETTING_KEY, nextCache, 'Periodic Medical Exam Dossier Attachments');
   memoryCache = nextCache;
 
   return updated;
@@ -227,9 +232,8 @@ export async function deleteDossierAttachment(id: string): Promise<boolean> {
   const index = memoryCache.findIndex(item => item.id === id);
   if (index === -1) return false;
 
-  const nextCache = memoryCache.filter(item => item.id !== id);
-  await apiDb.saveSetting(CENTRAL_SETTING_KEY, nextCache, 'Periodic Medical Exam Dossier Attachments');
-  memoryCache = nextCache;
+  await apiDb.collection.deleteItem(CENTRAL_SETTING_KEY, id);
+  memoryCache = memoryCache.filter(item => item.id !== id);
 
   return true;
 }

@@ -512,7 +512,7 @@ export default function LoginScreen({
               
               {/* Top Welcome Heading */}
               <div className="flex flex-col items-center text-center space-y-2 login-logo-enter">
-                <div className="text-[44px] sm:text-[56px] md:text-[64px] lg:text-[72px] leading-tight font-bold text-black dark:text-white tracking-tight mb-1 transition-colors duration-300">
+                <div className="text-[34px] sm:text-[56px] md:text-[64px] lg:text-[72px] leading-tight font-bold text-black dark:text-white tracking-tight mb-1 transition-colors duration-300">
                   {isFa ? 'خوش آمدید' : 'Welcome'}
                 </div>
                 <p className="text-xs sm:text-[13px] text-slate-500 dark:text-slate-400 font-light leading-relaxed">

@@ -52,6 +52,10 @@ export function createRateLimiter(options: {
 
     const record = store.get(key);
     if (!record || now > record.resetTime) {
+      if (store.size >= 10000 && !store.has(key)) {
+        const oldestKey = store.keys().next().value;
+        if (oldestKey !== undefined) store.delete(oldestKey);
+      }
       store.set(key, { count: 1, resetTime: now + options.windowMs });
       res.setHeader('X-RateLimit-Limit', options.maxRequests);
       res.setHeader('X-RateLimit-Remaining', options.maxRequests - 1);

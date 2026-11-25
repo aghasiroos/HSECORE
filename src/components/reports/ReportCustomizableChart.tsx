@@ -654,7 +654,7 @@ export const ReportCustomizableChart: React.FC<ReportCustomizableChartProps> = (
 
       {/* Mini Stats Footer */}
       {processedData.length > 0 && (
-        <div className="grid grid-cols-4 gap-2 pt-2 border-t border-slate-100 dark:border-slate-800 text-[10px] text-slate-500 dark:text-slate-400 font-mono">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-slate-100 dark:border-slate-800 text-[10px] text-slate-500 dark:text-slate-400 font-mono">
           <div className="text-center bg-slate-50 dark:bg-slate-800/40 p-1.5 rounded-xl">
             <span className="block text-[9px] text-slate-400 font-sans font-bold">{isFa ? 'مجموع' : 'Total'}</span>
             <strong className="font-black text-slate-800 dark:text-slate-200">{stats.total.toLocaleString()}</strong>

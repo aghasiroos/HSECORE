@@ -10,7 +10,7 @@
  * - RBAC permission integration
  */
 
-import { SYSTEM_MODULE_GROUPS, ALL_SYSTEM_MODULES, ALL_HEALTH_ENV_SUBITEMS, ALL_FIRE_DEPT_SUBITEMS, ALL_SAFETY_DEPT_SUBITEMS, ALL_DOCUMENTS_SUBITEMS, ALL_PSM_SUBITEMS } from '../../../src/config/modulesConfig.ts';
+import { SYSTEM_MODULE_GROUPS, ALL_SYSTEM_MODULES, ALL_HEALTH_ENV_SUBITEMS, ALL_FIRE_DEPT_SUBITEMS, ALL_SAFETY_DEPT_SUBITEMS, ALL_DOCUMENTS_SUBITEMS, ALL_PSM_SUBITEMS } from '../../../shared/modulesCatalog.ts';
 import { UserContext, checkUserHasPermission, isGlobalAdminUser } from '../../core/middleware/auth.ts';
 
 export type AIModuleStatus = 'IDENTIFIED' | 'HAS_API' | 'HAS_ADAPTER' | 'HAS_READ_TOOL' | 'HAS_RBAC_GUARD' | 'TESTED' | 'AI_READY';

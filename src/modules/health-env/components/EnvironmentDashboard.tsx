@@ -73,24 +73,24 @@ export default function EnvironmentDashboard({ language, onNavigate }: Props) {
   return (
     <div className="w-full p-4 md:p-6 space-y-6 max-w-7xl 2xl:max-w-[1720px] mx-auto" dir={isFa ? 'rtl' : 'ltr'}>
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-slate-200 dark:border-slate-700">
-        <div className="flex items-center gap-3">
-          <div className="p-3 bg-emerald-600 text-white rounded-2xl shadow-sm">
+      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 pb-2 border-b border-slate-200 dark:border-slate-700">
+        <div className="flex items-center gap-3 min-w-0 flex-1">
+          <div className="p-3 bg-emerald-600 text-white rounded-2xl shadow-sm shrink-0">
             <Wind className="w-6 h-6" />
           </div>
-          <div>
-            <h2 className="text-xl font-black text-slate-900 dark:text-white">
+          <div className="min-w-0">
+            <h2 className="text-base sm:text-xl font-black text-slate-900 dark:text-white leading-snug">
               {isFa ? 'داشبورد تخصصی مدیریت و پایش محیط‌زیست' : 'Environmental Management & Monitoring Dashboard'}
             </h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">
               {isFa ? 'پایش آنلاین انتشار آلاینده‌ها، سامانه جامع پسماند (EMP)، پساب و انطباق با استانداردهای ملی' : 'Emissions telemetry, hazardous waste manifests, wastewater and regulatory compliance.'}
             </p>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3 max-w-full">
           <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 p-1.5 rounded-xl text-xs font-bold border border-slate-200 dark:border-slate-700">
-            <span className="text-slate-500 dark:text-slate-400">{isFa ? 'سال پایش:' : 'Monitoring Year:'}</span>
+            <span className="text-slate-500 dark:text-slate-400 whitespace-nowrap">{isFa ? 'سال پایش:' : 'Monitoring Year:'}</span>
             <select
               value={selectedYear}
               onChange={(e) => setSelectedYear(Number(e.target.value))}
@@ -104,15 +104,15 @@ export default function EnvironmentDashboard({ language, onNavigate }: Props) {
             </select>
           </div>
 
-          <div className="flex items-center gap-2 text-xs font-bold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 px-3 py-1.5 rounded-xl border border-emerald-200 dark:border-emerald-800">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+          <div className="flex items-center gap-2 text-xs font-bold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 px-3 py-1.5 rounded-xl border border-emerald-200 dark:border-emerald-800 whitespace-nowrap">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0"></span>
             <span>{isFa ? 'سامانه پایش برخط (CEMS): متصل' : 'Online Telemetry: Connected'}</span>
           </div>
         </div>
       </div>
 
       {/* KPI Cards Grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
+      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3.5">
         <div 
           onClick={() => onNavigate?.('env-monitoring')}
           className="p-4 bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-xs hover:border-emerald-400 transition-all cursor-pointer"

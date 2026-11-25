@@ -28,6 +28,7 @@ import {
   syncIntegrationConfigCache,
 } from '../services/webhookDispatcher.ts';
 import { invalidateDashboardCache } from './dashboard.router.ts';
+import { personnelAccessService } from '../core/personnelAccess.service.ts';
 
 export const settingsRouter = Router();
 
@@ -94,6 +95,23 @@ export const SENSITIVE_ADMIN_READ_KEYS = [
   'hse_backup_schedule_config',
 ];
 
+export const PUBLIC_UNAUTHENTICATED_SETTING_KEYS = [
+  'system_branding',
+  'hse_ui_config_v2',
+  'hse_global_sound_preferences_v1',
+];
+
+export const PERSONNEL_SCOPED_SETTING_KEYS = [
+  'hse_clinic_visits_v1',
+  'hse_nutrition_records_v1',
+  'hse_ppe_issuances_v1',
+  'hse_training_records_v1',
+  'OCC_HEALTH_EXAMS_DATA_V2',
+  'hse_medical_exams_v4',
+  'hse_medical_records_v4',
+  'hse_periodic_dossier_attachments_v1',
+];
+
 export function checkIsAdminRequest(req: any): boolean {
   const user = req?.user;
   const role = String(user?.role || '').toUpperCase();
@@ -101,20 +119,43 @@ export function checkIsAdminRequest(req: any): boolean {
 }
 
 // Get all settings directly from PostgreSQL (Single Source of Truth)
+// Unauthenticated requests only receive public branding/UI keys; authenticated users receive RBAC & personnel-scoped data.
 settingsRouter.get('/', optionalAuth, async (req, res) => {
+  const isAuthenticated = Boolean(req.user && req.user.uid);
   const isAdmin = checkIsAdminRequest(req);
   try {
     const records = await withDbRetry(() => db.select().from(systemSettings));
+    const accessCtx = isAuthenticated
+      ? await personnelAccessService.resolveAccessContext(req.user)
+      : null;
+
     const settingsMap: Record<string, any> = {};
     const versions: Record<string, number> = {};
     for (const r of records) {
-      if (!isAdmin && SENSITIVE_ADMIN_READ_KEYS.includes(r.key)) continue;
-      settingsMap[r.key] =
+      if (!isAuthenticated) {
+        if (!PUBLIC_UNAUTHENTICATED_SETTING_KEYS.includes(r.key)) continue;
+      } else if (!isAdmin && SENSITIVE_ADMIN_READ_KEYS.includes(r.key)) {
+        continue;
+      }
+
+      let val =
         r.key === INTEGRATION_CONFIG_KEY ? maskIntegrationConfigForClient(r.value) : r.value;
+
+      if (
+        isAuthenticated &&
+        accessCtx &&
+        !accessCtx.canAccessAll &&
+        PERSONNEL_SCOPED_SETTING_KEYS.includes(r.key) &&
+        Array.isArray(val)
+      ) {
+        val = personnelAccessService.filterModuleRecords(accessCtx, val);
+      }
+
+      settingsMap[r.key] = val;
       versions[r.key] = Number((r as any).version ?? 1);
       syncSettingsMemoryCache(r.key, r.value);
     }
-    if (settingsMap[REFERRAL_STORAGE_KEY] !== undefined) {
+    if (isAuthenticated && settingsMap[REFERRAL_STORAGE_KEY] !== undefined) {
       const rawRefs = Array.isArray(settingsMap[REFERRAL_STORAGE_KEY])
         ? settingsMap[REFERRAL_STORAGE_KEY]
         : [];
@@ -134,6 +175,14 @@ settingsRouter.get('/', optionalAuth, async (req, res) => {
 // Get single setting directly from PostgreSQL with version metadata
 settingsRouter.get('/:key', optionalAuth, async (req, res) => {
   const { key } = req.params;
+  const isAuthenticated = Boolean(req.user && req.user.uid);
+
+  if (!isAuthenticated && !PUBLIC_UNAUTHENTICATED_SETTING_KEYS.includes(key)) {
+    return res.status(401).json({
+      success: false,
+      message: 'برای مشاهده این اطلاعات لطفاً ابتدا وارد سامانه شوید.',
+    });
+  }
   if (SENSITIVE_ADMIN_READ_KEYS.includes(key) && !checkIsAdminRequest(req)) {
     return res.status(403).json({ success: false, message: 'دسترسی غیرمجاز برای مشاهده تنظیمات امنیتی سامانه' });
   }
@@ -153,8 +202,20 @@ settingsRouter.get('/:key', optionalAuth, async (req, res) => {
     if (records.length > 0) {
       const rec = records[0] as any;
       syncSettingsMemoryCache(key, rec.value);
-      const outVal =
+      let outVal =
         key === INTEGRATION_CONFIG_KEY ? maskIntegrationConfigForClient(rec.value) : rec.value;
+
+      if (
+        isAuthenticated &&
+        PERSONNEL_SCOPED_SETTING_KEYS.includes(key) &&
+        Array.isArray(outVal)
+      ) {
+        const accessCtx = await personnelAccessService.resolveAccessContext(req.user);
+        if (!accessCtx.canAccessAll) {
+          outVal = personnelAccessService.filterModuleRecords(accessCtx, outVal);
+        }
+      }
+
       return res.json({
         success: true,
         data: outVal,
@@ -240,7 +301,13 @@ settingsRouter.post('/:key', requireAuth, async (req, res) => {
           count: Array.isArray(merged) ? merged.length : 0,
         },
       });
-      broadcastDataMutation('settings', 'update', { key, value: merged }, { module: REFERRAL_STORAGE_KEY, actorId: req.user?.uid });
+      // Broadcast minimal metadata signal only — never push other users' private referrals over shared channels
+      broadcastDataMutation(
+        'settings',
+        'update',
+        { key, scopedRefresh: true, count: Array.isArray(merged) ? merged.length : 0 },
+        { module: REFERRAL_STORAGE_KEY, recordId: key, actorId: req.user?.uid }
+      );
       return res.json({ success: true, message: 'Setting saved successfully', key, value: visible });
     } catch (err: any) {
       return res.status(500).json({ success: false, message: err?.message || 'Error saving referrals' });
@@ -294,19 +361,35 @@ settingsRouter.post('/:key', requireAuth, async (req, res) => {
 
     if (!isUnchanged) {
       invalidateDashboardCache();
-      broadcastDataMutation(
-        'settings',
-        'update',
-        { key, value, version: txRes.nextVersion, updatedAt: txRes.savedRow?.updated_at },
-        { module: 'SETTINGS', recordId: key, actorId: req.user?.uid, version: txRes.nextVersion }
-      );
+      const isScopedCollection = PERSONNEL_SCOPED_SETTING_KEYS.includes(key);
+      const broadcastSettingsPayload = isScopedCollection
+        ? {
+            key,
+            scopedRefresh: true,
+            count: Array.isArray(value) ? value.length : undefined,
+            version: txRes.nextVersion,
+            updatedAt: txRes.savedRow?.updated_at,
+          }
+        : { key, value, version: txRes.nextVersion, updatedAt: txRes.savedRow?.updated_at };
+
+      broadcastDataMutation('settings', 'update', broadcastSettingsPayload, {
+        module: 'SETTINGS',
+        recordId: key,
+        actorId: req.user?.uid,
+        version: txRes.nextVersion,
+      });
       if (key !== 'settings') {
-        broadcastDataMutation(key, 'update', value, {
-          module: key,
-          recordId: key,
-          actorId: req.user?.uid,
-          version: txRes.nextVersion,
-        });
+        broadcastDataMutation(
+          key,
+          'update',
+          isScopedCollection ? { scopedRefresh: true, version: txRes.nextVersion } : value,
+          {
+            module: key,
+            recordId: key,
+            actorId: req.user?.uid,
+            version: txRes.nextVersion,
+          }
+        );
       }
 
       if (key !== 'hse_heat_log') {

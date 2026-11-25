@@ -157,22 +157,46 @@ export const PersianTimePicker: React.FC<PersianTimePickerProps> = ({
     }
   }, [value]);
 
-  // Position popover with viewport boundary detection
+  const [isCompactViewport, setIsCompactViewport] = useState<boolean>(false);
+
+  // Position popover with viewport boundary detection (safe down to 320px)
   const updatePosition = useCallback(() => {
     if (!containerRef.current) return;
+    const vw = document.documentElement.clientWidth || window.innerWidth;
+    const vh = window.innerHeight;
+    const compact = vw < 480;
+    setIsCompactViewport(compact);
+
+    const popoverWidth = Math.min(320, vw - 16);
+
+    if (compact) {
+      setPopoverStyle({
+        position: 'fixed',
+        top: '50%',
+        left: '50%',
+        transform: 'translate(-50%, -50%)',
+        width: `${popoverWidth}px`,
+        maxWidth: 'calc(100vw - 16px)',
+        maxHeight: 'calc(100dvh - 24px)',
+        overflowY: 'auto',
+        zIndex: 99999,
+      });
+      return;
+    }
+
     const rect = containerRef.current.getBoundingClientRect();
-    const popoverWidth = 320;
-    const popoverHeight = 420;
+    const popoverHeight = Math.min(420, vh - 24);
 
     // Check vertical space (open upwards if tight at bottom)
-    const spaceBelow = window.innerHeight - rect.bottom;
-    const shouldOpenUp = spaceBelow < popoverHeight && rect.top > popoverHeight;
+    const spaceBelow = vh - rect.bottom;
+    const shouldOpenUp = spaceBelow < popoverHeight && rect.top > spaceBelow;
 
-    const top = shouldOpenUp 
+    const rawTop = shouldOpenUp 
       ? rect.top - popoverHeight - 8 
       : rect.bottom + 8;
+    const top = Math.max(8, Math.min(rawTop, vh - popoverHeight - 8));
 
-    // Horizontal placement keeping it inside screen margins
+    // Horizontal placement keeping it strictly inside screen margins
     let left: number;
     if (isFa) {
       left = rect.right - popoverWidth;
@@ -180,16 +204,16 @@ export const PersianTimePicker: React.FC<PersianTimePickerProps> = ({
       left = rect.left;
     }
 
-    if (left < 12) left = 12;
-    if (left + popoverWidth > window.innerWidth - 12) {
-      left = window.innerWidth - popoverWidth - 12;
-    }
+    left = Math.max(8, Math.min(left, Math.max(8, vw - popoverWidth - 8)));
 
     setPopoverStyle({
       position: 'fixed',
-      top: `${Math.max(10, top)}px`,
+      top: `${top}px`,
       left: `${left}px`,
       width: `${popoverWidth}px`,
+      maxWidth: 'calc(100vw - 16px)',
+      maxHeight: 'calc(100dvh - 16px)',
+      overflowY: 'auto',
       zIndex: 99999,
     });
   }, [isFa]);
@@ -442,13 +466,21 @@ export const PersianTimePicker: React.FC<PersianTimePickerProps> = ({
 
       {/* POPUP TIME PICKER DIALOG */}
       {isOpen && createPortal(
-        <div 
-          ref={popoverRef}
-          className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border-2 border-slate-200 dark:border-slate-700 p-4 animate-in fade-in zoom-in-95 duration-150 flex flex-col gap-3.5"
-          style={popoverStyle}
-          dir={isFa ? 'rtl' : 'ltr'}
-          onClick={(e) => e.stopPropagation()}
-        >
+        <>
+          {isCompactViewport && (
+            <div
+              className="fixed inset-0 bg-slate-950/50 backdrop-blur-xs z-[99998]"
+              onClick={() => setIsOpen(false)}
+              aria-hidden="true"
+            />
+          )}
+          <div 
+            ref={popoverRef}
+            className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border-2 border-slate-200 dark:border-slate-700 p-3 sm:p-4 animate-in fade-in zoom-in-95 duration-150 flex flex-col gap-3 sm:gap-3.5 max-h-[calc(100dvh-20px)] overflow-y-auto custom-scrollbar"
+            style={popoverStyle}
+            dir={isFa ? 'rtl' : 'ltr'}
+            onClick={(e) => e.stopPropagation()}
+          >
           {/* Header Bar */}
           <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2.5">
             <div className="flex items-center gap-2">
@@ -913,7 +945,8 @@ export const PersianTimePicker: React.FC<PersianTimePickerProps> = ({
               </button>
             </div>
           </div>
-        </div>,
+        </div>
+        </>,
         document.body
       )}
     </div>

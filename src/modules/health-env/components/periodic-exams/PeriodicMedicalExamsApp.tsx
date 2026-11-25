@@ -30,6 +30,7 @@ import { parseOccupationalHealthExcel } from './excelParser';
 import { workerManager } from '../../../../workers/workerManager';
 import { apiDb } from '../../../../services/apiDatabaseClient';
 import { getComplexPersonnelList } from '../../../../utils/personnelHelper';
+import { medicalExamService } from '../../services/medicalExamService';
 import { AdvancedFilterState, INITIAL_FILTER_STATE } from './AdvancedFilterPanel';
 import { DashboardTab } from './tabs/DashboardTab';
 import { PersonnelDossierTab } from './tabs/PersonnelDossierTab';
@@ -536,7 +537,7 @@ export const PeriodicMedicalExamsApp: React.FC<Props> = ({ language = 'fa', curr
   };
 
   // Delete Individual Excel File Batch
-  const deleteBatch = (batchId: string) => {
+  const deleteBatch = async (batchId: string) => {
     const batch = importedBatches.find(b => b.id === batchId);
     if (!batch) return;
 
@@ -556,7 +557,8 @@ export const PeriodicMedicalExamsApp: React.FC<Props> = ({ language = 'fa', curr
     setExaminations(remainingExams);
     setPersonnelMap(remainingPMap);
     setImportedBatches(remainingBatches);
-    saveToStorage(remainingExams, remainingPMap, remainingBatches);
+    await saveToStorage(remainingExams, remainingPMap, remainingBatches);
+    await medicalExamService.syncFromOccHealthV2Deletion(batchId);
 
     setImportStatus(`فایل اکسل «${batch.fileName}» و تمام ${batch.recordCount} رکورد مرتبط با آن با موفقیت حذف گردید.`);
   };
@@ -566,12 +568,8 @@ export const PeriodicMedicalExamsApp: React.FC<Props> = ({ language = 'fa', curr
     setExaminations([]);
     setPersonnelMap({});
     setImportedBatches([]);
-    try {
-      await apiDb.saveSetting(STORAGE_KEY, null);
-    } catch (e: any) {
-      toast.error(e?.message || 'خطا در پاک‌سازی اطلاعات در پایگاه داده');
-      return;
-    }
+    await saveToStorage([], {}, []);
+    await medicalExamService.syncFromOccHealthV2Deletion(null);
     setImportStatus('کلیه اطلاعات و فایل‌های سامانه به طور کامل در پایگاه داده پاک‌سازی شدند. پایگاه داده خالی است.');
   };
 
@@ -593,34 +591,34 @@ export const PeriodicMedicalExamsApp: React.FC<Props> = ({ language = 'fa', curr
     <div className="relative w-full p-0" dir="rtl">
       {/* Top Header Bar */}
       <header className="sticky top-0 z-30 bg-white/95 dark:bg-[#132a3a]/95 backdrop-blur-md border-b border-slate-200/90 dark:border-slate-800 shadow-xs">
-        <div className="max-w-7xl 2xl:max-w-[1720px] mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16">
+        <div className="max-w-7xl 2xl:max-w-[1720px] mx-auto px-3 sm:px-6 lg:px-8">
+          <div className="flex flex-wrap items-center justify-between gap-2.5 min-h-16 py-2.5">
             {/* Title & Brand */}
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-teal-700 to-teal-500 flex items-center justify-center text-white shadow-md shadow-teal-700/20">
-                <ShieldCheck className="w-6 h-6" />
+            <div className="flex items-center gap-3 min-w-0 flex-1 basis-[240px]">
+              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-gradient-to-tr from-teal-700 to-teal-500 flex items-center justify-center text-white shadow-md shadow-teal-700/20 shrink-0">
+                <ShieldCheck className="w-5 h-5 sm:w-6 sm:h-6" />
               </div>
-              <div>
-                <h1 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight">
+              <div className="min-w-0">
+                <h1 className="text-sm sm:text-base lg:text-lg font-black text-slate-900 dark:text-white tracking-tight leading-snug">
                   سامانه جامع پایش معاینات ادواری و طب کار
                 </h1>
-                <span className="text-[11px] text-teal-700 dark:text-teal-400 font-bold block -mt-0.5">
+                <span className="text-[11px] text-teal-700 dark:text-teal-400 font-bold block truncate">
                   Occupational Health & Periodic Medical Examination Management System
                 </span>
               </div>
             </div>
 
             {/* Quick Action Pills */}
-            <div className="flex items-center gap-2">
-              <span className="hidden sm:inline-flex text-xs font-mono font-bold px-3 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+            <div className="flex flex-wrap items-center gap-2 max-w-full">
+              <span className="hidden sm:inline-flex text-xs font-mono font-bold px-3 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 whitespace-nowrap">
                 {personnelList.length} پرسنل | {joinedRecords.length} معاینه
               </span>
               <button
                 type="button"
                 onClick={() => setActiveTab('import')}
-                className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-teal-50 dark:bg-teal-950/60 border border-teal-200 dark:border-teal-800 text-teal-700 dark:text-teal-300 hover:bg-teal-100 text-xs font-bold transition-all cursor-pointer"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-teal-50 dark:bg-teal-950/60 border border-teal-200 dark:border-teal-800 text-teal-700 dark:text-teal-300 hover:bg-teal-100 text-xs font-bold transition-all cursor-pointer whitespace-nowrap"
               >
-                <Upload className="w-3.5 h-3.5" />
+                <Upload className="w-3.5 h-3.5 shrink-0" />
                 <span>ورود اکسل</span>
               </button>
             </div>

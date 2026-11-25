@@ -51,6 +51,8 @@ const PERSONNEL_SCOPED_ENTITIES = new Set([
   'personnel',
   'medicalexams',
   'medical_exams',
+  'clinicvisits',
+  'nutritionrecords',
   'incidents',
   'permits',
   'workpermits',
@@ -62,15 +64,39 @@ const PERSONNEL_SCOPED_ENTITIES = new Set([
   'hse_nutrition_records_v1',
   'hse_ppe_issuances_v1',
   'hse_training_records_v1',
+  'occ_health_exams_data_v2',
+  'hse_medical_exams_v4',
+  'hse_medical_records_v4',
+  'hse_periodic_dossier_attachments_v1',
 ]);
+
+// Unique boot instance ID so reconnecting clients immediately detect server restarts and resync from PostgreSQL
+export const SERVER_INSTANCE_ID = crypto.randomUUID();
 
 // Bounded event history ring buffer for client catch-up after temporary disconnects
 const EVENT_HISTORY_LIMIT = 1500;
 let monotonicSeq = 0;
 const eventHistory: MutationEventEnvelope[] = [];
 
-// Short-lived per-user PersonnelAccessContext cache for high-frequency socket filtering
+export function getLatestSeq(): number {
+  return monotonicSeq;
+}
+
+// Short-lived per-user PersonnelAccessContext cache for high-frequency socket filtering (bounded)
+const SOCKET_ACCESS_CACHE_MAX = 500;
 const socketAccessCtxCache = new Map<string, { ctx: PersonnelAccessContext; expiresAt: number }>();
+
+const accessCacheCleanupTimer = setInterval(() => {
+  const now = Date.now();
+  for (const [uid, entry] of socketAccessCtxCache.entries()) {
+    if (entry.expiresAt <= now) {
+      socketAccessCtxCache.delete(uid);
+    }
+  }
+}, 60_000);
+if (accessCacheCleanupTimer.unref) {
+  accessCacheCleanupTimer.unref();
+}
 
 export function invalidateRealtimeAccessCache(userUid?: string) {
   if (userUid) {
@@ -88,6 +114,10 @@ async function getCachedAccessContext(user: UserContext): Promise<PersonnelAcces
     return cached.ctx;
   }
   const ctx = await personnelAccessService.resolveAccessContext(user);
+  if (socketAccessCtxCache.size >= SOCKET_ACCESS_CACHE_MAX && !socketAccessCtxCache.has(uid)) {
+    const oldest = socketAccessCtxCache.keys().next().value;
+    if (oldest !== undefined) socketAccessCtxCache.delete(oldest);
+  }
   socketAccessCtxCache.set(uid, { ctx, expiresAt: now + 15000 });
   return ctx;
 }
@@ -194,8 +224,14 @@ async function canDeliverToUser(
     return Boolean(ownerUid) && ownerUid === String(user.uid);
   }
 
-  // 2. Sensitive admin-only settings, audit logs, users list
-  if (ADMIN_SOCKET_KEYS.has(settingKey) || rawEntity === 'audit_logs' || rawEntity === 'audit') {
+  // 2. Sensitive admin-only settings, webhooks, backup configs, audit logs, users list
+  if (
+    ADMIN_SOCKET_KEYS.has(settingKey) ||
+    rawEntity === 'audit_logs' ||
+    rawEntity === 'audit' ||
+    rawEntity === 'webhooks' ||
+    rawEntity === 'backup'
+  ) {
     return isAdmin;
   }
   if (rawEntity === 'users' || rawEntity === 'user') {
@@ -214,10 +250,80 @@ async function canDeliverToUser(
     return payloadUid === String(user.uid) || affected.includes(String(user.uid));
   }
 
-  // 4. Personnel-scoped operational records
-  if (PERSONNEL_SCOPED_ENTITIES.has(rawEntity) || PERSONNEL_SCOPED_ENTITIES.has(settingKey)) {
+  // 4. Scoped notifications delivery (never leak user-private notifications to other users)
+  if (rawEntity === 'notifications' || rawEntity === 'notification') {
+    if (isAdmin) return true;
+    const payload = envelope.data;
+    if (!payload || typeof payload !== 'object') return true;
+    if (payload.isPublic || payload.isEmergency || payload.priority === 'EMERGENCY' || payload.priority === 'CRITICAL') {
+      return true;
+    }
+    const explicitUserId = String(
+      targetUserUid || payload.targetUserUid || payload.recipientUserId || payload.userId || payload.uid || ''
+    ).trim();
+    const recipientIds: string[] = Array.isArray(payload.recipientIds)
+      ? payload.recipientIds.map(String)
+      : Array.isArray(payload.targetUserIds)
+      ? payload.targetUserIds.map(String)
+      : [];
+    const targetRoles: string[] = Array.isArray(payload.targetRoles)
+      ? payload.targetRoles.map((r: any) => normalizeRoleToCanonical(String(r)))
+      : [];
+
+    if (explicitUserId || recipientIds.length > 0 || targetRoles.length > 0) {
+      const userKeys = new Set(
+        [user.uid, user.id, user.username].filter(Boolean).map((v) => String(v))
+      );
+      if (explicitUserId && userKeys.has(explicitUserId)) return true;
+      if (recipientIds.some((id) => userKeys.has(id))) return true;
+      const userRole = normalizeRoleToCanonical(user.role);
+      if (targetRoles.includes(userRole) || targetRoles.includes('ALL')) return true;
+      return false;
+    }
+    return true;
+  }
+
+  // 5. Referrals scoping (deliver content only to participants/admins; metadata refresh signals are safe)
+  if (
+    rawEntity === 'referrals' ||
+    rawEntity === 'document_referrals' ||
+    settingKey === 'hse_document_referrals'
+  ) {
+    if (isAdmin) return true;
+    const payload = envelope.data;
+    if (payload?.scopedRefresh) return true;
+    if (payload && typeof payload === 'object') {
+      const userKeys = new Set(
+        [user.uid, user.id, user.username, user.name].filter(Boolean).map((v) => String(v).toLowerCase())
+      );
+      const candidateFields = [
+        payload.senderId,
+        payload.senderUsername,
+        payload.fromUserId,
+        payload.recipientId,
+        payload.recipientUsername,
+        payload.toUserId,
+        payload.targetUserId,
+      ]
+        .filter(Boolean)
+        .map((v) => String(v).toLowerCase());
+      if (candidateFields.length > 0) {
+        return candidateFields.some((c) => userKeys.has(c));
+      }
+    }
+    return false;
+  }
+
+  // 6. Personnel-scoped operational records
+  const lowerSettingKey = settingKey.toLowerCase();
+  if (PERSONNEL_SCOPED_ENTITIES.has(rawEntity) || PERSONNEL_SCOPED_ENTITIES.has(lowerSettingKey)) {
     const accessCtx = await getCachedAccessContext(user);
     if (accessCtx.canAccessAll) return true;
+
+    // Minimal scopedRefresh invalidation signals contain zero PII/record payload — safe to trigger client re-fetch
+    if (envelope.data?.scopedRefresh) {
+      return true;
+    }
 
     const op = String(envelope.operation || '').toLowerCase();
     // On deletes / bulk actions without full record payload, allow ID signal so client can drop stale entry if loaded
@@ -257,11 +363,31 @@ export function getSSEClientCount(): number {
 
 export async function getMissedMutationEvents(
   sinceSeq: number,
-  user: UserContext
-): Promise<{ events: MutationEventEnvelope[]; latestSeq: number; resyncRequired: boolean }> {
+  user: UserContext,
+  clientServerInstanceId?: string | null
+): Promise<{
+  events: MutationEventEnvelope[];
+  latestSeq: number;
+  serverInstanceId: string;
+  resyncRequired: boolean;
+}> {
   const cleanSince = Number.isFinite(sinceSeq) ? Math.max(0, Math.floor(sinceSeq)) : 0;
   const oldestBufferedSeq = eventHistory.length > 0 ? eventHistory[0].seq : monotonicSeq + 1;
-  const resyncRequired = cleanSince > 0 && eventHistory.length >= EVENT_HISTORY_LIMIT && cleanSince < oldestBufferedSeq - 1;
+  const instanceChanged =
+    Boolean(clientServerInstanceId) && clientServerInstanceId !== SERVER_INSTANCE_ID;
+  const seqAheadOfServer = cleanSince > monotonicSeq;
+  const bufferEvicted =
+    cleanSince > 0 && eventHistory.length >= EVENT_HISTORY_LIMIT && cleanSince < oldestBufferedSeq - 1;
+  const resyncRequired = instanceChanged || seqAheadOfServer || bufferEvicted;
+
+  if (resyncRequired) {
+    return {
+      events: [],
+      latestSeq: monotonicSeq,
+      serverInstanceId: SERVER_INSTANCE_ID,
+      resyncRequired: true,
+    };
+  }
 
   const candidates = eventHistory.filter((ev) => ev.seq > cleanSince);
   const filtered: MutationEventEnvelope[] = [];
@@ -273,7 +399,8 @@ export async function getMissedMutationEvents(
   return {
     events: filtered,
     latestSeq: monotonicSeq,
-    resyncRequired,
+    serverInstanceId: SERVER_INSTANCE_ID,
+    resyncRequired: false,
   };
 }
 
@@ -294,7 +421,7 @@ class SocketService {
       perMessageDeflate: false,
       pingTimeout: 20000,
       pingInterval: 10000,
-      maxHttpBufferSize: 1e8,
+      maxHttpBufferSize: 5 * 1024 * 1024, // 5MB cap prevents RAM exhaustion under 50+ concurrent connections
     });
 
     this.io.use((socket, next) => {
@@ -322,28 +449,48 @@ class SocketService {
           authenticated: true,
           uid: user.uid,
           latestSeq: monotonicSeq,
+          serverInstanceId: SERVER_INSTANCE_ID,
           serverTime: new Date().toISOString(),
         });
       } else {
         socket.emit('sync:hello', {
           authenticated: false,
           latestSeq: monotonicSeq,
+          serverInstanceId: SERVER_INSTANCE_ID,
           serverTime: new Date().toISOString(),
         });
       }
 
-      socket.on('sync:catchup', async (payload: { sinceSeq?: number }, ack?: (res: any) => void) => {
-        if (!user || !user.uid) {
-          ack?.({ success: false, events: [], latestSeq: monotonicSeq, resyncRequired: false });
-          return;
+      socket.on(
+        'sync:catchup',
+        async (payload: { sinceSeq?: number; serverInstanceId?: string }, ack?: (res: any) => void) => {
+          if (!user || !user.uid) {
+            ack?.({
+              success: false,
+              events: [],
+              latestSeq: monotonicSeq,
+              serverInstanceId: SERVER_INSTANCE_ID,
+              resyncRequired: false,
+            });
+            return;
+          }
+          try {
+            const result = await getMissedMutationEvents(
+              Number(payload?.sinceSeq || 0),
+              user,
+              payload?.serverInstanceId
+            );
+            ack?.({ success: true, ...result });
+          } catch (err: any) {
+            ack?.({
+              success: false,
+              error: err?.message || 'Catchup failed',
+              serverInstanceId: SERVER_INSTANCE_ID,
+              resyncRequired: true,
+            });
+          }
         }
-        try {
-          const result = await getMissedMutationEvents(Number(payload?.sinceSeq || 0), user);
-          ack?.({ success: true, ...result });
-        } catch (err: any) {
-          ack?.({ success: false, error: err?.message || 'Catchup failed', resyncRequired: true });
-        }
-      });
+      );
 
       socket.on('disconnect', () => {
         logger.debug(`WebSocket disconnected: ${socket.id}`);
@@ -386,6 +533,26 @@ class SocketService {
   broadcastToRoom(room: string, event: string, data: any) {
     if (this.io) {
       this.io.to(room).emit(event, data);
+    }
+  }
+
+  close() {
+    for (const client of sseClients) {
+      try {
+        client.res.end();
+      } catch {
+        // Ignore already-closed SSE streams
+      }
+    }
+    sseClients.clear();
+    this.connectedUsers.clear();
+    if (this.io) {
+      try {
+        this.io.close();
+      } catch {
+        // Ignore shutdown errors
+      }
+      this.io = null;
     }
   }
 }
@@ -453,38 +620,55 @@ export function broadcastDataMutation(
 }
 
 async function deliverEnvelopeAsync(envelope: MutationEventEnvelope, targetUserUid?: string | null) {
-  // 1. Scoped Socket.IO delivery
-  try {
-    for (const sock of socketService.getSockets()) {
-      const user = sock.data?.user as UserContext | undefined;
-      if (!user || !user.uid) continue;
-      try {
-        const allowed = await canDeliverToUser(envelope, user, targetUserUid);
-        if (allowed) {
-          sock.emit('data_mutated', envelope);
-        }
-      } catch {
-        // Ignore single-socket error
-      }
+  // Deduplicate RBAC / personnel-scope evaluation per unique user UID across multiple tabs & SSE streams
+  const decisionByUid = new Map<string, Promise<boolean>>();
+  const checkAllowedForUser = (user: UserContext): Promise<boolean> => {
+    const uid = String(user.uid || user.id || user.username || '');
+    let pending = decisionByUid.get(uid);
+    if (!pending) {
+      pending = canDeliverToUser(envelope, user, targetUserUid).catch(() => false);
+      decisionByUid.set(uid, pending);
     }
+    return pending;
+  };
+
+  // 1. Scoped Socket.IO delivery (concurrent fan-out)
+  try {
+    const sockets = Array.from(socketService.getSockets());
+    await Promise.all(
+      sockets.map(async (sock) => {
+        const user = sock.data?.user as UserContext | undefined;
+        if (!user || !user.uid) return;
+        try {
+          if (await checkAllowedForUser(user)) {
+            sock.emit('data_mutated', envelope);
+          }
+        } catch {
+          // Ignore single-socket error
+        }
+      })
+    );
   } catch (err: any) {
     logger.warn('Socket broadcast warning:', { error: err?.message });
   }
 
-  // 2. Scoped SSE delivery
-  const deadClients: SseClientEntry[] = [];
-  for (const client of sseClients) {
-    try {
-      const allowed = await canDeliverToUser(envelope, client.user, targetUserUid);
-      if (allowed) {
-        const message = `event: data_mutated\nid: ${envelope.seq}\ndata: ${JSON.stringify(envelope)}\n\n`;
-        client.res.write(message);
-      }
-    } catch {
-      deadClients.push(client);
+  // 2. Scoped SSE delivery (pre-serialized once, concurrent decision check)
+  if (sseClients.size > 0) {
+    const serializedMessage = `event: data_mutated\nid: ${envelope.seq}\ndata: ${JSON.stringify(envelope)}\n\n`;
+    const deadClients: SseClientEntry[] = [];
+    await Promise.all(
+      Array.from(sseClients).map(async (client) => {
+        try {
+          if (await checkAllowedForUser(client.user)) {
+            client.res.write(serializedMessage);
+          }
+        } catch {
+          deadClients.push(client);
+        }
+      })
+    );
+    for (const dead of deadClients) {
+      sseClients.delete(dead);
     }
-  }
-  for (const dead of deadClients) {
-    sseClients.delete(dead);
   }
 }

@@ -14,6 +14,7 @@ import { broadcastDataMutation } from '../core/socket.ts';
 import { auditService } from '../modules/audit/audit.service.ts';
 import {
   ADMIN_ONLY_SETTING_KEYS,
+  PERSONNEL_SCOPED_SETTING_KEYS,
   SENSITIVE_ADMIN_READ_KEYS,
   checkIsAdminRequest,
   syncSettingsMemoryCache,
@@ -26,15 +27,7 @@ export const collectionRouter = Router();
 
 collectionRouter.use(requireAuth);
 
-const PERSONNEL_SCOPED_COLLECTIONS = new Set([
-  'hse_clinic_visits_v1',
-  'hse_nutrition_records_v1',
-  'hse_ppe_issuances_v1',
-  'hse_training_records_v1',
-  'OCC_HEALTH_EXAMS_DATA_V2',
-  'hse_medical_exams_v4',
-  'hse_medical_records_v4',
-]);
+const PERSONNEL_SCOPED_COLLECTIONS = new Set(PERSONNEL_SCOPED_SETTING_KEYS);
 
 function getItemIdentifier(item: any): string {
   if (!item || typeof item !== 'object') return '';
@@ -193,11 +186,11 @@ collectionRouter.post('/:collectionKey/item', async (req: Request, res: Response
       actorId: req.user?.uid,
       version: txRes.savedItem._version,
     });
-    broadcastDataMutation('settings', 'update', {
-      key,
-      value: txRes.nextItems,
-      version: txRes.nextCollectionVersion,
-    });
+    const isScopedKey = PERSONNEL_SCOPED_COLLECTIONS.has(key);
+    broadcastDataMutation('settings', 'update', isScopedKey
+      ? { key, scopedRefresh: true, count: txRes.nextItems.length, version: txRes.nextCollectionVersion }
+      : { key, value: txRes.nextItems, version: txRes.nextCollectionVersion }
+    );
 
     void auditService.logFromRequest(req, {
       action: txRes.op === 'create' ? 'CREATE' : 'UPDATE',
@@ -295,11 +288,11 @@ collectionRouter.put('/:collectionKey/item/:itemId', async (req: Request, res: R
       actorId: req.user?.uid,
       version: txRes.savedItem._version,
     });
-    broadcastDataMutation('settings', 'update', {
-      key,
-      value: txRes.nextItems,
-      version: txRes.nextCollectionVersion,
-    });
+    const isScopedKey = PERSONNEL_SCOPED_COLLECTIONS.has(key);
+    broadcastDataMutation('settings', 'update', isScopedKey
+      ? { key, scopedRefresh: true, count: txRes.nextItems.length, version: txRes.nextCollectionVersion }
+      : { key, value: txRes.nextItems, version: txRes.nextCollectionVersion }
+    );
 
     void auditService.logFromRequest(req, {
       action: 'UPDATE',
@@ -356,6 +349,14 @@ collectionRouter.delete('/:collectionKey/item/:itemId', async (req: Request, res
         throw new NotFoundError('رکورد مورد نظر در مجموعه');
       }
       const existingItem = currentItems[idx];
+      if (PERSONNEL_SCOPED_COLLECTIONS.has(key)) {
+        const ctx = await personnelAccessService.resolveAccessContext(req.user);
+        if (!ctx.canAccessAll && !personnelAccessService.doesModuleRecordMatchContext(ctx, existingItem)) {
+          const err: any = new Error('شما مجوز حذف این رکورد را ندارید.');
+          err.statusCode = 403;
+          throw err;
+        }
+      }
       if (expectedVersion !== undefined) {
         assertVersionMatch(existingItem, expectedVersion);
       }
@@ -383,11 +384,11 @@ collectionRouter.delete('/:collectionKey/item/:itemId', async (req: Request, res
       actorId: req.user?.uid,
       version: txRes.nextCollectionVersion,
     });
-    broadcastDataMutation('settings', 'update', {
-      key,
-      value: txRes.nextItems,
-      version: txRes.nextCollectionVersion,
-    });
+    const isScopedKey = PERSONNEL_SCOPED_COLLECTIONS.has(key);
+    broadcastDataMutation('settings', 'update', isScopedKey
+      ? { key, scopedRefresh: true, count: txRes.nextItems.length, version: txRes.nextCollectionVersion }
+      : { key, value: txRes.nextItems, version: txRes.nextCollectionVersion }
+    );
 
     void auditService.logFromRequest(req, {
       action: 'DELETE',
@@ -487,11 +488,11 @@ collectionRouter.post('/:collectionKey/batch', async (req: Request, res: Respons
       actorId: req.user?.uid,
       version: txRes.nextCollectionVersion,
     });
-    broadcastDataMutation('settings', 'update', {
-      key,
-      value: txRes.nextItems,
-      version: txRes.nextCollectionVersion,
-    });
+    const isScopedKey = PERSONNEL_SCOPED_COLLECTIONS.has(key);
+    broadcastDataMutation('settings', 'update', isScopedKey
+      ? { key, scopedRefresh: true, count: txRes.nextItems.length, version: txRes.nextCollectionVersion }
+      : { key, value: txRes.nextItems, version: txRes.nextCollectionVersion }
+    );
 
     res.json({
       success: true,

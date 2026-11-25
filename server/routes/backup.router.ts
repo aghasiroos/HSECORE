@@ -16,6 +16,9 @@ import {
   BackupTag,
 } from '../services/backup.service.ts';
 import { logger } from '../core/logger.ts';
+import { broadcastDataMutation } from '../core/socket.ts';
+import { invalidateDashboardCache } from './dashboard.router.ts';
+import { preloadSettingsCache } from './settings.router.ts';
 
 export const backupRouter = Router();
 
@@ -87,6 +90,15 @@ backupRouter.post('/create', async (req: Request, res) => {
       isSelective: Boolean(isSelective),
       selectedModules,
       encrypt: Boolean(encrypt),
+    });
+
+    broadcastDataMutation('backup', 'create', {
+      backupId: result.manifest?.backupId,
+      tag: safeTag,
+    }, {
+      module: 'BACKUP',
+      recordId: result.manifest?.backupId,
+      actorId: req.user?.uid,
     });
 
     res.json({
@@ -234,6 +246,17 @@ backupRouter.post('/:backupId/restore', async (req: Request, res) => {
       operator,
     });
 
+    await preloadSettingsCache().catch(() => {});
+    invalidateDashboardCache();
+    broadcastDataMutation('system_restore', 'restore', {
+      mode,
+      backupId: String(req.params.backupId || ''),
+      restoredAt: new Date().toISOString(),
+    }, {
+      module: 'BACKUP',
+      actorId: req.user?.uid,
+    });
+
     res.json({ success: true, data: report });
   } catch (err: any) {
     logger.error('[BackupRouter] Real restore error:', err);
@@ -293,6 +316,17 @@ backupRouter.post('/upload-restore', async (req: Request, res) => {
       operator,
     });
 
+    await preloadSettingsCache().catch(() => {});
+    invalidateDashboardCache();
+    broadcastDataMutation('system_restore', 'restore', {
+      mode,
+      source: 'upload',
+      restoredAt: new Date().toISOString(),
+    }, {
+      module: 'BACKUP',
+      actorId: req.user?.uid,
+    });
+
     res.json({ success: true, data: report });
   } catch (err: any) {
     logger.error('[BackupRouter] Upload restore error:', err);
@@ -311,6 +345,11 @@ backupRouter.delete('/:backupId', async (req: Request, res) => {
   try {
     const operator = extractOperator(req);
     const result = await deleteServerBackup(String(req.params.backupId || ''), operator.username);
+    broadcastDataMutation('backup', 'delete', { backupId: String(req.params.backupId || '') }, {
+      module: 'BACKUP',
+      recordId: String(req.params.backupId || ''),
+      actorId: req.user?.uid,
+    });
     res.json({ success: true, data: result });
   } catch (err: any) {
     logger.error('[BackupRouter] Delete backup error:', err);
@@ -329,6 +368,10 @@ backupRouter.post('/schedule', async (req: Request, res) => {
   try {
     const operator = extractOperator(req);
     const saved = await saveBackupScheduleConfig(req.body || {}, operator.username);
+    broadcastDataMutation('backup', 'schedule', { updated: true }, {
+      module: 'BACKUP',
+      actorId: req.user?.uid,
+    });
     res.json({ success: true, data: saved });
   } catch (err: any) {
     logger.error('[BackupRouter] Save schedule error:', err);

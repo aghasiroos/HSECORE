@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  CheckSquare, LayoutDashboard
+  CheckSquare, LayoutDashboard, Layers
 } from 'lucide-react';
 import { OperationalSafetyInspection, SafetyChecklistTypeTemplate } from './types';
 import { safetyDeptService } from './services/safetyDeptService';
 import SafetyOverviewDashboard from './components/SafetyOverviewDashboard';
 import OperationalChecklistsView from './components/OperationalChecklistsView';
+import ScaffoldingModuleView from './scaffolding/ScaffoldingModuleView';
 import { SubViewTransition } from '../../motion';
 
 interface Props {
@@ -85,6 +86,7 @@ export default function SafetyUnitModule({ isFa = true, currentUser }: Props) {
   const subMenuItems = [
     { key: 'dashboard', titleFa: 'داشبورد واحد ایمنی', titleEn: 'Overview Dashboard', icon: LayoutDashboard },
     { key: 'checklists', titleFa: 'سوابق و اجرای بازرسی', titleEn: 'Execution & History', icon: CheckSquare },
+    { key: 'scaffolding', titleFa: 'بازرسی و وضعیت داربست‌بندی', titleEn: 'Scaffolding Inspection & Status', icon: Layers },
   ];
 
   return (
@@ -129,6 +131,11 @@ export default function SafetyUnitModule({ isFa = true, currentUser }: Props) {
             onViewInspection={handleViewInspectionFromDashboard}
             onReinspectInspection={handleReinspectFromDashboard}
             onNavigateToChecklists={handleNavigateToChecklistsWithFilter}
+            isFa={isFa}
+          />
+        ) : activeTab === 'scaffolding' ? (
+          <ScaffoldingModuleView
+            currentUser={currentUser}
             isFa={isFa}
           />
         ) : (

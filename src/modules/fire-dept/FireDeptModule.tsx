@@ -56,7 +56,23 @@ export default function FireDeptModule({ language }: Props) {
     };
   }, []);
 
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(() =>
+    typeof window !== 'undefined' ? window.innerWidth >= 1280 : false
+  );
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    let prevWidth = window.innerWidth;
+    const handleResize = () => {
+      const currWidth = window.innerWidth;
+      if (prevWidth >= 1024 && currWidth < 1024) {
+        setSidebarOpen(false);
+      }
+      prevWidth = currWidth;
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   // Dynamic Fire Dept configuration
   const [subConfigs, setSubConfigs] = useState<FireDeptSubItemConfig[]>(() => getMergedFireDeptConfig());
@@ -104,7 +120,7 @@ export default function FireDeptModule({ language }: Props) {
   })();
 
   return (
-    <div className="flex flex-col lg:flex-row min-h-[calc(100dvh-7.5rem)] lg:h-[calc(100dvh-7.5rem)] bg-slate-100 dark:bg-slate-900 rounded-2xl overflow-hidden relative border border-slate-200/80 dark:border-slate-800/80" dir={isFa ? 'rtl' : 'ltr'}>
+    <div className="flex flex-col lg:flex-row min-h-[calc(100dvh-9rem)] lg:h-[calc(100dvh-9rem)] bg-slate-100 dark:bg-slate-900 rounded-2xl overflow-hidden relative border border-slate-200/80 dark:border-slate-800/80" dir={isFa ? 'rtl' : 'ltr'}>
       {/* Mobile Sub-Header Bar */}
       <div className="lg:hidden flex items-center justify-between gap-2 px-3 py-2.5 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 shrink-0">
         <div className="flex items-center gap-2 min-w-0">
@@ -143,7 +159,7 @@ export default function FireDeptModule({ language }: Props) {
       <aside 
         className={`fixed lg:static inset-y-0 ${isFa ? 'right-0' : 'left-0'} z-40 lg:z-20 ${
           sidebarOpen
-            ? 'translate-x-0 w-72 max-w-[85vw] lg:w-72 shadow-2xl lg:shadow-none'
+            ? 'translate-x-0 w-72 max-w-[85vw] lg:w-60 xl:w-64 2xl:w-72 shadow-2xl lg:shadow-none'
             : `${isFa ? 'translate-x-full lg:translate-x-0' : '-translate-x-full lg:translate-x-0'} w-72 lg:w-16`
         } bg-white dark:bg-slate-800 border-l border-r border-slate-200 dark:border-slate-700 flex flex-col transition-all duration-300 shrink-0`}
       >
@@ -303,7 +319,7 @@ export default function FireDeptModule({ language }: Props) {
 
       {/* Main Content Area */}
       <main className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
-        <SubViewTransition viewKey={activeSection} isFa={isFa} className="flex-1 flex flex-col min-h-0 h-full">
+        <SubViewTransition viewKey={activeSection} isFa={isFa} className="flex-1 min-w-0 w-full flex flex-col min-h-0 h-full">
           {activeSection === 'dashboard' ? (
             <FireDashboard 
               language={language} 

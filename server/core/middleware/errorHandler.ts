@@ -22,8 +22,8 @@ export function errorHandlerMiddleware(
 
   if (statusCode >= 500) {
     logger.error(`[${req.method}] ${req.originalUrl} - ${err?.message || 'Server Error'}`, logPayload, correlationId);
-  } else if (statusCode === 401 || statusCode === 403 || statusCode === 404) {
-    logger.debug(`[${req.method}] ${req.originalUrl} - (${statusCode}) ${err?.message || 'Access Denied / Not Found'}`, logPayload, correlationId);
+  } else if (statusCode === 400 || statusCode === 401 || statusCode === 403 || statusCode === 404 || statusCode === 409 || statusCode === 422) {
+    logger.debug(`[${req.method}] ${req.originalUrl} - (${statusCode}) ${err?.message || 'Client Validation / Access Notice'}`, logPayload, correlationId);
   } else {
     logger.warn(`[${req.method}] ${req.originalUrl} - ${err?.message || 'Client Warning'}`, logPayload, correlationId);
   }

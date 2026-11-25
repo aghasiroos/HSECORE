@@ -912,30 +912,30 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
     <div className="space-y-5 text-right font-sans" dir="rtl">
       {/* Top Executive Banner & Project Selector */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xs">
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-          <div className="space-y-1.5">
+        <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
+          <div className="space-y-1.5 min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <span className="px-2.5 py-0.5 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-600 dark:text-blue-400 text-[11px] font-black">
                 CCPS RBPS (20 Elements) & OSHA 29 CFR 1910.119 (14 Clauses)
               </span>
             </div>
-            <h2 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white flex items-center gap-2">
+            <h2 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white flex items-center gap-2 leading-snug">
               <ShieldCheck className="w-6 h-6 text-blue-500 shrink-0" />
               <span>سیستم جامع مدیریت پروژه استقرار و بلوغ ایمنی فرایند (PSM)</span>
             </h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
+            <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
               مدیریت یکپارچه چرخه استقرار از تعیین دامنه، ارزیابی اولیه، تحلیل شکاف، برنامه‌ریزی WBS/Gantt، بانک اسناد، گردش کار ۸ مرحله‌ای CAPA، ۱۴ زیرماژول تخصصی، ممیزی بلوغ و تحویل نهایی
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+          <div className="flex flex-wrap items-center gap-2.5 max-w-full">
             {projects.length > 0 && (
-              <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-1.5">
-                <span className="text-xs font-bold text-slate-500 dark:text-slate-400">پروژه فعال:</span>
+              <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-1.5 max-w-full min-w-0">
+                <span className="text-xs font-bold text-slate-500 dark:text-slate-400 shrink-0">پروژه فعال:</span>
                 <select
                   value={selectedProjectId || ''}
                   onChange={(e) => handleSelectProject(Number(e.target.value))}
-                  className="bg-transparent text-xs font-black text-slate-800 dark:text-slate-100 focus:outline-none cursor-pointer"
+                  className="bg-transparent text-xs font-black text-slate-800 dark:text-slate-100 focus:outline-none cursor-pointer min-w-0 truncate"
                 >
                   {projects.map((p) => (
                     <option key={p.id} value={p.id} className="bg-white dark:bg-slate-900">
@@ -949,7 +949,7 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
             <button
               type="button"
               onClick={() => fetchBootstrap(selectedProjectId)}
-              className="p-2 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition cursor-pointer"
+              className="p-2 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition cursor-pointer shrink-0"
               title="همگام‌سازی زنده با پایگاه داده"
             >
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-blue-500' : ''}`} />
@@ -958,23 +958,23 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
             <button
               type="button"
               onClick={() => handleSelectSubTab('comprehensive-guide')}
-              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl border text-xs font-black transition cursor-pointer ${
+              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl border text-xs font-black transition cursor-pointer whitespace-nowrap ${
                 activeSubTab === 'comprehensive-guide'
                   ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
                   : 'border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300'
               }`}
               title="مشاهده راهنمای جامع استقرار PSM (۱۲ بخش آموزشی و عملیاتی)"
             >
-              <BookOpen className="w-4 h-4" />
+              <BookOpen className="w-4 h-4 shrink-0" />
               <span>راهنمای جامع</span>
             </button>
 
             <button
               type="button"
               onClick={() => setShowCreateProjectModal(true)}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black shadow-sm transition cursor-pointer"
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black shadow-sm transition cursor-pointer whitespace-nowrap"
             >
-              <Plus className="w-4 h-4" />
+              <Plus className="w-4 h-4 shrink-0" />
               <span>تعریف پروژه جدید استقرار PSM</span>
             </button>
           </div>
@@ -982,9 +982,9 @@ export default function PsmManagementModule({ currentUser }: PsmManagementModule
 
         {/* 2-Tier Navigation: Tier 1 - Functional Zones */}
         <div className="mt-4 pt-3 border-t border-slate-200/80 dark:border-slate-800 space-y-2.5">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2">
+          <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-2 min-w-0">
             {/* Zone Selector */}
-            <div className="flex items-center gap-1 overflow-x-auto no-scrollbar p-1 bg-slate-100/80 dark:bg-slate-800/70 rounded-xl border border-slate-200/70 dark:border-slate-700/60">
+            <div className="flex items-center gap-1 overflow-x-auto max-w-full no-scrollbar p-1 bg-slate-100/80 dark:bg-slate-800/70 rounded-xl border border-slate-200/70 dark:border-slate-700/60">
               {PSM_ZONES.map((zone) => {
                 const ZoneIcon = zone.icon;
                 const isZoneActive = activeZone === zone.key;

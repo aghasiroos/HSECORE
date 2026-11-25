@@ -12,7 +12,7 @@ import {
 } from '../types';
 import { addAuditLog } from '../../../utils/authHelper';
 import { calculateNextInspectionDate, normalizeInspectionType } from '../../../utils/inspectionScheduleHelper';
-import { apiDb } from '../../../services/apiDatabaseClient';
+import { apiDb, getAuthToken } from '../../../services/apiDatabaseClient';
 import { getShamsiToday } from '../../../utils/jalaliDate';
 
 const STORAGE_KEYS = {
@@ -253,12 +253,17 @@ class FiveSService {
       };
       window.addEventListener('app_data_mutated', handleRemote);
       window.addEventListener('hse_data_mutated', handleRemote);
+      window.addEventListener('hse_auth_state_changed', () => {
+        if (getAuthToken()) {
+          void this.reloadFromServer();
+        }
+      });
       setTimeout(() => this.reloadFromServer(), 100);
     }
   }
 
   public async reloadFromServer() {
-    if (this.isReloading) return;
+    if (this.isReloading || !getAuthToken()) return;
     this.isReloading = true;
     try {
       const [dbIns, dbNc, dbSch] = await Promise.all([

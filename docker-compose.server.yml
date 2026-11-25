@@ -28,8 +28,8 @@ services:
       - "SQL_SSL=${SQL_SSL:-false}"
       - "SQL_SSL_CA=${SQL_SSL_CA:-}"
       - "SQL_SSL_REJECT_UNAUTHORIZED=${SQL_SSL_REJECT_UNAUTHORIZED:-true}"
-      - "PG_MAX_POOL=${PG_MAX_POOL:-15}"
-      - "PG_MIN_POOL=${PG_MIN_POOL:-2}"
+      - "PG_MAX_POOL=${PG_MAX_POOL:-25}"
+      - "PG_MIN_POOL=${PG_MIN_POOL:-4}"
       - "PG_IDLE_TIMEOUT_MS=${PG_IDLE_TIMEOUT_MS:-60000}"
       - "PG_CONN_TIMEOUT_MS=${PG_CONN_TIMEOUT_MS:-15000}"
       - "STRICT_DB_STARTUP=${STRICT_DB_STARTUP:-true}"
@@ -64,6 +64,15 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    stop_grace_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: "${APP_CPU_LIMIT:-2.0}"
+          memory: "${APP_MEMORY_LIMIT:-1536M}"
+        reservations:
+          cpus: "0.5"
+          memory: "384M"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health || exit 1"]
       interval: 15s

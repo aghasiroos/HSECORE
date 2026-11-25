@@ -75,8 +75,13 @@ export const DigitalSignaturePad: React.FC<DigitalSignaturePadProps> = ({
     const container = containerRef.current;
     if (!canvas || !container) return;
 
-    const width = container.clientWidth || 300;
-    const height = container.clientHeight || 144;
+    const width = Math.max(200, Math.floor(container.clientWidth));
+    const height = Math.max(120, Math.floor(container.clientHeight));
+
+    const prevDataUrl =
+      hasDrawnRef.current && canvas.width > 0 && canvas.height > 0
+        ? canvas.toDataURL('image/png')
+        : null;
 
     if (canvas.width !== width || canvas.height !== height) {
       canvas.width = width;
@@ -92,8 +97,8 @@ export const DigitalSignaturePad: React.FC<DigitalSignaturePadProps> = ({
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
 
-    const sigToRender = activeImageSignature || initialSignature;
-    if (sigToRender && !hasDrawnRef.current) {
+    const sigToRender = prevDataUrl || (!hasDrawnRef.current ? (activeImageSignature || initialSignature) : null);
+    if (sigToRender) {
       const img = new Image();
       img.onload = () => {
         drawImageCentered(ctx, img, canvas.width, canvas.height);
@@ -107,7 +112,12 @@ export const DigitalSignaturePad: React.FC<DigitalSignaturePadProps> = ({
     setupCanvas();
 
     const resizeObserver = new ResizeObserver(() => {
-      if (canvasRef.current && (canvasRef.current.width === 0 || canvasRef.current.height === 0)) {
+      const canvas = canvasRef.current;
+      const container = containerRef.current;
+      if (!canvas || !container) return;
+      const nextW = Math.floor(container.clientWidth);
+      const nextH = Math.floor(container.clientHeight);
+      if (nextW > 0 && nextH > 0 && (Math.abs(canvas.width - nextW) > 4 || Math.abs(canvas.height - nextH) > 4)) {
         setupCanvas();
       }
     });
@@ -125,16 +135,18 @@ export const DigitalSignaturePad: React.FC<DigitalSignaturePadProps> = ({
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
     const rect = canvas.getBoundingClientRect();
+    const scaleX = rect.width > 0 ? canvas.width / rect.width : 1;
+    const scaleY = rect.height > 0 ? canvas.height / rect.height : 1;
     if ('touches' in e && e.touches.length > 0) {
       return {
-        x: e.touches[0].clientX - rect.left,
-        y: e.touches[0].clientY - rect.top
+        x: (e.touches[0].clientX - rect.left) * scaleX,
+        y: (e.touches[0].clientY - rect.top) * scaleY
       };
     }
     const mouseEvt = e as React.MouseEvent<HTMLCanvasElement>;
     return {
-      x: mouseEvt.clientX - rect.left,
-      y: mouseEvt.clientY - rect.top
+      x: (mouseEvt.clientX - rect.left) * scaleX,
+      y: (mouseEvt.clientY - rect.top) * scaleY
     };
   };
 
@@ -281,7 +293,7 @@ export const DigitalSignaturePad: React.FC<DigitalSignaturePadProps> = ({
 
       <div
         ref={containerRef}
-        className="relative w-full h-36 bg-slate-50 dark:bg-slate-900 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl overflow-hidden touch-none cursor-crosshair select-none"
+        className="relative w-full h-40 sm:h-36 bg-slate-50 dark:bg-slate-900 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl overflow-hidden touch-none cursor-crosshair select-none"
       >
         <canvas
           ref={canvasRef}

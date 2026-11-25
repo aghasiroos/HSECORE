@@ -3,6 +3,7 @@
 @source "../src";
 @custom-variant dark (&:where(.dark, .dark *));
 @import "./styles/motion.css";
+@import "./styles/responsive.css";
 
 /* ==========================================================================
    Vazirmatn Typography Standard

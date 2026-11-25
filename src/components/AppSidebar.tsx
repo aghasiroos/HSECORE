@@ -613,7 +613,7 @@ export default function AppSidebar({
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
         className={`
-          fixed top-0 bottom-0 z-[9995] h-[100dvh] max-h-[100dvh]
+          fixed top-0 bottom-0 ${isOpen ? 'z-[9995]' : 'z-30'} lg:z-30 h-[100dvh] max-h-[100dvh]
           ${isFa ? 'right-0 border-l' : 'left-0 border-r'}
           border-slate-200/90 dark:border-slate-800/80
           bg-white/95 dark:bg-[#0c121e]/95 backdrop-blur-md
@@ -715,8 +715,9 @@ export default function AppSidebar({
                 <button
                   type="button"
                   onClick={onClose}
-                  className="lg:hidden p-1.5 text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                  className="lg:hidden p-2 min-w-[38px] min-h-[38px] flex items-center justify-center text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
                   title={isFa ? 'بستن منو' : 'Close Menu'}
+                  aria-label={isFa ? 'بستن منو' : 'Close Menu'}
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -911,7 +912,7 @@ export default function AppSidebar({
                                   onClick={() => handleSelectTab(tab.key)}
                                   onMouseEnter={() => prefetchModule(tab.key)}
                                   onTouchStart={() => prefetchModule(tab.key)}
-                                  className={`hse-motion-tab w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-xl text-xs cursor-pointer group relative border ${
+                                  className={`hse-motion-tab w-full flex items-center justify-between gap-2 px-2.5 py-2.5 lg:py-2 min-h-[42px] lg:min-h-0 rounded-xl text-xs cursor-pointer group relative border ${
                                     isActive
                                       ? `${toneStyle.activeBg} ${toneStyle.activeBorder} ${toneStyle.activeText} font-black shadow-2xs`
                                       : 'border-transparent text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/70 dark:hover:bg-slate-800/50 font-semibold'
@@ -954,7 +955,7 @@ export default function AppSidebar({
                                       className={`p-1 rounded-md transition-opacity cursor-pointer ${
                                         isPinned
                                           ? 'text-amber-500 opacity-90 hover:opacity-100'
-                                          : 'text-slate-400 opacity-0 group-hover:opacity-100 hover:text-amber-500'
+                                          : 'text-slate-400 opacity-60 lg:opacity-0 lg:group-hover:opacity-100 hover:text-amber-500'
                                       }`}
                                       title={isPinned ? (isFa ? 'برداشتن سنجاق' : 'Unpin') : (isFa ? 'سنجاق به دسترسی سریع' : 'Pin to top')}
                                     >

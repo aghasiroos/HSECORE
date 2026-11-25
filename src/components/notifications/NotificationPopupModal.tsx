@@ -39,7 +39,7 @@ import {
   CentralNotificationService,
   DevicePlatformType,
   detectClientDeviceInfo,
-  getPublicAcknowledgedAlertIds,
+  isNotificationAcknowledgedOrDismissed,
 } from '../../services/notificationService';
 import {
   startSirenLoop,
@@ -83,18 +83,8 @@ export const NotificationPopupModal: React.FC = () => {
   const isError = notif?.category === 'error';
   const isSuccess = notif?.category === 'success';
 
-  // Check if current user has already acknowledged this notification
-  const isAcknowledgedByCurrentUser = Boolean(
-    currentUser
-      ? notif?.acknowledgedBy?.some(
-          (a) =>
-            a.userId === currentUser.id ||
-            a.userId === currentUser.username ||
-            a.userName === currentUser.username ||
-            a.userName === currentUser.fullName
-        )
-      : notif?.notifId && getPublicAcknowledgedAlertIds().has(notif.notifId)
-  );
+  // Single shared check for whether current user/browser has already acknowledged or dismissed this alert
+  const isAcknowledgedByCurrentUser = isNotificationAcknowledgedOrDismissed(notif, currentUser as any);
 
   // Siren configuration
   const sirenType = (notif?.sirenType ||
@@ -181,13 +171,20 @@ export const NotificationPopupModal: React.FC = () => {
       (currentUser.id || currentUser.username) &&
       prefsLoaded &&
       !preferences.lockScreenSirenConfirmed &&
-      !CentralNotificationService.isLockScreenSirenConfirmed(currentUser.id || currentUser.username)
+      !CentralNotificationService.isLockScreenSirenConfirmed(
+        currentUser.id || (currentUser as any).uid || currentUser.username,
+        currentUser.username
+      )
   );
 
   const handleConfirmFirstLoginReadiness = async () => {
     setIsConfirmingReadiness(true);
     try {
-      await resumeAudioContext();
+      try {
+        await resumeAudioContext();
+      } catch {
+        // Ignore audio resume errors on restricted browsers
+      }
       await CentralNotificationService.confirmLockScreenSiren(
         currentUser as any,
         currentUser?.username,
@@ -259,7 +256,7 @@ export const NotificationPopupModal: React.FC = () => {
 
     return (
       <div
-        className="fixed inset-0 z-[100000] flex items-center justify-center p-3 sm:p-5 overflow-y-auto"
+        className="fixed inset-0 z-[100000] flex items-center justify-center p-2 sm:p-4 md:p-6 overflow-y-auto"
         style={{ direction: 'rtl' }}
         role="dialog"
         aria-modal="true"
@@ -268,57 +265,60 @@ export const NotificationPopupModal: React.FC = () => {
           className="fixed inset-0 bg-slate-950/80 backdrop-blur-md transition-opacity animate-in fade-in duration-200"
           onClick={closeAlertDetails}
         />
-        <div className="relative w-full max-w-3xl max-h-[92vh] flex flex-col bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden z-10 animate-in zoom-in-95">
+        <div className="relative w-full max-w-[calc(100vw-1rem)] sm:max-w-3xl max-h-[calc(100dvh-1rem)] sm:max-h-[90dvh] flex flex-col bg-white dark:bg-slate-900 rounded-2xl sm:rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden z-10 animate-in zoom-in-95">
           {/* Header */}
           <div
-            className={`px-5 py-4 flex items-center justify-between border-b ${
+            className={`shrink-0 px-3.5 sm:px-5 py-3 sm:py-4 flex items-start sm:items-center justify-between gap-2.5 border-b ${
               dCrit
                 ? 'bg-rose-600 text-white border-rose-700'
                 : 'bg-slate-900 text-white border-slate-800'
             }`}
           >
-            <div className="flex items-center gap-2.5">
-              <ShieldAlert className="w-5 h-5 shrink-0" />
-              <div>
-                <h3 className="text-sm sm:text-base font-black">
+            <div className="flex items-start sm:items-center gap-2.5 min-w-0 flex-1">
+              <ShieldAlert className="w-5 h-5 shrink-0 mt-0.5 sm:mt-0" />
+              <div className="min-w-0 flex-1">
+                <h3 className="text-xs sm:text-base font-black leading-snug break-words">
                   پرونده کامل هشدار و گزارش تحویل (Popup + Browser Push)
                 </h3>
-                <p className="text-[11px] opacity-85 font-mono">شناسه هشدار: {dNotif.notifId}</p>
+                <p className="text-[10px] sm:text-[11px] opacity-85 font-mono break-all mt-0.5">
+                  شناسه هشدار: {dNotif.notifId}
+                </p>
               </div>
             </div>
             <button
               type="button"
               onClick={closeAlertDetails}
-              className="p-1.5 rounded-xl bg-white/15 hover:bg-white/25 text-white transition cursor-pointer"
+              className="p-1.5 rounded-xl bg-white/15 hover:bg-white/25 text-white transition cursor-pointer shrink-0"
+              aria-label="بستن"
             >
               <X className="w-4 h-4" />
             </button>
           </div>
 
           {/* Body */}
-          <div className="overflow-y-auto flex-1 p-5 sm:p-6 space-y-5 text-xs">
+          <div className="overflow-y-auto flex-1 p-3.5 sm:p-5 md:p-6 space-y-4 sm:space-y-5 text-xs overscroll-contain">
             {/* Alert Summary */}
-            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-2.5">
+            <div className="p-3 sm:p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-2.5">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="px-2.5 py-0.5 rounded-lg font-black text-[11px] bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300">
+                <span className="px-2.5 py-0.5 rounded-lg font-black text-[10px] sm:text-[11px] bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300 leading-snug">
                   {dNotif.type === 'popup_and_push' || !dNotif.type
                     ? 'ارسال همزمان: پنجره داخلی (Popup) + اعلان سیستمی مرورگر (Web Push)'
                     : dNotif.type === 'push'
                     ? 'اعلان سیستمی مرورگر (Browser Push)'
                     : 'پنجره هشدار داخلی (Popup)'}
                 </span>
-                <span className="font-mono text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                <span className="font-mono text-[10px] sm:text-[11px] font-bold text-slate-500 dark:text-slate-400">
                   زمان انتشار: {formatPersianDateTime(dNotif.createdAt)}
                 </span>
               </div>
-              <h4 className="text-sm sm:text-base font-black text-slate-900 dark:text-white">
+              <h4 className="text-sm sm:text-base font-black text-slate-900 dark:text-white break-words">
                 {dNotif.title}
               </h4>
-              <p className="text-xs text-slate-700 dark:text-slate-200 leading-relaxed whitespace-pre-line font-medium">
+              <p className="text-xs text-slate-700 dark:text-slate-200 leading-relaxed whitespace-pre-line break-words font-medium">
                 {dNotif.body}
               </p>
               {(dNotif.actionGuidelines || dNotif.metadata?.actionGuidelines) && (
-                <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-900 dark:text-amber-200">
+                <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-900 dark:text-amber-200 break-words">
                   <strong className="block mb-1">🛡️ دستورالعمل و اقدام ضروری ایمنی:</strong>
                   <span>{dNotif.actionGuidelines || dNotif.metadata?.actionGuidelines}</span>
                 </div>
@@ -492,23 +492,37 @@ export const NotificationPopupModal: React.FC = () => {
           </div>
 
           {/* Footer */}
-          <div className="px-5 py-3.5 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 flex items-center justify-between gap-3">
-            {dNotif.requiresAck && (
+          <div className="shrink-0 px-3.5 sm:px-5 py-3 sm:py-3.5 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center justify-between gap-2 sm:gap-3">
+            {dNotif.requiresAck && !isNotificationAcknowledgedOrDismissed(dNotif, currentUser as any) && (
               <button
                 type="button"
                 onClick={async () => {
                   await acknowledgeAlert(dNotif.notifId, 'تأیید دریافت از صفحه جزئیات هشدار');
                 }}
-                className="px-4 py-2 rounded-xl text-xs font-black bg-emerald-600 hover:bg-emerald-700 text-white transition cursor-pointer flex items-center gap-1.5"
+                className="w-full sm:w-auto px-4 py-2.5 sm:py-2 rounded-xl text-xs font-black bg-emerald-600 hover:bg-emerald-700 text-white transition cursor-pointer flex items-center justify-center gap-1.5"
               >
-                <Check className="w-4 h-4" />
+                <Check className="w-4 h-4 shrink-0" />
                 <span>ثبت تأیید دریافت هشدار و قطع آژیر</span>
+              </button>
+            )}
+            {dNotif.actionUrl && dNotif.actionUrl.startsWith('#') && (
+              <button
+                type="button"
+                onClick={() => {
+                  const target = dNotif.actionUrl!;
+                  closeAlertDetails();
+                  window.location.hash = target;
+                }}
+                className="w-full sm:w-auto px-4 py-2.5 sm:py-2 rounded-xl text-xs font-black bg-indigo-600 hover:bg-indigo-700 text-white transition cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <ExternalLink className="w-4 h-4 shrink-0" />
+                <span>باز کردن فرم و کارتابل مربوطه</span>
               </button>
             )}
             <button
               type="button"
               onClick={closeAlertDetails}
-              className="px-5 py-2 rounded-xl text-xs font-bold bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 transition cursor-pointer mr-auto"
+              className="w-full sm:w-auto px-5 py-2.5 sm:py-2 rounded-xl text-xs font-bold bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 transition cursor-pointer sm:mr-auto"
             >
               بستن پنجره جزئیات
             </button>
@@ -518,7 +532,7 @@ export const NotificationPopupModal: React.FC = () => {
     );
   };
 
-  if (!activePopupAlert) {
+  if (!activePopupAlert || isAcknowledgedByCurrentUser) {
     if (selectedAlertDetails) {
       return renderAlertDetailsModal();
     }
@@ -526,81 +540,83 @@ export const NotificationPopupModal: React.FC = () => {
 
     return (
       <div
-        className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6"
+        className="fixed inset-0 z-[9999] flex items-center justify-center p-2 sm:p-4 md:p-6 overflow-y-auto"
         style={{ direction: 'rtl' }}
         role="dialog"
         aria-modal="true"
       >
         <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm transition-opacity animate-in fade-in duration-200" />
-        <div className="relative w-full max-w-lg bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-rose-200 dark:border-rose-900/60 p-6 space-y-5 z-10 animate-in zoom-in-95">
-          <div className="flex items-start gap-3.5">
-            <div className="w-12 h-12 rounded-2xl bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
-              <Bell className="w-6 h-6" />
-            </div>
-            <div className="space-y-1">
-              <h3 className="text-sm sm:text-base font-black text-slate-900 dark:text-slate-100">
-                فعال‌سازی اعلان‌های سیستمی مرورگر (Browser Push) و ثبت اشتراک این دستگاه
-              </h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed font-medium">
-                برای اینکه هشدارهای فوری HSECORE علاوه بر پنجره داخلی (Popup)، حتی در زمان بسته بودن مرورگر نیز از طریق{' '}
-                <strong>Service Worker + Push API + Notifications API</strong> روی این دستگاه نمایش داده شوند، نوع دستگاه خود را انتخاب و فعال‌سازی را تأیید نمایید:
-              </p>
-            </div>
-          </div>
-
-          {/* Device Type Selection */}
-          <div className="space-y-3 bg-slate-50 dark:bg-slate-800/60 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-700">
-            <label className="text-xs font-black text-slate-700 dark:text-slate-200 block">
-              ۱. انتخاب نوع دستگاه فعلی برای ثبت اشتراک Push:
-            </label>
-            <div className="grid grid-cols-3 gap-2">
-              {[
-                { id: 'desktop' as DevicePlatformType, label: 'کامپیوتر رومیزی', icon: Monitor },
-                { id: 'laptop' as DevicePlatformType, label: 'لپ‌تاپ', icon: Laptop },
-                { id: 'mobile' as DevicePlatformType, label: 'تلفن همراه', icon: Smartphone },
-              ].map((item) => {
-                const IconComp = item.icon;
-                const active = selectedDeviceType === item.id;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => setSelectedDeviceType(item.id)}
-                    className={`p-2.5 rounded-xl border text-xs font-bold flex flex-col items-center gap-1.5 transition cursor-pointer ${
-                      active
-                        ? 'bg-rose-600 text-white border-rose-600 shadow-xs'
-                        : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-rose-400'
-                    }`}
-                  >
-                    <IconComp className="w-4 h-4" />
-                    <span>{item.label}</span>
-                  </button>
-                );
-              })}
+        <div className="relative w-full max-w-[calc(100vw-1rem)] sm:max-w-lg max-h-[calc(100dvh-1rem)] sm:max-h-[90dvh] flex flex-col bg-white dark:bg-slate-900 rounded-2xl sm:rounded-3xl shadow-2xl border border-rose-200 dark:border-rose-900/60 overflow-hidden z-10 animate-in zoom-in-95">
+          <div className="overflow-y-auto flex-1 p-4 sm:p-6 space-y-4 sm:space-y-5 overscroll-contain">
+            <div className="flex items-start gap-3 sm:gap-3.5">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
+                <Bell className="w-5 h-5 sm:w-6 sm:h-6" />
+              </div>
+              <div className="space-y-1 min-w-0 flex-1">
+                <h3 className="text-sm sm:text-base font-black text-slate-900 dark:text-slate-100 leading-snug break-words">
+                  فعال‌سازی اعلان‌های سیستمی مرورگر (Browser Push) و ثبت اشتراک این دستگاه
+                </h3>
+                <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 leading-relaxed font-medium">
+                  برای اینکه هشدارهای فوری HSECORE علاوه بر پنجره داخلی (Popup)، حتی در زمان بسته بودن مرورگر نیز از طریق{' '}
+                  <strong>Service Worker + Push API + Notifications API</strong> روی این دستگاه نمایش داده شوند، نوع دستگاه خود را انتخاب و فعال‌سازی را تأیید نمایید:
+                </p>
+              </div>
             </div>
 
-            <div className="space-y-1 pt-1">
-              <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block">
-                ۲. عنوان دلخواه دستگاه (در گزارش تحویل نمایش داده می‌شود):
+            {/* Device Type Selection */}
+            <div className="space-y-3 bg-slate-50 dark:bg-slate-800/60 p-3 sm:p-3.5 rounded-2xl border border-slate-200 dark:border-slate-700">
+              <label className="text-[11px] sm:text-xs font-black text-slate-700 dark:text-slate-200 block">
+                ۱. انتخاب نوع دستگاه فعلی برای ثبت اشتراک Push:
               </label>
-              <input
-                type="text"
-                value={customDeviceName}
-                onChange={(e) => setCustomDeviceName(e.target.value)}
-                placeholder="مثال: لپ‌تاپ اتاق کنترل / موبایل سرپرست ایمنی"
-                className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold text-slate-800 dark:text-slate-100"
-              />
+              <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
+                {[
+                  { id: 'desktop' as DevicePlatformType, label: 'کامپیوتر رومیزی', icon: Monitor },
+                  { id: 'laptop' as DevicePlatformType, label: 'لپ‌تاپ', icon: Laptop },
+                  { id: 'mobile' as DevicePlatformType, label: 'تلفن همراه', icon: Smartphone },
+                ].map((item) => {
+                  const IconComp = item.icon;
+                  const active = selectedDeviceType === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => setSelectedDeviceType(item.id)}
+                      className={`p-2 sm:p-2.5 rounded-xl border text-[11px] sm:text-xs font-bold flex flex-col items-center justify-center text-center gap-1.5 transition cursor-pointer ${
+                        active
+                          ? 'bg-rose-600 text-white border-rose-600 shadow-xs'
+                          : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-rose-400'
+                      }`}
+                    >
+                      <IconComp className="w-4 h-4 shrink-0" />
+                      <span className="leading-tight">{item.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="space-y-1 pt-1">
+                <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block">
+                  ۲. عنوان دلخواه دستگاه (در گزارش تحویل نمایش داده می‌شود):
+                </label>
+                <input
+                  type="text"
+                  value={customDeviceName}
+                  onChange={(e) => setCustomDeviceName(e.target.value)}
+                  placeholder="مثال: لپ‌تاپ اتاق کنترل / موبایل سرپرست ایمنی"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold text-slate-800 dark:text-slate-100"
+                />
+              </div>
             </div>
           </div>
 
-          <div className="flex items-center justify-end pt-1 border-t border-slate-100 dark:border-slate-800">
+          <div className="shrink-0 px-4 sm:px-6 py-3 sm:py-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900">
             <button
               type="button"
               disabled={isConfirmingReadiness}
               onClick={handleConfirmFirstLoginReadiness}
-              className="w-full py-2.5 px-4 rounded-xl text-xs font-black text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-60 transition cursor-pointer shadow-md shadow-rose-600/20 flex items-center justify-center gap-2"
+              className="w-full py-2.5 sm:py-3 px-4 rounded-xl text-xs font-black text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-60 transition cursor-pointer shadow-md shadow-rose-600/20 flex items-center justify-center gap-2 min-h-[42px]"
             >
-              <Bell className="w-4 h-4" />
+              <Bell className="w-4 h-4 shrink-0" />
               <span>
                 {isConfirmingReadiness
                   ? 'در حال ثبت اشتراک دستگاه و فعال‌سازی...'
@@ -680,6 +696,11 @@ export const NotificationPopupModal: React.FC = () => {
   const handleNavigate = () => {
     stopSirenLoop();
     markAsRead(notif.notifId);
+    if (notif.actionUrl && notif.actionUrl.startsWith('#') && notif.actionUrl.includes('report=')) {
+      closePopup();
+      window.location.hash = notif.actionUrl;
+      return;
+    }
     openAlertDetails(notif);
     closePopup();
   };
@@ -703,7 +724,9 @@ export const NotificationPopupModal: React.FC = () => {
   const handleSimpleDismiss = () => {
     stopSirenLoop();
     setIsSirenActive(false);
-    markAsRead(notif.notifId);
+    if (currentUser?.id) {
+      markAsRead(notif.notifId).catch(() => {});
+    }
     closePopup();
   };
 
@@ -714,7 +737,7 @@ export const NotificationPopupModal: React.FC = () => {
     <>
       {selectedAlertDetails && renderAlertDetailsModal()}
       <div
-        className="fixed inset-0 z-[99999] flex items-center justify-center p-3 sm:p-5 overflow-y-auto"
+        className="fixed inset-0 z-[99999] flex items-center justify-center p-2 sm:p-4 md:p-6 overflow-y-auto"
         style={{ direction: 'rtl' }}
         role="dialog"
         aria-modal="true"
@@ -727,7 +750,7 @@ export const NotificationPopupModal: React.FC = () => {
 
         {/* Central Modal Card */}
         <div
-          className={`relative w-full max-w-lg sm:max-w-xl md:max-w-2xl max-h-[92vh] flex flex-col bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border-2 transition-all duration-300 overflow-hidden z-10 animate-in zoom-in-95 ${
+          className={`relative w-full max-w-[calc(100vw-1rem)] sm:max-w-xl md:max-w-2xl max-h-[calc(100dvh-1rem)] sm:max-h-[90dvh] flex flex-col bg-white dark:bg-slate-900 rounded-2xl sm:rounded-3xl shadow-2xl border-2 transition-all duration-300 overflow-hidden z-10 animate-in zoom-in-95 ${
             isCritical
               ? 'border-rose-500 ring-4 ring-rose-500/30 shadow-[0_0_50px_rgba(244,63,94,0.35)]'
               : isWarning
@@ -746,13 +769,15 @@ export const NotificationPopupModal: React.FC = () => {
         >
           {/* Top Emergency Visual Flasher Banner for Critical Alerts */}
           {isCritical && (
-            <div className="shrink-0 bg-gradient-to-r from-rose-600 via-red-600 to-rose-700 text-white px-4 py-2.5 text-xs font-black flex items-center justify-between shadow-inner animate-pulse">
-              <div className="flex items-center gap-2">
+            <div className="shrink-0 bg-gradient-to-r from-rose-600 via-red-600 to-rose-700 text-white px-3 sm:px-4 py-2 sm:py-2.5 text-[11px] sm:text-xs font-black flex flex-wrap items-center justify-between gap-1.5 sm:gap-2 shadow-inner animate-pulse">
+              <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1">
                 <ShieldAlert className="w-4 h-4 shrink-0 animate-bounce" />
-                <span>هشدار فوری HSE (ارسال همزمان پنجره داخلی Popup + اعلان مرورگر Web Push)</span>
+                <span className="leading-snug break-words">
+                  هشدار فوری HSE (ارسال همزمان پنجره داخلی Popup + اعلان مرورگر Web Push)
+                </span>
               </div>
               {hasSiren && (
-                <div className="flex items-center gap-1.5 font-mono text-[10px] bg-rose-950/60 px-2.5 py-0.5 rounded-full border border-rose-400/30">
+                <div className="flex items-center gap-1.5 font-mono text-[10px] bg-rose-950/60 px-2.5 py-0.5 rounded-full border border-rose-400/30 shrink-0 whitespace-nowrap">
                   <Radio className="w-3 h-3 text-rose-300 animate-pulse" />
                   <span>پخش پیوسته آژیر</span>
                 </div>
@@ -760,12 +785,12 @@ export const NotificationPopupModal: React.FC = () => {
             </div>
           )}
 
-          <div className="overflow-y-auto flex-1 p-5 sm:p-7 space-y-4">
+          <div className="overflow-y-auto flex-1 p-3.5 sm:p-6 space-y-3 sm:space-y-4">
             {/* Header row */}
-            <div className="flex items-start justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-4">
-              <div className="flex items-start gap-3.5">
+            <div className="flex items-start justify-between gap-2.5 sm:gap-4 border-b border-slate-100 dark:border-slate-800 pb-3 sm:pb-4">
+              <div className="flex items-start gap-2.5 sm:gap-3.5 min-w-0 flex-1">
                 <div
-                  className={`p-3 rounded-2xl shrink-0 shadow-sm ${
+                  className={`p-2 sm:p-3 rounded-xl sm:rounded-2xl shrink-0 shadow-sm ${
                     isCritical
                       ? 'bg-rose-100 dark:bg-rose-950/80 text-rose-600 dark:text-rose-400 ring-2 ring-rose-400'
                       : isWarning
@@ -778,29 +803,29 @@ export const NotificationPopupModal: React.FC = () => {
                   }`}
                 >
                   {isCritical ? (
-                    <ShieldAlert className="w-7 h-7" />
+                    <ShieldAlert className="w-5 h-5 sm:w-7 sm:h-7" />
                   ) : isWarning ? (
-                    <AlertTriangle className="w-7 h-7" />
+                    <AlertTriangle className="w-5 h-5 sm:w-7 sm:h-7" />
                   ) : isError ? (
-                    <XCircle className="w-7 h-7" />
+                    <XCircle className="w-5 h-5 sm:w-7 sm:h-7" />
                   ) : isSuccess ? (
-                    <CheckCircle2 className="w-7 h-7" />
+                    <CheckCircle2 className="w-5 h-5 sm:w-7 sm:h-7" />
                   ) : (
-                    <Info className="w-7 h-7" />
+                    <Info className="w-5 h-5 sm:w-7 sm:h-7" />
                   )}
                 </div>
 
-                <div>
-                  <div className="flex flex-wrap items-center gap-2 mb-1.5">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-1.5">
                     <span
-                      className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black border ${moduleMeta.color}`}
+                      className={`inline-flex items-center gap-1 px-2 sm:px-2.5 py-0.5 rounded-full text-[10px] font-black border max-w-full ${moduleMeta.color}`}
                     >
-                      <ModuleIcon className="w-3 h-3" />
-                      <span>{moduleMeta.label}</span>
+                      <ModuleIcon className="w-3 h-3 shrink-0" />
+                      <span className="truncate">{moduleMeta.label}</span>
                     </span>
 
                     <span
-                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${
                         isCritical
                           ? 'bg-rose-500 text-white'
                           : isWarning
@@ -822,13 +847,13 @@ export const NotificationPopupModal: React.FC = () => {
                     </span>
 
                     {popupQueue.length > 1 && (
-                      <span className="text-[10px] font-mono text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full font-bold">
+                      <span className="text-[10px] font-mono text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full font-bold shrink-0">
                         اعلان ۱ از {popupQueue.length}
                       </span>
                     )}
                   </div>
 
-                  <h3 className="text-base sm:text-lg md:text-xl font-black text-slate-900 dark:text-slate-100 leading-snug">
+                  <h3 className="text-sm sm:text-lg md:text-xl font-black text-slate-900 dark:text-slate-100 leading-snug break-words">
                     {notif.title}
                   </h3>
                 </div>
@@ -837,9 +862,11 @@ export const NotificationPopupModal: React.FC = () => {
               {/* Close button if not strictly requiring ack */}
               {!notif.requiresAck && (
                 <button
+                  type="button"
                   onClick={handleSimpleDismiss}
-                  className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                  className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer shrink-0"
                   title="بستن"
+                  aria-label="بستن"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -853,33 +880,35 @@ export const NotificationPopupModal: React.FC = () => {
                   <button
                     type="button"
                     onClick={handleUnlockAudio}
-                    className="w-full p-3 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs rounded-2xl flex items-center justify-between transition shadow-md cursor-pointer animate-pulse"
+                    className="w-full p-2.5 sm:p-3 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-[11px] sm:text-xs rounded-xl sm:rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-right transition shadow-md cursor-pointer animate-pulse"
                   >
-                    <div className="flex items-center gap-2">
-                      <VolumeX className="w-4 h-4 text-slate-950 shrink-0" />
-                      <span>مرورگر پخش خودکار صدا را مسدود کرده است؛ برای فعال‌سازی فوری آژیر کلیک نمایید.</span>
+                    <div className="flex items-start sm:items-center gap-2 min-w-0">
+                      <VolumeX className="w-4 h-4 text-slate-950 shrink-0 mt-0.5 sm:mt-0" />
+                      <span className="leading-snug">
+                        مرورگر پخش خودکار صدا را مسدود کرده است؛ برای فعال‌سازی فوری آژیر کلیک نمایید.
+                      </span>
                     </div>
-                    <span className="px-2 py-1 bg-slate-950 text-amber-400 rounded-lg text-[10px] font-bold shrink-0">
+                    <span className="px-2.5 py-1 bg-slate-950 text-amber-400 rounded-lg text-[10px] font-bold shrink-0 self-end sm:self-center whitespace-nowrap">
                       فعال‌سازی آژیر
                     </span>
                   </button>
                 ) : isSirenActive ? (
-                  <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-2xl flex items-center justify-between text-xs text-rose-700 dark:text-rose-300 font-bold">
-                    <div className="flex items-center gap-2.5">
-                      <span className="relative flex h-3 w-3">
+                  <div className="p-2.5 sm:p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl sm:rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-rose-700 dark:text-rose-300 font-bold">
+                    <div className="flex items-start sm:items-center gap-2.5 min-w-0">
+                      <span className="relative flex h-3 w-3 shrink-0 mt-1 sm:mt-0">
                         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
                         <span className="relative inline-flex rounded-full h-3 w-3 bg-rose-600"></span>
                       </span>
-                      <div>
-                        <span className="font-black text-rose-800 dark:text-rose-200">
+                      <div className="min-w-0">
+                        <span className="font-black text-rose-800 dark:text-rose-200 block sm:inline">
                           {sirenDef ? sirenDef.titleFa : 'آژیر اضطراری'}
                         </span>
-                        <span className="text-[11px] text-slate-500 dark:text-slate-400 block font-normal">
+                        <span className="text-[11px] text-slate-500 dark:text-slate-400 block font-normal leading-snug">
                           صدا تا زمان کلیک روی دکمه «تأیید هشدار و قطع آژیر» ادامه دارد.
                         </span>
                       </div>
                     </div>
-                    <div className="flex items-center gap-1 font-mono text-[10px] bg-rose-500/20 px-2 py-0.5 rounded-full text-rose-700 dark:text-rose-300">
+                    <div className="flex items-center gap-1 font-mono text-[10px] bg-rose-500/20 px-2.5 py-0.5 rounded-full text-rose-700 dark:text-rose-300 shrink-0 self-end sm:self-center whitespace-nowrap">
                       <Volume2 className="w-3.5 h-3.5 animate-pulse" />
                       <span>آژیر زنده</span>
                     </div>
@@ -889,18 +918,18 @@ export const NotificationPopupModal: React.FC = () => {
             )}
 
             {/* Body Content */}
-            <div className="space-y-3.5">
+            <div className="space-y-3 sm:space-y-3.5">
               {/* Structured Emergency Metadata Bar (Risk Level & Publish Time) */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-2.5">
                 <div
-                  className={`p-3 rounded-2xl border flex items-center justify-between ${
+                  className={`p-2.5 sm:p-3 rounded-xl sm:rounded-2xl border flex items-center justify-between gap-2 ${
                     isCritical
                       ? 'bg-rose-500/10 border-rose-500/30 text-rose-900 dark:text-rose-200'
                       : 'bg-amber-500/10 border-amber-500/30 text-amber-900 dark:text-amber-200'
                   }`}
                 >
-                  <span className="text-[11px] font-bold opacity-80">سطح خطر:</span>
-                  <span className="text-xs font-black">
+                  <span className="text-[11px] font-bold opacity-80 shrink-0">سطح خطر:</span>
+                  <span className="text-[11px] sm:text-xs font-black text-left break-words">
                     {(notif as any).riskLevelFa ||
                       notif.metadata?.riskLevelFa ||
                       (isCritical
@@ -911,26 +940,26 @@ export const NotificationPopupModal: React.FC = () => {
                   </span>
                 </div>
 
-                <div className="p-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 flex items-center justify-between">
-                  <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">مخاطبین هدف:</span>
-                  <span className="text-xs font-black text-slate-800 dark:text-slate-200">
+                <div className="p-2.5 sm:p-3 rounded-xl sm:rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 shrink-0">مخاطبین هدف:</span>
+                  <span className="text-[11px] sm:text-xs font-black text-slate-800 dark:text-slate-200 text-left break-words">
                     {getTargetLabelFa(notif.targetType, notif.targetValues)}
                   </span>
                 </div>
               </div>
 
-              <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-100 dark:border-slate-800/80 leading-relaxed text-sm text-slate-700 dark:text-slate-200">
-                <p className="whitespace-pre-line font-medium leading-relaxed">{notif.body}</p>
+              <div className="p-3 sm:p-4 bg-slate-50 dark:bg-slate-800/60 rounded-xl sm:rounded-2xl border border-slate-100 dark:border-slate-800/80 leading-relaxed text-xs sm:text-sm text-slate-700 dark:text-slate-200">
+                <p className="whitespace-pre-line break-words font-medium leading-relaxed">{notif.body}</p>
               </div>
 
               {/* Action Guidelines / Protective Instructions */}
               {(notif.actionGuidelines || notif.metadata?.actionGuidelines || isCritical) && (
-                <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl space-y-1.5 animate-in fade-in">
+                <div className="p-3 sm:p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl sm:rounded-2xl space-y-1.5 animate-in fade-in">
                   <div className="flex items-center gap-2 text-xs font-black text-amber-800 dark:text-amber-300">
                     <ShieldAlert className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400" />
                     <span>اقدام ضروری و الزامات ایمنی:</span>
                   </div>
-                  <p className="text-xs text-amber-950 dark:text-amber-100 leading-relaxed font-semibold whitespace-pre-line">
+                  <p className="text-[11px] sm:text-xs text-amber-950 dark:text-amber-100 leading-relaxed font-semibold whitespace-pre-line break-words">
                     {notif.actionGuidelines ||
                       notif.metadata?.actionGuidelines ||
                       'حفظ خونسردی، توقف فوری عملیات پرخطر، رعایت پروتکل واکنش در شرایط اضطراری (ERP) و ثبت تأیید دریافت هشدار.'}
@@ -946,16 +975,16 @@ export const NotificationPopupModal: React.FC = () => {
                       key={idx}
                       src={img}
                       alt="پیوست هشدار"
-                      className="h-24 w-auto rounded-xl object-cover border border-slate-200 dark:border-slate-700 shadow-xs"
+                      className="max-h-24 sm:max-h-28 max-w-full w-auto rounded-xl object-cover border border-slate-200 dark:border-slate-700 shadow-xs"
                     />
                   ))}
                 </div>
               )}
 
               {/* Time & Sender info & Multi-user Delivery info */}
-              <div className="flex flex-wrap items-center justify-between text-xs text-slate-400 pt-1 border-t border-slate-100 dark:border-slate-800/60">
+              <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 text-[11px] sm:text-xs text-slate-400 pt-2 border-t border-slate-100 dark:border-slate-800/60">
                 <div className="flex items-center gap-1.5">
-                  <Clock className="w-3.5 h-3.5 text-slate-400" />
+                  <Clock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                   <span>زمان انتشار:</span>
                   <span className="font-mono font-bold text-slate-600 dark:text-slate-300">
                     {formatPersianTime(notif.createdAt)}
@@ -963,32 +992,34 @@ export const NotificationPopupModal: React.FC = () => {
                 </div>
 
                 {notif.sender && (
-                  <div className="text-[11px]">
+                  <div className="text-[11px] break-words">
                     <span>مخابره‌شده توسط: </span>
                     <span className="font-bold text-slate-700 dark:text-slate-200">{notif.sender}</span>
                   </div>
                 )}
 
-                <div className="w-full flex flex-wrap items-center justify-between gap-2 text-[11px] mt-1.5">
-                  {ackCount > 0 && (
-                    <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
-                      <Users className="w-3.5 h-3.5" />
-                      <span>تأیید دریافت: {ackCount} نفر</span>
-                    </div>
-                  )}
-                  {viewCount > 0 && (
-                    <div className="flex items-center gap-1.5 text-sky-600 dark:text-sky-400">
-                      <Eye className="w-3.5 h-3.5" />
-                      <span>مشاهده‌شده: {viewCount} نفر</span>
-                    </div>
-                  )}
-                </div>
+                {(ackCount > 0 || viewCount > 0) && (
+                  <div className="w-full flex flex-wrap items-center justify-between gap-2 text-[11px] pt-0.5">
+                    {ackCount > 0 && (
+                      <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
+                        <Users className="w-3.5 h-3.5 shrink-0" />
+                        <span>تأیید دریافت: {ackCount} نفر</span>
+                      </div>
+                    )}
+                    {viewCount > 0 && (
+                      <div className="flex items-center gap-1.5 text-sky-600 dark:text-sky-400">
+                        <Eye className="w-3.5 h-3.5 shrink-0" />
+                        <span>مشاهده‌شده: {viewCount} نفر</span>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Optional Acknowledgment Note Field */}
               {notif.requiresAck && showNoteField && (
                 <div className="space-y-1.5 pt-1 animate-in fade-in">
-                  <label className="text-xs font-bold text-slate-600 dark:text-slate-300">
+                  <label className="text-[11px] sm:text-xs font-bold text-slate-600 dark:text-slate-300 block">
                     توضیحات یا اقدام کنترلی انجام‌شده (اختیاری جهت ثبت در گزارش تحویل):
                   </label>
                   <textarea
@@ -1004,18 +1035,18 @@ export const NotificationPopupModal: React.FC = () => {
           </div>
 
           {/* Sticky Responsive Action Footer */}
-          <div className="shrink-0 p-4 sm:p-5 border-t border-slate-100 dark:border-slate-800 bg-slate-50/90 dark:bg-slate-900/95 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+          <div className="shrink-0 p-3 sm:p-4 md:p-5 border-t border-slate-100 dark:border-slate-800 bg-slate-50/95 dark:bg-slate-900/95 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 sm:gap-3">
             {/* Open Alert Details & Delivery Report button */}
             <button
               type="button"
               onClick={handleNavigate}
-              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:hover:bg-blue-900/60 dark:text-blue-300 transition-colors cursor-pointer border border-blue-200 dark:border-blue-800 shadow-xs order-2 sm:order-1"
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-3.5 sm:px-4 py-2.5 rounded-xl text-xs font-bold bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:hover:bg-blue-900/60 dark:text-blue-300 transition-colors cursor-pointer border border-blue-200 dark:border-blue-800 shadow-xs order-2 sm:order-1 min-h-[42px] sm:min-h-0"
             >
               <ExternalLink className="w-4 h-4 shrink-0" />
               <span>مشاهده جزئیات هشدار و گزارش تحویل</span>
             </button>
 
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 order-1 sm:order-2">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-2.5 order-1 sm:order-2">
               {/* Mandatory or Optional Acknowledge Button */}
               {notif.requiresAck ? (
                 <>
@@ -1032,7 +1063,7 @@ export const NotificationPopupModal: React.FC = () => {
                     type="button"
                     onClick={handleAcknowledge}
                     disabled={isSubmittingAck}
-                    className="inline-flex items-center justify-center gap-2 px-6 py-3 sm:py-2.5 rounded-xl text-xs sm:text-sm font-black text-white bg-gradient-to-r from-rose-600 via-red-600 to-rose-700 hover:from-rose-700 hover:to-red-800 shadow-lg shadow-rose-600/25 hover:shadow-rose-600/40 transition-all cursor-pointer disabled:opacity-50 active:scale-[0.99]"
+                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 sm:px-6 py-3 sm:py-2.5 rounded-xl text-xs sm:text-sm font-black text-white bg-gradient-to-r from-rose-600 via-red-600 to-rose-700 hover:from-rose-700 hover:to-red-800 shadow-lg shadow-rose-600/25 hover:shadow-rose-600/40 transition-all cursor-pointer disabled:opacity-50 active:scale-[0.99] min-h-[44px] sm:min-h-0"
                   >
                     <Check className="w-4 h-4 stroke-[3] shrink-0" />
                     <span>
@@ -1048,7 +1079,7 @@ export const NotificationPopupModal: React.FC = () => {
                 <button
                   type="button"
                   onClick={handleSimpleDismiss}
-                  className="inline-flex items-center justify-center gap-1.5 px-6 py-2.5 rounded-xl text-xs font-black text-white bg-slate-800 hover:bg-slate-900 dark:bg-slate-700 dark:hover:bg-slate-600 transition-colors cursor-pointer shadow-sm"
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-6 py-2.5 rounded-xl text-xs font-black text-white bg-slate-800 hover:bg-slate-900 dark:bg-slate-700 dark:hover:bg-slate-600 transition-colors cursor-pointer shadow-sm min-h-[42px] sm:min-h-0"
                 >
                   <Check className="w-4 h-4 shrink-0" />
                   <span>متوجه شدم</span>

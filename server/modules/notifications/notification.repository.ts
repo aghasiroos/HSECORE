@@ -55,7 +55,17 @@ export function detectHseExpertFromProfile(role?: string, jobTitle?: string, dep
 }
 
 export class NotificationRepository {
-  async getAll(currentUserId?: string): Promise<NotificationRecord[]> {
+  async getAll(currentUserIdOrIds?: string | string[]): Promise<NotificationRecord[]> {
+    const userIds = (
+      Array.isArray(currentUserIdOrIds)
+        ? currentUserIdOrIds
+        : currentUserIdOrIds
+        ? [currentUserIdOrIds]
+        : []
+    )
+      .map((id) => String(id || '').trim().toLowerCase())
+      .filter(Boolean);
+
     try {
       const records = await db
         .select()
@@ -66,8 +76,17 @@ export class NotificationRepository {
       // Map database records to NotificationRecord
       return records.map((r) => {
         const readList = (r.readBy as string[]) || [];
-        const isRead = currentUserId ? readList.includes(currentUserId) : readList.length > 0;
         const ackList = (r.acknowledgedBy as any[]) || [];
+        const isRead =
+          userIds.length > 0
+            ? readList.some((rid) => userIds.includes(String(rid || '').trim().toLowerCase())) ||
+              ackList.some(
+                (a) =>
+                  a &&
+                  (userIds.includes(String(a.userId || '').trim().toLowerCase()) ||
+                    userIds.includes(String(a.userName || '').trim().toLowerCase()))
+              )
+            : readList.length > 0;
         const meta = (r.metadata as Record<string, any>) || {};
 
         return {
@@ -105,7 +124,7 @@ export class NotificationRepository {
    * Public active emergency alerts strictly sanitized for unauthenticated / Login Screen / Lock Screen display.
    * Contains NO confidential personnel records, NO internal IDs, and NO private comments.
    */
-  async getPublicActiveEmergencies(sinceIso?: string): Promise<Array<{
+  async getPublicActiveEmergencies(sinceIso?: string, clientSessionId?: string): Promise<Array<{
     notifId: string;
     id: number;
     title: string;
@@ -120,6 +139,23 @@ export class NotificationRepository {
     acknowledgedCount: number;
     createdAt: string;
   }>> {
+    const sessionTokens = clientSessionId
+      ? [
+          String(clientSessionId).trim().toLowerCase(),
+          `guest_${String(clientSessionId).trim().slice(0, 24).toLowerCase()}`,
+        ]
+      : [];
+
+    const isAlreadyAcknowledgedBySession = (readListRaw: any, ackListRaw: any): boolean => {
+      if (sessionTokens.length === 0) return false;
+      const readList = Array.isArray(readListRaw) ? readListRaw : [];
+      const ackList = Array.isArray(ackListRaw) ? ackListRaw : [];
+      return (
+        readList.some((rid) => sessionTokens.includes(String(rid || '').trim().toLowerCase())) ||
+        ackList.some((a) => a && sessionTokens.includes(String(a.userId || '').trim().toLowerCase()))
+      );
+    };
+
     try {
       const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
       const minDate = sinceIso && !isNaN(Date.parse(sinceIso))
@@ -144,6 +180,7 @@ export class NotificationRepository {
 
       return records
         .filter((r) => r.targetType === 'all' || !r.targetType)
+        .filter((r) => !isAlreadyAcknowledgedBySession(r.readBy, r.acknowledgedBy))
         .map((r) => {
           const ackList = Array.isArray(r.acknowledgedBy) ? r.acknowledgedBy : [];
           return {
@@ -170,7 +207,8 @@ export class NotificationRepository {
         .filter(
           (n) =>
             (n.category === 'critical_hse' || n.priority === 'critical') &&
-            (n.targetType === 'all' || !n.targetType)
+            (n.targetType === 'all' || !n.targetType) &&
+            !isAlreadyAcknowledgedBySession(n.readBy, n.acknowledgedBy)
         )
         .slice(0, 5)
         .map((n) => ({
@@ -379,17 +417,23 @@ export class NotificationRepository {
     return record;
   }
 
-  async markRead(idOrNotifId: string | number, userId?: string): Promise<boolean> {
+  async markRead(idOrNotifId: string | number, userId?: string, clientSessionId?: string): Promise<boolean> {
     const idStr = String(idOrNotifId);
     const numId = Number(idOrNotifId);
+    const idsToRecord = [userId || 'system'];
+    if (clientSessionId && String(clientSessionId).trim()) {
+      idsToRecord.push(`guest_${String(clientSessionId).trim().slice(0, 24)}`);
+    }
 
     // Update in-memory fallback
     for (const item of inMemoryNotifications) {
       if (item.notifId === idStr || String(item.id) === idStr) {
         item.read = true;
-        if (userId && (!item.readBy || !item.readBy.includes(userId))) {
-          item.readBy = [...(item.readBy || []), userId];
+        const currentRead = [...(item.readBy || [])];
+        for (const rid of idsToRecord) {
+          if (!currentRead.includes(rid)) currentRead.push(rid);
         }
+        item.readBy = currentRead;
       }
     }
 
@@ -402,10 +446,11 @@ export class NotificationRepository {
       const [existing] = await db.select().from(schema.notifications).where(condition!).limit(1);
 
       if (existing) {
-        const readList = (existing.readBy as string[]) || [];
-        const uidToRecord = userId || 'system';
-        if (!readList.includes(uidToRecord)) {
-          readList.push(uidToRecord);
+        const readList = Array.isArray(existing.readBy) ? [...(existing.readBy as string[])] : [];
+        for (const rid of idsToRecord) {
+          if (!readList.includes(rid)) {
+            readList.push(rid);
+          }
         }
 
         await db
@@ -428,6 +473,7 @@ export class NotificationRepository {
     extra?: {
       acknowledgmentSource?: string;
       clientIp?: string;
+      clientSessionId?: string;
     }
   ): Promise<boolean> {
     const idStr = String(idOrNotifId);
@@ -442,6 +488,9 @@ export class NotificationRepository {
       clientIp: extra?.clientIp || undefined,
       status: 'acknowledged' as const,
     };
+    const guestSessionToken = extra?.clientSessionId?.trim()
+      ? `guest_${extra.clientSessionId.trim().slice(0, 24)}`
+      : null;
 
     // Update in-memory fallback (idempotent per userId)
     for (const item of inMemoryNotifications) {
@@ -455,9 +504,10 @@ export class NotificationRepository {
         } else {
           item.acknowledgedBy = [...currentAcks, ackEntry];
         }
-        if (!item.readBy?.includes(userId)) {
-          item.readBy = [...(item.readBy || []), userId];
-        }
+        const readSet = new Set(item.readBy || []);
+        readSet.add(userId);
+        if (guestSessionToken) readSet.add(guestSessionToken);
+        item.readBy = Array.from(readSet);
       }
     }
 
@@ -481,6 +531,9 @@ export class NotificationRepository {
         const readList = Array.isArray(existing.readBy) ? [...(existing.readBy as string[])] : [];
         if (!readList.includes(userId)) {
           readList.push(userId);
+        }
+        if (guestSessionToken && !readList.includes(guestSessionToken)) {
+          readList.push(guestSessionToken);
         }
 
         await db
@@ -831,6 +884,7 @@ export class NotificationRepository {
         uid: string;
         username: string;
         fullName: string;
+        personnelCode: string;
         role: string;
         jobTitle: string;
         departmentIds: string[];
@@ -848,6 +902,9 @@ export class NotificationRepository {
         const role = u.role || pData.role || 'User';
         const jobTitle = pData.jobTitle || '';
         const deptName = pData.department || '';
+        const personnelCode = String(
+          u.personnelNumber || pData.personnelNumber || pData.personnelCode || ''
+        ).trim();
         const deptIds: string[] = Array.isArray(pData.departmentIds)
           ? pData.departmentIds.map(String)
           : pData.departmentId
@@ -857,6 +914,7 @@ export class NotificationRepository {
           uid: u.uid,
           username: u.username,
           fullName: u.fullName || u.username,
+          personnelCode,
           role,
           jobTitle,
           departmentIds: deptIds,
@@ -866,6 +924,7 @@ export class NotificationRepository {
         };
         if (u.uid) map.set(String(u.uid).toLowerCase(), entry);
         if (u.username) map.set(String(u.username).toLowerCase(), entry);
+        if (personnelCode) map.set(personnelCode.toLowerCase(), entry);
       }
     } catch {}
     return map;

@@ -820,35 +820,35 @@ export default function NonPeriodicExams({ language, currentUser }: Props) {
     >
       {/* Top Header Bar - Matches PeriodicMedicalExamsApp standard */}
       <header className="sticky top-0 z-30 bg-white/95 dark:bg-[#132a3a]/95 backdrop-blur-md border-b border-slate-200/90 dark:border-slate-800 shadow-xs">
-        <div className="max-w-7xl 2xl:max-w-[1720px] w-full mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16">
+        <div className="max-w-7xl 2xl:max-w-[1720px] w-full mx-auto px-3 sm:px-6 lg:px-8">
+          <div className="flex flex-wrap items-center justify-between gap-2.5 min-h-16 py-2.5">
             {/* Title & Brand */}
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-indigo-700 to-indigo-500 flex items-center justify-center text-white shadow-md shadow-indigo-700/20">
-                <Stethoscope className="w-6 h-6" />
+            <div className="flex items-center gap-3 min-w-0 flex-1 basis-[240px]">
+              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-gradient-to-tr from-indigo-700 to-indigo-500 flex items-center justify-center text-white shadow-md shadow-indigo-700/20 shrink-0">
+                <Stethoscope className="w-5 h-5 sm:w-6 sm:h-6" />
               </div>
-              <div>
-                <h1 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight">
+              <div className="min-w-0">
+                <h1 className="text-sm sm:text-base lg:text-lg font-black text-slate-900 dark:text-white tracking-tight leading-snug">
                   سامانه جامع معاینات غیر دوره‌ای و ارزیابی‌های اختصاصی طب کار
                 </h1>
-                <span className="text-[11px] text-indigo-700 dark:text-indigo-400 font-bold block -mt-0.5">
+                <span className="text-[11px] text-indigo-700 dark:text-indigo-400 font-bold block truncate">
                   Occupational Health Non-Periodic & Fitness Examination System
                 </span>
               </div>
             </div>
 
             {/* Quick Action Pills */}
-            <div className="flex items-center gap-2">
-              <span className="hidden sm:inline-flex text-xs font-mono font-bold px-3 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+            <div className="flex flex-wrap items-center gap-2 max-w-full">
+              <span className="hidden sm:inline-flex text-xs font-mono font-bold px-3 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 whitespace-nowrap">
                 {exams.length} پرونده معاینه | {stats.fitPercent}٪ تناسب کامل
               </span>
 
               <button
                 type="button"
                 onClick={() => { resetForm(); setActiveTab('register'); }}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition shadow-xs cursor-pointer"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition shadow-xs cursor-pointer whitespace-nowrap"
               >
-                <Plus className="w-3.5 h-3.5" />
+                <Plus className="w-3.5 h-3.5 shrink-0" />
                 <span>ثبت معاینه جدید</span>
               </button>
             </div>

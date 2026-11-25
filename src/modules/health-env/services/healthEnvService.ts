@@ -14,7 +14,7 @@ import {
 } from '../types';
 import { findPersonnelByCode, ComplexPersonnel, getComplexPersonnelList, setComplexPersonnelList } from '../../../utils/personnelHelper';
 import { addAuditLog } from '../../../utils/authHelper';
-import { apiDb } from '../../../services/apiDatabaseClient';
+import { apiDb, getAuthToken } from '../../../services/apiDatabaseClient';
 import { getCurrentShamsiYear, getCurrentShamsiTimestamp } from '../../../utils/jalaliDate';
 import { formatFileSize } from '../../../utils/fileHelpers';
 import { normalizeDigits } from '../../../utils/textNormalization';
@@ -53,19 +53,46 @@ export function extractShamsiYear(dateStr?: string | number): number | null {
   return null;
 }
 
+export function isOccHealthV2Exam(exam: Partial<PeriodicMedicalExam> | null | undefined): boolean {
+  if (!exam) return false;
+  return (
+    exam.createdBy === 'سامانه طب کار' ||
+    String(exam.id || '').startsWith('exam-occ-') ||
+    String(exam.recordId || '').startsWith('med-rec-occ-') ||
+    String(exam.importBatchId || '').startsWith('batch_')
+  );
+}
+
+export function isOccHealthV2Record(record: Partial<PeriodicMedicalRecord> | null | undefined): boolean {
+  if (!record) return false;
+  return (
+    record.createdBy === 'سامانه طب کار' ||
+    String(record.id || '').startsWith('med-rec-occ-')
+  );
+}
+
 export function mergeOccHealthV2Data(
   occData: any,
   baseRecords: PeriodicMedicalRecord[],
   baseExams: PeriodicMedicalExam[]
 ): { records: PeriodicMedicalRecord[]; exams: PeriodicMedicalExam[]; rawOccExams: any[] } {
-  const recordsMap = new Map<string, PeriodicMedicalRecord>();
-  baseRecords.forEach(r => {
-    if (r && r.id) recordsMap.set(r.id, r);
+  // Keep only non-V2 (manually entered / PDF / independent) exams from baseExams;
+  // OCC_HEALTH_EXAMS_DATA_V2 is the single source of truth for periodic-exam Excel imports.
+  const examsMap = new Map<string, PeriodicMedicalExam>();
+  const activeNonV2RecordIds = new Set<string>();
+  (baseExams || []).forEach(e => {
+    if (e && e.id && !isOccHealthV2Exam(e)) {
+      examsMap.set(e.id, e);
+      if (e.recordId) activeNonV2RecordIds.add(e.recordId);
+    }
   });
 
-  const examsMap = new Map<string, PeriodicMedicalExam>();
-  baseExams.forEach(e => {
-    if (e && e.id) examsMap.set(e.id, e);
+  // Keep non-V2 medical records, or V2 records that still have an independent non-V2 exam linked to them.
+  const recordsMap = new Map<string, PeriodicMedicalRecord>();
+  (baseRecords || []).forEach(r => {
+    if (r && r.id && (!isOccHealthV2Record(r) || activeNonV2RecordIds.has(r.id))) {
+      recordsMap.set(r.id, r);
+    }
   });
 
   const rawExams: any[] = Array.isArray(occData?.examinations) ? occData.examinations : [];
@@ -159,6 +186,7 @@ export function mergeOccHealthV2Data(
         id: examId,
         recordId: existingRec.id,
         employeeCode: pcode,
+        nationalCode: nid,
         employeeName: fullName,
         department: company,
         examYear,
@@ -264,12 +292,18 @@ export class HealthEnvService {
         this.kpisCache.clear();
         this.reloadFromServer();
       });
+      window.addEventListener('hse_auth_state_changed', () => {
+        if (getAuthToken()) {
+          this.kpisCache.clear();
+          void this.reloadFromServer();
+        }
+      });
     }
     this.reloadFromServer();
   }
 
   public async reloadFromServer() {
-    if (this.isReloading) return;
+    if (this.isReloading || !getAuthToken()) return;
     this.isReloading = true;
     this.kpisCache.clear();
     try {

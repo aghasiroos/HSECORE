@@ -2,7 +2,13 @@ import { Router, Request, Response } from 'express';
 import * as dbServices from '../db-services.ts';
 import { requireAuth, requireRole, requirePermission, isGlobalAdminUser, checkUserHasPermission } from '../core/middleware/auth.ts';
 import { getClientIp } from '../core/ip.ts';
-import { broadcastDataMutation, registerSSEClient, getMissedMutationEvents } from '../core/socket.ts';
+import {
+  broadcastDataMutation,
+  registerSSEClient,
+  getMissedMutationEvents,
+  SERVER_INSTANCE_ID,
+  getLatestSeq,
+} from '../core/socket.ts';
 import {
   assertVersionMatch,
   extractExpectedUpdatedAt,
@@ -22,6 +28,7 @@ import {
 import {
   SENSITIVE_ADMIN_READ_KEYS,
   ADMIN_ONLY_SETTING_KEYS,
+  PERSONNEL_SCOPED_SETTING_KEYS,
   checkIsAdminRequest,
   syncSettingsMemoryCache,
 } from './settings.router.ts';
@@ -991,13 +998,7 @@ router.get('/sync/full', requireAuth, async (req: Request, res: Response) => {
           (snapshot.data as any).workPermits = personnelAccessService.filterModuleRecords(ctx, (snapshot.data as any).workPermits);
         }
         if (snapshot.data.settings && typeof snapshot.data.settings === 'object') {
-          const personnelLinkedSettingKeys = [
-            'hse_clinic_visits_v1',
-            'hse_nutrition_records_v1',
-            'hse_ppe_issuances_v1',
-            'hse_training_records_v1',
-          ];
-          for (const sKey of personnelLinkedSettingKeys) {
+          for (const sKey of PERSONNEL_SCOPED_SETTING_KEYS) {
             if (Array.isArray(snapshot.data.settings[sKey])) {
               snapshot.data.settings[sKey] = personnelAccessService.filterModuleRecords(
                 ctx,
@@ -1063,7 +1064,15 @@ router.get('/sync/events', requireAuth, (req: Request, res: Response) => {
   }
 
   registerSSEClient(res, req.user!);
-  res.write(`data: ${JSON.stringify({ type: 'connected', uid: req.user?.uid, time: new Date().toISOString() })}\n\n`);
+  res.write(
+    `data: ${JSON.stringify({
+      type: 'connected',
+      uid: req.user?.uid,
+      latestSeq: getLatestSeq(),
+      serverInstanceId: SERVER_INSTANCE_ID,
+      time: new Date().toISOString(),
+    })}\n\n`
+  );
 
   const keepAlive = setInterval(() => {
     try {
@@ -1072,17 +1081,24 @@ router.get('/sync/events', requireAuth, (req: Request, res: Response) => {
       clearInterval(keepAlive);
     }
   }, 25000);
+  if (keepAlive.unref) {
+    keepAlive.unref();
+  }
 
-  req.on('close', () => {
-    clearInterval(keepAlive);
-  });
+  const cleanupKeepAlive = () => clearInterval(keepAlive);
+  req.on('close', cleanupKeepAlive);
+  res.on('close', cleanupKeepAlive);
+  res.on('finish', cleanupKeepAlive);
+  res.on('error', cleanupKeepAlive);
 });
 
 // Catch-up missed mutation events since last sequence number after network reconnect
 router.get('/sync/events/catchup', requireAuth, async (req: Request, res: Response) => {
   try {
     const sinceSeq = Number(req.query.sinceSeq || 0);
-    const result = await getMissedMutationEvents(sinceSeq, req.user!);
+    const serverInstanceId =
+      typeof req.query.serverInstanceId === 'string' ? req.query.serverInstanceId : undefined;
+    const result = await getMissedMutationEvents(sinceSeq, req.user!, serverInstanceId);
     res.json({ success: true, ...result });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error?.message || 'Catchup failed' });

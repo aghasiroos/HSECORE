@@ -329,36 +329,36 @@ export default function NutritionSubmoduleView({ language, currentUser }: Props)
     <div className="w-full p-4 sm:p-6 space-y-6 max-w-7xl 2xl:max-w-[1720px] mx-auto" dir="rtl">
       
       {/* Top Banner & Actions */}
-      <div className="bg-white dark:bg-slate-800 p-5 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-3.5">
-          <div className="w-12 h-12 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shadow-lg shadow-emerald-600/20 shrink-0">
+      <div className="bg-white dark:bg-slate-800 p-4 sm:p-5 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-xs flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+        <div className="flex items-center gap-3.5 min-w-0 flex-1">
+          <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shadow-lg shadow-emerald-600/20 shrink-0">
             <Apple className="w-6 h-6" />
           </div>
-          <div>
-            <h1 className="text-base sm:text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
+          <div className="min-w-0">
+            <h1 className="text-base sm:text-lg font-black text-slate-900 dark:text-white flex items-center gap-2 leading-snug">
               <span>زیرماژول کارشناس تغذیه و رژیم‌درمانی</span>
             </h1>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">
               پایش وضعیت تغذیه، شاخص‌های آنتروپومتریک، عادات غذایی، برنامه‌ها و مشاوره‌های تخصصی پرسنل
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex flex-wrap items-center gap-2 max-w-full">
           <button
             type="button"
             onClick={handleExportCsv}
             disabled={filteredRecords.length === 0}
-            className="px-3.5 py-2.5 bg-slate-100 dark:bg-slate-700/80 hover:bg-slate-200 text-slate-700 dark:text-slate-200 text-xs font-bold rounded-2xl flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+            className="px-3.5 py-2.5 bg-slate-100 dark:bg-slate-700/80 hover:bg-slate-200 text-slate-700 dark:text-slate-200 text-xs font-bold rounded-2xl flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50 whitespace-nowrap"
             title="خروجی اکسل و CSV"
           >
-            <Download className="w-4 h-4 text-emerald-600" />
+            <Download className="w-4 h-4 text-emerald-600 shrink-0" />
             <span>خروجی اکسل</span>
           </button>
           <button
             type="button"
             onClick={loadRecords}
-            className="p-2.5 bg-slate-100 dark:bg-slate-700/80 hover:bg-slate-200 text-slate-700 dark:text-slate-200 rounded-2xl transition cursor-pointer"
+            className="p-2.5 bg-slate-100 dark:bg-slate-700/80 hover:bg-slate-200 text-slate-700 dark:text-slate-200 rounded-2xl transition cursor-pointer shrink-0"
             title="بازخوانی داده‌ها"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
@@ -369,16 +369,16 @@ export default function NutritionSubmoduleView({ language, currentUser }: Props)
               setEditingRecord(null);
               setIsModalOpen(true);
             }}
-            className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-black text-xs rounded-2xl flex items-center gap-2 transition cursor-pointer shadow-lg shadow-emerald-600/25"
+            className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-black text-xs rounded-2xl flex items-center gap-2 transition cursor-pointer shadow-lg shadow-emerald-600/25 whitespace-nowrap"
           >
-            <Plus className="w-4 h-4" />
+            <Plus className="w-4 h-4 shrink-0" />
             <span>ثبت پرونده و مشاوره جدید</span>
           </button>
         </div>
       </div>
 
       {/* Real Statistics Cards strictly calculated from DB */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
         <div className="p-3.5 bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-2xs">
           <span className="text-[11px] text-slate-400 block font-bold">کل مراجعات ثبت‌شده</span>
           <div className="flex items-baseline justify-between mt-1">
@@ -433,44 +433,44 @@ export default function NutritionSubmoduleView({ language, currentUser }: Props)
       </div>
 
       {/* Main View Segmented Controls */}
-      <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-700 pb-2">
-        <div className="flex items-center gap-1.5 p-1 bg-slate-200/60 dark:bg-slate-800 rounded-2xl text-xs font-bold">
+      <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-700 pb-2 min-w-0">
+        <div className="flex items-center gap-1.5 p-1 bg-slate-200/60 dark:bg-slate-800 rounded-2xl text-xs font-bold overflow-x-auto max-w-full no-scrollbar">
           <button
             type="button"
             onClick={() => setActiveTab('table')}
-            className={`px-4 py-2 rounded-xl transition cursor-pointer flex items-center gap-1.5 ${
+            className={`px-3.5 sm:px-4 py-2 rounded-xl transition cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
               activeTab === 'table'
                 ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs font-black'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
             }`}
           >
-            <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+            <FileSpreadsheet className="w-4 h-4 text-emerald-600 shrink-0" />
             <span>فهرست پرونده‌ها و مراجعات ({filteredRecords.length})</span>
           </button>
 
           <button
             type="button"
             onClick={() => setActiveTab('analytics')}
-            className={`px-4 py-2 rounded-xl transition cursor-pointer flex items-center gap-1.5 ${
+            className={`px-3.5 sm:px-4 py-2 rounded-xl transition cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
               activeTab === 'analytics'
                 ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs font-black'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
             }`}
           >
-            <BarChart3 className="w-4 h-4 text-blue-600" />
+            <BarChart3 className="w-4 h-4 text-blue-600 shrink-0" />
             <span>داشبورد و تحلیل شاخص‌ها</span>
           </button>
 
           <button
             type="button"
             onClick={() => setActiveTab('high_risk')}
-            className={`px-4 py-2 rounded-xl transition cursor-pointer flex items-center gap-1.5 ${
+            className={`px-3.5 sm:px-4 py-2 rounded-xl transition cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
               activeTab === 'high_risk'
                 ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs font-black'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
             }`}
           >
-            <AlertTriangle className="w-4 h-4 text-rose-600" />
+            <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
             <span>بیماری‌های پرخطر و پیگیری ({highRiskProfiles.length})</span>
           </button>
         </div>

@@ -16,8 +16,8 @@ import { matchPersonnelRecord, normalizePersianString } from './personnelMatchin
 import { labReferenceRangeService } from './labReferenceRangeService';
 import { occupationalHealthStructuredService } from './occupationalHealthStructuredService';
 import { MedicalItemCategory, MedicalResultStatus } from '../types';
-import { mergeOccHealthV2Data } from './healthEnvService';
-import { apiDb } from '../../../services/apiDatabaseClient';
+import { mergeOccHealthV2Data, isOccHealthV2Exam, isOccHealthV2Record } from './healthEnvService';
+import { apiDb, getAuthToken } from '../../../services/apiDatabaseClient';
 import { formatFileSize } from '../../../utils/fileHelpers';
 import { getCurrentShamsiTimestamp } from '../../../utils/jalaliDate';
 
@@ -79,7 +79,7 @@ export class MedicalExamService {
   };
 
   public reloadFromServer = async () => {
-    if (this.isReloading) return;
+    if (this.isReloading || !getAuthToken()) return;
     const now = Date.now();
     if (now - this.lastReloadTime < 200) return;
     this.isReloading = true;
@@ -93,15 +93,40 @@ export class MedicalExamService {
         apiDb.getSetting(STORAGE_KEYS.IMPORT_AUDITS),
         apiDb.getSetting('OCC_HEALTH_EXAMS_DATA_V2'),
       ]);
-      const baseRecs = Array.isArray(recs) ? recs : this.records;
-      const baseExms = Array.isArray(exms) ? exms : this.exams;
+      const baseRecs = Array.isArray(recs) ? recs : [];
+      const baseExms = Array.isArray(exms) ? exms : [];
       const merged = mergeOccHealthV2Data(occV2, baseRecs, baseExms);
       this.records = merged.records;
       this.exams = merged.exams;
       if (Array.isArray(atts)) this.attachments = atts;
       if (Array.isArray(labs)) this.structuredLabs = labs;
-      if (Array.isArray(audits)) this.importAudits = audits;
+
+      // Reconcile import audits: prune stale V2-originated audit entries whose exams no longer exist
+      const activeExamIds = new Set(this.exams.map(e => e.id));
+      const rawAudits: ImportAuditLogRecord[] = Array.isArray(audits) ? audits : [];
+      const cleanedAudits = rawAudits.filter(a => {
+        const isV2Audit =
+          a.importedBy === 'سامانه طب کار' ||
+          String(a.id || '').startsWith('batch_') ||
+          String(a.id || '').startsWith('audit-auto-batch_');
+        if (!isV2Audit) return true;
+        return Array.isArray(a.importedExamIds) && a.importedExamIds.some(id => activeExamIds.has(id));
+      });
+      this.importAudits = cleanedAudits;
       this.syncImportAuditsFromExams();
+
+      // Auto-heal legacy persisted V2 shadow copies in PostgreSQL so deleted Excel files never resurface
+      const hadStaleV2Exams = baseExms.some(e => isOccHealthV2Exam(e));
+      const hadStaleV2Records = baseRecs.some(r => isOccHealthV2Record(r));
+      const hadStaleV2Audits = cleanedAudits.length !== rawAudits.length;
+      if (hadStaleV2Exams || hadStaleV2Records || hadStaleV2Audits) {
+        const { persistableRecords, persistableExams, persistableAudits } = this.getPersistablePayload();
+        void Promise.all([
+          apiDb.saveSetting(STORAGE_KEYS.RECORDS, persistableRecords),
+          apiDb.saveSetting(STORAGE_KEYS.EXAMS, persistableExams),
+          apiDb.saveSetting(STORAGE_KEYS.IMPORT_AUDITS, persistableAudits),
+        ]).catch(() => {});
+      }
       // Readers must never dispatch mutation notifications!
     } catch (_) {
     } finally {
@@ -113,19 +138,99 @@ export class MedicalExamService {
     void this.reloadFromServer();
   };
 
+  private getPersistablePayload() {
+    // OCC_HEALTH_EXAMS_DATA_V2 is the single source of truth for periodic-exam Excel imports.
+    // Never clone V2 exams/records into hse_medical_exams_v4 / hse_medical_records_v4.
+    const persistableExams = this.exams.filter(e => !isOccHealthV2Exam(e));
+    const activeNonV2RecIds = new Set(persistableExams.map(e => e.recordId).filter(Boolean));
+    const persistableRecords = this.records.filter(r => !isOccHealthV2Record(r) || activeNonV2RecIds.has(r.id));
+    const persistableAudits = this.importAudits.filter(a => {
+      const isV2Audit =
+        a.importedBy === 'سامانه طب کار' ||
+        String(a.id || '').startsWith('batch_') ||
+        String(a.id || '').startsWith('audit-auto-batch_');
+      return !isV2Audit;
+    });
+    return { persistableRecords, persistableExams, persistableAudits };
+  }
+
   private saveData() {
     try {
-      // Authoritatively persist to PostgreSQL central database
-      apiDb.saveSetting(STORAGE_KEYS.RECORDS, this.records);
-      apiDb.saveSetting(STORAGE_KEYS.EXAMS, this.exams);
+      const { persistableRecords, persistableExams, persistableAudits } = this.getPersistablePayload();
+      // Authoritatively persist non-V2 medical records to PostgreSQL central database
+      apiDb.saveSetting(STORAGE_KEYS.RECORDS, persistableRecords);
+      apiDb.saveSetting(STORAGE_KEYS.EXAMS, persistableExams);
       apiDb.saveSetting(STORAGE_KEYS.ATTACHMENTS, this.attachments);
       apiDb.saveSetting(STORAGE_KEYS.STRUCTURED_LABS, this.structuredLabs);
-      apiDb.saveSetting(STORAGE_KEYS.IMPORT_AUDITS, this.importAudits);
+      apiDb.saveSetting(STORAGE_KEYS.IMPORT_AUDITS, persistableAudits);
 
       notifyMedicalDataChange();
     } catch (e) {
       console.warn('[MedicalExamService] Database write warning:', e);
     }
+  }
+
+  /**
+   * Immediately reconcile in-memory state and PostgreSQL shadow records after a periodic-exam
+   * Excel batch (or all Excel imports) is deleted in PeriodicMedicalExamsApp.
+   */
+  public async syncFromOccHealthV2Deletion(batchId: string | null): Promise<void> {
+    const removedExamIds = new Set<string>();
+    const remainingExams: PeriodicMedicalExam[] = [];
+
+    this.exams.forEach(e => {
+      const isTarget =
+        batchId === null
+          ? isOccHealthV2Exam(e)
+          : isOccHealthV2Exam(e) && e.importBatchId === batchId;
+      if (isTarget) {
+        removedExamIds.add(e.id);
+      } else {
+        remainingExams.push(e);
+      }
+    });
+
+    this.exams = remainingExams;
+    const remainingRecIds = new Set(this.exams.map(e => e.recordId).filter(Boolean));
+    const remainingCodes = new Set(this.exams.map(e => String(e.employeeCode || '').trim().toLowerCase()).filter(Boolean));
+    this.records = this.records.filter(r => {
+      if (!isOccHealthV2Record(r)) return true;
+      const code = String(r.employeeCode || '').trim().toLowerCase();
+      return remainingRecIds.has(r.id) || (code !== '' && remainingCodes.has(code));
+    });
+
+    if (removedExamIds.size > 0) {
+      this.structuredLabs = this.structuredLabs.filter(
+        l => !removedExamIds.has(l.examId) && (!batchId || l.importBatchId !== batchId)
+      );
+      try {
+        occupationalHealthStructuredService.deleteSessionsByIds(Array.from(removedExamIds));
+      } catch (_) {}
+    }
+
+    const activeExamIds = new Set(this.exams.map(e => e.id));
+    this.importAudits = this.importAudits.filter(a => {
+      if (batchId && (a.id === batchId || a.id === `audit-auto-${batchId}`)) return false;
+      const isV2Audit =
+        a.importedBy === 'سامانه طب کار' ||
+        String(a.id || '').startsWith('batch_') ||
+        String(a.id || '').startsWith('audit-auto-batch_');
+      if (!isV2Audit) return true;
+      if (batchId === null) return false;
+      return Array.isArray(a.importedExamIds) && a.importedExamIds.some(id => activeExamIds.has(id));
+    });
+
+    const { persistableRecords, persistableExams, persistableAudits } = this.getPersistablePayload();
+    try {
+      await Promise.all([
+        apiDb.saveSetting(STORAGE_KEYS.RECORDS, persistableRecords),
+        apiDb.saveSetting(STORAGE_KEYS.EXAMS, persistableExams),
+        apiDb.saveSetting(STORAGE_KEYS.STRUCTURED_LABS, this.structuredLabs),
+        apiDb.saveSetting(STORAGE_KEYS.IMPORT_AUDITS, persistableAudits),
+      ]);
+    } catch (_) {}
+
+    notifyMedicalDataChange({ action: 'occ_v2_excel_deleted', batchId });
   }
 
   /**
@@ -906,7 +1011,7 @@ export class MedicalExamService {
       groups.get(groupKey)!.push(exam);
     });
 
-    let modified = false;
+    let modifiedNonV2 = false;
 
     groups.forEach((groupExams, groupKey) => {
       if (existingLogIds.has(groupKey)) return;
@@ -945,10 +1050,12 @@ export class MedicalExamService {
       this.importAudits.push(newAuditLog);
       existingLogIds.add(newAuditLog.id);
       existingFileNames.add(fileNameKey);
-      modified = true;
+      if (!groupExams.every(e => isOccHealthV2Exam(e))) {
+        modifiedNonV2 = true;
+      }
     });
 
-    if (modified) {
+    if (modifiedNonV2) {
       this.saveData();
     }
   }
@@ -1453,12 +1560,33 @@ export class MedicalExamService {
     // 7. Remove from import audits
     this.importAudits = this.importAudits.filter(a => a.id !== auditLogId);
 
-    // 8. Sync OCC_HEALTH_EXAMS_DATA_V2 in database
+    // 8. Sync OCC_HEALTH_EXAMS_DATA_V2 in database (supports object schema { examinations, personnelMap, importedBatches })
     try {
       apiDb.getSetting('OCC_HEALTH_EXAMS_DATA_V2').then(v2 => {
-        if (Array.isArray(v2)) {
+        if (v2 && typeof v2 === 'object' && !Array.isArray(v2) && Array.isArray(v2.examinations)) {
+          const remainingEx = v2.examinations.filter((x: any) =>
+            !associatedExamIds.has(String(x.exam_id)) &&
+            String(x.batch_id || '') !== auditLogId &&
+            !affectedCodes.has(String(x.pcode || x.nid || x.personnel_id || ''))
+          );
+          const remainingPMap: Record<string, any> = {};
+          const oldPMap = v2.personnelMap && typeof v2.personnelMap === 'object' ? v2.personnelMap : {};
+          remainingEx.forEach((x: any) => {
+            if (x.personnel_id && oldPMap[x.personnel_id]) {
+              remainingPMap[x.personnel_id] = oldPMap[x.personnel_id];
+            }
+          });
+          const remainingBatches = Array.isArray(v2.importedBatches)
+            ? v2.importedBatches.filter((b: any) => b.id !== auditLogId && b.fileName !== log.fileName)
+            : [];
+          void apiDb.saveSetting('OCC_HEALTH_EXAMS_DATA_V2', {
+            examinations: remainingEx,
+            personnelMap: remainingPMap,
+            importedBatches: remainingBatches
+          });
+        } else if (Array.isArray(v2)) {
           const filteredV2 = v2.filter((x: any) => !associatedExamIds.has(String(x.exam_id)) && !affectedCodes.has(String(x.personnel_code || x.personnel_id)));
-          apiDb.saveSetting('OCC_HEALTH_EXAMS_DATA_V2', filteredV2);
+          void apiDb.saveSetting('OCC_HEALTH_EXAMS_DATA_V2', filteredV2);
         }
       }).catch(() => {});
     } catch (_) {}

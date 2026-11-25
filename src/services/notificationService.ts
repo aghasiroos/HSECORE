@@ -217,23 +217,158 @@ export function detectClientDeviceInfo(): {
   };
 }
 
+export const HSE_NOTIF_CLIENT_SESSION_KEY = 'hse_notif_client_session_v1';
+export const HSE_NOTIF_ACKED_IDS_KEY = 'hse_notif_acked_ids_v1';
+export const HSE_NOTIF_LOCKSCREEN_CONFIRMED_KEY = 'hse_notif_lockscreen_confirmed_v1';
+
+const MAX_STORED_ACKED_IDS = 500;
+
 let inMemoryGuestSessionId: string | null = null;
 const inMemoryPublicAcknowledgedIds = new Set<string>();
 const inMemoryConfirmedLockScreenUsers = new Set<string>();
 
+function safeReadStorageArray(key: string): string[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.map((v) => String(v)).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+function safeWriteStorageArray(key: string, values: Set<string>, maxItems = MAX_STORED_ACKED_IDS): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const arr = Array.from(values);
+    const trimmed = arr.length > maxItems ? arr.slice(arr.length - maxItems) : arr;
+    window.localStorage.setItem(key, JSON.stringify(trimmed));
+  } catch {
+    // Ignore storage quota or private mode restrictions
+  }
+}
+
 export function getOrInitGuestSessionId(): string {
+  if (!inMemoryGuestSessionId && typeof window !== 'undefined') {
+    try {
+      const stored = window.localStorage.getItem(HSE_NOTIF_CLIENT_SESSION_KEY);
+      if (stored && stored.trim()) {
+        inMemoryGuestSessionId = stored.trim();
+      }
+    } catch {
+      // Ignore storage access restrictions
+    }
+  }
   if (!inMemoryGuestSessionId) {
     inMemoryGuestSessionId = 'sid_' + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
+    if (typeof window !== 'undefined') {
+      try {
+        window.localStorage.setItem(HSE_NOTIF_CLIENT_SESSION_KEY, inMemoryGuestSessionId);
+      } catch {
+        // Ignore
+      }
+    }
   }
   return inMemoryGuestSessionId;
 }
 
 export function getPublicAcknowledgedAlertIds(): Set<string> {
+  const persisted = safeReadStorageArray(HSE_NOTIF_ACKED_IDS_KEY);
+  for (const id of persisted) {
+    inMemoryPublicAcknowledgedIds.add(id);
+  }
   return new Set(inMemoryPublicAcknowledgedIds);
 }
 
-export function markPublicAlertAcknowledgedLocally(notifId: string): void {
-  inMemoryPublicAcknowledgedIds.add(String(notifId));
+export function markPublicAlertAcknowledgedLocally(
+  notifId: string | number,
+  extraId?: string | number
+): void {
+  const persisted = safeReadStorageArray(HSE_NOTIF_ACKED_IDS_KEY);
+  for (const existing of persisted) {
+    inMemoryPublicAcknowledgedIds.add(existing);
+  }
+  const primary = String(notifId || '').trim();
+  if (primary) inMemoryPublicAcknowledgedIds.add(primary);
+  const secondary = extraId !== undefined && extraId !== null ? String(extraId).trim() : '';
+  if (secondary) inMemoryPublicAcknowledgedIds.add(secondary);
+  safeWriteStorageArray(HSE_NOTIF_ACKED_IDS_KEY, inMemoryPublicAcknowledgedIds);
+}
+
+/**
+ * Single source of truth: checks whether a notification has already been acknowledged or dismissed
+ * by this user or on this browser (survives page refresh, login, logout, and cross-tab actions).
+ */
+export function isNotificationAcknowledgedOrDismissed(
+  notif: AppNotification | null | undefined,
+  currentUser?: { id?: string; uid?: string; username?: string; fullName?: string; personnelNumber?: string } | null
+): boolean {
+  if (!notif) return false;
+  const ackedSet = getPublicAcknowledgedAlertIds();
+  const notifIdStr = String(notif.notifId || '').trim();
+  const numericIdStr = notif.id !== undefined && notif.id !== null ? String(notif.id).trim() : '';
+
+  if ((notifIdStr && ackedSet.has(notifIdStr)) || (numericIdStr && ackedSet.has(numericIdStr))) {
+    return true;
+  }
+
+  if (notif.read) {
+    return true;
+  }
+
+  const sessionId = getOrInitGuestSessionId();
+  const guestToken = `guest_${sessionId.slice(0, 24)}`.toLowerCase();
+  const userTokens = new Set<string>([sessionId.toLowerCase(), guestToken]);
+
+  if (currentUser) {
+    for (const raw of [
+      currentUser.id,
+      currentUser.uid,
+      currentUser.username,
+      currentUser.fullName,
+      currentUser.personnelNumber,
+    ]) {
+      const normalized = String(raw || '').trim().toLowerCase();
+      if (normalized) userTokens.add(normalized);
+    }
+  }
+
+  if (Array.isArray(notif.readBy) && notif.readBy.some((r) => userTokens.has(String(r || '').trim().toLowerCase()))) {
+    return true;
+  }
+
+  if (
+    Array.isArray(notif.acknowledgedBy) &&
+    notif.acknowledgedBy.some((a) => {
+      if (!a) return false;
+      const uid = String(a.userId || '').trim().toLowerCase();
+      const uname = String(a.userName || '').trim().toLowerCase();
+      return (uid && userTokens.has(uid)) || (uname && userTokens.has(uname));
+    })
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function getPersistedConfirmedLockScreenUsers(): Set<string> {
+  const persisted = safeReadStorageArray(HSE_NOTIF_LOCKSCREEN_CONFIRMED_KEY);
+  for (const u of persisted) {
+    inMemoryConfirmedLockScreenUsers.add(u);
+  }
+  return inMemoryConfirmedLockScreenUsers;
+}
+
+function persistConfirmedLockScreenUser(userIds: Array<string | null | undefined>): void {
+  const set = getPersistedConfirmedLockScreenUsers();
+  for (const raw of userIds) {
+    const val = String(raw || '').trim().toLowerCase();
+    if (val) set.add(val);
+  }
+  safeWriteStorageArray(HSE_NOTIF_LOCKSCREEN_CONFIRMED_KEY, set, 100);
 }
 
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
@@ -252,19 +387,25 @@ let cachedPreferences: NotificationPreferences = { ...DEFAULT_PREFERENCES };
 
 export const CentralNotificationService = {
   /**
-   * Check whether the user has already confirmed lock-screen & siren readiness on this account
+   * Check whether the user has already confirmed lock-screen & siren readiness on this account/device
    */
-  isLockScreenSirenConfirmed(userId?: string | null): boolean {
-    if (userId && inMemoryConfirmedLockScreenUsers.has(String(userId))) return true;
+  isLockScreenSirenConfirmed(userId?: string | null, username?: string | null): boolean {
+    const set = getPersistedConfirmedLockScreenUsers();
+    const uidKey = String(userId || '').trim().toLowerCase();
+    const unameKey = String(username || '').trim().toLowerCase();
+    if ((uidKey && set.has(uidKey)) || (unameKey && set.has(unameKey))) {
+      return true;
+    }
     return Boolean(cachedPreferences.lockScreenSirenConfirmed);
   },
 
   /**
-   * Mark lock-screen & siren readiness as confirmed and persist strictly in PostgreSQL
+   * Mark lock-screen & siren readiness as confirmed and persist in both localStorage and PostgreSQL
    */
   async confirmLockScreenSiren(
     userOrId?: {
       id?: string;
+      uid?: string;
       username?: string;
       fullName?: string;
       role?: string;
@@ -278,17 +419,36 @@ export const CentralNotificationService = {
       deviceName?: string;
     }
   ): Promise<void> {
-    const uid = typeof userOrId === 'string' ? userOrId : userOrId?.id || userOrId?.username;
-    if (uid) {
-      inMemoryConfirmedLockScreenUsers.add(String(uid));
-    }
+    const uid =
+      typeof userOrId === 'string'
+        ? userOrId
+        : userOrId?.id || userOrId?.uid || userOrId?.username;
+    const uname =
+      typeof userOrId === 'object' && userOrId !== null
+        ? userOrId.username || usernameArg
+        : usernameArg;
+
+    // Persist immediately so refreshing the browser will never show this confirmation popup again
+    persistConfirmedLockScreenUser([uid, uname]);
+
     const nextPrefs: NotificationPreferences = {
       ...cachedPreferences,
       lockScreenSirenConfirmed: true,
     };
-    await this.subscribeToWebPush(userOrId, usernameArg, deviceMeta);
-    await apiDb.saveNotificationPreferences(nextPrefs);
     cachedPreferences = nextPrefs;
+
+    try {
+      await this.subscribeToWebPush(userOrId, usernameArg, deviceMeta);
+    } catch {
+      // Non-fatal: browser may deny or not support Web Push
+    }
+
+    try {
+      await apiDb.saveNotificationPreferences(nextPrefs);
+    } catch {
+      // Non-fatal: localStorage persistence still guarantees popup never repeats
+    }
+
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('hse_notif_preferences_updated', { detail: cachedPreferences }));
     }
@@ -297,7 +457,8 @@ export const CentralNotificationService = {
   /**
    * Initialize and synchronize preferences from PostgreSQL database
    */
-  async loadPreferences(userId?: string | null): Promise<NotificationPreferences> {
+  async loadPreferences(userId?: string | null, username?: string | null): Promise<NotificationPreferences> {
+    const alreadyConfirmedLocally = this.isLockScreenSirenConfirmed(userId, username);
     try {
       const data = await apiDb.getNotificationPreferences();
       if (data && typeof data === 'object') {
@@ -306,11 +467,9 @@ export const CentralNotificationService = {
           ? '/api/v1/notifications/custom-siren'
           : rawCustomUrl;
 
-        const isConfirmed = Boolean(
-          data.lockScreenSirenConfirmed || (userId && inMemoryConfirmedLockScreenUsers.has(String(userId)))
-        );
-        if (isConfirmed && userId) {
-          inMemoryConfirmedLockScreenUsers.add(String(userId));
+        const isConfirmed = Boolean(data.lockScreenSirenConfirmed || alreadyConfirmedLocally);
+        if (isConfirmed) {
+          persistConfirmedLockScreenUser([userId, username]);
         }
         cachedPreferences = {
           ...DEFAULT_PREFERENCES,
@@ -325,9 +484,13 @@ export const CentralNotificationService = {
             ...(data.enabledCategories || {}),
           },
         };
+      } else if (alreadyConfirmedLocally) {
+        cachedPreferences = { ...cachedPreferences, lockScreenSirenConfirmed: true };
       }
     } catch {
-      // Keep default/in-memory preferences when unauthenticated or unreachable
+      if (alreadyConfirmedLocally) {
+        cachedPreferences = { ...cachedPreferences, lockScreenSirenConfirmed: true };
+      }
     }
     return cachedPreferences;
   },
@@ -594,7 +757,10 @@ export const CentralNotificationService = {
    * Fetch all notifications from database
    */
   async getNotifications(params?: { category?: string; priority?: string; sourceModule?: string; unreadOnly?: boolean }): Promise<AppNotification[]> {
-    const list = await apiDb.getNotifications(params);
+    const list = await apiDb.getNotifications({
+      ...params,
+      clientSessionId: getOrInitGuestSessionId(),
+    });
     return (list || []).map((item) => ({
       id: item.id,
       notifId: item.notifId || item.id || `notif-${Date.now()}`,
@@ -769,7 +935,9 @@ export const CentralNotificationService = {
   },
 
   async markAsRead(id: string | number): Promise<boolean> {
-    const success = await apiDb.markNotificationRead(String(id));
+    const idStr = String(id);
+    markPublicAlertAcknowledgedLocally(idStr);
+    const success = await apiDb.markNotificationRead(idStr, getOrInitGuestSessionId());
     window.dispatchEvent(new CustomEvent('hse_notifications_updated'));
     return success;
   },
@@ -782,15 +950,20 @@ export const CentralNotificationService = {
 
   async acknowledge(id: string | number, note?: string, acknowledgmentSource?: string): Promise<boolean> {
     const idStr = String(id);
-    const success = await apiDb.acknowledgeNotification(idStr, note, acknowledgmentSource);
     markPublicAlertAcknowledgedLocally(idStr);
+    const success = await apiDb.acknowledgeNotification(
+      idStr,
+      note,
+      acknowledgmentSource,
+      getOrInitGuestSessionId()
+    );
     await this.closeSystemOsNotification(idStr);
     window.dispatchEvent(new CustomEvent('hse_notifications_updated'));
     return success;
   },
 
   async getPublicActiveEmergencyAlerts(sinceIso?: string): Promise<AppNotification[]> {
-    const list = await apiDb.getPublicActiveEmergencyAlerts(sinceIso);
+    const list = await apiDb.getPublicActiveEmergencyAlerts(sinceIso, getOrInitGuestSessionId());
     return (list || []).map((item: any) => ({
       id: item.id,
       notifId: item.notifId || item.id || `notif-${Date.now()}`,
@@ -815,6 +988,7 @@ export const CentralNotificationService = {
 
   async acknowledgePublic(id: string | number, note?: string, acknowledgmentSource?: string): Promise<boolean> {
     const notifIdStr = String(id);
+    markPublicAlertAcknowledgedLocally(notifIdStr);
     const sessionId = getOrInitGuestSessionId();
     const success = await apiDb.acknowledgePublicEmergency(
       notifIdStr,
@@ -822,7 +996,6 @@ export const CentralNotificationService = {
       note,
       acknowledgmentSource || 'login_screen'
     );
-    markPublicAlertAcknowledgedLocally(notifIdStr);
     await this.closeSystemOsNotification(notifIdStr);
     window.dispatchEvent(new CustomEvent('hse_notifications_updated'));
     return success;

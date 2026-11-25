@@ -173,6 +173,11 @@ export const NotificationBellDropdown: React.FC<NotificationBellDropdownProps> =
     markAsRead(notif.notifId);
     setIsOpen(false);
 
+    if (notif.actionUrl && notif.actionUrl.startsWith('#') && notif.actionUrl.includes('report=')) {
+      window.location.hash = notif.actionUrl;
+      return;
+    }
+
     // Open full Alert Details & Delivery Report modal
     openAlertDetails(notif);
 
@@ -278,8 +283,9 @@ export const NotificationBellDropdown: React.FC<NotificationBellDropdownProps> =
       {/* Dropdown Panel */}
       {isOpen && (
         <div
-          className="absolute left-0 right-auto top-full mt-2.5 w-[calc(100vw-2rem)] sm:w-96 md:w-[420px] max-w-[95vw] bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-2xl sm:rounded-3xl shadow-2xl overflow-hidden z-[100] animate-in fade-in slide-in-from-top-2"
-          style={{ minWidth: 'min(340px, calc(100vw - 2rem))' }}
+          className={`fixed inset-x-2 top-16 sm:inset-x-auto sm:top-full sm:mt-2.5 sm:absolute ${
+            isFa ? 'sm:left-0 sm:right-auto' : 'sm:right-0 sm:left-auto'
+          } w-auto sm:w-96 md:w-[420px] max-w-[calc(100vw-1rem)] max-h-[calc(100dvh-5rem)] bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-2xl sm:rounded-3xl shadow-2xl overflow-hidden z-[100] animate-in fade-in slide-in-from-top-2 flex flex-col`}
         >
           {/* Header */}
           <div className="p-3.5 sm:p-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/90 dark:bg-slate-800/60 backdrop-blur-sm">

@@ -1,5 +1,40 @@
 import { toast } from 'react-hot-toast';
 import { apiDb, getAuthToken } from '../services/apiDatabaseClient';
+import {
+  SYSTEM_MODULE_GROUPS,
+  ALL_SYSTEM_MODULES,
+  ALL_PSM_SUBITEMS,
+  ALL_DOCUMENTS_SUBITEMS,
+  ALL_HEALTH_ENV_SUBITEMS,
+  ALL_FIRE_DEPT_SUBITEMS,
+  ALL_SAFETY_DEPT_SUBITEMS,
+  DEFAULT_DASHBOARD_CARDS_LAYOUT,
+  type SystemModuleGroup,
+  type SystemModuleConfig,
+  type HealthEnvSubItemConfig,
+  type FireDeptSubItemConfig,
+  type SafetyDeptSubItemConfig,
+  type CardLayoutItem,
+  type DashboardLayoutConfig,
+} from '../../shared/modulesCatalog';
+
+export {
+  SYSTEM_MODULE_GROUPS,
+  ALL_SYSTEM_MODULES,
+  ALL_PSM_SUBITEMS,
+  ALL_DOCUMENTS_SUBITEMS,
+  ALL_HEALTH_ENV_SUBITEMS,
+  ALL_FIRE_DEPT_SUBITEMS,
+  ALL_SAFETY_DEPT_SUBITEMS,
+  DEFAULT_DASHBOARD_CARDS_LAYOUT,
+  type SystemModuleGroup,
+  type SystemModuleConfig,
+  type HealthEnvSubItemConfig,
+  type FireDeptSubItemConfig,
+  type SafetyDeptSubItemConfig,
+  type CardLayoutItem,
+  type DashboardLayoutConfig,
+};
 
 async function fetchSettingFromServer(key: string): Promise<any> {
   if (typeof window === 'undefined' || !getAuthToken()) return null;
@@ -20,234 +55,6 @@ async function saveSettingToServer(key: string, value: any, description?: string
     return false;
   }
 }
-
-export interface SystemModuleGroup {
-  id: string;
-  titleFa: string;
-  titleEn: string;
-  color: string;
-  bgLight: string;
-  borderLight: string;
-  iconName?: string;
-  badgeCount?: number;
-}
-
-export const SYSTEM_MODULE_GROUPS: SystemModuleGroup[] = [
-  {
-    id: 'dashboards',
-    titleFa: 'داشبوردها و تحلیل‌های آماری',
-    titleEn: 'Executive Dashboards & Analytics',
-    color: 'text-sky-600 dark:text-sky-400',
-    bgLight: 'bg-sky-50 dark:bg-sky-950/30',
-    borderLight: 'border-sky-200 dark:border-sky-800/40',
-    iconName: 'BarChart3'
-  },
-  {
-    id: 'departments',
-    titleFa: 'دپارتمان‌های تخصصی HSE',
-    titleEn: 'Specialized HSE Units',
-    color: 'text-rose-600 dark:text-rose-400',
-    bgLight: 'bg-rose-50 dark:bg-rose-950/30',
-    borderLight: 'border-rose-200 dark:border-rose-800/40',
-    iconName: 'Building2'
-  },
-  {
-    id: 'safety_permits',
-    titleFa: 'مجوزهای کار و کنترل ریسک',
-    titleEn: 'Permits & Risk Control',
-    color: 'text-amber-600 dark:text-amber-400',
-    bgLight: 'bg-amber-50 dark:bg-amber-950/30',
-    borderLight: 'border-amber-200 dark:border-amber-800/40',
-    iconName: 'FileCheck2'
-  },
-  {
-    id: 'incidents_compliance',
-    titleFa: 'رویدادها و انضباط ایمنی',
-    titleEn: 'Incidents & Compliance',
-    color: 'text-red-600 dark:text-red-400',
-    bgLight: 'bg-red-50 dark:bg-red-950/30',
-    borderLight: 'border-red-200 dark:border-red-800/40',
-    iconName: 'AlertOctagon'
-  },
-  {
-    id: 'human_capital',
-    titleFa: 'سرمایه انسانی و آموزش',
-    titleEn: 'Human Capital & Training',
-    color: 'text-emerald-600 dark:text-emerald-400',
-    bgLight: 'bg-emerald-50 dark:bg-emerald-950/30',
-    borderLight: 'border-emerald-200 dark:border-emerald-800/40',
-    iconName: 'GraduationCap'
-  },
-  {
-    id: 'workflows',
-    titleFa: 'کارتابل و فرآیندهای سازمانی',
-    titleEn: 'Workflows & Digital Workplace',
-    color: 'text-indigo-600 dark:text-indigo-400',
-    bgLight: 'bg-indigo-50 dark:bg-indigo-950/30',
-    borderLight: 'border-indigo-200 dark:border-indigo-800/40',
-    iconName: 'Workflow'
-  },
-  {
-    id: 'intelligent_analytics',
-    titleFa: 'مرکز هوشمند مدیریت و تحلیل HSE',
-    titleEn: 'Intelligent HSE Management & Analytics Center',
-    color: 'text-violet-600 dark:text-violet-400',
-    bgLight: 'bg-violet-50 dark:bg-violet-950/30',
-    borderLight: 'border-violet-200 dark:border-violet-800/40',
-    iconName: 'BrainCircuit'
-  },
-  {
-    id: 'system',
-    titleFa: 'مدیریت و پیکربندی سامانه',
-    titleEn: 'Governance & Administration',
-    color: 'text-slate-600 dark:text-slate-400',
-    bgLight: 'bg-slate-100 dark:bg-slate-800/50',
-    borderLight: 'border-slate-200 dark:border-slate-700',
-    iconName: 'SlidersHorizontal'
-  }
-];
-
-export interface SystemModuleConfig {
-  key: string;
-  titleFa: string;
-  titleEn: string;
-  enabled?: boolean; // default true
-  groupId?: string; // One of: 'dashboards' | 'departments' | 'safety_permits' | 'incidents_compliance' | 'human_capital' | 'workflows' | 'system'
-  category?: string;
-  descriptionFa?: string;
-}
-
-export interface HealthEnvSubItemConfig {
-  key: string;
-  titleFa: string;
-  titleEn: string;
-  group: 'health' | 'env';
-  enabled?: boolean; // default true
-  descriptionFa?: string;
-}
-
-export interface FireDeptSubItemConfig {
-  key: string;
-  titleFa: string;
-  titleEn: string;
-  type: 'general' | 'category';
-  enabled?: boolean; // default true
-  descriptionFa?: string;
-}
-
-export interface SafetyDeptSubItemConfig {
-  key: string;
-  titleFa: string;
-  titleEn: string;
-  group: 'checklists' | 'operations';
-  enabled?: boolean; // default true
-  descriptionFa?: string;
-}
-
-export const ALL_SYSTEM_MODULES: SystemModuleConfig[] = [
-  // 1. Dashboards & KPI Analytics
-  { key: 'dashboard', titleFa: 'داشبورد جامع مدیریتی', titleEn: 'Unified Executive Dashboard', groupId: 'dashboards', category: 'داشبوردها و تحلیل‌های آماری', enabled: true, descriptionFa: 'داشبورد اصلی آمار، شاخص‌های کلیدی عملکرد HSE و تحلیل‌های کلی' },
-  { key: 'heat', titleFa: 'پایش استرس گرمایی', titleEn: 'Thermal Heat Stress Monitor', groupId: 'dashboards', category: 'داشبوردها و تحلیل‌های آماری', enabled: true, descriptionFa: 'پایش آنلاین شاخص WBGT، استرس گرمایی محیط و توصیه‌های ایمنی' },
-  { key: 'hse-ms', titleFa: 'پایش نرخ رویدادها (TRIR)', titleEn: 'TRIR Incident Rate', groupId: 'dashboards', category: 'داشبوردها و تحلیل‌های آماری', enabled: true, descriptionFa: 'محاسبه استاندارد نرخ رویدادهای قابل ثبت TRIR و ساعات کارکرد' },
-
-  // 2. Specialized HSE Departments
-  { key: 'safety-unit', titleFa: 'واحد ایمنی و بازرسی‌ها', titleEn: 'Safety Operations Department', groupId: 'departments', category: 'دپارتمان‌های تخصصی HSE', enabled: true, descriptionFa: 'مدیریت نظارت بر ایمنی عملیاتی، چک‌لیست‌های تخصصی، ممیزی‌ها و گشت‌های ایمنی' },
-  { key: 'fire-dept', titleFa: 'واحد آتش‌نشانی و امداد', titleEn: 'Fire Department & Emergency', groupId: 'departments', category: 'دپارتمان‌های تخصصی HSE', enabled: true, descriptionFa: 'مدیریت ناوگان آتش‌نشانی، تجهیزات اطفاء حریق و مانورهای عملیاتی' },
-  { key: 'health-env', titleFa: 'واحد بهداشت و محیط زیست', titleEn: 'Health & Environment Department', groupId: 'departments', category: 'دپارتمان‌های تخصصی HSE', enabled: true, descriptionFa: 'پایش آلاینده‌های محیط زیست، معاینات طب کار و بهداشت حرفه‌ای' },
-
-  // 3. Permits & Risk Control
-  { key: 'psm', titleFa: 'مدیریت استقرار ایمنی فرایند (PSM)', titleEn: 'Process Safety Management (PSM)', groupId: 'safety_permits', category: 'مجوزهای کار و کنترل ریسک', enabled: true, descriptionFa: 'سیستم جامع مدیریت پروژه استقرار و بلوغ ایمنی فرایند (PSM) مبتنی بر ۲۰ عنصر CCPS RBPS و ۱۴ الزام OSHA 1910.119' },
-  { key: 'permit', titleFa: 'پروانه کار ایمن (PTW)', titleEn: 'Permit to Work (PTW)', groupId: 'safety_permits', category: 'مجوزهای کار و کنترل ریسک', enabled: true, descriptionFa: 'صدور و گردش کار دیجیتال پروانه‌های کار گرم، سرد، حفاری و فضاهای بسته' },
-  { key: 'ptw-audit', titleFa: 'ممیزی پروانه‌های کار (PTW Audit)', titleEn: 'Permit to Work Audit System', groupId: 'safety_permits', category: 'مجوزهای کار و کنترل ریسک', enabled: true, descriptionFa: 'ممیزی جامع و چک‌لیست ۳۰ گانه انطباق سیستم صدور پروانه کار ایمن' },
-  { key: 'risk', titleFa: 'ارزیابی ریسک هوشمند (AI JSA)', titleEn: 'AI Risk Assessment (JSA/FMEA)', groupId: 'safety_permits', category: 'مجوزهای کار و کنترل ریسک', enabled: true, descriptionFa: 'شناسایی خطرات و ارزیابی ریسک با هوش مصنوعی بر اساس JSA / FMEA' },
-  { key: 'lifting-plan', titleFa: 'مدیریت و مهندسی عملیات باربرداری (Lifting Plan)', titleEn: 'Lifting Plan Management & Engineering', groupId: 'safety_permits', category: 'مجوزهای کار و کنترل ریسک', enabled: true, descriptionFa: 'سامانه جامع طراحی، محاسبات مهندسی ASME/WRC، مدل‌سازی سه‌بعدی، Load Chart، عملیات ویژه و گردش کار ۹ مرحله‌ای باربرداری' },
-  { key: 'ppe', titleFa: 'تجهیزات حفاظت فردی (PPE)', titleEn: 'PPE Matrix Management (OSHA)', groupId: 'safety_permits', category: 'مجوزهای کار و کنترل ریسک', enabled: true, descriptionFa: 'مدیریت تحویل، انقضا و استاندارد تجهیزات حفاظت فردی' },
-
-  // 4. Incidents & Compliance
-  { key: 'incidents', titleFa: 'گزارشات ناهنجاری و حوادث', titleEn: 'Safety Incidents & Anomalies', groupId: 'incidents_compliance', category: 'رویدادها و انضباط ایمنی', enabled: true, descriptionFa: 'ثبت و تحلیل شبه‌حوادث، ناهنجاری‌های ایمنی و حوادث شغلی OSHA' },
-  { key: 'warnings', titleFa: 'ثبت و پیگیری اخطارها', titleEn: 'Personnel Written Warnings', groupId: 'incidents_compliance', category: 'رویدادها و انضباط ایمنی', enabled: true, descriptionFa: 'ثبت و پیگیری اخطارهای کتبی ایمنی و عدم انطباق‌های پرسنلی' },
-
-  // 5. Human Capital & Training
-  { key: 'training', titleFa: 'مدیریت و تقویم آموزش', titleEn: 'Training Management & Calendar', groupId: 'human_capital', category: 'سرمایه انسانی و آموزش', enabled: true, descriptionFa: 'سجلات دوره‌های آموزشی HSE، گواهینامه‌ها و آمار ساعات آموزش' },
-
-  // 6. Workflows & Digital Workplace
-  { key: 'documents', titleFa: 'دستورالعمل‌ها و مستندات', titleEn: 'Instructions & Documents', groupId: 'workflows', category: 'کارتابل و فرآیندهای سازمانی', enabled: true, descriptionFa: 'مدیریت جامع دستورالعمل‌ها، روش‌های اجرایی، گواهینامه‌ها و سرتیفیکیت تجهیزات، فرم‌ها و مستندات HSE' },
-  { key: 'pending-documents', titleFa: 'کارتابل و اسناد در انتظار اقدام', titleEn: 'Documents Awaiting Action & Sign', groupId: 'workflows', category: 'کارتابل و فرآیندهای سازمانی', enabled: true, descriptionFa: 'کارتابل هوشمند مشاهده، بررسی، تأیید، رد، امضای دیجیتال و ارجاع اسناد و پروانه‌ها' },
-  { key: 'non-conformances', titleFa: 'مدیریت عدم انطباق‌ها (CAPA)', titleEn: 'Non-Conformities & CAPA', groupId: 'workflows', category: 'کارتابل و فرآیندهای سازمانی', enabled: true, descriptionFa: 'سامانه جامع ثبت، ارجاع، علل ریشه‌ای و اقدامات اصلاحی و پیشگیرانه کلیه واحدها' },
-
-  // 7. Intelligent HSE Management & Analytics Center (مرکز هوشمند مدیریت و تحلیل HSE)
-  { key: 'reports', titleFa: 'گزارشات تحلیلی و آماری', titleEn: 'Analytical & Statistical Reports', groupId: 'intelligent_analytics', category: 'مرکز هوشمند مدیریت و تحلیل HSE', enabled: true, descriptionFa: 'گزارش‌های مدیریتی، نمودارهای تحلیلی و خروجی‌های جامع سیستم' },
-  { key: 'personnel-history', titleFa: 'پرونده ۳۶۰ درجه پرسنل', titleEn: 'Personnel 360° Dossier', groupId: 'intelligent_analytics', category: 'مرکز هوشمند مدیریت و تحلیل HSE', enabled: true, descriptionFa: 'جستجو و مشاهده پرونده ۳۶۰ درجه پرسنل شامل آموزش‌ها، اخطارها و PPE' },
-  { key: 'ai-assistant', titleFa: 'هوش مصنوعی HSECORE', titleEn: 'HSECORE AI Assistant', groupId: 'intelligent_analytics', category: 'مرکز هوشمند مدیریت و تحلیل HSE', enabled: true, descriptionFa: 'دستیار مستقل هوش مصنوعی محلی با ۱۰ مشاور تخصصی و استخراج داده‌های زنده سازمان' },
-
-  // 8. Governance & Administration (مدیریت و پیکربندی سامانه)
-  { key: 'process-management', titleFa: 'مدیریت فرآیندها (BPMN)', titleEn: 'Process Management (Camunda 8)', groupId: 'system', category: 'مدیریت و پیکربندی سامانه', enabled: true, descriptionFa: 'طراحی، مدل‌سازی و اجرای فرآیندهای سازمانی و گردش‌کارهای Camunda' },
-  { key: 'notifications', titleFa: 'مدیریت هشدار و اعلان‌ها', titleEn: 'Alerts & Notifications Management', groupId: 'system', category: 'مدیریت و پیکربندی سامانه', enabled: true, descriptionFa: 'ارسال هشدار فوری HSE، مشاهده تاریخچه اعلان‌ها و دسترسی به آرشیو و بایگانی اعلان‌های سامانه' },
-  { key: 'user-mgmt', titleFa: 'مدیریت کاربران و دسترسی‌ها', titleEn: 'User Management & RBAC Roles', groupId: 'system', category: 'مدیریت و پیکربندی سامانه', enabled: true, descriptionFa: 'مدیریت حساب‌های کاربری، نقش‌ها و ماتریس دسترسی به ماژول‌های سامانه' },
-  { key: 'system', titleFa: 'تنظیمات و ساختار سازمانی', titleEn: 'System Settings & Architecture', groupId: 'system', category: 'مدیریت و پیکربندی سامانه', enabled: true, descriptionFa: 'پیکربندی سامانه، مدیریت ساختار سازمانی، لوگو و بازیابی پایگاه داده' },
-  { key: 'profile', titleFa: 'شناسنامه و تنظیمات کاربری', titleEn: 'My Personal Profile & Security', groupId: 'system', category: 'مدیریت و پیکربندی سامانه', enabled: true, descriptionFa: 'مشخصات حساب کاربری جاری، تغییر رمز عبور و تنظیمات شخصی' }
-];
-
-export const ALL_PSM_SUBITEMS = [
-  { key: 'dashboard', titleFa: 'داشبورد کنترل و پایش پروژه PSM', titleEn: 'PSM Control & Monitoring Dashboard', descriptionFa: 'پایش درصد پیشرفت کل، پیشرفت واحدها، ۲۰ عنصر CCPS، ۱۴ الزام OSHA و انحراف زمانی' },
-  { key: 'project', titleFa: 'مدیریت پروژه اصلی و دامنه PSM', titleEn: 'PSM Project Charter & Scope', descriptionFa: 'تعریف کد، نام، دامنه پروژه، مدیر و حامی پروژه، اعضای تیم، واحدهای مشمول و بودجه' },
-  { key: 'org-assets', titleFa: 'ساختار سازمانی مرکزی و تجهیزات فرایندی (SCE)', titleEn: 'Central Org & Process Assets', descriptionFa: 'اتصال زنده به ساختار سازمانی مرکزی و ثبت تجهیزات بحرانی ایمنی و PSI' },
-  { key: 'assessment', titleFa: 'ارزیابی اولیه PSM و ماتریس تطبیق N:M', titleEn: 'Initial Assessment & Traceability Matrix', descriptionFa: 'ارزیابی ۲۰ عنصر CCPS و ۱۴ الزام OSHA به همراه ماتریس تطبیق چندبه‌چند با تفکیک ارتباط مستقیم و غیرمستقیم' },
-  { key: 'gap-analysis', titleFa: 'تحلیل شکاف (Gap Analysis) و استخراج خودکار', titleEn: 'Automated Gap Analysis', descriptionFa: 'استخراج خودکار شکاف‌ها از ارزیابی اولیه، سطح‌بندی ریسک و دروازه توجیه فنی خارج از دامنه' },
-  { key: 'wbs-gantt', titleFa: 'مدیریت WBS، برنامه اجرایی و نمودار گانت', titleEn: 'WBS, Schedule & Gantt Chart', descriptionFa: 'ساختار شکست کار سلسله‌مراتبی، زمان‌بندی، پیش‌نیازها، مسیر بحرانی و محاسبه تأخیر' },
-  { key: 'documents', titleFa: 'بانک اسناد، مدارک و شواهد PSM', titleEn: 'PSM Document & Evidence Bank', descriptionFa: 'مدیریت نسخه، تاریخ بازنگری/انقضا، چرخه تأیید چندمرحله‌ای و کنترل کفایت شواهد فنی' },
-  { key: 'capa', titleFa: 'گردش کار ۸ مرحله‌ای اقدامات اصلاحی (CAPA)', titleEn: '8-Stage CAPA Workflow', descriptionFa: 'گردش کار کامل ۸ مرحله‌ای CAPA با الزام صحه‌گذاری مستقل اثربخشی قبل از بستن اقدام' },
-  { key: 'studies', titleFa: '۱۴ زیرماژول تخصصی ایمنی فرایند', titleEn: '14 Specialized PSM Subsystems', descriptionFa: 'مدیریت PSI, PHA, HAZOP, HAZID, LOPA, Bow-Tie, SOP, MI, MOC, PSSR, Contractors, Training, Incidents, ERP' },
-  { key: 'maturity', titleFa: 'مدل بلوغ ۵ سطحی PSM (Maturity Model)', titleEn: '5-Level PSM Maturity Model', descriptionFa: 'ارزیابی مستقل سطح بلوغ از سطح ۱ (Initial) تا سطح ۵ (Leading) برای هر عنصر و کل مجتمع' },
-  { key: 'handover', titleFa: 'دروازه تحویل نهایی پروژه و دوره نگهداشت', titleEn: 'Final Handover & Sustainment Gate', descriptionFa: 'کنترل خودکار ۷ شرط الزامی تحویل نهایی پروژه استقرار و انتقال به سیستم فعال PSM' },
-  { key: 'ai-audit', titleFa: 'هوش مصنوعی محلی PSM و تاریخچه ممیزی (Audit Log)', titleEn: 'Local PSM AI & Audit Trail', descriptionFa: 'تحلیل شکاف، پیشنهاد برنامه اجرایی و ارزیابی ریسک با هوش مصنوعی محلی بدون ارسال داده به کلود' },
-];
-
-export const ALL_DOCUMENTS_SUBITEMS = [
-  { key: 'ORG_PROCEDURES', titleFa: 'دستورالعمل‌ها و روش‌های اجرایی', titleEn: 'Organizational Procedures' },
-  { key: 'EQUIPMENT_CERTIFICATES', titleFa: 'گواهینامه‌ها و سرتیفیکیت ماشین‌آلات و تجهیزات', titleEn: 'Machinery & Equipment Certificates' },
-  { key: 'SDS', titleFa: 'SDS – برگه اطلاعات ایمنی مواد شیمیایی', titleEn: 'SDS – Safety Data Sheets' },
-  { key: 'ORG_FORMS_CHECKLISTS', titleFa: 'فرم‌ها و چک‌لیست‌های سازمانی', titleEn: 'Organizational Forms & Checklists' },
-  { key: 'OTHER_HSE_DOCS', titleFa: 'سایر مستندات مرتبط با HSE', titleEn: 'Other HSE Related Documents' },
-];
-
-export const ALL_HEALTH_ENV_SUBITEMS: HealthEnvSubItemConfig[] = [
-  // Group: Health (بهداشت حرفه‌ای و سلامت)
-  { key: 'clinic', titleFa: 'بهداری و مراجعات سرپایی', titleEn: 'Dispensary & Clinic', group: 'health', enabled: true, descriptionFa: 'ثبت و مدیریت مراجعات بهداری، تریاژ، علائم حیاتی، اقدامات درمانی، داروها، استراحت پزشکی و اعزام آمبولانس' },
-  { key: 'periodic-exams', titleFa: 'سامانه معاینات ادواری طب کار', titleEn: 'Periodic Medical Exams (Occupational Health)', group: 'health', enabled: true, descriptionFa: 'سامانه جامع معاینات ادواری، پرونده سلامت پرسنل، آزمایشگاه، ماژول BMI، مقایسه سالانه و ورود اکسل' },
-  { key: 'non-periodic-exams', titleFa: 'معاینات غیر دوره‌ای', titleEn: 'Non-Periodic Exams', group: 'health', enabled: true, descriptionFa: 'معاینات بدو استخدام، بازگشت به کار و معاینات اختصاصی موردی' },
-  { key: 'nutrition', titleFa: 'کارشناس تغذیه و رژیم‌درمانی', titleEn: 'Nutrition Specialist', group: 'health', enabled: true, descriptionFa: 'پایش وضعیت تغذیه، شاخص‌های آنتروپومتریک، عادات غذایی، برنامه‌ها و مشاوره‌های تخصصی پرسنل' },
-  { key: 'health-env-checklists', titleFa: 'چک‌لیست‌های عملیاتی بهداشت و محیط زیست', titleEn: 'Operational Health & Environment Checklists', group: 'health', enabled: true, descriptionFa: 'چک‌لیست‌های ۵ گانه: بازدید اماکن و ساختمان‌ها، تسهیلات و آبدارخانه، رستوران، تجهیزات آمبولانس و توالت و دستشویی کارگاه' },
-  
-  // Group: Environment (محیط‌زیست)
-  { key: 'env-dashboard', titleFa: 'داشبورد محیط‌زیست', titleEn: 'Env Dashboard', group: 'env', enabled: true, descriptionFa: 'شاخص‌های کلی عملکرد محیط‌زیستی، آلاینده‌ها و پایش‌های خوداظهاری' },
-  { key: 'env-monitoring', titleFa: 'پایش‌های محیط‌زیستی', titleEn: 'Environmental Monitoring', group: 'env', enabled: true, descriptionFa: 'سنجش و مانیتورینگ آنلاین آلاینده‌های هوا، صوت و عوامل محیطی' },
-  { key: 'waste-management', titleFa: 'مدیریت پسماند (EMP)', titleEn: 'Waste Management (EMP)', group: 'env', enabled: true, descriptionFa: 'انبارش، انتقال، تفکیک و دفع اصولی پسماندهای صنعتی و خطرناک' },
-  { key: 'wastewater', titleFa: 'مدیریت پساب (ETP)', titleEn: 'Wastewater (ETP)', group: 'env', enabled: true, descriptionFa: 'پایش پارامترهای کیفی پساب خروجی تصفیه‌خانه صنعتی و بهداشتی' },
-  { key: 'air-water-soil', titleFa: 'پایش دودکش، آب و خاک', titleEn: 'Stacks, Water & Soil', group: 'env', enabled: true, descriptionFa: 'نمونه‌برداری دوره‌ای گازهای دودکش، آب شرب و چاه‌ها و خاک صنعتی' },
-  { key: 'five-s', titleFa: 'ساماندهی 5S', titleEn: '5S System', group: 'env', enabled: true, descriptionFa: 'ممیزی نظام آراستگی محیط کار، ۵ اصل پاکیزگی و چک‌لیست‌های دوره‌ای' },
-  { key: 'env-reports', titleFa: 'گزارش‌های محیط‌زیست', titleEn: 'Environment Reports', group: 'env', enabled: true, descriptionFa: 'گزارش‌های رسمی سازمان حفاظت محیط‌زیست و خروجی‌های آماری' }
-];
-
-export const ALL_FIRE_DEPT_SUBITEMS: FireDeptSubItemConfig[] = [
-  { key: 'dashboard', titleFa: 'داشبورد و وضعیت کل', titleEn: 'Overview Dashboard', type: 'general', enabled: true, descriptionFa: 'داشبورد مدیریتی، وضعیت کلی تجهیزات آتش‌نشانی، نقص‌های باز و آمادگی عملیاتی' },
-  { key: 'daily-report', titleFa: 'گزارش روزانه آتش‌نشانی', titleEn: 'Daily Station Report', type: 'general', enabled: true, descriptionFa: 'ثبت و پایش گزارش روزانه ایستگاه آتش‌نشانی معین، تجهیزات، سیستم‌های اعلام و اطفاء حریق، گازسنج‌ها و رویدادها' },
-  { key: 'vehicles', titleFa: 'مدیریت و بازرسی خودروها', titleEn: 'Fire Vehicles Fleet', type: 'general', enabled: true, descriptionFa: 'ناوگان خودروهای آتش‌نشانی، چک‌لیست‌های روزانه، پمپ، تجهیزات و وضعیت فنی' },
-  { key: 'suppression-design', titleFa: 'مرکز طراحی و مهندسی سیستم‌های حفاظت در برابر حریق', titleEn: 'Fire Protection Design & Engineering Center', type: 'general', enabled: true, descriptionFa: 'محیط یکپارچه طراحی، محاسبه و جانمایی ۸ سیستم حفاظت حریق (NFPA 13, 10, 14, 11, 2001, 72, 20, 22) روی نقشه دوبعدی' },
-  { key: 'Fire Extinguisher Capsol', titleFa: 'کپسول‌های اطفاء حریق (Fire Extinguisher)', titleEn: 'Fire Extinguisher Capsol', type: 'category', enabled: true, descriptionFa: 'بازرسی کپسول‌های پودر و گاز، CO2، فوم و آب با انقضا و فشارسنج' },
-  { key: 'Hydrants & Monitors', titleFa: 'هایدرانت‌ها و مانیتورهای آب/فوم', titleEn: 'Hydrants & Monitors', type: 'category', enabled: true, descriptionFa: 'پایش فشار، روغن‌کاری، تست هیدرواستاتیک و کارایی هایدرانت‌ها و مانیتورها' },
-  { key: 'Fire Boxs', titleFa: 'جعبه‌های هوزریل و هوزباکس آتش‌نشانی', titleEn: 'Fire Boxes & Hose Reels', type: 'category', enabled: true, descriptionFa: 'بررسی شیلنگ‌های برزنتی، نازل‌ها، هوزریل و شیرآلات جعبه‌های اطفاء حریق' },
-  { key: 'Foam Pakages', titleFa: 'پکیج‌ها و مخازن فوم اطفاء حریق', titleEn: 'Foam Packages & Proportioners', type: 'category', enabled: true, descriptionFa: 'کنترل سطح کنسانتره فوم، اینداکتورها، تناسب‌سازها و سیستم‌های فومینگ' },
-  { key: 'FM 200', titleFa: 'سیستم‌های اطفاء گازی پاک FM 200', titleEn: 'FM 200 Clean Agent Systems', type: 'category', enabled: true, descriptionFa: 'سیستم‌های اطفاء حریق اتاق‌های سرور، کنترل‌روم و سیلندرهای گازی FM200' },
-  { key: 'دليج ولواسپرينكلرon,off ولو', titleFa: 'دلویج ولو، اسپرینکلر و شیرهای On/Off', titleEn: 'Deluge, Sprinklers & On/Off Valves', type: 'category', enabled: true, descriptionFa: 'شیرهای سیلابی دلویج، شبکه‌های اسپرینکلر اتوماتیک و تست اکچویتورها' },
-  { key: 'گازيابها', titleFa: 'گازیاب‌ها و دتکتورهای ثابت و پرتابل', titleEn: 'Fixed & Portable Gas Detectors', type: 'category', enabled: true, descriptionFa: 'کالیبراسیون و بررسی عملکرد سنسورهای LEL، H2S، O2 و CO' },
-  { key: 'دوش و چشم شوی اضطراری', titleFa: 'دوش و چشم‌شوی‌های اضطراری ایمنی', titleEn: 'Emergency Eyewash & Safety Showers', type: 'category', enabled: true, descriptionFa: 'تست جریان آب، فشار، اهرم‌های فعال‌سازی و شستشوی اضطراری' }
-];
-
-export const ALL_SAFETY_DEPT_SUBITEMS: SafetyDeptSubItemConfig[] = [
-  { key: 'dashboard', titleFa: 'داشبورد واحد ایمنی', titleEn: 'Overview Dashboard', group: 'operations', enabled: true, descriptionFa: 'داشبورد جامع نظارت، شاخص‌های انطباق بازرسی‌ها و نواقص باز ایمنی' },
-  { key: 'checklists', titleFa: 'سوابق و اجرای بازرسی', titleEn: 'Execution & History', group: 'checklists', enabled: true, descriptionFa: 'ثبت، مدیریت، سوابق و ممیزی‌های میدانی بازرسی‌ها و چک‌لیست‌های تخصصی' },
-];
 
 export const STORAGE_KEY = 'hse_ui_config_v3';
 export const PREV_STORAGE_KEY = 'hse_ui_config_v2';
@@ -636,52 +443,3 @@ export function resetSafetyDeptConfig(): void {
     console.error('Failed to reset Safety Dept config:', err);
   }
 }
-
-export interface CardLayoutItem {
-  id: string;
-  visible: boolean;
-  order: number;
-  colSpan?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12;
-  height?: 'compact' | 'normal' | 'expanded' | 'custom';
-  customHeight?: number;
-  minHeight?: number;
-}
-
-export interface DashboardLayoutConfig {
-  cards: CardLayoutItem[];
-  updatedAt?: string;
-  updatedBy?: string;
-  isUserCustom?: boolean;
-}
-
-export const DEFAULT_DASHBOARD_CARDS_LAYOUT: CardLayoutItem[] = [
-  { id: 'kpi-incidents', visible: true, order: 0, colSpan: 3, height: 'normal' },
-  { id: 'kpi-trir-target', visible: true, order: 1, colSpan: 3, height: 'normal' },
-  { id: 'kpi-safe-hours', visible: true, order: 2, colSpan: 3, height: 'normal' },
-  { id: 'kpi-permits', visible: true, order: 3, colSpan: 3, height: 'normal' },
-  { id: 'card-hsi-gauge', visible: true, order: 4, colSpan: 4, height: 'normal' },
-  { id: 'card-incident-chart', visible: true, order: 5, colSpan: 8, height: 'normal' },
-  { id: 'kpi-training-rate', visible: true, order: 6, colSpan: 3, height: 'normal' },
-  { id: 'kpi-anomalies-count', visible: true, order: 7, colSpan: 3, height: 'normal' },
-  { id: 'kpi-ptw-audit-rate', visible: true, order: 8, colSpan: 3, height: 'normal' },
-  { id: 'kpi-safety-inspection-rate', visible: true, order: 9, colSpan: 3, height: 'normal' },
-  { id: 'card-training-chart', visible: true, order: 10, colSpan: 6, height: 'normal' },
-  { id: 'card-anomalies-chart', visible: true, order: 11, colSpan: 6, height: 'normal' },
-  { id: 'card-ptw-audit-chart', visible: true, order: 12, colSpan: 6, height: 'normal' },
-  { id: 'card-safety-inspection-chart', visible: true, order: 13, colSpan: 6, height: 'normal' },
-  { id: 'card-health-chart', visible: true, order: 14, colSpan: 6, height: 'normal' },
-  { id: 'card-fire-dept-chart', visible: true, order: 15, colSpan: 6, height: 'normal' },
-  { id: 'card-ptw-chart', visible: true, order: 16, colSpan: 6, height: 'normal' },
-  { id: 'card-risk-matrix', visible: true, order: 17, colSpan: 6, height: 'normal' },
-  { id: 'card-5s-trend', visible: true, order: 18, colSpan: 6, height: 'normal' },
-  { id: 'card-warnings-trend', visible: true, order: 19, colSpan: 6, height: 'normal' },
-  { id: 'kpi-heat-index', visible: true, order: 20, colSpan: 3, height: 'normal' },
-  { id: 'kpi-wbgt', visible: true, order: 21, colSpan: 3, height: 'normal' },
-  { id: 'kpi-health-rate', visible: true, order: 22, colSpan: 3, height: 'normal' },
-  { id: 'kpi-fire-readiness', visible: true, order: 23, colSpan: 3, height: 'normal' },
-  { id: 'kpi-5s-score', visible: true, order: 24, colSpan: 3, height: 'normal' },
-  { id: 'kpi-risk-high', visible: true, order: 25, colSpan: 3, height: 'normal' },
-  { id: 'kpi-warnings', visible: true, order: 26, colSpan: 3, height: 'normal' },
-  { id: 'card-notifications', visible: true, order: 27, colSpan: 4, height: 'normal' },
-  { id: 'card-quick-actions', visible: true, order: 28, colSpan: 8, height: 'normal' },
-];

@@ -2012,17 +2012,22 @@ export default function PersonnelHistoryModule({ isFa, currentUser, warnings: pr
                       </tr>
                     </thead>
                     <tbody>
-                      {dossier.trainingCourses.map((c, idx) => (
-                        <tr key={c.id || idx} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/40">
-                          <td className="p-2 border-r border-slate-200 dark:border-slate-700 text-center font-mono">{idx + 1}</td>
-                          <td className="p-2 border-r border-slate-200 dark:border-slate-700 font-bold text-slate-900 dark:text-white">{c.courseTitle || c.title || 'دوره آموزشی HSE'}</td>
-                          <td className="p-2 border-r border-slate-200 dark:border-slate-700 text-center font-mono text-slate-500">{c.courseCode || '-'}</td>
-                          <td className="p-2 border-r border-slate-200 dark:border-slate-700 text-center font-mono font-bold text-blue-600">{c.hours || 8}</td>
-                          <td className="p-2 border-r border-slate-200 dark:border-slate-700 text-center font-mono">{c.date || '-'}</td>
-                          <td className="p-2 border-r border-slate-200 dark:border-slate-700">{c.trainer || 'واحد آموزش HSE مجتمع'}</td>
-                          <td className="p-2 text-center font-bold text-emerald-600">تایید شده</td>
-                        </tr>
-                      ))}
+                      {dossier.trainingCourses.map((c, idx) => {
+                        const isAssigned = c.status === 'assigned' || c.status === 'in_progress';
+                        return (
+                          <tr key={c.id || idx} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                            <td className="p-2 border-r border-slate-200 dark:border-slate-700 text-center font-mono">{idx + 1}</td>
+                            <td className="p-2 border-r border-slate-200 dark:border-slate-700 font-bold text-slate-900 dark:text-white">{c.courseTitle || c.title || 'دوره آموزشی HSE'}</td>
+                            <td className="p-2 border-r border-slate-200 dark:border-slate-700 text-center font-mono text-slate-500">{c.courseCode || '-'}</td>
+                            <td className="p-2 border-r border-slate-200 dark:border-slate-700 text-center font-mono font-bold text-blue-600">{c.hours || 8}</td>
+                            <td className="p-2 border-r border-slate-200 dark:border-slate-700 text-center font-mono">{c.date || (c.assignedDate ? `تخصیص: ${c.assignedDate}` : '-')}</td>
+                            <td className="p-2 border-r border-slate-200 dark:border-slate-700">{c.trainer || (c.assignedBy ? `تخصیص توسط: ${c.assignedBy}` : 'واحد آموزش HSE مجتمع')}</td>
+                            <td className={`p-2 text-center font-bold ${isAssigned ? 'text-amber-600' : 'text-emerald-600'}`}>
+                              {isAssigned ? `تخصیص‌داده‌شده${c.dueDate ? ` (مهلت: ${c.dueDate})` : ''}` : 'تایید شده'}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table></div>
                 ) : (

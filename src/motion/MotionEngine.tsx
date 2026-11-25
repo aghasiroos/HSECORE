@@ -439,6 +439,9 @@ export const ModuleStageTransition: React.FC<ModuleStageTransitionProps> = ({
             x: 0,
             y: 0,
             scale: 1,
+            transitionEnd: {
+              transform: 'none',
+            },
           }}
           exit={{
             opacity: 0,
@@ -496,7 +499,14 @@ export const SubViewTransition: React.FC<SubViewTransitionProps> = ({
       <motion.div
         key={viewKey}
         initial={{ opacity: 0, x: slideX, scale: 0.992 }}
-        animate={{ opacity: 1, x: 0, scale: 1 }}
+        animate={{
+          opacity: 1,
+          x: 0,
+          scale: 1,
+          transitionEnd: {
+            transform: 'none',
+          },
+        }}
         exit={{
           opacity: 0,
           x: -slideX * 0.4,

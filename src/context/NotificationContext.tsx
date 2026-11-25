@@ -5,6 +5,9 @@ import {
   NotificationPreferences,
   getPublicAcknowledgedAlertIds,
   markPublicAlertAcknowledgedLocally,
+  isNotificationAcknowledgedOrDismissed,
+  HSE_NOTIF_ACKED_IDS_KEY,
+  HSE_NOTIF_LOCKSCREEN_CONFIRMED_KEY,
 } from '../services/notificationService';
 import { useWebSocket } from '../providers/WebSocketProvider';
 import { startSirenLoop, stopSirenLoop } from '../utils/notificationAudio';
@@ -107,7 +110,10 @@ export const NotificationProvider: React.FC<{
   useEffect(() => {
     let active = true;
     setPrefsLoaded(false);
-    CentralNotificationService.loadPreferences(currentUser?.id || currentUser?.username).then((p) => {
+    CentralNotificationService.loadPreferences(
+      currentUser?.id || (currentUser as any)?.uid || currentUser?.username,
+      currentUser?.username
+    ).then((p) => {
       if (active) {
         setPreferences(p);
         setPrefsLoaded(true);
@@ -125,6 +131,111 @@ export const NotificationProvider: React.FC<{
       window.removeEventListener('hse_notif_preferences_updated', handlePrefsEvent);
     };
   }, [currentUser?.id, currentUser?.username]);
+
+  // Helper to determine if current user is part of target audience
+  const isTargetUser = useCallback(
+    (notif: AppNotification) => {
+      if (!currentUser) {
+        return (
+          notif.category === 'critical_hse' ||
+          notif.priority === 'critical' ||
+          notif.priority === 'high' ||
+          notif.requiresAck === true ||
+          notif.targetType === 'all' ||
+          !notif.targetType
+        );
+      }
+      const targetType = notif.targetType || 'all';
+      if (targetType === 'all') return true;
+      const values = notif.targetValues || [];
+
+      const uCode = String(
+        currentUser.personnelNumber || (currentUser as any).personnelCode || ''
+      )
+        .trim()
+        .toLowerCase();
+      const uid = String(currentUser.id || (currentUser as any).uid || '').trim().toLowerCase();
+      const uname = (currentUser.username || '').trim().toLowerCase();
+      const fullName = (currentUser.fullName || '').trim().toLowerCase();
+      const matchesUserValue = (v: any) => {
+        const val = String(v || '').trim().toLowerCase();
+        if (!val) return false;
+        return (
+          (uid && val === uid) ||
+          (uname && val === uname) ||
+          (uCode && val === uCode) ||
+          (fullName && val === fullName)
+        );
+      };
+
+      if (targetType === 'unit_managers') {
+        const role = (currentUser.role || '').toLowerCase();
+        const jt = (currentUser.jobTitle || '').toLowerCase();
+        const isMgr =
+          role.includes('manager') ||
+          role.includes('supervisor') ||
+          role.includes('executive') ||
+          role.includes('admin') ||
+          jt.includes('مدیر') ||
+          jt.includes('رئیس') ||
+          jt.includes('سرپرست') ||
+          jt.includes('مسئول واحد') ||
+          jt.includes('فرمانده') ||
+          Boolean((currentUser as any).ptwQualification?.responsibilities?.areaSupervisor) ||
+          Boolean((currentUser as any).ptwQualification?.responsibilities?.issuer);
+        if (values.length > 0) {
+          return isMgr || values.some(matchesUserValue);
+        }
+        return isMgr;
+      }
+
+      if (targetType === 'hse_experts') {
+        const role = (currentUser.role || '').toLowerCase();
+        const jt = (currentUser.jobTitle || '').toLowerCase();
+        const deptIds = (currentUser.departmentIds || []).map((d) => String(d).toLowerCase());
+        const isHse =
+          role.includes('hse') ||
+          role.includes('safety') ||
+          role.includes('inspector') ||
+          role.includes('medical') ||
+          role.includes('auditor') ||
+          role.includes('admin') ||
+          jt.includes('hse') ||
+          jt.includes('ایمنی') ||
+          jt.includes('بهداشت') ||
+          jt.includes('محیط زیست') ||
+          jt.includes('آتش‌نشان') ||
+          jt.includes('بازرس') ||
+          deptIds.some((d) => d.includes('hse') || d.includes('safety') || d.includes('ایمنی')) ||
+          Boolean((currentUser as any).ptwQualification?.responsibilities?.safetyUnit);
+        if (values.length > 0) {
+          return isHse || values.some(matchesUserValue);
+        }
+        return isHse;
+      }
+
+      if (values.length === 0) return true;
+
+      if (targetType === 'roles') {
+        const uRole = (currentUser.role || '').toLowerCase();
+        return values.some((v) => v.toLowerCase() === uRole);
+      }
+      if (targetType === 'departments') {
+        const uDeptIds = currentUser.departmentIds || [];
+        const singleDept = (currentUser as any).departmentId || (currentUser as any).department || '';
+        return values.some(
+          (v) =>
+            uDeptIds.some((d) => String(d).toLowerCase() === String(v).toLowerCase()) ||
+            (singleDept && String(singleDept).toLowerCase() === String(v).toLowerCase())
+        );
+      }
+      if (targetType === 'single' || targetType === 'user' || targetType === 'users') {
+        return values.some(matchesUserValue);
+      }
+      return true;
+    },
+    [currentUser]
+  );
 
   // Fetch notifications from database (supports authenticated user and login page guest mode)
   const refreshNotifications = useCallback(async () => {
@@ -151,20 +262,11 @@ export const NotificationProvider: React.FC<{
           n.sourceModule === 'incidents';
 
         const popupPref = preferences.showCenterPopup || 'important_and_critical';
-        const ackedSet = getPublicAcknowledgedAlertIds();
 
         const unackPopups = data.filter((n) => {
-          if (n.read) return false;
-          if (ackedSet.has(n.notifId)) return false;
+          if (isNotificationAcknowledgedOrDismissed(n, currentUser as any)) return false;
           if (dismissedPopupIdsRef.current.has(n.notifId)) return false;
-
-          if (
-            n.requiresAck &&
-            n.acknowledgedBy &&
-            n.acknowledgedBy.some((a) => a.userId === currentUser.id || a.userName === currentUser.username)
-          ) {
-            return false;
-          }
+          if (!isTargetUser(n)) return false;
 
           if (popupPref === 'none') return false;
           if (n.type === 'popup' || n.type === 'popup_and_push' || n.requiresAck) return true;
@@ -175,38 +277,76 @@ export const NotificationProvider: React.FC<{
           return false;
         });
 
-        if (unackPopups.length > 0) {
-          setPopupQueue((prev) => {
-            const existingIds = new Set(prev.map((p) => p.notifId));
-            const newItems = unackPopups.filter((u) => !existingIds.has(u.notifId));
-            return newItems.length > 0 ? [...prev, ...newItems] : prev;
-          });
-        }
+        // Prune any queued/active popups that have since been acknowledged/read
+        const ackedByServerOrLocal = (p: AppNotification) => {
+          const fresh = data.find((d) => d.notifId === p.notifId);
+          return (
+            isNotificationAcknowledgedOrDismissed(fresh || p, currentUser as any) ||
+            dismissedPopupIdsRef.current.has(p.notifId)
+          );
+        };
+
+        setActivePopupAlert((curr) => {
+          if (curr && ackedByServerOrLocal(curr)) {
+            stopSirenLoop();
+            return null;
+          }
+          return curr;
+        });
+
+        setPopupQueue((prev) => {
+          const kept = prev.filter((p) => !ackedByServerOrLocal(p));
+          const existingIds = new Set(kept.map((p) => p.notifId));
+          const newItems = unackPopups.filter((u) => !existingIds.has(u.notifId));
+          return newItems.length > 0 || kept.length !== prev.length ? [...kept, ...newItems] : prev;
+        });
       } else {
         // Unauthenticated guest user on Login Screen: fetch only public active emergency alerts
         const activePublicAlerts = await CentralNotificationService.getPublicActiveEmergencyAlerts();
-        const ackedSet = getPublicAcknowledgedAlertIds();
 
         const pendingEmergencies = activePublicAlerts.filter((n) => {
-          if (ackedSet.has(n.notifId)) return false;
+          if (isNotificationAcknowledgedOrDismissed(n, null)) return false;
           if (dismissedPopupIdsRef.current.has(n.notifId)) return false;
           return true;
         });
 
         setNotifications(pendingEmergencies);
 
-        if (pendingEmergencies.length > 0) {
-          setPopupQueue((prev) => {
-            const existingIds = new Set(prev.map((p) => p.notifId));
-            const newItems = pendingEmergencies.filter((u) => !existingIds.has(u.notifId));
-            return newItems.length > 0 ? [...prev, ...newItems] : prev;
-          });
-        }
+        setActivePopupAlert((curr) => {
+          if (curr && (isNotificationAcknowledgedOrDismissed(curr, null) || dismissedPopupIdsRef.current.has(curr.notifId))) {
+            stopSirenLoop();
+            return null;
+          }
+          return curr;
+        });
+
+        setPopupQueue((prev) => {
+          const kept = prev.filter(
+            (p) => !isNotificationAcknowledgedOrDismissed(p, null) && !dismissedPopupIdsRef.current.has(p.notifId)
+          );
+          const existingIds = new Set(kept.map((p) => p.notifId));
+          const newItems = pendingEmergencies.filter((u) => !existingIds.has(u.notifId));
+          return newItems.length > 0 || kept.length !== prev.length ? [...kept, ...newItems] : prev;
+        });
       }
-    } catch (err) {
-      console.error('Error fetching notifications:', err);
+    } catch (err: any) {
+      const msg = String(err?.message || '');
+      const isTransientProxyOrAuth =
+        err?.status === 401 ||
+        err?.status === 502 ||
+        err?.status === 503 ||
+        err?.status === 504 ||
+        err?.status === 0 ||
+        (err?.status === 200 && msg.includes('پاسخ نامعتبر')) ||
+        msg.includes('Failed to fetch') ||
+        msg.includes('NetworkError');
+      if (isTransientProxyOrAuth) {
+        console.warn('[Notifications] Transient polling delay; will retry on next cycle:', msg);
+      } else {
+        console.warn('[Notifications] Unable to refresh notifications:', err);
+      }
     }
-  }, [currentUser?.id, currentUser?.username, preferences.showCenterPopup]);
+  }, [currentUser, isTargetUser, preferences.showCenterPopup]);
 
   // Initial load and network online reconnect listener
   useEffect(() => {
@@ -217,115 +357,47 @@ export const NotificationProvider: React.FC<{
       refreshNotifications();
     };
 
+    // Cross-tab synchronization: acknowledging or confirming readiness in one tab immediately updates all tabs
+    const handleStorageSync = (e: StorageEvent) => {
+      if (e.key === HSE_NOTIF_ACKED_IDS_KEY) {
+        const ackedSet = getPublicAcknowledgedAlertIds();
+        setActivePopupAlert((curr) => {
+          if (curr && (ackedSet.has(curr.notifId) || (curr.id !== undefined && ackedSet.has(String(curr.id))))) {
+            stopSirenLoop();
+            return null;
+          }
+          return curr;
+        });
+        setPopupQueue((prev) =>
+          prev.filter(
+            (p) => !ackedSet.has(p.notifId) && !(p.id !== undefined && ackedSet.has(String(p.id)))
+          )
+        );
+      } else if (e.key === HSE_NOTIF_LOCKSCREEN_CONFIRMED_KEY) {
+        if (
+          CentralNotificationService.isLockScreenSirenConfirmed(
+            currentUser?.id || (currentUser as any)?.uid,
+            currentUser?.username
+          )
+        ) {
+          setPreferences((prev) => ({ ...prev, lockScreenSirenConfirmed: true }));
+        }
+      }
+    };
+
     // Automatic safety polling: 8 seconds on Login Screen (for near-instant public emergency popups), 30s when logged in
     const pollInterval = setInterval(() => {
       refreshNotifications();
     }, currentUser ? 30000 : 8000);
 
     window.addEventListener('online', handleOnline);
+    window.addEventListener('storage', handleStorageSync);
     return () => {
       clearInterval(pollInterval);
       window.removeEventListener('online', handleOnline);
+      window.removeEventListener('storage', handleStorageSync);
     };
-  }, [currentUser?.id, refreshNotifications]);
-
-  // Helper to determine if current user is part of target audience
-  const isTargetUser = useCallback(
-    (notif: AppNotification) => {
-      if (!currentUser) {
-        return (
-          notif.category === 'critical_hse' ||
-          notif.priority === 'critical' ||
-          notif.priority === 'high' ||
-          notif.requiresAck === true ||
-          notif.targetType === 'all' ||
-          !notif.targetType
-        );
-      }
-      const targetType = notif.targetType || 'all';
-      if (targetType === 'all') return true;
-      const values = notif.targetValues || [];
-
-      if (targetType === 'unit_managers') {
-        const role = (currentUser.role || '').toLowerCase();
-        const jt = (currentUser.jobTitle || '').toLowerCase();
-        const isMgr =
-          role.includes('manager') ||
-          role.includes('supervisor') ||
-          role.includes('executive') ||
-          role.includes('admin') ||
-          jt.includes('مدیر') ||
-          jt.includes('رئیس') ||
-          jt.includes('سرپرست') ||
-          jt.includes('مسئول واحد') ||
-          jt.includes('فرمانده') ||
-          Boolean((currentUser as any).ptwQualification?.responsibilities?.areaSupervisor) ||
-          Boolean((currentUser as any).ptwQualification?.responsibilities?.issuer);
-        if (values.length > 0) {
-          const uid = String(currentUser.id || '').toLowerCase();
-          const uname = (currentUser.username || '').toLowerCase();
-          return isMgr || values.some((v) => v.toLowerCase() === uid || v.toLowerCase() === uname);
-        }
-        return isMgr;
-      }
-
-      if (targetType === 'hse_experts') {
-        const role = (currentUser.role || '').toLowerCase();
-        const jt = (currentUser.jobTitle || '').toLowerCase();
-        const deptIds = (currentUser.departmentIds || []).map((d) => String(d).toLowerCase());
-        const isHse =
-          role.includes('hse') ||
-          role.includes('safety') ||
-          role.includes('inspector') ||
-          role.includes('medical') ||
-          role.includes('auditor') ||
-          role.includes('admin') ||
-          jt.includes('hse') ||
-          jt.includes('ایمنی') ||
-          jt.includes('بهداشت') ||
-          jt.includes('محیط زیست') ||
-          jt.includes('آتش‌نشان') ||
-          jt.includes('بازرس') ||
-          deptIds.some((d) => d.includes('hse') || d.includes('safety') || d.includes('ایمنی')) ||
-          Boolean((currentUser as any).ptwQualification?.responsibilities?.safetyUnit);
-        if (values.length > 0) {
-          const uid = String(currentUser.id || '').toLowerCase();
-          const uname = (currentUser.username || '').toLowerCase();
-          return isHse || values.some((v) => v.toLowerCase() === uid || v.toLowerCase() === uname);
-        }
-        return isHse;
-      }
-
-      if (values.length === 0) return true;
-
-      if (targetType === 'roles') {
-        const uRole = (currentUser.role || '').toLowerCase();
-        return values.some((v) => v.toLowerCase() === uRole);
-      }
-      if (targetType === 'departments') {
-        const uDeptIds = currentUser.departmentIds || [];
-        const singleDept = (currentUser as any).departmentId || (currentUser as any).department || '';
-        return values.some(
-          (v) =>
-            uDeptIds.some((d) => String(d).toLowerCase() === String(v).toLowerCase()) ||
-            (singleDept && String(singleDept).toLowerCase() === String(v).toLowerCase())
-        );
-      }
-      if (targetType === 'single' || targetType === 'user' || targetType === 'users') {
-        const uid = String(currentUser.id || '');
-        const uname = (currentUser.username || '').toLowerCase();
-        const fullName = (currentUser.fullName || '').toLowerCase();
-        return values.some(
-          (v) =>
-            String(v).toLowerCase() === uid.toLowerCase() ||
-            String(v).toLowerCase() === uname ||
-            (fullName && String(v).toLowerCase() === fullName)
-        );
-      }
-      return true;
-    },
-    [currentUser]
-  );
+  }, [currentUser?.id, currentUser?.username, refreshNotifications]);
 
   // Open Alert Details Modal & record view confirmation
   const openAlertDetails = useCallback(
@@ -451,8 +523,10 @@ export const NotificationProvider: React.FC<{
         return;
       }
 
-      const ackedSet = getPublicAcknowledgedAlertIds();
-      if (ackedSet.has(notifId) || dismissedPopupIdsRef.current.has(notifId)) {
+      if (
+        isNotificationAcknowledgedOrDismissed(normalizedNotif, currentUser as any) ||
+        dismissedPopupIdsRef.current.has(notifId)
+      ) {
         return;
       }
 
@@ -685,7 +759,12 @@ export const NotificationProvider: React.FC<{
 
     const handlePopupRequest = (e: any) => {
       const alert = e.detail as AppNotification;
-      if (alert && alert.notifId) {
+      if (
+        alert &&
+        alert.notifId &&
+        !isNotificationAcknowledgedOrDismissed(alert, currentUser as any) &&
+        !dismissedPopupIdsRef.current.has(alert.notifId)
+      ) {
         setPopupQueue((prev) => {
           if (prev.some((p) => p.notifId === alert.notifId)) return prev;
           return [...prev, alert];
@@ -730,17 +809,22 @@ export const NotificationProvider: React.FC<{
 
   const closePopup = useCallback(() => {
     stopSirenLoop();
-    if (activePopupAlert) {
-      setDismissedPopupIds((prev) => new Set(prev).add(activePopupAlert.notifId));
-      CentralNotificationService.closeSystemOsNotification(activePopupAlert.notifId).catch(() => {});
+    const closingAlert = activePopupAlert;
+    if (closingAlert) {
+      markPublicAlertAcknowledgedLocally(closingAlert.notifId, closingAlert.id);
+      setDismissedPopupIds((prev) => new Set(prev).add(closingAlert.notifId));
+      CentralNotificationService.closeSystemOsNotification(closingAlert.notifId).catch(() => {});
+      setPopupQueue((prev) => prev.filter((p) => p.notifId !== closingAlert.notifId));
+    } else {
+      setPopupQueue((prev) => prev.slice(1));
     }
     setActivePopupAlert(null);
-    setPopupQueue((prev) => prev.slice(1));
   }, [activePopupAlert]);
 
   const dismissPopup = useCallback(
     (notifId: string) => {
       stopSirenLoop();
+      markPublicAlertAcknowledgedLocally(notifId);
       setDismissedPopupIds((prev) => new Set(prev).add(notifId));
       CentralNotificationService.closeSystemOsNotification(notifId).catch(() => {});
       setPopupQueue((prev) => prev.filter((p) => p.notifId !== notifId));
@@ -752,11 +836,18 @@ export const NotificationProvider: React.FC<{
   );
 
   const markAsRead = useCallback(async (id: string | number) => {
+    const idStr = String(id);
+    markPublicAlertAcknowledgedLocally(idStr);
+    setDismissedPopupIds((prev) => new Set(prev).add(idStr));
+    setPopupQueue((prev) => prev.filter((p) => p.notifId !== idStr && String(p.id) !== idStr));
+    setActivePopupAlert((curr) =>
+      curr && (curr.notifId === idStr || String(curr.id) === idStr) ? null : curr
+    );
     try {
       const success = await CentralNotificationService.markAsRead(id);
       if (success) {
         setNotifications((prev) =>
-          prev.map((n) => (n.notifId === String(id) || n.id === Number(id) ? { ...n, read: true } : n))
+          prev.map((n) => (n.notifId === idStr || n.id === Number(id) ? { ...n, read: true } : n))
         );
       }
       return success;
@@ -770,7 +861,13 @@ export const NotificationProvider: React.FC<{
     try {
       const success = await CentralNotificationService.markAllAsRead();
       if (success) {
-        setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+        setNotifications((prev) => {
+          prev.forEach((n) => markPublicAlertAcknowledgedLocally(n.notifId, n.id));
+          return prev.map((n) => ({ ...n, read: true }));
+        });
+        stopSirenLoop();
+        setPopupQueue([]);
+        setActivePopupAlert(null);
       }
       return success;
     } catch (err: any) {
@@ -782,7 +879,34 @@ export const NotificationProvider: React.FC<{
   const acknowledgeAlert = useCallback(
     async (id: string | number, note?: string, acknowledgmentSource?: string) => {
       const idStr = String(id);
+      const matched =
+        (activePopupAlert && (activePopupAlert.notifId === idStr || String(activePopupAlert.id) === idStr)
+          ? activePopupAlert
+          : null) ||
+        popupQueue.find((n) => n.notifId === idStr || String(n.id) === idStr) ||
+        notifications.find((n) => n.notifId === idStr || String(n.id) === idStr);
+
       stopSirenLoop();
+      // Persist immediately on client so even an instant refresh or tab switch never re-opens this popup
+      markPublicAlertAcknowledgedLocally(matched?.notifId || idStr, matched?.id);
+      setDismissedPopupIds((prev) => {
+        const next = new Set(prev);
+        next.add(idStr);
+        if (matched?.notifId) next.add(matched.notifId);
+        return next;
+      });
+
+      const removeFromQueues = () => {
+        setPopupQueue((prev) =>
+          prev.filter((p) => p.notifId !== idStr && String(p.id) !== idStr && p.notifId !== matched?.notifId)
+        );
+        setActivePopupAlert((curr) =>
+          curr && (curr.notifId === idStr || String(curr.id) === idStr || curr.notifId === matched?.notifId)
+            ? null
+            : curr
+        );
+      };
+
       try {
         const success = currentUser?.id
           ? await CentralNotificationService.acknowledge(
@@ -825,15 +949,16 @@ export const NotificationProvider: React.FC<{
                 }
               : curr
           );
-          closePopup();
+          removeFromQueues();
         }
         return success;
       } catch (err: any) {
+        removeFromQueues();
         toast.error(err?.message || 'خطا در ثبت تاییدیه هشدار در پایگاه داده');
         return false;
       }
     },
-    [currentUser, closePopup]
+    [currentUser, activePopupAlert, popupQueue, notifications]
   );
 
   const deleteNotification = useCallback(async (id: string | number) => {

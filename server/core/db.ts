@@ -16,7 +16,7 @@ export async function checkDatabaseHealth(): Promise<{
 }> {
   const start = Date.now();
   const pool = createPool();
-  const maxConnections = Number(process.env.PG_MAX_POOL || process.env.SQL_MAX_POOL) || 15;
+  const maxConnections = Number(process.env.PG_MAX_POOL || process.env.SQL_MAX_POOL) || 30;
   const getPoolStats = () => ({
     totalCount: pool.totalCount,
     idleCount: pool.idleCount,

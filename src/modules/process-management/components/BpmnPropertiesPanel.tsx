@@ -366,8 +366,8 @@ export default function BpmnPropertiesPanel({
 
   return (
     <div
-      className={`transition-all duration-300 flex flex-col border-l border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 z-20 shadow-xl select-none ${
-        isWide ? 'w-full sm:w-[540px] lg:w-[620px]' : 'w-84 sm:w-96 lg:w-[460px]'
+      className={`transition-all duration-300 flex flex-col border-l border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 z-30 shadow-xl select-none fixed inset-y-0 left-0 max-w-full md:static md:inset-auto md:z-20 ${
+        isWide ? 'w-full sm:w-[min(540px,100vw)] lg:w-[620px]' : 'w-[min(100vw,360px)] sm:w-96 lg:w-[460px]'
       }`}
       dir={isFa ? 'rtl' : 'ltr'}
     >

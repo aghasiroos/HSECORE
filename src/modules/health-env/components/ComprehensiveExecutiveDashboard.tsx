@@ -1314,24 +1314,24 @@ export default function ComprehensiveExecutiveDashboard({ language, onNavigate }
       {/* EXECUTIVE HEADER & DOMAIN / FILTER BAR */}
       {/* ======================================================== */}
       <div className="bg-gradient-to-l from-slate-900 via-slate-800 to-emerald-950 p-4 sm:p-6 rounded-3xl text-white shadow-md border border-slate-700/80 space-y-4">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div className="flex items-start sm:items-center gap-3.5 min-w-0">
+        <div className="flex flex-col 2xl:flex-row 2xl:items-center justify-between gap-4">
+          <div className="flex items-start sm:items-center gap-3.5 min-w-0 flex-1">
             <div className="p-3 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-2xl shrink-0">
               <Activity className="w-6 h-6 sm:w-7 sm:h-7" />
             </div>
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-base sm:text-xl md:text-2xl font-black tracking-tight truncate">
+                <h1 className="text-base sm:text-xl md:text-2xl font-black tracking-tight leading-snug">
                   {isFa
                     ? 'داشبورد جامع مدیریتی واحد بهداشت و محیط‌زیست'
                     : 'Health & Environment Comprehensive Executive Dashboard'}
                 </h1>
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 whitespace-nowrap shrink-0">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
                   {isFa ? 'خوانش مستقیم از ۱۲ زیرماژول' : 'Live 12-Submodule Sync'}
                 </span>
               </div>
-              <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+              <p className="text-xs text-slate-300 mt-1.5 leading-relaxed">
                 {isFa
                   ? 'یکپارچه‌سازی برخط شاخص‌های کلیدی (KPI) و نمودارهای تحلیلی بهداری، معاینات طب کار، کارشناس تغذیه (افراد پرخطر)، چک‌لیست‌ها، پایش آلاینده‌ها، پساب، پسماند و ۵S'
                   : 'Real-time KPI cards and analytical charts directly synchronized with Clinic, Medical Exams, Nutrition, Checklists, Emissions, Wastewater, Waste & 5S.'}
@@ -1340,8 +1340,8 @@ export default function ComprehensiveExecutiveDashboard({ language, onNavigate }
           </div>
 
           {/* Action & Domain Switcher */}
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
-            <div className="flex items-center bg-slate-950/60 p-1 rounded-xl border border-white/10 text-xs font-bold">
+          <div className="flex flex-wrap items-center justify-between sm:justify-start 2xl:justify-end gap-2 w-full 2xl:w-auto max-w-full">
+            <div className="flex items-center bg-slate-950/60 p-1 rounded-xl border border-white/10 text-xs font-bold overflow-x-auto max-w-full no-scrollbar">
               {(
                 [
                   { id: 'all', labelFa: 'همه بخش‌ها (جامع)', labelEn: 'All Domains' },
@@ -1353,7 +1353,7 @@ export default function ComprehensiveExecutiveDashboard({ language, onNavigate }
                   key={tab.id}
                   type="button"
                   onClick={() => setDomainFilter(tab.id)}
-                  className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer whitespace-nowrap ${
+                  className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                     domainFilter === tab.id
                       ? 'bg-emerald-600 text-white shadow-xs'
                       : 'text-slate-300 hover:text-white'
@@ -1368,25 +1368,25 @@ export default function ComprehensiveExecutiveDashboard({ language, onNavigate }
               type="button"
               onClick={loadAllAsyncSubmoduleData}
               disabled={isRefreshing}
-              className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/15 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+              className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/15 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50 whitespace-nowrap shrink-0"
               title={isFa ? 'به‌روزرسانی مستقیم اطلاعات از زیرماژول‌ها' : 'Refresh Live Data'}
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
-              <span className="hidden sm:inline">{isFa ? 'به‌روزرسانی برخط' : 'Sync'}</span>
+              <RefreshCw className={`w-3.5 h-3.5 shrink-0 ${isRefreshing ? 'animate-spin' : ''}`} />
+              <span>{isFa ? 'به‌روزرسانی برخط' : 'Sync'}</span>
             </button>
           </div>
         </div>
 
         {/* Responsive Global Filter Bar inside Header */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-3 border-t border-white/10 text-xs">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 pt-3 border-t border-white/10 text-xs">
           {/* Year Filter */}
-          <div className="flex items-center gap-2 bg-white/5 px-3 py-2 rounded-xl border border-white/10">
+          <div className="flex items-center gap-2 bg-white/5 px-3 py-2 rounded-xl border border-white/10 min-w-0">
             <Calendar className="w-4 h-4 text-emerald-400 shrink-0" />
             <span className="text-slate-300 font-bold shrink-0">{isFa ? 'سال پایش:' : 'Year:'}</span>
             <select
               value={selectedYear}
               onChange={e => setSelectedYear(e.target.value === 'all' ? 'all' : Number(e.target.value))}
-              className="w-full bg-transparent text-white font-bold outline-none cursor-pointer"
+              className="w-full min-w-0 bg-transparent text-white font-bold outline-none cursor-pointer"
             >
               <option value="all" className="bg-slate-800 text-white">
                 {isFa ? 'همه سال‌های ثبت‌شده' : 'All Recorded Years'}
@@ -1400,13 +1400,13 @@ export default function ComprehensiveExecutiveDashboard({ language, onNavigate }
           </div>
 
           {/* Organizational Unit / Site Filter */}
-          <div className="flex items-center gap-2 bg-white/5 px-3 py-2 rounded-xl border border-white/10 sm:col-span-1 lg:col-span-2">
+          <div className="flex items-center gap-2 bg-white/5 px-3 py-2 rounded-xl border border-white/10 sm:col-span-1 xl:col-span-2 min-w-0">
             <Building2 className="w-4 h-4 text-teal-400 shrink-0" />
             <span className="text-slate-300 font-bold shrink-0">{isFa ? 'واحد / سایت:' : 'Unit / Site:'}</span>
             <select
               value={selectedDept}
               onChange={e => setSelectedDept(e.target.value)}
-              className="w-full bg-transparent text-white font-bold outline-none cursor-pointer truncate"
+              className="w-full min-w-0 bg-transparent text-white font-bold outline-none cursor-pointer truncate"
             >
               <option value="all" className="bg-slate-800 text-white">
                 {isFa ? 'همه واحدهای سازمانی و محل‌های خدمت' : 'All Organizational Units & Sites'}
@@ -1420,8 +1420,8 @@ export default function ComprehensiveExecutiveDashboard({ language, onNavigate }
           </div>
 
           {/* Active Filter Status & Reset */}
-          <div className="flex items-center justify-between gap-2 bg-white/5 px-3 py-2 rounded-xl border border-white/10">
-            <div className="flex items-center gap-1.5 truncate">
+          <div className="flex items-center justify-between gap-2 bg-white/5 px-3 py-2 rounded-xl border border-white/10 sm:col-span-2 xl:col-span-1 min-w-0">
+            <div className="flex items-center gap-1.5 min-w-0">
               <Filter className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
               <span className="text-[11px] text-slate-300 truncate">
                 {selectedYear === 'all' && selectedDept === 'all'
@@ -1454,21 +1454,21 @@ export default function ComprehensiveExecutiveDashboard({ language, onNavigate }
       {/* SECTION 1: UNIFIED KPI CARDS GRID (Data-Driven) */}
       {/* ======================================================== */}
       <section className="space-y-3">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <Layers className="w-5 h-5 text-teal-600 dark:text-teal-400" />
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <Layers className="w-5 h-5 text-teal-600 dark:text-teal-400 shrink-0" />
             <h2 className="text-sm sm:text-base font-black text-slate-800 dark:text-white">
               {isFa
                 ? 'شاخص‌های کلیدی عملکرد (KPI) زیرماژول‌های بهداشت و محیط‌زیست'
                 : 'Key Performance Indicators (KPIs) Across Submodules'}
             </h2>
           </div>
-          <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
+          <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 whitespace-nowrap">
             {isFa ? `${visibleKpiCards.length} شاخص کلیدی فعال` : `${visibleKpiCards.length} Active KPIs`}
           </span>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3.5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-3.5">
           {visibleKpiCards.map(card => (
             <ExecutiveKpiCard key={card.id} item={card} isFa={isFa} onNavigate={onNavigate} />
           ))}
@@ -1479,9 +1479,9 @@ export default function ComprehensiveExecutiveDashboard({ language, onNavigate }
       {/* SECTION 2: INTERACTIVE ANALYTICAL CHARTS GRID */}
       {/* ======================================================== */}
       <section className="space-y-3 pt-1">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <BarChart3 className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <BarChart3 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
             <h2 className="text-sm sm:text-base font-black text-slate-800 dark:text-white">
               {isFa
                 ? 'نمودارهای تحلیلی و پایش بصری زیرماژول‌ها و تب‌ها'
@@ -1493,7 +1493,7 @@ export default function ComprehensiveExecutiveDashboard({ language, onNavigate }
           </span>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
           {/* CHART 1: Occupational Fitness Breakdown (Periodic + Non-Periodic Exams) */}
           {(domainFilter === 'all' || domainFilter === 'health') && (
             <ChartPanelCard

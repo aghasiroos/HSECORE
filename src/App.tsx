@@ -11,6 +11,7 @@ import { SystemStatusBadge } from './components/SystemStatusBadge';
 import { PrintNotificationModal } from './components/common/PrintNotificationModal';
 import { ConfirmDialogModal } from './components/common/ConfirmDialogModal';
 import { ConflictResolutionModal, handleVersionConflict } from './components/common/ConflictResolutionModal';
+import { ResponsiveAutoEnhancer } from './components/common/ResponsivePrimitives';
 import { centralSync } from './services/centralSyncService';
 import { apiDb, getAuthToken, isConflictError } from './services/apiDatabaseClient';
 import { deduplicateWarningRecords } from './utils/safeStorage';
@@ -1248,6 +1249,7 @@ export default function App() {
  <SyncProvider>
  <NotificationProvider currentUser={currentUser}>
  <div className="h-screen h-[100dvh] max-h-screen max-h-[100dvh] relative overflow-hidden bg-slate-50 dark:bg-[#0b0f19] flex flex-row font-sans select-none text-slate-800 dark:text-slate-100 transition-colors duration-300" id="app-layout" dir={isFa ? 'rtl' : 'ltr'}>
+ <ResponsiveAutoEnhancer />
  
  {/* ── Background Geometric & Ambient Glow Layers (Inspired by Login Screen) ── */}
  <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden" aria-hidden="true">
@@ -1288,17 +1290,22 @@ export default function App() {
 
   {/* Top Professional Header Bar - Floating Card */}
   {showTopNavbar && (
-  <div className={`shrink-0 relative z-20 px-3 pt-3 sm:px-4 sm:pt-3.5 lg:px-6 lg:pt-4 ${activeTab === 'ai-assistant' ? 'hidden lg:block' : ''}`}>
-    <header className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border border-slate-200/80 dark:border-slate-800/80 rounded-2xl py-2.5 px-3 sm:px-5 flex flex-wrap items-center justify-between gap-2 sm:gap-4 shadow-xs transition-all relative z-20" id="app-header">
-  <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1">
-    <button onClick={() => setIsSidebarOpen(true)} className="p-2 -mx-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl lg:hidden transition-colors cursor-pointer text-slate-600 dark:text-slate-400 shrink-0" aria-label={isFa ? 'باز کردن منو' : 'Open menu'}>
+  <div className={`shrink-0 relative z-20 px-2.5 pt-2.5 sm:px-4 sm:pt-3.5 lg:px-6 lg:pt-4 ${activeTab === 'ai-assistant' ? 'hidden lg:block' : ''}`}>
+    <header className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border border-slate-200/80 dark:border-slate-800/80 rounded-2xl py-2 px-2.5 sm:py-2.5 sm:px-5 flex flex-nowrap items-center justify-between gap-1.5 sm:gap-4 shadow-xs transition-all relative z-20" id="app-header">
+  <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+    <button
+      type="button"
+      onClick={() => setIsSidebarOpen(true)}
+      className="min-w-[40px] min-h-[40px] flex items-center justify-center -mx-0.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl lg:hidden transition-colors cursor-pointer text-slate-600 dark:text-slate-400 shrink-0"
+      aria-label={isFa ? 'باز کردن منو' : 'Open menu'}
+    >
       <Menu className="w-5 h-5" />
     </button>
     <div className="hidden sm:flex items-center justify-center p-1 bg-white/80 dark:bg-slate-800/80 rounded-xl border border-slate-200/70 dark:border-slate-700/70 shrink-0 overflow-hidden shadow-xs">
       <HseLogo size="sm" target="nav" showShadow={false} />
     </div>
   <div className="min-w-0 flex-1">
-  <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400 truncate">
+  <div className="hidden sm:flex items-center gap-1.5 text-[10px] font-bold text-slate-400 truncate">
     <span className="hidden md:inline truncate">{isFa ? 'سیستم مدیریت بهداشت، ایمنی و محیط زیست (HSE)' : 'Health, Safety & Environment Management System (HSE)'}</span>
     <span className="hidden md:inline">•</span>
     <span className="text-blue-600 dark:text-blue-400 font-bold truncate">
@@ -1313,7 +1320,7 @@ export default function App() {
   </div>
 
   {/* Global togglers & Clock */}
-  <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+  <div className="flex items-center gap-1.5 sm:gap-3 lg:gap-4 shrink-0">
   
   <SystemStatusBadge />
 
@@ -1337,22 +1344,42 @@ export default function App() {
   </div>
   )}
 
-  {/* Floating Mobile Navigation Button (Exclusively displayed on non-dashboard modules when Top Navbar is hidden) */}
+  {/* Compact Non-Overlapping Mobile/Tablet Header Bar for non-dashboard modules */}
   {!showTopNavbar && activeTab !== 'ai-assistant' && (
-    <button 
-      type="button"
-      onClick={() => setIsSidebarOpen(true)} 
-      className="lg:hidden fixed top-3.5 start-3.5 z-20 p-2.5 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border border-slate-200/80 dark:border-slate-800/80 rounded-xl shadow-md hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer text-slate-700 dark:text-slate-300"
-      title={isFa ? 'باز کردن منو' : 'Open Menu'}
-      aria-label="Open Navigation Menu"
-    >
-      <Menu className="w-5 h-5 text-slate-600 dark:text-slate-400" />
-    </button>
+  <div className="lg:hidden shrink-0 relative z-20 px-2.5 pt-2.5 pb-0.5 sm:px-4">
+    <div className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border border-slate-200/80 dark:border-slate-800/80 rounded-2xl py-1.5 px-2.5 flex items-center justify-between gap-2 shadow-xs">
+      <div className="flex items-center gap-2 min-w-0 flex-1">
+        <button
+          type="button"
+          onClick={() => setIsSidebarOpen(true)}
+          className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer text-slate-700 dark:text-slate-300 shrink-0"
+          title={isFa ? 'باز کردن منو' : 'Open Menu'}
+          aria-label={isFa ? 'باز کردن منوی ناوبری' : 'Open Navigation Menu'}
+        >
+          <Menu className="w-5 h-5" />
+        </button>
+        <CurrentIcon className="w-4 h-4 text-blue-500 shrink-0" />
+        <span className="text-xs sm:text-sm font-black text-slate-800 dark:text-slate-100 truncate">
+          {isFa ? currentTabMeta?.titleFa : currentTabMeta?.titleEn}
+        </span>
+      </div>
+      <div className="flex items-center gap-1.5 shrink-0">
+        <HseThemeToggleButton
+          themeMode={themeMode}
+          onToggle={(origin) => handleSetThemeMode(themeMode === 'dark' ? 'light' : 'dark', origin)}
+          isFa={isFa}
+          variant="header"
+          id="mobile-header-theme-toggle-btn"
+        />
+        <NotificationBellDropdown language={language} />
+      </div>
+    </div>
+  </div>
   )}
 
   {/* Core Sub-Module View Render */}
-  <main className={`flex-1 min-w-0 min-h-0 ${activeTab === 'ai-assistant' ? 'overflow-hidden flex flex-col p-0 sm:px-4 sm:py-2.5 lg:px-6 lg:py-3' : `overflow-y-auto custom-scrollbar px-3 sm:px-4 lg:px-6 ${showTopNavbar ? 'py-2.5 sm:py-3 lg:py-3.5' : 'py-3.5 sm:py-4 lg:py-5'}`}`} id="app-main-stage">
-      <div className={`w-full max-w-[1920px] mx-auto ${activeTab === 'ai-assistant' ? 'flex-1 h-full min-h-0 flex flex-col overflow-hidden' : 'space-y-6'}`}>
+  <main className={`flex-1 min-w-0 min-h-0 ${activeTab === 'ai-assistant' ? 'overflow-hidden flex flex-col p-0 sm:px-4 sm:py-2.5 lg:px-6 lg:py-3' : `overflow-y-auto custom-scrollbar px-2.5 sm:px-4 lg:px-6 ${showTopNavbar ? 'py-2.5 sm:py-3 lg:py-3.5' : 'py-2.5 sm:py-4 lg:py-5'}`}`} id="app-main-stage">
+      <div className={`w-full max-w-[1920px] mx-auto ${activeTab === 'ai-assistant' ? 'flex-1 h-full min-h-0 flex flex-col overflow-hidden' : 'space-y-4 sm:space-y-6'}`}>
        <ModuleErrorBoundary isFa={isFa} resetKey={activeTab}>
          <React.Suspense fallback={<ModuleSkeletonFallback isFa={isFa} />}>
            <ModuleStageTransition
