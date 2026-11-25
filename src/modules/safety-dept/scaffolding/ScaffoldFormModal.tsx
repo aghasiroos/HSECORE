@@ -11,15 +11,25 @@ import {
   AlertCircle,
   Loader2,
   Layers,
+  Edit3,
+  ClipboardCheck,
 } from 'lucide-react';
-import CentralPersonnelSelector from '../../../components/CentralPersonnelSelector';
+import PersianDatePicker from '../../../components/common/PersianDatePicker';
+import { getCurrentShamsiYear } from '../../../utils/jalaliDate';
 import {
+  createInitialScaffoldChecklist,
+  evaluateScaffoldChecklist,
   SCAFFOLD_TYPES,
   ScaffoldBootstrapData,
+  ScaffoldChecklistResponseItem,
   ScaffoldPhotoItem,
   ScaffoldRecord,
 } from './types';
 import { scaffoldingApi } from './scaffoldingApi';
+import ScaffoldChecklistSection, {
+  ScaffoldApproverSignaturesBlock,
+  validateScaffoldChecklistBeforeSubmit,
+} from './ScaffoldChecklistSection';
 
 interface Props {
   isOpen: boolean;
@@ -27,6 +37,7 @@ interface Props {
   bootstrap: ScaffoldBootstrapData;
   initialRecord?: ScaffoldRecord | null;
   onSaved: (saved: ScaffoldRecord) => void;
+  onSettingsUpdated?: (allowNaOption: boolean) => void;
 }
 
 const MAX_FILE_SIZE_BYTES = 2.5 * 1024 * 1024;
@@ -54,11 +65,14 @@ export default function ScaffoldFormModal({
   bootstrap,
   initialRecord,
   onSaved,
+  onSettingsUpdated,
 }: Props) {
   const isEdit = Boolean(initialRecord);
+  const pickerMaxYear = getCurrentShamsiYear() + 5;
 
   const [requestDate, setRequestDate] = useState(bootstrap.todayJalali || '');
   const [requestingUnit, setRequestingUnit] = useState('');
+  const [isManualRequestingUnit, setIsManualRequestingUnit] = useState(false);
   const [orgUnitId, setOrgUnitId] = useState<number | null>(null);
   const [installationLocation, setInstallationLocation] = useState('');
   const [areaName, setAreaName] = useState('');
@@ -68,7 +82,6 @@ export default function ScaffoldFormModal({
 
   const [permitId, setPermitId] = useState<number | null>(null);
   const [permitNumber, setPermitNumber] = useState('');
-  const [workRequestId, setWorkRequestId] = useState<number | null>(null);
   const [workRequestNumber, setWorkRequestNumber] = useState('');
 
   const [contractorName, setContractorName] = useState('');
@@ -84,6 +97,18 @@ export default function ScaffoldFormModal({
   const [beforePhotos, setBeforePhotos] = useState<ScaffoldPhotoItem[]>([]);
   const [afterPhotos, setAfterPhotos] = useState<ScaffoldPhotoItem[]>([]);
 
+  // 23-item Safety Checklist (active by default when creating a new scaffold)
+  const [includeInitialChecklist, setIncludeInitialChecklist] = useState(true);
+  const [allowNaOption, setAllowNaOption] = useState(Boolean(bootstrap.checklistSettings?.allowNaOption));
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [checklistItems, setChecklistItems] = useState<ScaffoldChecklistResponseItem[]>(() =>
+    createInitialScaffoldChecklist(null, Boolean(bootstrap.checklistSettings?.allowNaOption))
+  );
+  const [checklistSummaryNotes, setChecklistSummaryNotes] = useState('');
+  const [safetyUnitSupervisorCode, setSafetyUnitSupervisorCode] = useState('');
+  const [safetyUnitSupervisorName, setSafetyUnitSupervisorName] = useState('');
+  const [approveAndIssueGreenTag, setApproveAndIssueGreenTag] = useState(false);
+
   const [autoFillNotice, setAutoFillNotice] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -92,10 +117,15 @@ export default function ScaffoldFormModal({
     if (!isOpen) return;
     setErrorMsg(null);
     setAutoFillNotice(null);
+    const initialAllowNa = Boolean(bootstrap.checklistSettings?.allowNaOption);
+    setAllowNaOption(initialAllowNa);
 
     if (initialRecord) {
+      const initReqUnit = initialRecord.requestingUnit || '';
+      const existsInOrg = Boolean(initReqUnit && bootstrap.orgUnits.some(u => u.name === initReqUnit));
       setRequestDate(initialRecord.requestDate || bootstrap.todayJalali || '');
-      setRequestingUnit(initialRecord.requestingUnit || '');
+      setRequestingUnit(initReqUnit);
+      setIsManualRequestingUnit(Boolean(initReqUnit) && !existsInOrg);
       setOrgUnitId(initialRecord.orgUnitId ?? null);
       setInstallationLocation(initialRecord.installationLocation || '');
       setAreaName(initialRecord.areaName || '');
@@ -104,7 +134,6 @@ export default function ScaffoldFormModal({
       setActivityDescription(initialRecord.activityDescription || '');
       setPermitId(initialRecord.permitId ?? null);
       setPermitNumber(initialRecord.permitNumber || '');
-      setWorkRequestId(initialRecord.workRequestId ?? null);
       setWorkRequestNumber(initialRecord.workRequestNumber || '');
       setContractorName(initialRecord.contractorName || '');
       setErectorSupervisorName(initialRecord.erectorSupervisorName || '');
@@ -120,6 +149,7 @@ export default function ScaffoldFormModal({
     } else {
       setRequestDate(bootstrap.todayJalali || '');
       setRequestingUnit('');
+      setIsManualRequestingUnit(false);
       setOrgUnitId(null);
       setInstallationLocation('');
       setAreaName('');
@@ -128,7 +158,6 @@ export default function ScaffoldFormModal({
       setActivityDescription('');
       setPermitId(null);
       setPermitNumber('');
-      setWorkRequestId(null);
       setWorkRequestNumber('');
       setContractorName('');
       setErectorSupervisorName('');
@@ -141,10 +170,44 @@ export default function ScaffoldFormModal({
       setNotes('');
       setBeforePhotos([]);
       setAfterPhotos([]);
+      setIncludeInitialChecklist(true);
+      setChecklistItems(createInitialScaffoldChecklist(null, initialAllowNa));
+      setChecklistSummaryNotes('');
+      setSafetyUnitSupervisorCode('');
+      setSafetyUnitSupervisorName('');
+      setApproveAndIssueGreenTag(false);
     }
-  }, [isOpen, initialRecord, bootstrap.todayJalali]);
+  }, [isOpen, initialRecord, bootstrap.todayJalali, bootstrap.orgUnits, bootstrap.checklistSettings?.allowNaOption]);
 
   if (!isOpen) return null;
+
+  const checklistEval = evaluateScaffoldChecklist(checklistItems);
+  const canConfigureChecklistSettings = Boolean(
+    bootstrap.permissions?.canInspect || bootstrap.permissions?.canEdit || bootstrap.permissions?.canApprove
+  );
+
+  const handleToggleAllowNa = async (nextVal: boolean) => {
+    setSavingSettings(true);
+    setErrorMsg(null);
+    try {
+      const saved = await scaffoldingApi.updateChecklistSettings({ allowNaOption: nextVal });
+      setAllowNaOption(saved.allowNaOption);
+      if (!saved.allowNaOption) {
+        setChecklistItems(prev =>
+          prev.map(it => {
+            if (it.answer !== 'NA') return it;
+            const safe = it.safeAnswer || 'YES';
+            return { ...it, answer: safe, verdict: 'PASS' };
+          })
+        );
+      }
+      onSettingsUpdated?.(saved.allowNaOption);
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'خطا در ذخیره تنظیمات چک‌لیست');
+    } finally {
+      setSavingSettings(false);
+    }
+  };
 
   const handleSelectPermit = (selectedIdStr: string) => {
     if (!selectedIdStr) {
@@ -161,9 +224,11 @@ export default function ScaffoldFormModal({
 
     const filledFields: string[] = [];
     if (ptw.unitName) {
+      const matchedOrg = bootstrap.orgUnits.find(u => u.name === ptw.unitName);
       setRequestingUnit(ptw.unitName);
+      setIsManualRequestingUnit(!matchedOrg);
       setUnitName(ptw.unitName);
-      if (ptw.unitId) setOrgUnitId(ptw.unitId);
+      setOrgUnitId(matchedOrg?.id ?? ptw.unitId ?? null);
       filledFields.push('واحد');
     }
     if (ptw.location) {
@@ -186,58 +251,19 @@ export default function ScaffoldFormModal({
       setActivityDescription(ptw.description);
       filledFields.push('شرح فعالیت');
     }
-    if (ptw.workOrderNumber && !workRequestNumber) {
-      setWorkRequestNumber(ptw.workOrderNumber);
-      filledFields.push('شماره درخواست کار');
-    }
 
     if (filledFields.length > 0) {
       setAutoFillNotice(`اطلاعات مرتبط از پروانه کار ${ptw.permitNumber} (${filledFields.join('، ')}) به‌صورت خودکار فراخوانی شد.`);
     }
   };
 
-  const handleSelectWorkRequest = (selectedIdStr: string) => {
-    if (!selectedIdStr) {
-      setWorkRequestId(null);
-      setWorkRequestNumber('');
+  const handleSelectOrgUnit = (unitTitle: string) => {
+    if (unitTitle === '__MANUAL__') {
+      setIsManualRequestingUnit(true);
+      setOrgUnitId(null);
+      setRequestingUnit('');
       return;
     }
-    const idNum = Number(selectedIdStr);
-    const wr = bootstrap.workRequests.find(w => w.id === idNum);
-    if (!wr) return;
-
-    setWorkRequestId(wr.id);
-    setWorkRequestNumber(wr.workRequestNumber);
-
-    const filledFields: string[] = [];
-    if (wr.unitName && !requestingUnit) {
-      setRequestingUnit(wr.unitName);
-      setUnitName(wr.unitName);
-      filledFields.push('واحد');
-    }
-    if (wr.location && !installationLocation) {
-      setInstallationLocation(wr.location);
-      filledFields.push('محل نصب');
-    }
-    if (wr.equipmentName && !equipmentName) {
-      setEquipmentName(wr.equipmentName);
-      filledFields.push('تجهیز');
-    }
-    if (wr.contractorName && !contractorName) {
-      setContractorName(wr.contractorName);
-      filledFields.push('پیمانکار');
-    }
-    if (wr.description && !activityDescription) {
-      setActivityDescription(wr.description);
-      filledFields.push('شرح فعالیت');
-    }
-
-    if (filledFields.length > 0) {
-      setAutoFillNotice(`اطلاعات مرتبط از درخواست کار ${wr.workRequestNumber} (${filledFields.join('، ')}) به‌صورت خودکار فراخوانی شد.`);
-    }
-  };
-
-  const handleSelectOrgUnit = (unitTitle: string) => {
     setRequestingUnit(unitTitle);
     const found = bootstrap.orgUnits.find(u => u.name === unitTitle);
     setOrgUnitId(found?.id ?? null);
@@ -290,9 +316,23 @@ export default function ScaffoldFormModal({
       return setErrorMsg('ارتفاع داربست باید عددی بزرگ‌تر از صفر باشد.');
     }
 
+    if (!isEdit && includeInitialChecklist) {
+      const checklistErr = validateScaffoldChecklistBeforeSubmit(checklistItems, allowNaOption);
+      if (checklistErr) {
+        return setErrorMsg(checklistErr);
+      }
+    }
+
     setSubmitting(true);
     try {
-      const payload = {
+      const nowTime = new Intl.DateTimeFormat('en-GB', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      }).format(new Date());
+      const stamp = `${bootstrap.todayJalali || requestDate} - ${nowTime}`;
+
+      const payload: Record<string, any> = {
         requestDate,
         requestingUnit,
         orgUnitId,
@@ -303,8 +343,7 @@ export default function ScaffoldFormModal({
         activityDescription,
         permitId,
         permitNumber: permitNumber || null,
-        workRequestId,
-        workRequestNumber: workRequestNumber || null,
+        workRequestNumber: workRequestNumber.trim() || null,
         contractorName,
         erectorSupervisorName,
         inspectorPersonnelId,
@@ -317,6 +356,31 @@ export default function ScaffoldFormModal({
         beforePhotos,
         afterPhotos,
       };
+
+      if (!isEdit && includeInitialChecklist) {
+        payload.initialInspection = {
+          inspectionDate: bootstrap.todayJalali || requestDate,
+          inspectionTime: nowTime,
+          nextDueDate: bootstrap.defaultNextDueDate,
+          checklistItems,
+          summaryNotes: checklistSummaryNotes,
+          inspectorSignature: inspectorName,
+          unitSupervisorSignature: safetyUnitSupervisorName || null,
+          signaturesMeta: {
+            inspectorName,
+            inspectorPersonnelCode: inspectorPersonnelCode || undefined,
+            inspectorSignedAt: stamp,
+            unitSupervisorName: safetyUnitSupervisorName || undefined,
+            unitSupervisorPersonnelCode: safetyUnitSupervisorCode || undefined,
+            unitSupervisorSignedAt: safetyUnitSupervisorName ? stamp : undefined,
+          },
+          approveAndIssueGreenTag:
+            checklistEval.openDefectsCount === 0 &&
+            bootstrap.permissions?.canApprove &&
+            bootstrap.permissions?.canChangeTag &&
+            approveAndIssueGreenTag,
+        };
+      }
 
       const saved = isEdit && initialRecord
         ? await scaffoldingApi.update(initialRecord.id, payload)
@@ -333,7 +397,7 @@ export default function ScaffoldFormModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-2 sm:p-4" dir="rtl">
-      <div className="bg-white dark:bg-slate-800 w-full max-w-4xl max-h-[92vh] rounded-2xl border border-slate-200 dark:border-slate-700 shadow-2xl flex flex-col overflow-hidden">
+      <div className="bg-white dark:bg-slate-800 w-full max-w-5xl max-h-[94vh] rounded-2xl border border-slate-200 dark:border-slate-700 shadow-2xl flex flex-col overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-4 sm:px-6 py-4 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/60">
           <div className="flex items-center gap-3">
@@ -378,11 +442,11 @@ export default function ScaffoldFormModal({
             </div>
           )}
 
-          {/* Section 1: PTW & Work Request Direct DB Integration */}
+          {/* Section 1: PTW Direct Integration & Optional Manual Work Request */}
           <div className="p-4 rounded-2xl bg-blue-50/70 dark:bg-blue-950/30 border border-blue-200/80 dark:border-blue-800/60 space-y-3">
             <div className="flex items-center gap-2 text-xs font-black text-blue-800 dark:text-blue-300">
               <Link2 className="w-4 h-4" />
-              <span>اتصال مستقیم به پروانه کار (PTW) و سیستم درخواست کار</span>
+              <span>اتصال مستقیم به پروانه کار (PTW) و شماره درخواست کار</span>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
@@ -414,29 +478,15 @@ export default function ScaffoldFormModal({
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-                  شماره درخواست کار (اتصال به سیستم درخواست کار)
+                  شماره درخواست کار (اختیاری - درج دستی)
                 </label>
-                <select
-                  value={workRequestId ?? ''}
-                  onChange={e => handleSelectWorkRequest(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs font-medium text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-blue-500 outline-none"
-                >
-                  <option value="">-- انتخاب درخواست کار ثبت‌شده (اختیاری) --</option>
-                  {bootstrap.workRequests.map(wr => (
-                    <option key={wr.id} value={wr.id}>
-                      {wr.workRequestNumber} — {wr.title} ({wr.status})
-                    </option>
-                  ))}
-                </select>
-                {!workRequestId && (
-                  <input
-                    type="text"
-                    value={workRequestNumber}
-                    onChange={e => setWorkRequestNumber(e.target.value)}
-                    placeholder="یا درج دستی شماره درخواست کار / Work Order..."
-                    className="mt-2 w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-700 dark:text-slate-200"
-                  />
-                )}
+                <input
+                  type="text"
+                  value={workRequestNumber}
+                  onChange={e => setWorkRequestNumber(e.target.value)}
+                  placeholder="در صورت وجود، شماره درخواست کار / Work Order را وارد کنید..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs font-mono text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-blue-500 outline-none"
+                />
               </div>
             </div>
           </div>
@@ -462,39 +512,83 @@ export default function ScaffoldFormModal({
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-                  تاریخ درخواست نصب <span className="text-rose-500">*</span>
-                </label>
-                <input
-                  type="text"
+                <PersianDatePicker
+                  isFa
                   required
+                  label="تاریخ درخواست نصب"
                   value={requestDate}
-                  onChange={e => setRequestDate(e.target.value)}
-                  placeholder="1405/09/03"
-                  className="w-full px-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-xs font-mono text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-blue-500 outline-none"
+                  onChange={val => setRequestDate(val)}
+                  maxYear={pickerMaxYear}
+                  placeholder="انتخاب تاریخ درخواست نصب"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-                  واحد درخواست‌کننده (ساختار سازمانی) <span className="text-rose-500">*</span>
-                </label>
-                <select
-                  required
-                  value={requestingUnit}
-                  onChange={e => handleSelectOrgUnit(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-xs text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-blue-500 outline-none"
-                >
-                  <option value="">-- انتخاب واحد از ساختار سازمانی --</option>
-                  {bootstrap.orgUnits.map(u => (
-                    <option key={`${u.id ?? 's'}-${u.name}`} value={u.name}>
-                      {u.name}{u.code ? ` (${u.code})` : ''}
-                    </option>
-                  ))}
-                  {requestingUnit && !bootstrap.orgUnits.some(u => u.name === requestingUnit) && (
-                    <option value={requestingUnit}>{requestingUnit}</option>
-                  )}
-                </select>
+                <div className="flex items-center justify-between gap-2 mb-1.5">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                    واحد درخواست‌کننده <span className="text-rose-500">*</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isManualRequestingUnit) {
+                        setIsManualRequestingUnit(false);
+                        const matched = bootstrap.orgUnits.find(u => u.name === requestingUnit.trim());
+                        if (matched) {
+                          setOrgUnitId(matched.id ?? null);
+                        } else {
+                          setRequestingUnit('');
+                          setOrgUnitId(null);
+                        }
+                      } else {
+                        setIsManualRequestingUnit(true);
+                        setOrgUnitId(null);
+                      }
+                    }}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition cursor-pointer"
+                  >
+                    {isManualRequestingUnit ? (
+                      <>
+                        <Building2 className="w-3 h-3" />
+                        <span>انتخاب از ساختار سازمانی</span>
+                      </>
+                    ) : (
+                      <>
+                        <Edit3 className="w-3 h-3" />
+                        <span>افزودن دستی</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {isManualRequestingUnit ? (
+                  <input
+                    type="text"
+                    required
+                    value={requestingUnit}
+                    onChange={e => {
+                      setRequestingUnit(e.target.value);
+                      setOrgUnitId(null);
+                    }}
+                    placeholder="نام واحد درخواست‌کننده را به‌صورت دستی وارد کنید..."
+                    className="w-full px-3 py-2.5 rounded-xl border border-blue-300 dark:border-blue-600 bg-white dark:bg-slate-900 text-xs text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-blue-500 outline-none"
+                  />
+                ) : (
+                  <select
+                    required
+                    value={requestingUnit}
+                    onChange={e => handleSelectOrgUnit(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-xs text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-blue-500 outline-none"
+                  >
+                    <option value="">-- انتخاب واحد از ساختار سازمانی --</option>
+                    {bootstrap.orgUnits.map(u => (
+                      <option key={`${u.id ?? 's'}-${u.name}`} value={u.name}>
+                        {u.name}{u.code ? ` (${u.code})` : ''}
+                      </option>
+                    ))}
+                    <option value="__MANUAL__">+ افزودن دستی واحد درخواست‌کننده...</option>
+                  </select>
+                )}
               </div>
 
               <div>
@@ -562,11 +656,11 @@ export default function ScaffoldFormModal({
             </div>
           </div>
 
-          {/* Section 3: Technical Specs, Contractor & HSE Inspector */}
+          {/* Section 3: Technical Specs & Contractor */}
           <div className="space-y-4">
             <div className="flex items-center gap-2 text-xs font-black text-slate-800 dark:text-slate-200 border-b border-slate-200 dark:border-slate-700 pb-2">
               <Wrench className="w-4 h-4 text-blue-600" />
-              <span>مشخصات فنی داربست، پیمانکار و بازرس HSE</span>
+              <span>مشخصات فنی داربست و پیمانکار</span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -605,15 +699,13 @@ export default function ScaffoldFormModal({
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-                  تاریخ تکمیل نصب (اختیاری در مرحله درخواست)
-                </label>
-                <input
-                  type="text"
+                <PersianDatePicker
+                  isFa
+                  label="تاریخ تکمیل نصب (اختیاری در مرحله درخواست)"
                   value={installationCompletedDate}
-                  onChange={e => setInstallationCompletedDate(e.target.value)}
-                  placeholder="مثال: 1405/09/04"
-                  className="w-full px-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-xs font-mono text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-blue-500 outline-none"
+                  onChange={val => setInstallationCompletedDate(val)}
+                  maxYear={pickerMaxYear}
+                  placeholder="انتخاب تاریخ تکمیل نصب (اختیاری)"
                 />
               </div>
 
@@ -650,60 +742,6 @@ export default function ScaffoldFormModal({
                   ))}
                 </select>
               </div>
-            </div>
-
-            {/* HSE Inspector from Central Personnel Bank */}
-            <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 space-y-2">
-              <CentralPersonnelSelector
-                isFa
-                required
-                compact
-                label="نام بازرس HSE (انتخاب از بانک اطلاعات پرسنلی)"
-                selectedPersonnelCode={inspectorPersonnelCode}
-                placeholder="جستجوی نام یا کد پرسنلی بازرس HSE..."
-                onSelectPersonnel={person => {
-                  if (person) {
-                    const matched = bootstrap.personnelList.find(
-                      p => p.personnelCode === person.personnelCode || p.fullName === person.fullName
-                    );
-                    setInspectorPersonnelId(matched?.id ?? null);
-                    setInspectorPersonnelCode(person.personnelCode || '');
-                    setInspectorName(person.fullName || '');
-                  } else {
-                    setInspectorPersonnelId(null);
-                    setInspectorPersonnelCode('');
-                    setInspectorName('');
-                  }
-                }}
-              />
-              {inspectorName && (
-                <div className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400">
-                  بازرس انتخاب‌شده: {inspectorName} {inspectorPersonnelCode ? `(کد پرسنلی: ${inspectorPersonnelCode})` : ''}
-                </div>
-              )}
-              {!inspectorName && bootstrap.personnelList.length > 0 && (
-                <div className="pt-1">
-                  <select
-                    value={inspectorPersonnelId ?? ''}
-                    onChange={e => {
-                      const p = bootstrap.personnelList.find(x => x.id === Number(e.target.value));
-                      if (p) {
-                        setInspectorPersonnelId(p.id);
-                        setInspectorPersonnelCode(p.personnelCode);
-                        setInspectorName(p.fullName);
-                      }
-                    }}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-700 dark:text-slate-200"
-                  >
-                    <option value="">یا انتخاب سریع بازرس HSE از لیست پرسنل پایگاه داده...</option>
-                    {bootstrap.personnelList.map(p => (
-                      <option key={p.id} value={p.id}>
-                        {p.fullName} — {p.personnelCode} {p.jobTitle ? `(${p.jobTitle})` : ''}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
             </div>
 
             <div>
@@ -799,6 +837,94 @@ export default function ScaffoldFormModal({
             </div>
           </div>
 
+          {/* Section 5: 23-Item Scaffolding Installation Safety Checklist (New Scaffold Registration) */}
+          {!isEdit && (
+            <div className="space-y-4 pt-2 border-t-2 border-slate-200 dark:border-slate-700">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-xs font-black text-emerald-700 dark:text-emerald-400">
+                  <ClipboardCheck className="w-4 h-4" />
+                  <span>بخش چک‌لیست ایمنی نصب داربست (۲۳ آیتم استاندارد RHS-W14 Rev 00)</span>
+                </div>
+                <label className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-200 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={includeInitialChecklist}
+                    onChange={e => setIncludeInitialChecklist(e.target.checked)}
+                    className="w-4 h-4 accent-emerald-600"
+                  />
+                  <span>تکمیل و ثبت هم‌زمان چک‌لیست ۲۳‌بندی با داربست</span>
+                </label>
+              </div>
+
+              {includeInitialChecklist ? (
+                <>
+                  <ScaffoldChecklistSection
+                    items={checklistItems}
+                    onChangeItems={setChecklistItems}
+                    allowNaOption={allowNaOption}
+                    canConfigureSettings={canConfigureChecklistSettings}
+                    savingSettings={savingSettings}
+                    onToggleAllowNa={handleToggleAllowNa}
+                    summaryNotes={checklistSummaryNotes}
+                    onChangeSummaryNotes={setChecklistSummaryNotes}
+                    personnelList={bootstrap.personnelList}
+                    inspectorName={inspectorName}
+                    inspectorPersonnelCode={inspectorPersonnelCode}
+                    onSelectInspector={sel => {
+                      setInspectorPersonnelId(sel.id);
+                      setInspectorPersonnelCode(sel.personnelCode);
+                      setInspectorName(sel.fullName);
+                    }}
+                    safetyUnitSupervisorName={safetyUnitSupervisorName}
+                    safetyUnitSupervisorCode={safetyUnitSupervisorCode}
+                    onSelectSafetyUnitSupervisor={sel => {
+                      setSafetyUnitSupervisorCode(sel.personnelCode);
+                      setSafetyUnitSupervisorName(sel.fullName);
+                    }}
+                    signedAtPreview={bootstrap.todayJalali || requestDate}
+                    onError={msg => setErrorMsg(msg)}
+                  />
+
+                  {checklistEval.openDefectsCount === 0 &&
+                    bootstrap.permissions?.canApprove &&
+                    bootstrap.permissions?.canChangeTag && (
+                      <label className="flex items-center gap-3 p-3.5 rounded-2xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-300 dark:border-emerald-700 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={approveAndIssueGreenTag}
+                          onChange={e => setApproveAndIssueGreenTag(e.target.checked)}
+                          className="w-4 h-4 accent-emerald-600"
+                        />
+                        <span className="text-xs font-black text-emerald-800 dark:text-emerald-200">
+                          تأیید نهایی بازرس HSE و صدور هم‌زمان «تگ سبز (مجاز به استفاده)» تا تاریخ {bootstrap.defaultNextDueDate}
+                        </span>
+                      </label>
+                    )}
+                </>
+              ) : (
+                <div className="p-3.5 rounded-2xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-xs text-amber-800 dark:text-amber-200">
+                  چک‌لیست ایمنی نصب داربست در مرحله ثبت درخواست به تعویق افتاد. داربست با <strong>تگ قرمز (غیرمجاز)</strong> ثبت می‌شود و پس از نصب، تکمیل چک‌لیست ۲۳‌بندی از پرونده داربست الزامی است.
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Bottom HSE Inspector Selector when Checklist is deferred or editing */}
+          {(isEdit || !includeInitialChecklist) && (
+            <ScaffoldApproverSignaturesBlock
+              personnelList={bootstrap.personnelList}
+              inspectorName={inspectorName}
+              inspectorPersonnelCode={inspectorPersonnelCode}
+              onSelectInspector={sel => {
+                setInspectorPersonnelId(sel.id);
+                setInspectorPersonnelCode(sel.personnelCode);
+                setInspectorName(sel.fullName);
+              }}
+              showSafetyUnitSupervisor={false}
+              signedAtPreview={bootstrap.todayJalali || requestDate}
+            />
+          )}
+
           {/* Footer */}
           <div className="flex flex-wrap items-center justify-end gap-2 pt-4 border-t border-slate-200 dark:border-slate-700">
             <button
@@ -814,7 +940,13 @@ export default function ScaffoldFormModal({
               className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white text-xs font-black shadow-md shadow-blue-500/20 cursor-pointer"
             >
               {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-              <span>{isEdit ? 'ذخیره تغییرات داربست' : 'ثبت داربست جدید'}</span>
+              <span>
+                {isEdit
+                  ? 'ذخیره تغییرات داربست'
+                  : includeInitialChecklist
+                    ? 'ثبت داربست و ذخیره چک‌لیست ۲۳‌بندی'
+                    : 'ثبت داربست جدید'}
+              </span>
             </button>
           </div>
         </form>

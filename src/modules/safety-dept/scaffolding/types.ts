@@ -1,8 +1,10 @@
 import {
   ScaffoldChecklistResponseItem,
+  ScaffoldChecklistSettings,
   ScaffoldChecklistTemplateItem,
   ScaffoldInspectionReason,
   ScaffoldPhotoItem,
+  ScaffoldSignaturesMeta,
   ScaffoldTagStatus,
   ScaffoldWorkflowStatus,
 } from '../../../../shared/scaffolding/constants';
@@ -32,23 +34,7 @@ export interface ScaffoldPermitOption {
   equipmentName: string;
   contractorName: string;
   description: string;
-  workOrderNumber: string;
   status: string;
-}
-
-export interface ScaffoldWorkRequestOption {
-  id: number;
-  workRequestNumber: string;
-  workflowKey: string;
-  entityType: string;
-  title: string;
-  status: string;
-  requesterName: string;
-  unitName: string;
-  location: string;
-  equipmentName: string;
-  contractorName: string;
-  description: string;
 }
 
 export interface ScaffoldOrgUnitOption {
@@ -143,7 +129,9 @@ export interface ScaffoldInspectionRecord {
   weatherCondition?: string | null;
   maxLoadCapacityKg?: number | null;
   inspectorSignature?: string | null;
+  unitSupervisorSignature?: string | null;
   supervisorSignature?: string | null;
+  signaturesMeta?: ScaffoldSignaturesMeta | null;
   createdAt: string;
 }
 
@@ -182,11 +170,11 @@ export interface ScaffoldBootstrapData {
   todayJalali: string;
   defaultNextDueDate: string;
   permits: ScaffoldPermitOption[];
-  workRequests: ScaffoldWorkRequestOption[];
   orgUnits: ScaffoldOrgUnitOption[];
   personnelList: ScaffoldPersonnelOption[];
   contractors: string[];
   checklistTemplate: ScaffoldChecklistTemplateItem[];
+  checklistSettings?: ScaffoldChecklistSettings;
   permissions: ScaffoldPermissionsMatrix;
 }
 
@@ -195,7 +183,6 @@ export interface ScaffoldDetailData {
   inspections: ScaffoldInspectionRecord[];
   tagHistory: ScaffoldTagHistoryRecord[];
   linkedPermit: any | null;
-  linkedWorkRequest: any | null;
   permissions: ScaffoldPermissionsMatrix;
 }
 

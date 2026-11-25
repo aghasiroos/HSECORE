@@ -52,6 +52,43 @@ export class AuthController {
     return ApiResponse.success(res, user);
   }
 
+  async updateMySessionTimeout(req: Request, res: Response) {
+    if (!req.user || !req.user.uid) {
+      throw new UnauthorizedError('احراز هویت الزامی است.');
+    }
+    const ip = getClientIp(req);
+    const userAgent = (req.headers['user-agent'] as string) || '';
+    const { sessionAlwaysActive, sessionTimeoutMinutes } = req.body || {};
+    const result = await authService.updateMySessionTimeout(
+      req.user.uid,
+      { sessionAlwaysActive, sessionTimeoutMinutes },
+      { ip, userAgent }
+    );
+
+    // Sync strictly to the exact same signed-in user across their own open tabs/devices
+    broadcastDataMutation(
+      'user_preferences',
+      'update',
+      {
+        userUid: req.user.uid,
+        prefKey: 'session_timeout',
+        value: {
+          sessionTimeoutMinutes: result.sessionTimeoutMinutes,
+          sessionAlwaysActive: result.sessionAlwaysActive,
+          sessionPolicy: result.sessionPolicy,
+        },
+      },
+      {
+        module: 'AUTH',
+        recordId: req.user.uid,
+        actorId: req.user.uid,
+        targetUserUid: req.user.uid,
+      }
+    );
+
+    return ApiResponse.success(res, result);
+  }
+
   async changePassword(req: Request, res: Response) {
     if (!req.user || !req.user.uid) {
       throw new UnauthorizedError('احراز هویت الزامی است.');

@@ -20,6 +20,20 @@ export type ScaffoldInspectionReason =
   | 'RE_INSPECTION';
 
 export type ScaffoldChecklistVerdict = 'PASS' | 'FAIL' | 'NA';
+export type ScaffoldChecklistAnswer = 'YES' | 'NO' | 'NA';
+
+export interface ScaffoldChecklistSettings {
+  allowNaOption: boolean;
+}
+
+export interface ScaffoldSignaturesMeta {
+  inspectorName?: string;
+  inspectorPersonnelCode?: string;
+  inspectorSignedAt?: string;
+  unitSupervisorName?: string;
+  unitSupervisorPersonnelCode?: string;
+  unitSupervisorSignedAt?: string;
+}
 
 export interface ScaffoldChecklistTemplateItem {
   code: string;
@@ -29,6 +43,8 @@ export interface ScaffoldChecklistTemplateItem {
   requirementFa: string;
   standardRef: string;
   isCritical: boolean;
+  /** The answer ('YES' | 'NO') that represents a SAFE / COMPLIANT condition */
+  safeAnswer: 'YES' | 'NO';
 }
 
 export interface ScaffoldChecklistResponseItem {
@@ -40,6 +56,8 @@ export interface ScaffoldChecklistResponseItem {
   standardRef?: string;
   isCritical: boolean;
   isCustom?: boolean;
+  safeAnswer?: 'YES' | 'NO';
+  answer?: ScaffoldChecklistAnswer | null;
   verdict: ScaffoldChecklistVerdict | null;
   comment?: string;
   defectPhoto?: string;
@@ -130,158 +148,358 @@ export const SCAFFOLD_TAG_META: Record<
 };
 
 /**
- * 15 standard HSE scaffolding inspection checklist items (OSHA 1926 Subpart L / BS EN 12811 / TG20).
- * Items marked `isCritical: true` automatically block final approval & GREEN tag issuance if failed & unresolved.
+ * Official 23-item Scaffolding Installation Safety Checklist (چک‌لیست ایمنی نصب داربست).
+ * All 23 items are implemented verbatim per RHS-W14 Rev 00 & HSECORE standards.
+ * Note: Items SCF-14 and SCF-16 have inverted polarity (`safeAnswer: 'NO'`).
  */
 export const STANDARD_SCAFFOLD_CHECKLIST_ITEMS: ScaffoldChecklistTemplateItem[] = [
   {
     code: 'SCF-01',
     orderIndex: 1,
-    categoryFa: 'بستر و استقرار',
-    titleFa: 'وضعیت زمین و محل استقرار',
-    requirementFa: 'زمین محل استقرار داربست مستحکم، هموار، تراز و عاری از نشست، گودبرداری، آب‌گرفتگی و نشت مواد شیمیایی باشد.',
-    standardRef: 'OSHA 1926.451(c)(2)',
+    categoryFa: 'مجوز و صلاحیت',
+    titleFa: 'آیا برای نصب داربست مجوز صادر شده است؟',
+    requirementFa: 'صدور و اعتبار پروانه کار / مجوز رسمی نصب داربست پیش از شروع عملیات.',
+    standardRef: 'RHS-W14 Rev 00',
     isCritical: true,
+    safeAnswer: 'YES',
   },
   {
     code: 'SCF-02',
     orderIndex: 2,
-    categoryFa: 'بستر و استقرار',
-    titleFa: 'کفشک‌ها و صفحات زیرپایه',
-    requirementFa: 'کلیه پایه‌های عمودی دارای صفحه زیرپایه فلزی (Base Plate) استاندارد و الوار زیرکفشک (Sole Board) سالم و تراز باشند.',
-    standardRef: 'OSHA 1926.451(c)(2)(i)',
+    categoryFa: 'مجوز و صلاحیت',
+    titleFa: 'آیا داربست توسط افراد ماهر و با تجربه برپا شده است؟',
+    requirementFa: 'برپایی داربست صرفاً توسط داربست‌بندان آموزش‌دیده و دارای صلاحیت فنی.',
+    standardRef: 'RHS-W14 Rev 00',
     isCritical: true,
+    safeAnswer: 'YES',
   },
   {
     code: 'SCF-03',
     orderIndex: 3,
-    categoryFa: 'سازه و قطعات',
-    titleFa: 'سلامت لوله‌ها و اتصالات',
-    requirementFa: 'لوله‌های داربست و بست‌ها فاقد خوردگی شدید، خمیدگی، ترک‌خوردگی، فرورفتگی یا جوشکاری غیراستاندارد باشند.',
-    standardRef: 'BS EN 39 / EN 74',
+    categoryFa: 'حفاظت فردی',
+    titleFa: 'آیا داربست‌بندها از وسایل حفاظت فردی مناسب استفاده می‌کنند؟',
+    requirementFa: 'استفاده از کمربند ایمنی (هارنس تمام‌بدن)، کلاه ایمنی چانه‌دار، کفش ایمنی و دستکش مناسب.',
+    standardRef: 'RHS-W14 Rev 00',
     isCritical: true,
+    safeAnswer: 'YES',
   },
   {
     code: 'SCF-04',
     orderIndex: 4,
-    categoryFa: 'سازه و قطعات',
-    titleFa: 'مهاربندی افقی و مورب',
-    requirementFa: 'مهارهای طولی (Ledger)، عرضی (Transom)، مهارهای ضربدری/مورب (Bracing) و مهار به سازه ثابت (Tie-in) کامل و استاندارد باشند.',
-    standardRef: 'BS EN 12811 / TG20',
+    categoryFa: 'اجزا و اتیکت',
+    titleFa: 'آیا اجزای تشکیل‌دهنده داربست در شرایط ایمن و مطمئنی جهت استفاده قرار دارند؟',
+    requirementFa: 'سلامت کامل لوله‌ها، بست‌ها، اتصالات و تجهیزات جانبی داربست.',
+    standardRef: 'RHS-W14 Rev 00',
     isCritical: true,
+    safeAnswer: 'YES',
   },
   {
     code: 'SCF-05',
     orderIndex: 5,
-    categoryFa: 'سازه و قطعات',
-    titleFa: 'اتصالات و استحکام سازه',
-    requirementFa: 'تمامی بست‌های ثابت و گردان با گشتاور مناسب محکم شده، پایه‌ها شاقول بوده و سازه بدون لرزش و لق‌زدگی باشد.',
-    standardRef: 'OSHA 1926.451(a)',
+    categoryFa: 'اجزا و اتیکت',
+    titleFa: 'آیا سیستم نصب اتیکت (Scafftag) اجرا شده است؟',
+    requirementFa: 'نصب هولدر و اتیکت وضعیت داربست (Scafftag) در نقطه دسترسی اصلی.',
+    standardRef: 'RHS-W14 Rev 00',
     isCritical: true,
+    safeAnswer: 'YES',
   },
   {
     code: 'SCF-06',
     orderIndex: 6,
-    categoryFa: 'سکوی کار',
-    titleFa: 'سکوی کار و تخته‌های داربست',
-    requirementFa: 'سکوی کار به‌طور کامل با تخته‌های استاندارد (بدون ترک، پوسیدگی و شکستگی) پوشیده شده، فاصله مجاز رعایت و تخته‌ها مهار شده باشند.',
-    standardRef: 'OSHA 1926.451(b)',
+    categoryFa: 'بستر و تراز',
+    titleFa: 'آیا برای تراز شدن عمودی و افقی داربست، به‌جای اشیای نامطمئن و ناپایدار مانند بلوک‌ها و آجرهای لق، از جک استفاده شده است؟',
+    requirementFa: 'استفاده از جک تراز استاندارد و منع کامل استفاده از آجر، بلوک یا قطعات ناپایدار.',
+    standardRef: 'RHS-W14 Rev 00',
     isCritical: true,
+    safeAnswer: 'YES',
   },
   {
     code: 'SCF-07',
     orderIndex: 7,
-    categoryFa: 'حفاظت در برابر سقوط',
-    titleFa: 'گاردریل بالایی و میانی',
-    requirementFa: 'نرده محافظ بالایی (ارتفاع ۹۵ تا ۱۱۰ سانتی‌متر) و میانی در کلیه لبه‌های باز سکوی کار به‌صورت مستحکم نصب شده باشد.',
-    standardRef: 'OSHA 1926.451(g)(4)',
+    categoryFa: 'بستر و تراز',
+    titleFa: 'آیا صفحات پایه (Base Plate) و جک‌های پیچی اتصال محکمی با لوله‌های استاندارد و فریم‌ها دارند؟',
+    requirementFa: 'استقرار و اتصال کامل صفحات زیرپایه و جک‌های پیچی به پایه‌های عمودی.',
+    standardRef: 'RHS-W14 Rev 00',
     isCritical: true,
+    safeAnswer: 'YES',
   },
   {
     code: 'SCF-08',
     orderIndex: 8,
-    categoryFa: 'حفاظت در برابر سقوط',
-    titleFa: 'پاخور (Toe Board)',
-    requirementFa: 'پاخور استاندارد با ارتفاع حداقل ۱۵ سانتی‌متر در تمام لبه‌های سکوی کار جهت جلوگیری از سقوط ابزار و مصالح نصب شده باشد.',
-    standardRef: 'OSHA 1926.451(h)(4)',
-    isCritical: false,
+    categoryFa: 'مهار و استحکام',
+    titleFa: 'آیا همه پایه‌های داربست به‌خوبی مهار و محکم شده‌اند؟',
+    requirementFa: 'مهاربندی مناسب تمامی پایه‌های عمودی و جلوگیری از لغزش یا جابه‌جایی.',
+    standardRef: 'RHS-W14 Rev 00',
+    isCritical: true,
+    safeAnswer: 'YES',
   },
   {
     code: 'SCF-09',
     orderIndex: 9,
-    categoryFa: 'دسترسی ایمن',
-    titleFa: 'مسیر دسترسی و نردبان',
-    requirementFa: 'نردبان دسترسی استاندارد با شیب مناسب (۱ به ۴)، مهار ایمن در بالا و پایین و امتداد حداقل ۱ متر بالاتر از سکوی کار نصب باشد.',
-    standardRef: 'OSHA 1926.451(e)',
+    categoryFa: 'دسترسی و نردبان',
+    titleFa: 'آیا برای دسترسی، ورود و خروج، نردبان ایمن تهیه شده است؟',
+    requirementFa: 'تعبیه نردبان دسترسی ایمن و مهارشده برای ورود و خروج پرسنل.',
+    standardRef: 'RHS-W14 Rev 00',
     isCritical: true,
+    safeAnswer: 'YES',
   },
   {
     code: 'SCF-10',
     orderIndex: 10,
-    categoryFa: 'ایمنی الکتریکی',
-    titleFa: 'فاصله ایمن از خطوط برق',
-    requirementFa: 'حریم ایمن قانونی از خطوط انتقال برق هوایی و تجهیزات برقدار رعایت شده و در صورت لزوم عایق‌بندی یا قطع برق انجام شده باشد.',
-    standardRef: 'OSHA 1926.451(f)(6)',
+    categoryFa: 'دسترسی و نردبان',
+    titleFa: 'آیا نردبان‌ها سالم بوده و دارای زاویه ۷۵ درجه نسبت به سطح افق و فاصله پله‌های ۰/۳ متر هستند؟',
+    requirementFa: 'سلامت فیزیکی نردبان، رعایت زاویه استقرار ۷۵ درجه (نسبت ۱ به ۴) و گام پله ۳۰ سانتی‌متر.',
+    standardRef: 'RHS-W14 Rev 00',
     isCritical: true,
+    safeAnswer: 'YES',
   },
   {
     code: 'SCF-11',
     orderIndex: 11,
-    categoryFa: 'ظرفیت و بارگذاری',
-    titleFa: 'ظرفیت بارگذاری',
-    requirementFa: 'حداکثر بار مجاز سکوی کار مشخص بوده، مصالح اضافی روی سکو دپو نشده و از بارگذاری بیش از ظرفیت طراحی جلوگیری شده باشد.',
-    standardRef: 'BS EN 12811-1 Load Class',
+    categoryFa: 'دسترسی و نردبان',
+    titleFa: 'آیا نردبان حداقل یک متر بالاتر از نقطه دسترسی امتداد دارد؟',
+    requirementFa: 'امتداد نردبان به میزان حداقل ۱ متر بالاتر از تراز سکوی ورود/خروج.',
+    standardRef: 'RHS-W14 Rev 00',
     isCritical: true,
+    safeAnswer: 'YES',
   },
   {
     code: 'SCF-12',
     orderIndex: 12,
-    categoryFa: 'پایداری و مهندسی',
-    titleFa: 'ارتفاع و پایداری داربست',
-    requirementFa: 'نسبت ارتفاع به عرض پایه استاندارد رعایت شده و برای داربست‌های مرتفع (بالای ۴ برابر عرض پایه یا خاص) محاسبات/مهار جانبی انجام شده باشد.',
-    standardRef: 'OSHA 1926.451(c)(1)',
-    isCritical: true,
+    categoryFa: 'حفاظت سکو',
+    titleFa: 'آیا لبه‌های پاخور حفاظتی قسمت پایین سکو (Toe Boards) به ارتفاع ۰/۱۵ متر نصب شده است؟',
+    requirementFa: 'نصب پاخور حفاظتی با حداقل ارتفاع ۱۵ سانتی‌متر در لبه‌های باز سکو.',
+    standardRef: 'RHS-W14 Rev 00',
+    isCritical: false,
+    safeAnswer: 'YES',
   },
   {
     code: 'SCF-13',
     orderIndex: 13,
-    categoryFa: 'شرایط محیطی',
-    titleFa: 'شرایط محیطی',
-    requirementFa: 'شرایط جوی (سرعت باد مجاز، نبود یخ‌زدگی و لغزندگی سکو)، روشنایی محیط و ایمنی تردد ماشین‌آلات پیرامون داربست مناسب باشد.',
-    standardRef: 'OSHA 1926.451(f)(8)',
-    isCritical: false,
+    categoryFa: 'ایمنی الکتریکی',
+    titleFa: 'آیا فاصله مجاز با خطوط برق رعایت شده است؟ (دستورالعمل RHS-W14 Rev 00 بندهای 4-2-36 و 4-2-37)',
+    requirementFa: 'رعایت حریم ایمن الکتریکی از خطوط برق هوایی و تجهیزات برقدار مطابق بندهای 4-2-36 و 4-2-37.',
+    standardRef: 'RHS-W14 Rev 00 (4-2-36, 4-2-37)',
+    isCritical: true,
+    safeAnswer: 'YES',
   },
   {
     code: 'SCF-14',
     orderIndex: 14,
-    categoryFa: 'علائم و حصارکشی',
-    titleFa: 'علائم هشداردهنده',
-    requirementFa: 'نوار خطر/حصارکشی محوطه زیر داربست، تابلوی هشدار «کار در ارتفاع / احتمال سقوط اشیاء» و هولدر تگ رنگی در محل ورود نصب باشد.',
-    standardRef: 'HSE Scaffolding Standard',
+    categoryFa: 'تردد و محیط',
+    titleFa: 'آیا داربست برای تردد آسان و ایمن وسایل نقلیه مزاحمت ایجاد کرده است؟',
+    requirementFa: 'عدم ایجاد مزاحمت یا خطر برخورد برای تردد ایمن خودروها و ماشین‌آلات (پاسخ ایمن: خیر).',
+    standardRef: 'RHS-W14 Rev 00',
     isCritical: false,
+    safeAnswer: 'NO',
   },
   {
     code: 'SCF-15',
     orderIndex: 15,
-    categoryFa: 'الزامات فنی و ایمنی',
-    titleFa: 'انطباق با الزامات فنی و ایمنی',
-    requirementFa: 'انطباق کامل نصب با دستورالعمل HSE، اعتبار پروانه کار (PTW) مرتبط، صلاحیت داربست‌بندان و رعایت الزامات حفاظتی مجتمع.',
-    standardRef: 'HSECORE-STD-SCF',
+    categoryFa: 'حفاظت سکو',
+    titleFa: 'آیا نرده‌های حفاظتی (Guard Rails) در ارتفاع‌های میانی ۰/۵ و ۱ متر بالاتر از سکوی کار نصب شده‌اند؟',
+    requirementFa: 'نصب کامل گاردریل میانی (۰/۵ متر) و بالایی (۱ متر) در تمام لبه‌های باز سکوی کار.',
+    standardRef: 'RHS-W14 Rev 00',
     isCritical: true,
+    safeAnswer: 'YES',
+  },
+  {
+    code: 'SCF-16',
+    orderIndex: 16,
+    categoryFa: 'سلامت متریال',
+    titleFa: 'آیا در داربست از متریال آسیب‌دیده و صدمه‌دیده استفاده شده است؟',
+    requirementFa: 'ممنوعیت اکید استفاده از لوله، تخته، بست یا متریال آسیب‌دیده/خورده‌شده (پاسخ ایمن: خیر).',
+    standardRef: 'RHS-W14 Rev 00',
+    isCritical: true,
+    safeAnswer: 'NO',
+  },
+  {
+    code: 'SCF-17',
+    orderIndex: 17,
+    categoryFa: 'بستر و بارگذاری',
+    titleFa: 'آیا زمین مقاومت و تحمل کافی برای تحمل وزن داربست را داشته است؟',
+    requirementFa: 'بررسی استحکام و ظرفیت باربری بستر زیرین جهت تحمل وزن سازه و بار عملیاتی.',
+    standardRef: 'RHS-W14 Rev 00',
+    isCritical: true,
+    safeAnswer: 'YES',
+  },
+  {
+    code: 'SCF-18',
+    orderIndex: 18,
+    categoryFa: 'سکوی کار',
+    titleFa: 'آیا سطح کار با الوار یا ورق‌های مشبک مناسب پوشانده و مهار شده و میل‌مهارهای عرضی حمایت‌کننده مطابق بند 04-02-30 دستورالعمل RHS-W14 Rev 00 هستند؟',
+    requirementFa: 'پوشش کامل و مهار الوار/ورق‌های مشبک سکوی کار و انطباق میل‌مهارهای عرضی با بند 04-02-30.',
+    standardRef: 'RHS-W14 Rev 00 (04-02-30)',
+    isCritical: true,
+    safeAnswer: 'YES',
+  },
+  {
+    code: 'SCF-19',
+    orderIndex: 19,
+    categoryFa: 'بستر و بارگذاری',
+    titleFa: 'آیا داربست برای مقدار بار موردنظر طراحی شده است؟',
+    requirementFa: 'انطباق طراحی و ظرفیت باربری داربست با بار پرسنل، ابزار و مصالح پیش‌بینی‌شده.',
+    standardRef: 'RHS-W14 Rev 00',
+    isCritical: true,
+    safeAnswer: 'YES',
+  },
+  {
+    code: 'SCF-20',
+    orderIndex: 20,
+    categoryFa: 'پایداری و تجهیزات خاص',
+    titleFa: 'آیا داربست متحرک مجهز به ترمز چرخ است؟',
+    requirementFa: 'وجود و سلامت قفل/ترمز چرخ‌ها در داربست‌های متحرک پیش از بهره‌برداری.',
+    standardRef: 'RHS-W14 Rev 00',
+    isCritical: true,
+    safeAnswer: 'YES',
+  },
+  {
+    code: 'SCF-21',
+    orderIndex: 21,
+    categoryFa: 'پایداری و تجهیزات خاص',
+    titleFa: 'آیا داربست‌های ۹ متر طول و ۸ متر ارتفاع به سازه چفت و بست شده‌اند؟',
+    requirementFa: 'مهار و اتصال مطمئن داربست‌های دارای طول ۹ متر و ارتفاع ۸ متر به سازه ثابت.',
+    standardRef: 'RHS-W14 Rev 00',
+    isCritical: true,
+    safeAnswer: 'YES',
+  },
+  {
+    code: 'SCF-22',
+    orderIndex: 22,
+    categoryFa: 'حفاظت پیرامونی',
+    titleFa: 'آیا حفاظ توری در صورت نیاز در بالای جایگاه و زیر آن نصب شده است؟',
+    requirementFa: 'نصب توری ایمنی جهت جلوگیری از سقوط اشیاء و حفاظت افراد پایین‌دست در صورت نیاز.',
+    standardRef: 'RHS-W14 Rev 00',
+    isCritical: false,
+    safeAnswer: 'YES',
+  },
+  {
+    code: 'SCF-23',
+    orderIndex: 23,
+    categoryFa: 'بازرسی و انطباق',
+    titleFa: 'آیا داربست طبق برنامه زمان‌بندی و مطابق دستورالعمل تهیه‌شده بازرسی و نصب شده است؟',
+    requirementFa: 'انطباق کامل فرآیند نصب و بازرسی با برنامه زمان‌بندی و دستورالعمل اجرایی.',
+    standardRef: 'RHS-W14 Rev 00',
+    isCritical: true,
+    safeAnswer: 'YES',
   },
 ];
 
+export const DEFAULT_SCAFFOLD_CHECKLIST_SETTINGS: ScaffoldChecklistSettings = {
+  allowNaOption: false,
+};
+
+/**
+ * Convert an explicit YES/NO/NA answer to a PASS/FAIL/NA verdict respecting item polarity (`safeAnswer`).
+ */
+export function resolveChecklistVerdict(
+  answer: ScaffoldChecklistAnswer | null | undefined,
+  safeAnswer: 'YES' | 'NO' = 'YES'
+): ScaffoldChecklistVerdict | null {
+  if (!answer) return null;
+  if (answer === 'NA') return 'NA';
+  return answer === safeAnswer ? 'PASS' : 'FAIL';
+}
+
+/**
+ * Derive YES/NO/NA answer from a response item (supports legacy items that only stored `verdict`).
+ */
+export function resolveChecklistAnswer(item: {
+  answer?: ScaffoldChecklistAnswer | null;
+  verdict?: ScaffoldChecklistVerdict | null;
+  safeAnswer?: 'YES' | 'NO';
+}): ScaffoldChecklistAnswer | null {
+  if (item.answer === 'YES' || item.answer === 'NO' || item.answer === 'NA') {
+    return item.answer;
+  }
+  const safe = item.safeAnswer || 'YES';
+  if (item.verdict === 'NA') return 'NA';
+  if (item.verdict === 'PASS') return safe;
+  if (item.verdict === 'FAIL') return safe === 'YES' ? 'NO' : 'YES';
+  return null;
+}
+
+export function createInitialScaffoldChecklist(
+  previousChecklist?: ScaffoldChecklistResponseItem[] | null,
+  allowNaOption = false
+): ScaffoldChecklistResponseItem[] {
+  const prevByCode = new Map(
+    (Array.isArray(previousChecklist) ? previousChecklist : []).map(i => [i.code, i])
+  );
+
+  const items: ScaffoldChecklistResponseItem[] = STANDARD_SCAFFOLD_CHECKLIST_ITEMS.map(tpl => {
+    const prev = prevByCode.get(tpl.code);
+    const keepUnresolvedFail = prev?.verdict === 'FAIL' && !prev.resolved;
+    const prevAnswer = prev ? resolveChecklistAnswer({ ...prev, safeAnswer: tpl.safeAnswer }) : null;
+
+    let answer: ScaffoldChecklistAnswer = tpl.safeAnswer;
+    if (keepUnresolvedFail) {
+      answer = tpl.safeAnswer === 'YES' ? 'NO' : 'YES';
+    } else if (prevAnswer === 'NA' && allowNaOption) {
+      answer = 'NA';
+    }
+
+    const verdict = resolveChecklistVerdict(answer, tpl.safeAnswer);
+    return {
+      code: tpl.code,
+      orderIndex: tpl.orderIndex,
+      categoryFa: tpl.categoryFa,
+      titleFa: tpl.titleFa,
+      requirementFa: tpl.requirementFa,
+      standardRef: tpl.standardRef,
+      isCritical: tpl.isCritical,
+      isCustom: false,
+      safeAnswer: tpl.safeAnswer,
+      answer,
+      verdict,
+      comment: keepUnresolvedFail ? prev?.comment || '' : '',
+      defectPhoto: keepUnresolvedFail ? prev?.defectPhoto : undefined,
+      correctiveAction: keepUnresolvedFail ? prev?.correctiveAction || '' : '',
+      responsiblePerson: keepUnresolvedFail ? prev?.responsiblePerson || '' : '',
+      dueDate: keepUnresolvedFail ? prev?.dueDate || '' : '',
+      resolved: false,
+    };
+  });
+
+  if (Array.isArray(previousChecklist)) {
+    previousChecklist
+      .filter(i => i.isCustom)
+      .forEach((c, idx) => {
+        const safe = c.safeAnswer || 'YES';
+        const ans = resolveChecklistAnswer({ ...c, safeAnswer: safe }) || safe;
+        const normalizedAns: ScaffoldChecklistAnswer = ans === 'NA' && !allowNaOption ? safe : ans;
+        items.push({
+          ...c,
+          orderIndex: items.length + idx + 1,
+          safeAnswer: safe,
+          answer: normalizedAns,
+          verdict: resolveChecklistVerdict(normalizedAns, safe),
+        });
+      });
+  }
+
+  return items;
+}
+
 export function evaluateScaffoldChecklist(items: ScaffoldChecklistResponseItem[]) {
   const safeItems = Array.isArray(items) ? items : [];
-  const totalItems = safeItems.length;
-  const passedCount = safeItems.filter(i => i.verdict === 'PASS').length;
-  const failedItems = safeItems.filter(i => i.verdict === 'FAIL');
+  const normalized = safeItems.map(it => {
+    const safe = it.safeAnswer || 'YES';
+    const verdict =
+      it.verdict ||
+      (it.answer ? resolveChecklistVerdict(it.answer, safe) : null);
+    return { ...it, verdict };
+  });
+
+  const totalItems = normalized.length;
+  const passedCount = normalized.filter(i => i.verdict === 'PASS').length;
+  const failedItems = normalized.filter(i => i.verdict === 'FAIL');
   const failedCount = failedItems.length;
   const openFailedItems = failedItems.filter(i => !i.resolved);
   const openDefectsCount = openFailedItems.length;
   const criticalFailedItems = openFailedItems.filter(i => i.isCritical);
   const criticalDefectCount = criticalFailedItems.length;
-  const naCount = safeItems.filter(i => i.verdict === 'NA').length;
+  const naCount = normalized.filter(i => i.verdict === 'NA').length;
   const evaluatedCount = totalItems - naCount;
   const complianceScore =
     evaluatedCount > 0 ? Math.round((passedCount / evaluatedCount) * 100) : 100;

@@ -117,6 +117,43 @@ router.get('/bootstrap', async (req: Request, res: Response, next: NextFunction)
 });
 
 /**
+ * PUT /api/v1/scaffolding/settings
+ * Persist scaffolding checklist settings (such as enabling/disabling the N/A option) in PostgreSQL.
+ */
+router.put('/settings', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { user, perms } = await resolveScaffoldPermissions(req);
+    assertScaffoldPerm(
+      req,
+      perms.canInspect || perms.canEdit || perms.canApprove,
+      'scaffolding:update',
+      'شما مجوز تغییر تنظیمات چک‌لیست داربست‌بندی را ندارید.'
+    );
+
+    const settings = await scaffoldingService.updateChecklistSettings(req.body || {}, user);
+
+    await auditService.logFromRequest(req, {
+      action: 'SCAFFOLD_SETTINGS_UPDATE',
+      module: 'SCAFFOLDING',
+      entityType: 'SCAFFOLD_SETTINGS',
+      newValue: settings,
+      details: {
+        actionTitle: `به‌روزرسانی تنظیمات چک‌لیست داربست (گزینه نامرتبط: ${settings.allowNaOption ? 'فعال' : 'غیرفعال'})`,
+      },
+    });
+
+    broadcastDataMutation('scaffolding', 'settings_update', settings, {
+      module: 'SCAFFOLDING',
+      actorId: user.uid,
+    });
+
+    res.json({ success: true, data: settings });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
  * GET /api/v1/scaffolding
  * List all scaffolds with multi-criteria filters & live KPIs.
  */
@@ -199,7 +236,10 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
     const { user, perms } = await resolveScaffoldPermissions(req);
     assertScaffoldPerm(req, perms.canCreate, 'scaffolding:create', 'شما مجوز ثبت داربست جدید را ندارید.');
 
-    const created = await scaffoldingService.createScaffold(req.body || {}, user);
+    const created = await scaffoldingService.createScaffold(req.body || {}, user, {
+      canApprove: perms.canApprove,
+      canChangeTag: perms.canChangeTag,
+    });
 
     await auditService.logFromRequest(req, {
       action: 'SCAFFOLD_CREATE',

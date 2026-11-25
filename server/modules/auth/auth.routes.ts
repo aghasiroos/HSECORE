@@ -15,6 +15,10 @@ router.get('/me', optionalAuth, (req, res, next) => {
   authController.getMe(req, res).catch(next);
 });
 
+router.put('/me/session-timeout', requireAuth, (req, res, next) => {
+  authController.updateMySessionTimeout(req, res).catch(next);
+});
+
 router.post('/change-password', requireAuth, (req, res, next) => {
   authController.changePassword(req, res).catch(next);
 });

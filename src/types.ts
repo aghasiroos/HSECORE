@@ -332,6 +332,12 @@ export interface UserProfile {
   forcePasswordChange: boolean;
   mfaEnabled: boolean;
   sessionTimeoutMinutes?: number; // Inactivity auto-logout timeout in minutes (e.g., 5, 10, 15, 30, 60)
+  sessionAlwaysActive?: boolean; // Per-user opt-in to disable inactivity auto-logout (default false)
+  sessionPolicy?: {
+    alwaysActiveAllowed: boolean;
+    maxSessionTimeoutMinutes?: number | null;
+    enforcedByAdmin?: boolean;
+  };
   
   // Access Duration & Validity
   accessExpiresAt?: string | null; // Expiration timestamp or Persian date string for access validity

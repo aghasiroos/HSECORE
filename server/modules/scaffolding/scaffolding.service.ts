@@ -3,14 +3,20 @@ import { db, schema, withTransaction } from '../../core/db.ts';
 import { AppError, ConflictError, NotFoundError, ValidationError } from '../../core/errors.ts';
 import { UserContext } from '../../core/middleware/auth.ts';
 import {
+  DEFAULT_SCAFFOLD_CHECKLIST_SETTINGS,
   evaluateScaffoldChecklist,
+  resolveChecklistAnswer,
+  resolveChecklistVerdict,
   SCAFFOLD_INSPECTION_REASONS,
   SCAFFOLD_TAG_META,
   SCAFFOLD_TYPES,
   SCAFFOLD_WORKFLOW_STEPS,
+  ScaffoldChecklistAnswer,
   ScaffoldChecklistResponseItem,
+  ScaffoldChecklistSettings,
   ScaffoldInspectionReason,
   ScaffoldPhotoItem,
+  ScaffoldSignaturesMeta,
   ScaffoldTagStatus,
   ScaffoldWorkflowStatus,
   STANDARD_SCAFFOLD_CHECKLIST_ITEMS,
@@ -24,7 +30,9 @@ import {
 
 const VALID_TAGS: ScaffoldTagStatus[] = ['GREEN', 'YELLOW', 'RED'];
 const VALID_REASONS = new Set<string>(SCAFFOLD_INSPECTION_REASONS.map(r => r.value));
-const VALID_VERDICTS = new Set(['PASS', 'FAIL', 'NA']);
+const VALID_ANSWERS = new Set<string>(['YES', 'NO', 'NA']);
+const VALID_VERDICTS = new Set<string>(['PASS', 'FAIL', 'NA']);
+const CHECKLIST_SETTINGS_KEY = 'scaffolding_checklist_settings';
 const MAX_PHOTOS_PER_STAGE = 8;
 const MAX_DATA_URL_LENGTH = 4_800_000; // ~3.5MB base64 image
 
@@ -95,9 +103,12 @@ function sanitizePhotos(raw: unknown, stage: 'BEFORE' | 'AFTER' | 'DEFECT', acto
   return clean;
 }
 
-function sanitizeChecklistItems(raw: unknown): ScaffoldChecklistResponseItem[] {
+function sanitizeChecklistItems(
+  raw: unknown,
+  allowNaOption = false
+): ScaffoldChecklistResponseItem[] {
   if (!Array.isArray(raw) || raw.length === 0) {
-    throw new ValidationError('چک‌لیست بازرسی داربست نمی‌تواند خالی باشد.');
+    throw new ValidationError('چک‌لیست ایمنی نصب داربست نمی‌تواند خالی باشد.');
   }
   const templateByCode = new Map(STANDARD_SCAFFOLD_CHECKLIST_ITEMS.map(i => [i.code, i]));
   const result: ScaffoldChecklistResponseItem[] = [];
@@ -107,9 +118,47 @@ function sanitizeChecklistItems(raw: unknown): ScaffoldChecklistResponseItem[] {
     if (!entry || typeof entry !== 'object') continue;
     const code = sanitizeOptionalString((entry as any).code, 40) || `SCF-C${String(idx + 1).padStart(2, '0')}`;
     const tpl = templateByCode.get(code);
-    const rawVerdict = String((entry as any).verdict || '').toUpperCase().trim();
-    if (!VALID_VERDICTS.has(rawVerdict)) {
-      throw new ValidationError(`وضعیت بند «${tpl?.titleFa || (entry as any).titleFa || code}» باید یکی از گزینه‌های تأیید، عدم تأیید یا نامرتبط باشد.`);
+    const safeAnswer: 'YES' | 'NO' = tpl
+      ? tpl.safeAnswer
+      : (String((entry as any).safeAnswer || '').toUpperCase().trim() === 'NO' ? 'NO' : 'YES');
+
+    const rawAnswerStr = String((entry as any).answer || '').toUpperCase().trim();
+    const rawVerdictStr = String((entry as any).verdict || '').toUpperCase().trim();
+
+    let answer: ScaffoldChecklistAnswer | null = null;
+    if (VALID_ANSWERS.has(rawAnswerStr)) {
+      answer = rawAnswerStr as ScaffoldChecklistAnswer;
+    } else if (VALID_VERDICTS.has(rawVerdictStr)) {
+      answer = resolveChecklistAnswer({
+        verdict: rawVerdictStr as 'PASS' | 'FAIL' | 'NA',
+        safeAnswer,
+      });
+    }
+
+    const label = tpl?.titleFa || sanitizeOptionalString((entry as any).titleFa, 240) || code;
+    const displayOrder = tpl ? tpl.orderIndex : idx + 1;
+
+    if (!answer) {
+      throw new ValidationError(
+        `پاسخ بند ${displayOrder} («${label}») مشخص نشده است. لطفاً یکی از گزینه‌های بله یا خیر${allowNaOption ? ' یا نامرتبط' : ''} را انتخاب کنید.`
+      );
+    }
+
+    if (answer === 'NA' && !allowNaOption) {
+      throw new ValidationError(
+        `گزینه «نامرتبط» برای بند ${displayOrder} در تنظیمات چک‌لیست غیرفعال است. در صورت نیاز ابتدا آن را در تنظیمات چک‌لیست فعال کنید.`
+      );
+    }
+
+    const verdict = resolveChecklistVerdict(answer, safeAnswer)!;
+    const comment = sanitizeOptionalString((entry as any).comment, 1000) || undefined;
+    const correctiveAction = sanitizeOptionalString((entry as any).correctiveAction, 1000) || undefined;
+
+    // Enforce mandatory explanation or corrective action whenever an item is answered unsafely
+    if (verdict === 'FAIL' && !comment && !correctiveAction) {
+      throw new ValidationError(
+        `برای بند ${displayOrder} («${label}») به دلیل ثبت وضعیت ناایمن، درج توضیحات یا اقدام اصلاحی الزامی است.`
+      );
     }
 
     const defectPhotoRaw = (entry as any).defectPhoto;
@@ -117,34 +166,64 @@ function sanitizeChecklistItems(raw: unknown): ScaffoldChecklistResponseItem[] {
 
     result.push({
       code,
-      orderIndex: tpl ? tpl.orderIndex : idx + 1,
+      orderIndex: displayOrder,
       categoryFa: tpl ? tpl.categoryFa : (sanitizeOptionalString((entry as any).categoryFa, 120) || 'موارد تکمیلی'),
       titleFa: tpl ? tpl.titleFa : sanitizeRequiredString((entry as any).titleFa, `عنوان بند ${idx + 1}`, 240),
       requirementFa: tpl ? tpl.requirementFa : (sanitizeOptionalString((entry as any).requirementFa, 500) || undefined),
       standardRef: tpl ? tpl.standardRef : (sanitizeOptionalString((entry as any).standardRef, 80) || 'HSECORE-CUSTOM'),
-      // Standard critical flags cannot be downgraded by client payloads
+      // Standard critical flags and safe polarity cannot be downgraded by client payloads
       isCritical: tpl ? tpl.isCritical : Boolean((entry as any).isCritical),
+      safeAnswer,
       isCustom: !tpl,
-      verdict: rawVerdict as 'PASS' | 'FAIL' | 'NA',
-      comment: sanitizeOptionalString((entry as any).comment, 1000) || undefined,
+      answer,
+      verdict,
+      comment,
       defectPhoto,
-      correctiveAction: sanitizeOptionalString((entry as any).correctiveAction, 1000) || undefined,
+      correctiveAction,
       responsiblePerson: sanitizeOptionalString((entry as any).responsiblePerson, 160) || undefined,
       dueDate: sanitizeOptionalString((entry as any).dueDate, 40) || undefined,
-      resolved: rawVerdict === 'FAIL' ? Boolean((entry as any).resolved) : false,
+      resolved: verdict === 'FAIL' ? Boolean((entry as any).resolved) : false,
     });
   }
 
-  // Ensure all 15 mandatory standard items are present
+  // Ensure all 23 mandatory standard items are present without omission or merging
   const presentCodes = new Set(result.map(r => r.code));
   const missingStandard = STANDARD_SCAFFOLD_CHECKLIST_ITEMS.filter(i => !presentCodes.has(i.code));
   if (missingStandard.length > 0) {
     throw new ValidationError(
-      `چک‌لیست استاندارد ناقص است؛ بندهای الزامی تکمیل نشده‌اند (${missingStandard.map(m => m.code).join(', ')}).`
+      `چک‌لیست ۲۳‌بندی ایمنی نصب داربست ناقص است؛ بندهای الزامی تکمیل نشده‌اند (${missingStandard.map(m => m.code).join(', ')}).`
     );
   }
 
-  return result;
+  return result.sort((a, b) => a.orderIndex - b.orderIndex);
+}
+
+function sanitizeSignaturesMeta(
+  raw: unknown,
+  defaults: {
+    inspectorName: string;
+    inspectorPersonnelCode?: string | null;
+    unitSupervisorName?: string | null;
+    signedAt: string;
+  }
+): ScaffoldSignaturesMeta {
+  const src = raw && typeof raw === 'object' ? (raw as Record<string, any>) : {};
+  const inspectorName = sanitizeOptionalString(src.inspectorName, 160) || defaults.inspectorName;
+  const inspectorPersonnelCode =
+    sanitizeOptionalString(src.inspectorPersonnelCode, 60) || defaults.inspectorPersonnelCode || undefined;
+  const unitSupervisorName =
+    sanitizeOptionalString(src.unitSupervisorName, 160) || defaults.unitSupervisorName || undefined;
+  const unitSupervisorPersonnelCode = sanitizeOptionalString(src.unitSupervisorPersonnelCode, 60) || undefined;
+
+  return {
+    inspectorName,
+    inspectorPersonnelCode,
+    inspectorSignedAt: sanitizeOptionalString(src.inspectorSignedAt, 60) || defaults.signedAt,
+    unitSupervisorName,
+    unitSupervisorPersonnelCode,
+    unitSupervisorSignedAt:
+      sanitizeOptionalString(src.unitSupervisorSignedAt, 60) || (unitSupervisorName ? defaults.signedAt : undefined),
+  };
 }
 
 function parsePositiveIntOrNull(val: unknown): number | null {
@@ -188,15 +267,64 @@ class ScaffoldingService {
   }
 
   /**
+   * Read persisted scaffolding checklist settings from PostgreSQL `system_settings`.
+   */
+  async getChecklistSettings(): Promise<ScaffoldChecklistSettings> {
+    try {
+      const [row] = await db
+        .select({ value: schema.systemSettings.value })
+        .from(schema.systemSettings)
+        .where(eq(schema.systemSettings.key, CHECKLIST_SETTINGS_KEY))
+        .limit(1);
+      const val = row?.value && typeof row.value === 'object' ? (row.value as Record<string, any>) : null;
+      return {
+        allowNaOption: Boolean(val?.allowNaOption),
+      };
+    } catch {
+      return { ...DEFAULT_SCAFFOLD_CHECKLIST_SETTINGS };
+    }
+  }
+
+  /**
+   * Persist scaffolding checklist settings in PostgreSQL `system_settings`.
+   */
+  async updateChecklistSettings(
+    payload: Record<string, any>,
+    actor: UserContext
+  ): Promise<ScaffoldChecklistSettings> {
+    const nextSettings: ScaffoldChecklistSettings = {
+      allowNaOption: Boolean(payload.allowNaOption),
+    };
+    const updatedBy = actor.name || actor.username || actor.uid || 'system';
+    await db
+      .insert(schema.systemSettings)
+      .values({
+        key: CHECKLIST_SETTINGS_KEY,
+        value: nextSettings as any,
+        updatedBy,
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: schema.systemSettings.key,
+        set: {
+          value: nextSettings as any,
+          updatedBy,
+          updatedAt: new Date(),
+        },
+      });
+    return nextSettings;
+  }
+
+  /**
    * Bootstrap context from live PostgreSQL tables:
    * - Real PTW permits (`work_permits`)
-   * - Real Work Requests (`workflow_instances`)
    * - Organizational units (`org_units` merged with `system_settings.hse_unit_structure_v1`)
    * - Personnel (`personnel`)
-   * - Contractors (aggregated from `scaffolds`, `work_permits`, `hse_training_contractor_companies`)
+   * - Contractors (aggregated from `scaffolds`, `work_permits`, `org_companies`)
+   * - Persisted checklist settings (`system_settings`)
    */
   async getBootstrapContext() {
-    const [permitsRaw, workRequestsRaw, orgUnitsRaw, orgSettingRaw, personnelRaw, existingScaffoldsRaw] =
+    const [permitsRaw, orgUnitsRaw, orgDeptsRaw, orgSettingsRaw, personnelRaw, existingScaffoldsRaw] =
       await Promise.all([
         db
           .select({
@@ -217,21 +345,6 @@ class ScaffoldingService {
           .limit(300),
         db
           .select({
-            id: schema.workflowInstances.id,
-            workflowKey: schema.workflowInstances.workflowKey,
-            entityType: schema.workflowInstances.entityType,
-            entityId: schema.workflowInstances.entityId,
-            entityNumber: schema.workflowInstances.entityNumber,
-            title: schema.workflowInstances.title,
-            status: schema.workflowInstances.status,
-            requesterName: schema.workflowInstances.requesterName,
-            metadata: schema.workflowInstances.metadata,
-          })
-          .from(schema.workflowInstances)
-          .orderBy(desc(schema.workflowInstances.id))
-          .limit(200),
-        db
-          .select({
             id: schema.orgUnits.id,
             name: schema.orgUnits.name,
             code: schema.orgUnits.code,
@@ -239,10 +352,18 @@ class ScaffoldingService {
           .from(schema.orgUnits)
           .orderBy(schema.orgUnits.name),
         db
-          .select({ value: schema.systemSettings.value })
+          .select({
+            id: schema.orgDepartments.id,
+            name: schema.orgDepartments.name,
+            code: schema.orgDepartments.code,
+          })
+          .from(schema.orgDepartments)
+          .orderBy(schema.orgDepartments.name)
+          .catch(() => []),
+        db
+          .select({ key: schema.systemSettings.key, value: schema.systemSettings.value })
           .from(schema.systemSettings)
-          .where(eq(schema.systemSettings.key, 'hse_unit_structure_v1'))
-          .limit(1),
+          .where(inArray(schema.systemSettings.key, ['hse_unit_structure_v1', 'org_nodes'])),
         db
           .select({
             id: schema.personnel.id,
@@ -273,28 +394,63 @@ class ScaffoldingService {
         unitMap.set(u.name.trim(), { id: u.id, name: u.name.trim(), code: u.code });
       }
     }
+    for (const d of orgDeptsRaw) {
+      const name = String(d.name || '').trim();
+      if (name && !unitMap.has(name)) {
+        unitMap.set(name, { id: null, name, code: d.code || null });
+      }
+    }
 
-    // Parse hierarchical structure from system_settings if present
-    const settingVal: any = orgSettingRaw[0]?.value;
+    // Parse hierarchical & map structures from system_settings (hse_unit_structure_v1 & org_nodes)
     const extractUnits = (node: any, parentArea?: string) => {
       if (!node) return;
+      if (typeof node === 'string') {
+        const label = node.trim();
+        if (label && !unitMap.has(label)) {
+          unitMap.set(label, { id: null, name: label, code: null, area: parentArea || null });
+        }
+        return;
+      }
       if (Array.isArray(node)) {
         node.forEach(item => extractUnits(item, parentArea));
         return;
       }
       if (typeof node === 'object') {
-        const label = String(node.name || node.title || node.unitName || '').trim();
+        const label = String(node.name || node.title || node.unitName || node.department || '').trim();
         if (label && !unitMap.has(label)) {
           unitMap.set(label, { id: null, name: label, code: node.code || null, area: parentArea || null });
         }
+        const hasKnownShape = Boolean(
+          label ||
+            Array.isArray(node.units) ||
+            Array.isArray(node.children) ||
+            Array.isArray(node.departments) ||
+            Array.isArray(node.subUnits) ||
+            Array.isArray(node.areas)
+        );
         if (Array.isArray(node.units)) extractUnits(node.units, label || parentArea);
         if (Array.isArray(node.children)) extractUnits(node.children, label || parentArea);
         if (Array.isArray(node.departments)) extractUnits(node.departments, label || parentArea);
         if (Array.isArray(node.subUnits)) extractUnits(node.subUnits, label || parentArea);
         if (Array.isArray(node.areas)) extractUnits(node.areas, label || parentArea);
+
+        // Handle dictionary map format: { "Unit A": ["SubUnit 1", "SubUnit 2"], ... }
+        if (!hasKnownShape) {
+          for (const [k, v] of Object.entries(node)) {
+            const keyName = k.trim();
+            if (keyName && !unitMap.has(keyName)) {
+              unitMap.set(keyName, { id: null, name: keyName, code: null, area: parentArea || null });
+            }
+            if (Array.isArray(v) || (v && typeof v === 'object')) {
+              extractUnits(v, keyName || parentArea);
+            }
+          }
+        }
       }
     };
-    if (settingVal) extractUnits(settingVal);
+    for (const row of orgSettingsRaw) {
+      if (row?.value) extractUnits(row.value);
+    }
 
     const orgUnitById = new Map<number, string>();
     for (const u of orgUnitsRaw) {
@@ -328,26 +484,7 @@ class ScaffoldingService {
         equipmentName: String(equipmentName || '').trim(),
         contractorName: p.contractorName || fd.contractorName || fd.contractor || '',
         description: p.description || fd.workDescription || fd.description || p.title || '',
-        workOrderNumber: fd.workOrderNumber || fd.workRequestNumber || '',
         status: p.status,
-      };
-    });
-
-    const workRequests = workRequestsRaw.map(wr => {
-      const meta = (wr.metadata && typeof wr.metadata === 'object' ? wr.metadata : {}) as Record<string, any>;
-      return {
-        id: wr.id,
-        workRequestNumber: wr.entityNumber || `WR-${wr.id}`,
-        workflowKey: wr.workflowKey,
-        entityType: wr.entityType,
-        title: wr.title,
-        status: wr.status,
-        requesterName: wr.requesterName || '',
-        unitName: String(meta.unitName || meta.unit || meta.department || '').trim(),
-        location: String(meta.location || meta.area || '').trim(),
-        equipmentName: String(meta.equipmentName || meta.equipmentTag || '').trim(),
-        contractorName: String(meta.contractorName || meta.contractor || '').trim(),
-        description: String(meta.description || wr.title || '').trim(),
       };
     });
 
@@ -390,18 +527,21 @@ class ScaffoldingService {
       // Optional table
     }
 
-    const nextScaffoldCode = await this.generateNextScaffoldCode();
+    const [nextScaffoldCode, checklistSettings] = await Promise.all([
+      this.generateNextScaffoldCode(),
+      this.getChecklistSettings(),
+    ]);
 
     return {
       nextScaffoldCode,
       todayJalali: getShamsiToday(),
       defaultNextDueDate: getJalaliPlusDays(7),
       permits,
-      workRequests,
       orgUnits: Array.from(unitMap.values()),
       personnelList,
       contractors: Array.from(contractorSet).sort((a, b) => a.localeCompare(b, 'fa')),
       checklistTemplate: STANDARD_SCAFFOLD_CHECKLIST_ITEMS,
+      checklistSettings,
       scaffoldTypes: SCAFFOLD_TYPES,
       inspectionReasons: SCAFFOLD_INSPECTION_REASONS,
       workflowSteps: SCAFFOLD_WORKFLOW_STEPS,
@@ -549,7 +689,7 @@ class ScaffoldingService {
       throw new NotFoundError('داربست مورد نظر');
     }
 
-    const [inspections, tagHistory, linkedPermit, linkedWorkRequest] = await Promise.all([
+    const [inspections, tagHistory, linkedPermit] = await Promise.all([
       db
         .select()
         .from(schema.scaffoldInspections)
@@ -578,21 +718,6 @@ class ScaffoldingService {
             .limit(1)
             .then(r => r[0] || null)
         : Promise.resolve(null),
-      scaffold.workRequestId
-        ? db
-            .select({
-              id: schema.workflowInstances.id,
-              entityNumber: schema.workflowInstances.entityNumber,
-              entityType: schema.workflowInstances.entityType,
-              title: schema.workflowInstances.title,
-              status: schema.workflowInstances.status,
-              requesterName: schema.workflowInstances.requesterName,
-            })
-            .from(schema.workflowInstances)
-            .where(eq(schema.workflowInstances.id, scaffold.workRequestId))
-            .limit(1)
-            .then(r => r[0] || null)
-        : Promise.resolve(null),
     ]);
 
     return {
@@ -600,7 +725,6 @@ class ScaffoldingService {
       inspections,
       tagHistory,
       linkedPermit,
-      linkedWorkRequest,
     };
   }
 
@@ -633,20 +757,8 @@ class ScaffoldingService {
       }
     }
 
-    let workRequestId = parsePositiveIntOrNull(payload.workRequestId);
-    let workRequestNumber = sanitizeOptionalString(payload.workRequestNumber, 80);
-
-    if (workRequestId) {
-      const [wr] = await db
-        .select({ id: schema.workflowInstances.id, entityNumber: schema.workflowInstances.entityNumber })
-        .from(schema.workflowInstances)
-        .where(eq(schema.workflowInstances.id, workRequestId))
-        .limit(1);
-      if (!wr) {
-        throw new ValidationError('درخواست کار انتخاب‌شده در پایگاه داده یافت نشد.');
-      }
-      workRequestNumber = wr.entityNumber || `WR-${wr.id}`;
-    }
+    const workRequestId = null;
+    const workRequestNumber = sanitizeOptionalString(payload.workRequestNumber, 80);
 
     let orgUnitId = parsePositiveIntOrNull(payload.orgUnitId);
     if (orgUnitId) {
@@ -713,9 +825,15 @@ class ScaffoldingService {
   }
 
   /**
-   * Register a new scaffold (always starts with RED tag — unauthorized until inspected & approved).
+   * Register a new scaffold (always starts with RED tag unless accompanied by a verified initial 23-item checklist
+   * and authorized HSE approval). If `initialInspection.checklistItems` is provided, creates the scaffold and its
+   * first inspection record (`INSP-01`) atomically inside a single PostgreSQL transaction.
    */
-  async createScaffold(payload: Record<string, any>, actor: UserContext) {
+  async createScaffold(
+    payload: Record<string, any>,
+    actor: UserContext,
+    actorPerms: { canApprove: boolean; canChangeTag: boolean } = { canApprove: false, canChangeTag: false }
+  ) {
     const requestDate = sanitizeRequiredString(payload.requestDate || getShamsiToday(), 'تاریخ درخواست نصب', 40);
     const requestingUnit = sanitizeRequiredString(payload.requestingUnit, 'واحد درخواست‌کننده', 160);
     const installationLocation = sanitizeRequiredString(payload.installationLocation, 'محل نصب داربست', 240);
@@ -729,17 +847,37 @@ class ScaffoldingService {
       throw new ValidationError('ارتفاع داربست باید عددی معتبر و بزرگ‌تر از صفر (حداکثر ۲۰۰ متر) باشد.');
     }
 
+    // Validate optional initial 23-item safety checklist before opening transaction
+    const rawInitialInsp =
+      payload.initialInspection && typeof payload.initialInspection === 'object'
+        ? (payload.initialInspection as Record<string, any>)
+        : null;
+    const hasInitialChecklist = Boolean(
+      rawInitialInsp && Array.isArray(rawInitialInsp.checklistItems) && rawInitialInsp.checklistItems.length > 0
+    );
+
+    let initialChecklistItems: ScaffoldChecklistResponseItem[] = [];
+    let initialEvaluation: ReturnType<typeof evaluateScaffoldChecklist> | null = null;
+    if (hasInitialChecklist) {
+      const checklistSettings = await this.getChecklistSettings();
+      initialChecklistItems = sanitizeChecklistItems(rawInitialInsp!.checklistItems, checklistSettings.allowNaOption);
+      initialEvaluation = evaluateScaffoldChecklist(initialChecklistItems);
+    }
+
     const links = await this.resolveExternalLinks(payload);
     const actorName = actor.name || actor.username || 'کاربر سامانه';
-    const installationCompletedDate = sanitizeOptionalString(payload.installationCompletedDate, 40);
-    const initialWorkflowStatus: ScaffoldWorkflowStatus = installationCompletedDate
+    const { jalaliDate, timeStr } = getTehranNowJalaliAndTime();
+    const shortTime = timeStr.slice(0, 5);
+    const signedAtStamp = `${jalaliDate} - ${shortTime}`;
+
+    const installationCompletedDate =
+      sanitizeOptionalString(payload.installationCompletedDate, 40) || (hasInitialChecklist ? jalaliDate : null);
+    const baseWorkflowStatus: ScaffoldWorkflowStatus = installationCompletedDate
       ? 'INSTALLATION_COMPLETED'
       : 'INSTALLATION_REQUESTED';
 
     const beforePhotos = sanitizePhotos(payload.beforePhotos, 'BEFORE', actorName);
     const afterPhotos = sanitizePhotos(payload.afterPhotos, 'AFTER', actorName);
-
-    const { jalaliDate, timeStr } = getTehranNowJalaliAndTime();
 
     return await withTransaction(async (tx) => {
       let scaffoldCode = await this.generateNextScaffoldCode(tx);
@@ -774,7 +912,7 @@ class ScaffoldingService {
               notes: sanitizeOptionalString(payload.notes, 2000),
               beforePhotos,
               afterPhotos,
-              workflowStatus: initialWorkflowStatus,
+              workflowStatus: baseWorkflowStatus,
               tagStatus: 'RED',
               tagIssuedAt: new Date(),
               tagIssuedBy: actorName,
@@ -783,15 +921,146 @@ class ScaffoldingService {
             })
             .returning();
 
+          if (!hasInitialChecklist || !initialEvaluation) {
+            await tx.insert(schema.scaffoldTagHistory).values({
+              scaffoldId: created.id,
+              previousTag: 'NONE',
+              newTag: 'RED',
+              previousWorkflowStatus: null,
+              newWorkflowStatus: baseWorkflowStatus,
+              reason: installationCompletedDate
+                ? 'ثبت اولیه داربست (نصب تکمیل‌شده — در انتظار بازرسی HSE و تأیید نهایی)'
+                : 'ثبت درخواست نصب داربست جدید — پیش از بازرسی و تأیید HSE استفاده ممنوع است',
+              changedByUid: actor.uid,
+              changedByName: actorName,
+              changedByRole: actor.role,
+              changedDateJalali: jalaliDate,
+              changedTime: timeStr,
+            });
+            return created;
+          }
+
+          // Record initial 23-item safety checklist atomically as INSP-01
+          const inspectionDate = sanitizeOptionalString(rawInitialInsp!.inspectionDate, 40) || jalaliDate;
+          const inspectionTime = sanitizeOptionalString(rawInitialInsp!.inspectionTime, 20) || shortTime;
+          const nextDueDate = sanitizeOptionalString(rawInitialInsp!.nextDueDate, 40) || getJalaliPlusDays(7);
+          const inspectionNumber = `${created.scaffoldCode}-INSP-01`;
+          const maxLoadVal =
+            rawInitialInsp!.maxLoadCapacityKg !== undefined &&
+            rawInitialInsp!.maxLoadCapacityKg !== null &&
+            rawInitialInsp!.maxLoadCapacityKg !== ''
+              ? Number(rawInitialInsp!.maxLoadCapacityKg)
+              : null;
+
+          const inspectorSig = sanitizeOptionalString(rawInitialInsp!.inspectorSignature, 160) || links.inspectorName;
+          const unitSupervisorSig = sanitizeOptionalString(rawInitialInsp!.unitSupervisorSignature, 160);
+          const signaturesMeta = sanitizeSignaturesMeta(rawInitialInsp!.signaturesMeta, {
+            inspectorName: inspectorSig,
+            inspectorPersonnelCode: links.inspectorPersonnelCode,
+            unitSupervisorName: unitSupervisorSig,
+            signedAt: signedAtStamp,
+          });
+
+          const [inspection] = await tx
+            .insert(schema.scaffoldInspections)
+            .values({
+              scaffoldId: created.id,
+              inspectionNumber,
+              inspectionReason: 'INITIAL_POST_INSTALL',
+              inspectionDate,
+              inspectionTime,
+              nextDueDate,
+              inspectorPersonnelId: links.inspectorPersonnelId,
+              inspectorPersonnelCode: links.inspectorPersonnelCode,
+              inspectorName: links.inspectorName,
+              inspectorUid: actor.uid,
+              checklistItems: initialChecklistItems,
+              totalItems: initialEvaluation.totalItems,
+              passedCount: initialEvaluation.passedCount,
+              failedCount: initialEvaluation.failedCount,
+              naCount: initialEvaluation.naCount,
+              criticalDefectCount: initialEvaluation.criticalDefectCount,
+              complianceScore: initialEvaluation.complianceScore,
+              overallResult: initialEvaluation.overallResult,
+              recommendedTag: initialEvaluation.recommendedTag,
+              summaryNotes: sanitizeOptionalString(rawInitialInsp!.summaryNotes, 2000),
+              weatherCondition: sanitizeOptionalString(rawInitialInsp!.weatherCondition, 120),
+              maxLoadCapacityKg: Number.isFinite(maxLoadVal) ? maxLoadVal : null,
+              inspectorSignature: inspectorSig,
+              unitSupervisorSignature: unitSupervisorSig,
+              supervisorSignature: null,
+              signaturesMeta,
+            })
+            .returning();
+
+          let nextWorkflowStatus: ScaffoldWorkflowStatus = 'CHECKLIST_COMPLETED';
+          let nextTagStatus: ScaffoldTagStatus = 'RED';
+          let approvedBy: string | null = null;
+          let approvedByUid: string | null = null;
+          let approvedAt: Date | null = null;
+          let approvalComment: string | null = null;
+          let tagValidUntil: string | null = null;
+          let tagChangeReason = `ثبت داربست و تکمیل چک‌لیست ایمنی نصب (${inspectionNumber}) — در انتظار تأیید نهایی بازرس مجاز HSE`;
+
+          if (initialEvaluation.criticalDefectCount > 0) {
+            nextWorkflowStatus = 'DEFECTS_REVIEW';
+            nextTagStatus = 'RED';
+            tagChangeReason = `ثبت ${initialEvaluation.criticalDefectCount} نقص بحرانی در چک‌لیست اولیه (${inspectionNumber}) — اعمال تگ قرمز و ممنوعیت استفاده`;
+          } else if (initialEvaluation.openDefectsCount > 0) {
+            nextWorkflowStatus = 'DEFECTS_REVIEW';
+            nextTagStatus = 'YELLOW';
+            tagChangeReason = `ثبت ${initialEvaluation.openDefectsCount} نقص غیربحرانی در چک‌لیست اولیه (${inspectionNumber}) — اعمال تگ زرد تا رفع نواقص`;
+          } else if (
+            Boolean(rawInitialInsp!.approveAndIssueGreenTag) &&
+            actorPerms.canApprove &&
+            actorPerms.canChangeTag
+          ) {
+            nextWorkflowStatus = 'AUTHORIZED_FOR_USE';
+            nextTagStatus = 'GREEN';
+            approvedBy = actorName;
+            approvedByUid = actor.uid;
+            approvedAt = new Date();
+            approvalComment =
+              sanitizeOptionalString(rawInitialInsp!.summaryNotes, 1000) ||
+              'تأیید نهایی هم‌زمان با ثبت چک‌لیست ۲۳‌بندی بدون نقص';
+            tagValidUntil = nextDueDate;
+            tagChangeReason = `ثبت داربست و تأیید کامل چک‌لیست ایمنی (${inspectionNumber} — انطباق ${initialEvaluation.complianceScore}٪) و صدور تگ سبز`;
+          }
+
+          const [finalScaffold] = await tx
+            .update(schema.scaffolds)
+            .set({
+              latestInspectionId: inspection.id,
+              latestInspectionDate: inspectionDate,
+              nextInspectionDueDate: nextDueDate,
+              inspectionsCount: 1,
+              hasOpenDefects: initialEvaluation.openDefectsCount > 0,
+              hasCriticalDefect: initialEvaluation.criticalDefectCount > 0,
+              openDefectsCount: initialEvaluation.openDefectsCount,
+              criticalDefectsCount: initialEvaluation.criticalDefectCount,
+              workflowStatus: nextWorkflowStatus,
+              tagStatus: nextTagStatus,
+              tagIssuedAt: new Date(),
+              tagValidUntil,
+              tagIssuedBy: actorName,
+              approvedBy,
+              approvedByUid,
+              approvedAt,
+              approvalComment,
+              updatedAt: new Date(),
+            })
+            .where(eq(schema.scaffolds.id, created.id))
+            .returning();
+
           await tx.insert(schema.scaffoldTagHistory).values({
             scaffoldId: created.id,
+            inspectionId: inspection.id,
             previousTag: 'NONE',
-            newTag: 'RED',
+            newTag: nextTagStatus,
             previousWorkflowStatus: null,
-            newWorkflowStatus: initialWorkflowStatus,
-            reason: installationCompletedDate
-              ? 'ثبت اولیه داربست (نصب تکمیل‌شده — در انتظار بازرسی HSE و تأیید نهایی)'
-              : 'ثبت درخواست نصب داربست جدید — پیش از بازرسی و تأیید HSE استفاده ممنوع است',
+            newWorkflowStatus: nextWorkflowStatus,
+            reason: tagChangeReason,
+            validUntil: nextTagStatus === 'GREEN' ? tagValidUntil : null,
             changedByUid: actor.uid,
             changedByName: actorName,
             changedByRole: actor.role,
@@ -799,7 +1068,7 @@ class ScaffoldingService {
             changedTime: timeStr,
           });
 
-          return created;
+          return finalScaffold;
         } catch (err: any) {
           if (err?.code === '23505' && attempt < 2) {
             scaffoldCode = `${scaffoldCode}-${Math.floor(Math.random() * 90 + 10)}`;
@@ -843,7 +1112,6 @@ class ScaffoldingService {
     const links = await this.resolveExternalLinks({
       permitId: payload.permitId !== undefined ? payload.permitId : existing.permitId,
       permitNumber: payload.permitNumber !== undefined ? payload.permitNumber : existing.permitNumber,
-      workRequestId: payload.workRequestId !== undefined ? payload.workRequestId : existing.workRequestId,
       workRequestNumber: payload.workRequestNumber !== undefined ? payload.workRequestNumber : existing.workRequestNumber,
       orgUnitId: payload.orgUnitId !== undefined ? payload.orgUnitId : existing.orgUnitId,
       inspectorPersonnelId: payload.inspectorPersonnelId !== undefined ? payload.inspectorPersonnelId : existing.inspectorPersonnelId,
@@ -972,13 +1240,15 @@ class ScaffoldingService {
     }
     const inspectionReason = reasonRaw as ScaffoldInspectionReason;
 
-    const checklistItems = sanitizeChecklistItems(payload.checklistItems);
+    const checklistSettings = await this.getChecklistSettings();
+    const checklistItems = sanitizeChecklistItems(payload.checklistItems, checklistSettings.allowNaOption);
     const evaluation = evaluateScaffoldChecklist(checklistItems);
 
     const { jalaliDate, timeStr } = getTehranNowJalaliAndTime();
     const inspectionDate = sanitizeOptionalString(payload.inspectionDate, 40) || jalaliDate;
     const inspectionTime = sanitizeOptionalString(payload.inspectionTime, 20) || timeStr.slice(0, 5);
     const nextDueDate = sanitizeOptionalString(payload.nextDueDate, 40) || getJalaliPlusDays(7);
+    const signedAtStamp = `${inspectionDate} - ${inspectionTime}`;
 
     // Resolve inspector identity
     let inspectorPersonnelId = parsePositiveIntOrNull(payload.inspectorPersonnelId) ?? existing.inspectorPersonnelId;
@@ -1014,6 +1284,14 @@ class ScaffoldingService {
         : null;
 
     const actorName = actor.name || actor.username || inspectorName;
+    const inspectorSig = sanitizeOptionalString(payload.inspectorSignature, 160) || inspectorName;
+    const unitSupervisorSig = sanitizeOptionalString(payload.unitSupervisorSignature, 160);
+    const signaturesMeta = sanitizeSignaturesMeta(payload.signaturesMeta, {
+      inspectorName: inspectorSig,
+      inspectorPersonnelCode,
+      unitSupervisorName: unitSupervisorSig,
+      signedAt: signedAtStamp,
+    });
 
     return await withTransaction(async (tx) => {
       const nextCount = (existing.inspectionsCount || 0) + 1;
@@ -1044,8 +1322,10 @@ class ScaffoldingService {
           summaryNotes: sanitizeOptionalString(payload.summaryNotes, 2000),
           weatherCondition: sanitizeOptionalString(payload.weatherCondition, 120),
           maxLoadCapacityKg: Number.isFinite(maxLoadCapacityKg) ? maxLoadCapacityKg : null,
-          inspectorSignature: sanitizeOptionalString(payload.inspectorSignature, 160) || inspectorName,
-          supervisorSignature: sanitizeOptionalString(payload.supervisorSignature, 160) || existing.erectorSupervisorName,
+          inspectorSignature: inspectorSig,
+          unitSupervisorSignature: unitSupervisorSig,
+          supervisorSignature: null,
+          signaturesMeta,
         })
         .returning();
 

@@ -124,6 +124,7 @@ export const FIELD_LABELS_FA: Record<string, string> = {
   examYear: 'سال معاینه',
   doctorVerdict: 'نظر نهایی پزشک طب کار',
   sessionTimeoutMinutes: 'مهلت عدم فعالیت نشست (دقیقه)',
+  sessionAlwaysActive: 'وضعیت همیشه فعال نشست',
   personnelAccessScope: 'محدوده دسترسی پرسنلی',
 };
 

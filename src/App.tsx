@@ -584,12 +584,46 @@ export default function App() {
     hydrateUserPrefs();
 
     const handlePrefUpdated = (e: any) => {
-      const prefKey = e?.detail?.prefKey || e?.detail?.key;
-      const val = e?.detail?.value;
+      const detail = e?.detail || {};
+      const nestedData = detail?.data || {};
+      const prefKey = detail?.prefKey || detail?.key || nestedData?.prefKey;
+      const val = detail?.value !== undefined ? detail.value : nestedData?.value;
+      const targetUid = detail?.targetUserUid || nestedData?.userUid;
       if (prefKey === 'theme_mode' && (val === 'dark' || val === 'light')) {
         setThemeMode(val);
       } else if (prefKey === 'sidebar_collapsed' && typeof val === 'boolean') {
         setIsSidebarCollapsed(val);
+      } else if (prefKey === 'session_timeout' && val && typeof val === 'object') {
+        const currentUid = String(currentUser?.id || (currentUser as any)?.uid || '');
+        if (!targetUid || (currentUid && String(targetUid) === currentUid)) {
+          setCurrentUser((prev) => {
+            if (!prev) return prev;
+            const nextPolicy = val.sessionPolicy ?? prev.sessionPolicy;
+            const nextAlwaysActive =
+              nextPolicy?.alwaysActiveAllowed === false
+                ? false
+                : Boolean(val.sessionAlwaysActive);
+            const nextMinutes =
+              typeof val.sessionTimeoutMinutes === 'number' && val.sessionTimeoutMinutes > 0
+                ? val.sessionTimeoutMinutes
+                : prev.sessionTimeoutMinutes;
+            if (
+              prev.sessionTimeoutMinutes === nextMinutes &&
+              Boolean(prev.sessionAlwaysActive) === nextAlwaysActive &&
+              JSON.stringify(prev.sessionPolicy || null) === JSON.stringify(nextPolicy || null)
+            ) {
+              return prev;
+            }
+            const merged = {
+              ...prev,
+              sessionTimeoutMinutes: nextMinutes,
+              sessionAlwaysActive: nextAlwaysActive,
+              sessionPolicy: nextPolicy,
+            };
+            setCurrentUserInAuth(merged);
+            return merged;
+          });
+        }
       } else if (!prefKey) {
         apiDb.invalidateCache('user-prefs');
         hydrateUserPrefs();
@@ -669,9 +703,16 @@ export default function App() {
     }
   });
 
-  // Automatic Session Timeout & Inactivity Logout (Configurable per user profile / default 5 min)
+  // Automatic Session Timeout & Inactivity Logout (Configurable per user profile, respects Always Active & admin policy)
   useEffect(() => {
     if (!currentUser) return;
+
+    // Never bypass mandatory administrator security policy; JWT expiration & manual logout remain unaffected.
+    const alwaysActiveAllowed = currentUser.sessionPolicy?.alwaysActiveAllowed !== false;
+    const isAlwaysActive = Boolean(currentUser.sessionAlwaysActive) && alwaysActiveAllowed;
+    if (isAlwaysActive) {
+      return;
+    }
 
     let lastActivity = Date.now();
     let lastThrottledCheck = 0;
@@ -690,9 +731,13 @@ export default function App() {
     window.addEventListener('scroll', resetActivity, { passive: true });
 
     const interval = setInterval(() => {
-      const timeoutMinutes = (typeof currentUser.sessionTimeoutMinutes === 'number' && currentUser.sessionTimeoutMinutes > 0)
+      const configuredMinutes = (typeof currentUser.sessionTimeoutMinutes === 'number' && currentUser.sessionTimeoutMinutes > 0)
         ? currentUser.sessionTimeoutMinutes
         : 15;
+      const adminMaxMinutes = currentUser.sessionPolicy?.maxSessionTimeoutMinutes;
+      const timeoutMinutes = (typeof adminMaxMinutes === 'number' && adminMaxMinutes > 0)
+        ? Math.min(configuredMinutes, adminMaxMinutes)
+        : configuredMinutes;
 
       const maxSeconds = timeoutMinutes * 60;
       const secondsInactive = (Date.now() - lastActivity) / 1000;
@@ -718,7 +763,14 @@ export default function App() {
       window.removeEventListener('scroll', resetActivity);
       clearInterval(interval);
     };
-  }, [currentUser?.id, currentUser?.sessionTimeoutMinutes, language]);
+  }, [
+    currentUser?.id,
+    currentUser?.sessionTimeoutMinutes,
+    currentUser?.sessionAlwaysActive,
+    currentUser?.sessionPolicy?.alwaysActiveAllowed,
+    currentUser?.sessionPolicy?.maxSessionTimeoutMinutes,
+    language,
+  ]);
 
   // Track dynamic tab permissions (memoized for high render performance)
   const allowedTabs: TabItemConfig[] = useMemo(() => {

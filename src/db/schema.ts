@@ -2343,7 +2343,7 @@ export const scaffoldInspections = pgTable(
     inspectorName: text('inspector_name').notNull(),
     inspectorUid: text('inspector_uid'),
     checklistItems: jsonb('checklist_items').$type<any[]>().default([]).notNull(),
-    totalItems: integer('total_items').default(15).notNull(),
+    totalItems: integer('total_items').default(23).notNull(),
     passedCount: integer('passed_count').default(0).notNull(),
     failedCount: integer('failed_count').default(0).notNull(),
     naCount: integer('na_count').default(0).notNull(),
@@ -2355,7 +2355,9 @@ export const scaffoldInspections = pgTable(
     weatherCondition: text('weather_condition'),
     maxLoadCapacityKg: doublePrecision('max_load_capacity_kg'),
     inspectorSignature: text('inspector_signature'),
+    unitSupervisorSignature: text('unit_supervisor_signature'),
     supervisorSignature: text('supervisor_signature'),
+    signaturesMeta: jsonb('signatures_meta').$type<Record<string, any>>(),
     createdAt: timestamp('created_at').defaultNow().notNull(),
   },
   (table) => [

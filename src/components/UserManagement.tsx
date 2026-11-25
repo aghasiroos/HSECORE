@@ -259,6 +259,7 @@ export default function UserManagement({ currentUser, language, onUserUpdateTrig
       forcePasswordChange: Boolean(u.forcePasswordChange || u.profileData?.forcePasswordChange),
       mfaEnabled: Boolean(u.mfaEnabled || u.profileData?.mfaEnabled),
       sessionTimeoutMinutes: Number(u.sessionTimeoutMinutes || u.profileData?.sessionTimeoutMinutes) || 5,
+      sessionAlwaysActive: Boolean(u.sessionAlwaysActive ?? u.profileData?.sessionAlwaysActive),
       accessExpiresAt: u.accessExpiresAt || u.profileData?.accessExpiresAt || null,
       accessDurationType: u.accessDurationType || u.profileData?.accessDurationType || ((u.accessExpiresAt || u.profileData?.accessExpiresAt) ? 'custom' : 'permanent'),
       profilePhoto: u.profilePhoto || u.profileData?.profilePhoto || '',

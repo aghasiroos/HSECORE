@@ -349,7 +349,7 @@ export default function ScaffoldingModuleView({ isFa = true }: Props) {
               مدیریت، بازرسی و وضعیت تگ رنگی داربست‌بندی
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              ثبت متمرکز داربست‌ها با اتصال مستقیم به PTW، چک‌لیست ۱۵‌بندی استاندارد، کنترل تگ سبز/زرد/قرمز و همگام‌سازی لحظه‌ای
+              ثبت متمرکز داربست‌ها با اتصال مستقیم به PTW، چک‌لیست ۲۳‌بندی ایمنی نصب داربست (RHS-W14 Rev 00)، کنترل تگ سبز/زرد/قرمز و چاپ رسمی A4
             </p>
           </div>
         </div>
@@ -728,6 +728,9 @@ export default function ScaffoldingModuleView({ isFa = true }: Props) {
             loadList(filters);
             loadBootstrap();
           }}
+          onSettingsUpdated={allowNaOption => {
+            setBootstrap(prev => (prev ? { ...prev, checklistSettings: { allowNaOption } } : prev));
+          }}
         />
       )}
 
@@ -745,6 +748,9 @@ export default function ScaffoldingModuleView({ isFa = true }: Props) {
           onChanged={() => {
             loadList(filters);
             loadBootstrap();
+          }}
+          onSettingsUpdated={allowNaOption => {
+            setBootstrap(prev => (prev ? { ...prev, checklistSettings: { allowNaOption } } : prev));
           }}
         />
       )}

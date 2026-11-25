@@ -525,8 +525,19 @@ export class AuthService {
       logger.warn('Login audit log warning', { error: String(auditErr) });
     }
 
-    // 9. Resolve centralized personnel access assignments from PostgreSQL
-    const accessCtx = await personnelAccessService.resolveAccessContext(user);
+    // 9. Resolve centralized personnel access assignments & system session security policy from PostgreSQL
+    const [accessCtx, sessionPolicy] = await Promise.all([
+      personnelAccessService.resolveAccessContext(user),
+      this.getEffectiveSessionPolicy(),
+    ]);
+
+    const rawTimeout = Number(profileData.sessionTimeoutMinutes);
+    const resolvedTimeoutMinutes =
+      Number.isFinite(rawTimeout) && rawTimeout >= 1 && rawTimeout <= 480
+        ? Math.min(rawTimeout, sessionPolicy.maxSessionTimeoutMinutes || 480)
+        : 5;
+    const resolvedAlwaysActive =
+      Boolean(profileData.sessionAlwaysActive === true) && sessionPolicy.alwaysActiveAllowed;
 
     // 10. Sanitize user profile output (strictly omit passwordHash)
     const sanitizedUser: any = {
@@ -550,6 +561,9 @@ export class AuthService {
       permissions: fullPermissions,
       mustResetPassword,
       forcePasswordChange: mustResetPassword,
+      sessionTimeoutMinutes: resolvedTimeoutMinutes,
+      sessionAlwaysActive: resolvedAlwaysActive,
+      sessionPolicy,
       profileData: user.profileData,
       signatureImage: (user.profileData as any)?.signatureImage || '',
       profilePhoto: (user.profileData as any)?.profilePhoto || '',
@@ -585,7 +599,18 @@ export class AuthService {
       ? user.permissions
       : defaultPermissions;
 
-    const accessCtx = await personnelAccessService.resolveAccessContext(user);
+    const [accessCtx, sessionPolicy] = await Promise.all([
+      personnelAccessService.resolveAccessContext(user),
+      this.getEffectiveSessionPolicy(),
+    ]);
+
+    const rawTimeout = Number(profileData.sessionTimeoutMinutes);
+    const resolvedTimeoutMinutes =
+      Number.isFinite(rawTimeout) && rawTimeout >= 1 && rawTimeout <= 480
+        ? Math.min(rawTimeout, sessionPolicy.maxSessionTimeoutMinutes || 480)
+        : 5;
+    const resolvedAlwaysActive =
+      Boolean(profileData.sessionAlwaysActive === true) && sessionPolicy.alwaysActiveAllowed;
 
     return {
       id: user.uid,
@@ -607,12 +632,176 @@ export class AuthService {
       assignedPersonnel: accessCtx.assignedPersonnel,
       permissions,
       mustResetPassword: Boolean(profileData.mustResetPassword),
+      sessionTimeoutMinutes: resolvedTimeoutMinutes,
+      sessionAlwaysActive: resolvedAlwaysActive,
+      sessionPolicy,
       profileData: user.profileData,
       signatureImage: profileData.signatureImage || '',
       profilePhoto: profileData.profilePhoto || '',
       ptwQualification: profileData.ptwQualification || null,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
+    };
+  }
+
+  /**
+   * Reads optional mandatory session security policy configured by system administrators
+   * in `system_settings` (`key = 'security_policy'`).
+   * Ensures personal 'Always Active' settings can never bypass enforced admin policies.
+   */
+  async getEffectiveSessionPolicy(): Promise<{
+    alwaysActiveAllowed: boolean;
+    maxSessionTimeoutMinutes: number | null;
+    enforcedByAdmin: boolean;
+  }> {
+    try {
+      const [row] = await db
+        .select({ value: schema.systemSettings.value })
+        .from(schema.systemSettings)
+        .where(eq(schema.systemSettings.key, 'security_policy'))
+        .limit(1);
+
+      const policy = (row?.value && typeof row.value === 'object' ? row.value : {}) as Record<string, any>;
+      const alwaysActiveDisallowed =
+        policy.allowAlwaysActiveSession === false ||
+        policy.disableAlwaysActiveSession === true ||
+        policy.enforceInactivityTimeout === true ||
+        policy.enforceSessionTimeout === true;
+
+      const rawMax = Number(policy.maxSessionTimeoutMinutes);
+      const maxSessionTimeoutMinutes =
+        Number.isFinite(rawMax) && rawMax >= 1 && rawMax <= 480 ? Math.floor(rawMax) : null;
+
+      return {
+        alwaysActiveAllowed: !alwaysActiveDisallowed,
+        maxSessionTimeoutMinutes,
+        enforcedByAdmin: alwaysActiveDisallowed || maxSessionTimeoutMinutes !== null,
+      };
+    } catch {
+      return {
+        alwaysActiveAllowed: true,
+        maxSessionTimeoutMinutes: null,
+        enforcedByAdmin: false,
+      };
+    }
+  }
+
+  /**
+   * Self-service update of the authenticated user's own inactivity session timeout preference.
+   * Strictly isolated to the signed-in user's UID and validated against mandatory admin policies.
+   */
+  async updateMySessionTimeout(
+    uid: string,
+    payload: { sessionAlwaysActive?: boolean; sessionTimeoutMinutes?: number },
+    clientInfo: ClientContext
+  ) {
+    const list = await db
+      .select()
+      .from(schema.users)
+      .where(and(eq(schema.users.uid, uid), isNull(schema.users.deletedAt)))
+      .limit(1);
+
+    if (list.length === 0) {
+      throw new NotFoundError('حساب کاربری یافت نشد.');
+    }
+
+    const user = list[0];
+    const existingProfile = (user.profileData as Record<string, any>) || {};
+    const sessionPolicy = await this.getEffectiveSessionPolicy();
+
+    const requestedAlwaysActive =
+      payload.sessionAlwaysActive !== undefined
+        ? Boolean(payload.sessionAlwaysActive)
+        : Boolean(existingProfile.sessionAlwaysActive === true);
+
+    if (requestedAlwaysActive && !sessionPolicy.alwaysActiveAllowed) {
+      throw new ForbiddenError(
+        'بر اساس سیاست‌های امنیتی اجباری مدیر سیستم، فعال‌سازی حالت «همیشه فعال» برای خروج خودکار مجاز نیست.'
+      );
+    }
+
+    const fallbackMinutes =
+      Number.isFinite(Number(existingProfile.sessionTimeoutMinutes)) &&
+      Number(existingProfile.sessionTimeoutMinutes) >= 1
+        ? Number(existingProfile.sessionTimeoutMinutes)
+        : 5;
+
+    let resolvedMinutes = fallbackMinutes;
+    if (payload.sessionTimeoutMinutes !== undefined && payload.sessionTimeoutMinutes !== null) {
+      const parsed = Math.floor(Number(payload.sessionTimeoutMinutes));
+      if (!Number.isFinite(parsed) || parsed < 1 || parsed > 480) {
+        throw new ValidationError('مقدار زمان خروج خودکار باید عددی بین ۱ تا ۴۸۰ دقیقه باشد.');
+      }
+      if (sessionPolicy.maxSessionTimeoutMinutes && parsed > sessionPolicy.maxSessionTimeoutMinutes) {
+        throw new ValidationError(
+          `حداکثر زمان مجاز خروج خودکار بر اساس سیاست امنیتی سیستم ${sessionPolicy.maxSessionTimeoutMinutes} دقیقه است.`
+        );
+      }
+      resolvedMinutes = parsed;
+    } else if (sessionPolicy.maxSessionTimeoutMinutes && resolvedMinutes > sessionPolicy.maxSessionTimeoutMinutes) {
+      resolvedMinutes = sessionPolicy.maxSessionTimeoutMinutes;
+    }
+
+    const updatedProfile = {
+      ...existingProfile,
+      sessionTimeoutMinutes: resolvedMinutes,
+      sessionAlwaysActive: requestedAlwaysActive,
+    };
+
+    const now = new Date();
+    const [updated] = await db
+      .update(schema.users)
+      .set({
+        profileData: updatedProfile,
+        version: Number(user.version ?? 1) + 1,
+        updatedAt: now,
+      })
+      .where(eq(schema.users.id, user.id))
+      .returning({
+        uid: schema.users.uid,
+        username: schema.users.username,
+        updatedAt: schema.users.updatedAt,
+      });
+
+    try {
+      await auditService.log({
+        userId: user.id,
+        userUid: user.uid,
+        personnelCode: user.personnelNumber || undefined,
+        username: user.username,
+        fullName: user.fullName || user.username,
+        userRole: user.role,
+        action: 'SESSION_TIMEOUT_UPDATE',
+        module: 'AUTH',
+        entityType: 'USER_SESSION_PREFERENCE',
+        entityId: user.uid,
+        oldValue: {
+          sessionTimeoutMinutes: Number(existingProfile.sessionTimeoutMinutes) || 5,
+          sessionAlwaysActive: Boolean(existingProfile.sessionAlwaysActive === true),
+        },
+        newValue: {
+          sessionTimeoutMinutes: resolvedMinutes,
+          sessionAlwaysActive: requestedAlwaysActive,
+        },
+        result: 'SUCCESS',
+        ipAddress: clientInfo.ip,
+        userAgent: clientInfo.userAgent,
+        details: {
+          actionTitle: requestedAlwaysActive
+            ? 'فعال‌سازی حالت «همیشه فعال» برای خروج خودکار عدم فعالیت توسط کاربر'
+            : `تنظیم زمان خروج خودکار عدم فعالیت به ${resolvedMinutes} دقیقه توسط کاربر`,
+        },
+      });
+    } catch {
+      // Never block preference persistence due to audit logging
+    }
+
+    return {
+      uid: updated.uid,
+      sessionTimeoutMinutes: resolvedMinutes,
+      sessionAlwaysActive: requestedAlwaysActive,
+      sessionPolicy,
+      updatedAt: updated.updatedAt?.toISOString() || now.toISOString(),
     };
   }
 
@@ -815,6 +1004,8 @@ export class AuthService {
         signatureImage: profileData?.signatureImage || '',
         profilePhoto: profileData?.profilePhoto || '',
         ptwQualification: profileData?.ptwQualification || null,
+        sessionTimeoutMinutes: Number(profileData?.sessionTimeoutMinutes) || 5,
+        sessionAlwaysActive: Boolean(profileData?.sessionAlwaysActive === true),
       };
     });
   }
@@ -983,6 +1174,7 @@ export class AuthService {
       mustResetPassword: data.mustResetPassword !== undefined ? Boolean(data.mustResetPassword) : (autoGeneratedPassword ? true : Boolean(existingProfile.mustResetPassword)),
       forcePasswordChange: (data as any).forcePasswordChange !== undefined ? Boolean((data as any).forcePasswordChange) : (autoGeneratedPassword ? true : Boolean(existingProfile.forcePasswordChange)),
       sessionTimeoutMinutes: (data as any).sessionTimeoutMinutes !== undefined ? Number((data as any).sessionTimeoutMinutes) : (existingProfile.sessionTimeoutMinutes || 5),
+      sessionAlwaysActive: (data as any).sessionAlwaysActive !== undefined ? Boolean((data as any).sessionAlwaysActive) : (newProfile.sessionAlwaysActive !== undefined ? Boolean(newProfile.sessionAlwaysActive) : Boolean(existingProfile.sessionAlwaysActive ?? false)),
       signatureImage: (data as any).signatureImage !== undefined ? (data as any).signatureImage : ((data.profileData as any)?.signatureImage !== undefined ? (data.profileData as any)?.signatureImage : (existingProfile.signatureImage || '')),
       profilePhoto: (data as any).profilePhoto !== undefined ? (data as any).profilePhoto : ((data.profileData as any)?.profilePhoto !== undefined ? (data.profileData as any)?.profilePhoto : (existingProfile.profilePhoto || '')),
       ptwQualification: (data as any).ptwQualification !== undefined

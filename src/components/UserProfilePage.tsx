@@ -13,6 +13,9 @@ import {
   CheckCircle,
   Timer,
   ShieldCheck,
+  ShieldAlert,
+  Infinity as InfinityIcon,
+  Loader2,
   X
 } from 'lucide-react';
 import { UserProfile, Department } from '../types';
@@ -43,12 +46,45 @@ export default function UserProfilePage({ currentUser, language, onProfileUpdate
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordMessage, setPasswordMessage] = useState<{ text: string; success: boolean } | null>(null);
 
-  // Session Timeout (in minutes)
-  const [sessionTimeoutMinutes, setSessionTimeoutMinutes] = useState<number>(currentUser?.sessionTimeoutMinutes || 5);
+  // Session Timeout (in minutes) & Always Active opt-in (strictly per-user, default false)
+  const alwaysActiveAllowed = currentUser?.sessionPolicy?.alwaysActiveAllowed !== false;
+  const maxAllowedMinutes =
+    typeof currentUser?.sessionPolicy?.maxSessionTimeoutMinutes === 'number' &&
+    currentUser.sessionPolicy.maxSessionTimeoutMinutes > 0
+      ? Math.min(480, currentUser.sessionPolicy.maxSessionTimeoutMinutes)
+      : 480;
+
+  const [sessionTimeoutMinutes, setSessionTimeoutMinutes] = useState<number>(
+    currentUser?.sessionTimeoutMinutes || 5
+  );
+  const [sessionAlwaysActive, setSessionAlwaysActive] = useState<boolean>(
+    Boolean(currentUser?.sessionAlwaysActive) && alwaysActiveAllowed
+  );
+  const [isSavingTimeout, setIsSavingTimeout] = useState(false);
   const [isTimeoutSaved, setIsTimeoutSaved] = useState(false);
+  const [savedTimeoutSnapshot, setSavedTimeoutSnapshot] = useState<{
+    alwaysActive: boolean;
+    minutes: number;
+  } | null>(null);
+  const [timeoutError, setTimeoutError] = useState<string | null>(null);
 
   const [departments, setDepartments] = useState<Department[]>([]);
   const [isSavedAlert, setIsSavedAlert] = useState(false);
+
+  // Sync local form state whenever authoritative user profile updates (e.g. login, refresh, cross-device sync)
+  useEffect(() => {
+    if (typeof currentUser?.sessionTimeoutMinutes === 'number' && currentUser.sessionTimeoutMinutes > 0) {
+      setSessionTimeoutMinutes(currentUser.sessionTimeoutMinutes);
+    }
+    setSessionAlwaysActive(
+      Boolean(currentUser?.sessionAlwaysActive) && currentUser?.sessionPolicy?.alwaysActiveAllowed !== false
+    );
+  }, [
+    currentUser?.id,
+    currentUser?.sessionTimeoutMinutes,
+    currentUser?.sessionAlwaysActive,
+    currentUser?.sessionPolicy?.alwaysActiveAllowed,
+  ]);
 
   useEffect(() => {
     const loadDepts = () => {
@@ -72,6 +108,7 @@ export default function UserProfilePage({ currentUser, language, onProfileUpdate
       email: email.trim(),
       emergencyContact: emergencyContact.trim(),
       sessionTimeoutMinutes: sessionTimeoutMinutes,
+      sessionAlwaysActive: alwaysActiveAllowed ? sessionAlwaysActive : false,
       updatedDate: moment().format('jYYYY/jMM/jDD')
     };
 
@@ -90,26 +127,69 @@ export default function UserProfilePage({ currentUser, language, onProfileUpdate
 
   const handleUpdateSessionTimeout = async (e: React.FormEvent) => {
     e.preventDefault();
-    const timeoutVal = Math.max(1, Math.min(480, Number(sessionTimeoutMinutes) || 5));
+    setTimeoutError(null);
+    setIsTimeoutSaved(false);
+
+    const effectiveAlwaysActive = alwaysActiveAllowed ? Boolean(sessionAlwaysActive) : false;
+    const timeoutVal = Math.max(1, Math.min(maxAllowedMinutes, Number(sessionTimeoutMinutes) || 5));
     setSessionTimeoutMinutes(timeoutVal);
 
-    const freshUser: UserProfile = {
-      ...currentUser,
-      sessionTimeoutMinutes: timeoutVal,
-      updatedDate: moment().format('jYYYY/jMM/jDD')
-    };
-
-    onProfileUpdated(freshUser);
-    setCurrentUser(freshUser);
+    setIsSavingTimeout(true);
     try {
-      await apiDb.saveUser(freshUser);
-    } catch (err) {
-      console.error('Failed to update session timeout in database:', err);
-    }
-    addAuditLog(currentUser.username, `تنظیم مقدار خروج خودکار به دلیل عدم فعالیت به ${timeoutVal} دقیقه`, 'موفقیت‌آمیز');
+      const result = await apiDb.updateMySessionTimeout({
+        sessionAlwaysActive: effectiveAlwaysActive,
+        sessionTimeoutMinutes: timeoutVal,
+      });
 
-    setIsTimeoutSaved(true);
-    setTimeout(() => setIsTimeoutSaved(false), 3500);
+      if (!result.success || !result.data) {
+        setTimeoutError(
+          result.error ||
+            (isFa
+              ? 'ذخیره تنظیمات در پایگاه داده با خطا مواجه شد.'
+              : 'Failed to save session timeout settings.')
+        );
+        return;
+      }
+
+      const savedMinutes = result.data.sessionTimeoutMinutes;
+      const savedAlwaysActive = Boolean(result.data.sessionAlwaysActive);
+      const savedPolicy = result.data.sessionPolicy || currentUser.sessionPolicy;
+
+      setSessionTimeoutMinutes(savedMinutes);
+      setSessionAlwaysActive(savedAlwaysActive);
+
+      const freshUser: UserProfile = {
+        ...currentUser,
+        sessionTimeoutMinutes: savedMinutes,
+        sessionAlwaysActive: savedAlwaysActive,
+        sessionPolicy: savedPolicy,
+        updatedDate: result.data.updatedDate || moment().format('jYYYY/jMM/jDD'),
+      };
+
+      onProfileUpdated(freshUser);
+      setCurrentUser(freshUser);
+
+      addAuditLog(
+        currentUser.username,
+        savedAlwaysActive
+          ? 'فعال‌سازی وضعیت «همیشه فعال» برای خروج خودکار عدم فعالیت نشست'
+          : `تنظیم مقدار خروج خودکار به دلیل عدم فعالیت به ${savedMinutes} دقیقه`,
+        'موفقیت‌آمیز'
+      );
+
+      setSavedTimeoutSnapshot({ alwaysActive: savedAlwaysActive, minutes: savedMinutes });
+      setIsTimeoutSaved(true);
+      setTimeout(() => setIsTimeoutSaved(false), 4000);
+    } catch (err: any) {
+      setTimeoutError(
+        err?.message ||
+          (isFa
+            ? 'خطا در ارتباط با سرور هنگام ذخیره تنظیمات نشست.'
+            : 'Server communication error while saving session settings.')
+      );
+    } finally {
+      setIsSavingTimeout(false);
+    }
   };
 
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -493,48 +573,158 @@ export default function UserProfilePage({ currentUser, language, onProfileUpdate
       <div className="lg:col-span-3 bg-white dark:bg-slate-900 p-6 sm:p-7 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-5" id="session-timeout-settings-card">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800/80 pb-4">
           <div className="flex items-start sm:items-center gap-3">
-            <div className="p-3 bg-amber-500/10 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400 rounded-2xl border border-blue-500/20">
-              <Timer className="w-5 h-5" />
+            <div className={`p-3 rounded-2xl border ${
+              sessionAlwaysActive && alwaysActiveAllowed
+                ? 'bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+                : 'bg-amber-500/10 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400 border-blue-500/20'
+            }`}>
+              {sessionAlwaysActive && alwaysActiveAllowed ? (
+                <InfinityIcon className="w-5 h-5" />
+              ) : (
+                <Timer className="w-5 h-5" />
+              )}
             </div>
             <div>
-              <h3 className="font-extrabold text-slate-800 dark:text-slate-100 text-sm sm:text-base flex items-center gap-2">
+              <h3 className="font-extrabold text-slate-800 dark:text-slate-100 text-sm sm:text-base flex flex-wrap items-center gap-2">
                 <span>{isFa ? 'خروج خودکار به دلیل عدم فعالیت (Session Timeout)' : 'Automatic Session Timeout (Inactivity Logout)'}</span>
-                <span className="px-2.5 py-0.5 text-[11px] font-bold rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 border border-blue-200 dark:border-blue-700/50">
-                  {sessionTimeoutMinutes} {isFa ? 'دقیقه' : 'min'}
-                </span>
+                {sessionAlwaysActive && alwaysActiveAllowed ? (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 text-[11px] font-bold rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-700/50">
+                    <InfinityIcon className="w-3.5 h-3.5" />
+                    <span>{isFa ? 'همیشه فعال' : 'Always Active'}</span>
+                  </span>
+                ) : (
+                  <span className="px-2.5 py-0.5 text-[11px] font-bold rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 border border-blue-200 dark:border-blue-700/50">
+                    {sessionTimeoutMinutes} {isFa ? 'دقیقه' : 'min'}
+                  </span>
+                )}
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
-                {isFa 
-                  ? 'تنظیم مدت زمان مجاز عدم فعالیت کاربر در سامانه به دقیقه؛ در صورت عدم ارسال هیچ رویدادی (حرکت ماوس، کلیک یا صفحه‌کلید) در این بازه، نشست کاربری جهت ارتقای امنیت اطلاعات به‌طور خودکار بسته می‌شود.'
-                  : 'Configure the inactivity logout window in minutes. If no user activity (mouse, click, keypress) is detected during this period, the system logs out safely.'}
+                {sessionAlwaysActive && alwaysActiveAllowed
+                  ? (isFa
+                      ? 'وضعیت «همیشه فعال» برای حساب کاربری شما انتخاب شده است؛ خروج خودکار ناشی از عدم فعالیت غیرفعال بوده اما محدودیت‌های امنیتی نشست، انقضای توکن، خروج دستی و سیاست‌های اجباری مدیر سیستم همچنان برقرار هستند.'
+                      : 'Always Active mode is selected for your account. Inactivity auto-logout is disabled, while token expiration, manual logout, and mandatory administrator security policies remain active.')
+                  : (isFa
+                      ? 'تنظیم مدت زمان مجاز عدم فعالیت کاربر در سامانه به دقیقه؛ در صورت عدم ارسال هیچ رویدادی (حرکت ماوس، کلیک یا صفحه‌کلید) در این بازه، نشست کاربری جهت ارتقای امنیت اطلاعات به‌طور خودکار بسته می‌شود.'
+                      : 'Configure the inactivity logout window in minutes. If no user activity (mouse, click, keypress) is detected during this period, the system logs out safely.')}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 self-start sm:self-auto bg-slate-50 dark:bg-slate-800 px-3.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700/60 text-xs font-bold text-slate-600 dark:text-slate-300">
-            <ShieldCheck className="w-4 h-4 text-emerald-500" />
-            <span>{isFa ? 'امنیت دسترسی فعال' : 'Security Active'}</span>
+          <div className={`flex items-center gap-2 self-start sm:self-auto px-3.5 py-1.5 rounded-xl border text-xs font-bold shrink-0 ${
+            !alwaysActiveAllowed
+              ? 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800/60 text-amber-700 dark:text-amber-300'
+              : sessionAlwaysActive
+                ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800/60 text-emerald-700 dark:text-emerald-300'
+                : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700/60 text-slate-600 dark:text-slate-300'
+          }`}>
+            {!alwaysActiveAllowed ? (
+              <>
+                <ShieldAlert className="w-4 h-4 text-amber-500 shrink-0" />
+                <span>{isFa ? 'سیاست امنیتی اجباری مدیر' : 'Admin Policy Active'}</span>
+              </>
+            ) : sessionAlwaysActive ? (
+              <>
+                <InfinityIcon className="w-4 h-4 text-emerald-500 shrink-0" />
+                <span>{isFa ? 'همیشه فعال (اختصاصی شما)' : 'Always Active (Personal)'}</span>
+              </>
+            ) : (
+              <>
+                <ShieldCheck className="w-4 h-4 text-emerald-500 shrink-0" />
+                <span>{isFa ? 'امنیت دسترسی فعال' : 'Security Active'}</span>
+              </>
+            )}
           </div>
         </div>
 
         <form onSubmit={handleUpdateSessionTimeout} className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-5 items-center">
+          {/* Always Active Personal Option */}
+          <div className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-2xl border transition ${
+            !alwaysActiveAllowed
+              ? 'bg-slate-50/80 dark:bg-slate-800/40 border-slate-200 dark:border-slate-800 opacity-80'
+              : sessionAlwaysActive
+                ? 'bg-emerald-50/70 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800/70'
+                : 'bg-slate-50/70 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700/70'
+          }`}>
+            <div className="space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs sm:text-sm font-extrabold text-slate-800 dark:text-slate-100">
+                  {isFa ? 'همیشه فعال' : 'Always Active'}
+                </span>
+                <span className={`px-2 py-0.5 text-[10px] font-bold rounded-full border ${
+                  sessionAlwaysActive && alwaysActiveAllowed
+                    ? 'bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 border-emerald-300/70 dark:border-emerald-700/60'
+                    : 'bg-slate-100 dark:bg-slate-700/70 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-600'
+                }`}>
+                  {sessionAlwaysActive && alwaysActiveAllowed
+                    ? (isFa ? 'فعال' : 'Enabled')
+                    : (isFa ? 'غیرفعال' : 'Disabled')}
+                </span>
+              </div>
+              <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                {!alwaysActiveAllowed
+                  ? (isFa
+                      ? 'بر اساس سیاست امنیتی اجباری مدیر سیستم، فعال‌سازی گزینه «همیشه فعال» غیرمجاز است و خروج خودکار عدم فعالیت اعمال می‌شود.'
+                      : 'Disabled by mandatory administrator security policy. Automatic inactivity timeout is enforced.')
+                  : (isFa
+                      ? 'در صورت فعال‌سازی، خروج خودکار ناشی از عدم فعالیت صرفاً برای حساب کاربری شما غیرفعال می‌شود و در تمامی دستگاه‌ها و مرورگرها اعمال می‌گردد. انقضای توکن، خروج دستی و سیاست‌های امنیتی سامانه همچنان معتبر هستند.'
+                      : 'When enabled, inactivity auto-logout is disabled for your account only across all your devices. Token expiry, manual logout, and mandatory security policies remain enforced.')}
+              </p>
+            </div>
+
+            <button
+              type="button"
+              dir="ltr"
+              role="switch"
+              aria-checked={sessionAlwaysActive && alwaysActiveAllowed}
+              aria-label={isFa ? 'همیشه فعال' : 'Always Active'}
+              disabled={!alwaysActiveAllowed || isSavingTimeout}
+              onClick={() => {
+                if (!alwaysActiveAllowed) return;
+                setTimeoutError(null);
+                setSessionAlwaysActive((prev) => !prev);
+              }}
+              className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500/50 self-end sm:self-center ${
+                !alwaysActiveAllowed
+                  ? 'bg-slate-300 dark:bg-slate-700 cursor-not-allowed'
+                  : sessionAlwaysActive
+                    ? 'bg-emerald-500 cursor-pointer'
+                    : 'bg-slate-300 dark:bg-slate-600 cursor-pointer'
+              }`}
+            >
+              <span
+                className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform ${
+                  sessionAlwaysActive && alwaysActiveAllowed
+                    ? 'translate-x-6'
+                    : 'translate-x-1'
+                }`}
+              />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-5 items-end">
             
             {/* Quick Preset Buttons */}
-            <div className="md:col-span-7 space-y-2">
+            <div className={`md:col-span-7 space-y-2 transition-opacity ${
+              sessionAlwaysActive && alwaysActiveAllowed ? 'opacity-50' : 'opacity-100'
+            }`}>
               <label className="text-xs text-slate-600 dark:text-slate-300 font-bold block">
                 {isFa ? 'انتخاب سریع مقادیر استاندارد (دقیقه):' : 'Quick Standard Presets (Minutes):'}
               </label>
               <div className="flex flex-wrap gap-2">
-                {[5, 10, 15, 30, 60, 120].map((preset) => (
+                {[5, 10, 15, 30, 60, 120]
+                  .filter((preset) => preset <= maxAllowedMinutes)
+                  .map((preset) => (
                   <button
                     key={preset}
                     type="button"
+                    disabled={sessionAlwaysActive && alwaysActiveAllowed}
                     onClick={() => setSessionTimeoutMinutes(preset)}
-                    className={`px-3.5 py-2 rounded-xl text-xs font-bold transition cursor-pointer border ${
-                      sessionTimeoutMinutes === preset
-                        ? 'bg-amber-500 text-slate-950 border-blue-500 shadow-xs'
-                        : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-blue-400'
+                    className={`px-3.5 py-2 rounded-xl text-xs font-bold transition border ${
+                      sessionAlwaysActive && alwaysActiveAllowed
+                        ? 'bg-slate-100 dark:bg-slate-800/60 text-slate-400 dark:text-slate-500 border-slate-200 dark:border-slate-700 cursor-not-allowed'
+                        : sessionTimeoutMinutes === preset
+                          ? 'bg-amber-500 text-slate-950 border-blue-500 shadow-xs cursor-pointer'
+                          : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-blue-400 cursor-pointer'
                     }`}
                   >
                     {preset} {isFa ? 'دقیقه' : 'min'}
@@ -543,24 +733,35 @@ export default function UserProfilePage({ currentUser, language, onProfileUpdate
               </div>
             </div>
 
-            {/* Custom Input */}
+            {/* Custom Input + Save Button */}
             <div className="md:col-span-5 space-y-2">
-              <label className="text-xs text-slate-600 dark:text-slate-300 font-bold block">
-                {isFa ? 'مقدار دلخواه زمان خروج خودکار (۱ الی ۴۸۰ دقیقه):' : 'Custom Timeout Value (1 - 480 mins):'}
+              <label className={`text-xs text-slate-600 dark:text-slate-300 font-bold block transition-opacity ${
+                sessionAlwaysActive && alwaysActiveAllowed ? 'opacity-50' : 'opacity-100'
+              }`}>
+                {isFa
+                  ? `مقدار دلخواه زمان خروج خودکار (۱ الی ${maxAllowedMinutes} دقیقه):`
+                  : `Custom Timeout Value (1 - ${maxAllowedMinutes} mins):`}
               </label>
-              <div className="flex items-center gap-2">
-                <div className="relative flex-1">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                <div className={`relative flex-1 transition-opacity ${
+                  sessionAlwaysActive && alwaysActiveAllowed ? 'opacity-50' : 'opacity-100'
+                }`}>
                   <span className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400">
                     <Clock className="w-4 h-4 text-slate-400" />
                   </span>
                   <input
                     type="number"
                     min="1"
-                    max="480"
-                    required
+                    max={maxAllowedMinutes}
+                    required={!sessionAlwaysActive}
+                    disabled={sessionAlwaysActive && alwaysActiveAllowed}
                     value={sessionTimeoutMinutes}
-                    onChange={(e) => setSessionTimeoutMinutes(Math.max(1, Math.min(480, parseInt(e.target.value) || 1)))}
-                    className="w-full bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl pr-10 pl-14 py-2.5 text-xs font-bold text-slate-800 dark:text-slate-100 font-mono text-left focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    onChange={(e) =>
+                      setSessionTimeoutMinutes(
+                        Math.max(1, Math.min(maxAllowedMinutes, parseInt(e.target.value, 10) || 1))
+                      )
+                    }
+                    className="w-full bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl pr-10 pl-14 py-2.5 text-xs font-bold text-slate-800 dark:text-slate-100 font-mono text-left focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed"
                   />
                   <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-xs font-bold text-slate-400 pointer-events-none">
                     {isFa ? 'دقیقه' : 'mins'}
@@ -569,23 +770,39 @@ export default function UserProfilePage({ currentUser, language, onProfileUpdate
 
                 <button
                   type="submit"
-                  className="py-2.5 px-5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs rounded-xl transition flex items-center justify-center gap-1.5 shadow-sm cursor-pointer shrink-0"
+                  disabled={isSavingTimeout}
+                  className="py-2.5 px-5 bg-amber-500 hover:bg-amber-600 disabled:opacity-60 text-slate-950 font-black text-xs rounded-xl transition flex items-center justify-center gap-1.5 shadow-sm cursor-pointer shrink-0"
                 >
-                  <Save className="w-4 h-4" />
-                  <span>{isFa ? 'ذخیره تنظیمات' : 'Save Timeout'}</span>
+                  {isSavingTimeout ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Save className="w-4 h-4" />
+                  )}
+                  <span>{isFa ? 'ذخیره تنظیمات' : 'Save Settings'}</span>
                 </button>
               </div>
             </div>
 
           </div>
 
-          {isTimeoutSaved && (
+          {timeoutError && (
+            <div className="p-3.5 bg-rose-50 dark:bg-rose-950/40 text-rose-800 dark:text-rose-300 rounded-2xl text-xs font-bold border border-rose-200 dark:border-rose-800/60 flex items-center gap-2.5 animate-fadeIn">
+              <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0" />
+              <span>{timeoutError}</span>
+            </div>
+          )}
+
+          {isTimeoutSaved && savedTimeoutSnapshot && (
             <div className="p-3.5 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 rounded-2xl text-xs font-bold border border-emerald-200 dark:border-emerald-800/60 flex items-center gap-2.5 animate-fadeIn">
               <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
               <span>
-                {isFa 
-                  ? `تنظیمات با موفقیت ذخیره شد. خروج خودکار سیستم بر روی ${sessionTimeoutMinutes} دقیقه عدم فعالیت اعمال گردید.` 
-                  : `Session timeout updated successfully to ${sessionTimeoutMinutes} minutes of inactivity.`}
+                {savedTimeoutSnapshot.alwaysActive
+                  ? (isFa
+                      ? 'تنظیمات با موفقیت در پایگاه داده ذخیره شد. حالت «همیشه فعال» برای حساب کاربری شما اعمال گردید.'
+                      : 'Settings saved to database. Always Active mode is now enabled for your account.')
+                  : (isFa
+                      ? `تنظیمات با موفقیت در پایگاه داده ذخیره شد. خروج خودکار سیستم بر روی ${savedTimeoutSnapshot.minutes} دقیقه عدم فعالیت اعمال گردید.`
+                      : `Session timeout updated successfully to ${savedTimeoutSnapshot.minutes} minutes of inactivity.`)}
               </span>
             </div>
           )}

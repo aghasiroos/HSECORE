@@ -2521,6 +2521,44 @@ export const apiDb = {
     }
   },
 
+  async updateMySessionTimeout(payload: {
+    sessionAlwaysActive: boolean;
+    sessionTimeoutMinutes: number;
+  }): Promise<{
+    success: boolean;
+    data?: {
+      sessionTimeoutMinutes: number;
+      sessionAlwaysActive: boolean;
+      sessionPolicy?: {
+        alwaysActiveAllowed: boolean;
+        maxSessionTimeoutMinutes?: number | null;
+        enforcedByAdmin?: boolean;
+      };
+      updatedDate?: string;
+    };
+    error?: string;
+  }> {
+    try {
+      const res = await authFetch('/api/v1/auth/me/session-timeout', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const parsed = await parseJsonSafely<any>(res);
+      if (!parsed.ok || !parsed.data || !parsed.data.success) {
+        const errorMsg =
+          parsed.data?.error?.message ||
+          parsed.data?.message ||
+          parsed.error ||
+          'خطا در ذخیره تنظیمات خروج خودکار';
+        return { success: false, error: errorMsg };
+      }
+      return { success: true, data: parsed.data.data };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'خطا در ارتباط با سرور' };
+    }
+  },
+
   async changePassword(currentPassword: string, newPassword: string): Promise<{ success: boolean; message?: string; error?: string }> {
     try {
       const res = await authFetch('/api/v1/auth/change-password', {

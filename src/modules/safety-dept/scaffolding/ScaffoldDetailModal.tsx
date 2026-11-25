@@ -24,6 +24,7 @@ import {
   getInspectionReasonLabelFa,
   getScaffoldTypeLabelFa,
   getWorkflowStepIndex,
+  resolveChecklistAnswer,
   SCAFFOLD_TAG_META,
   SCAFFOLD_WORKFLOW_STEPS,
   ScaffoldBootstrapData,
@@ -35,6 +36,8 @@ import {
 import { scaffoldingApi } from './scaffoldingApi';
 import ScaffoldInspectionModal from './ScaffoldInspectionModal';
 import ScaffoldPrintModal from './ScaffoldPrintModal';
+import PersianDatePicker from '../../../components/common/PersianDatePicker';
+import { getCurrentShamsiYear } from '../../../utils/jalaliDate';
 
 interface Props {
   scaffoldId: number;
@@ -42,6 +45,7 @@ interface Props {
   onClose: () => void;
   onEdit: (record: ScaffoldRecord) => void;
   onChanged: () => void;
+  onSettingsUpdated?: (allowNaOption: boolean) => void;
 }
 
 export default function ScaffoldDetailModal({
@@ -50,6 +54,7 @@ export default function ScaffoldDetailModal({
   onClose,
   onEdit,
   onChanged,
+  onSettingsUpdated,
 }: Props) {
   const [detail, setDetail] = useState<ScaffoldDetailData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -400,7 +405,7 @@ export default function ScaffoldDetailModal({
                     className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-800 dark:bg-slate-700 hover:bg-slate-900 text-white text-xs font-bold cursor-pointer"
                   >
                     <Printer className="w-4 h-4" />
-                    چاپ گواهی بازرسی (A4 / PDF)
+                    پیش‌نمایش چاپ / PDF چک‌لیست
                   </button>
                 )}
 
@@ -472,14 +477,14 @@ export default function ScaffoldDetailModal({
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
-                        تاریخ اعتبار تگ سبز
-                      </label>
-                      <input
-                        type="text"
+                      <PersianDatePicker
+                        isFa
+                        label="تاریخ اعتبار تگ سبز"
                         value={tagValidUntil}
-                        onChange={e => setTagValidUntil(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-xs font-mono"
+                        onChange={val => setTagValidUntil(val)}
+                        maxYear={getCurrentShamsiYear() + 5}
+                        placeholder="انتخاب تاریخ اعتبار تگ سبز"
+                        showGregorianPreview={false}
                       />
                     </div>
                   </div>
@@ -572,14 +577,14 @@ export default function ScaffoldDetailModal({
                     </div>
                     {newTagChoice === 'GREEN' && (
                       <div>
-                        <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
-                          تاریخ اعتبار تگ سبز
-                        </label>
-                        <input
-                          type="text"
+                        <PersianDatePicker
+                          isFa
+                          label="تاریخ اعتبار تگ سبز"
                           value={tagValidUntil}
-                          onChange={e => setTagValidUntil(e.target.value)}
-                          className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-xs font-mono"
+                          onChange={val => setTagValidUntil(val)}
+                          maxYear={getCurrentShamsiYear() + 5}
+                          placeholder="انتخاب تاریخ اعتبار تگ سبز"
+                          showGregorianPreview={false}
                         />
                       </div>
                     )}
@@ -681,16 +686,11 @@ export default function ScaffoldDetailModal({
                     <div className="p-3.5 rounded-xl bg-indigo-50/60 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800 text-xs">
                       <div className="font-black text-indigo-800 dark:text-indigo-300 flex items-center gap-1.5">
                         <Link2 className="w-4 h-4" />
-                        درخواست کار متصل
+                        شماره درخواست کار
                       </div>
                       <div className="mt-1.5 font-mono font-black text-slate-900 dark:text-white">
-                        {detail.linkedWorkRequest?.entityNumber || scaffold.workRequestNumber || 'متصل نشده'}
+                        {scaffold.workRequestNumber || 'ثبت نشده'}
                       </div>
-                      {detail.linkedWorkRequest && (
-                        <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
-                          {detail.linkedWorkRequest.title} — وضعیت: {detail.linkedWorkRequest.status}
-                        </div>
-                      )}
                     </div>
                   </div>
 
@@ -749,21 +749,36 @@ export default function ScaffoldDetailModal({
                   {!latestInspection ? (
                     <div className="text-center py-12 text-slate-500 text-xs space-y-3">
                       <ClipboardCheck className="w-10 h-10 mx-auto text-slate-300" />
-                      <div className="font-bold">هنوز هیچ چک‌لیست بازرسی برای این داربست ثبت نشده است.</div>
+                      <div className="font-bold">هنوز هیچ چک‌لیست ایمنی نصب داربست برای این پرونده ثبت نشده است.</div>
                     </div>
                   ) : (
-                    <div className="space-y-3">
+                    <div className="space-y-4">
                       <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-xl bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 text-xs">
                         <div>
-                          <span className="font-black">{latestInspection.inspectionNumber}</span> —{' '}
-                          <span>{getInspectionReasonLabelFa(latestInspection.inspectionReason)}</span>
+                          <span className="font-mono font-black text-blue-700 dark:text-blue-400">
+                            {latestInspection.inspectionNumber}
+                          </span>{' '}
+                          — <span>{getInspectionReasonLabelFa(latestInspection.inspectionReason)}</span>
                         </div>
                         <div className="flex flex-wrap items-center gap-2 font-bold">
                           <span>بازرس: {latestInspection.inspectorName}</span>
-                          <span className="font-mono">تاریخ: {latestInspection.inspectionDate}</span>
+                          <span className="font-mono">
+                            {latestInspection.inspectionDate}
+                            {latestInspection.inspectionTime ? ` (${latestInspection.inspectionTime})` : ''}
+                          </span>
                           <span className="px-2 py-0.5 rounded-lg bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">
                             انطباق: {latestInspection.complianceScore}٪
                           </span>
+                          {perms?.canReport && (
+                            <button
+                              type="button"
+                              onClick={() => setPrintInspection(latestInspection)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-900 text-white text-[11px] font-bold cursor-pointer"
+                            >
+                              <Printer className="w-3.5 h-3.5" />
+                              چاپ / PDF
+                            </button>
+                          )}
                         </div>
                       </div>
 
@@ -771,62 +786,135 @@ export default function ScaffoldDetailModal({
                         <table className="w-full text-xs">
                           <thead className="bg-slate-100 dark:bg-slate-900/70 text-slate-700 dark:text-slate-300">
                             <tr>
-                              <th className="p-2.5 text-center w-10">#</th>
-                              <th className="p-2.5 text-right">آیتم بازرسی</th>
-                              <th className="p-2.5 text-center w-24">وضعیت</th>
-                              <th className="p-2.5 text-right">توضیحات / CAPA / مسئول</th>
-                              <th className="p-2.5 text-center w-20">تصویر</th>
+                              <th className="p-2.5 text-center w-10">ردیف</th>
+                              <th className="p-2.5 text-right">موارد بازرسی و چک کردن داربست</th>
+                              <th className="p-2.5 text-center w-14">بله</th>
+                              <th className="p-2.5 text-center w-14">خیر</th>
+                              <th className="p-2.5 text-right">اقدام / توضیحات</th>
+                              <th className="p-2.5 text-center w-16">تصویر</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
-                            {latestInspection.checklistItems.map((it, idx) => (
-                              <tr key={it.code} className={it.verdict === 'FAIL' ? 'bg-rose-50/40 dark:bg-rose-950/20' : ''}>
-                                <td className="p-2.5 text-center font-mono">{idx + 1}</td>
-                                <td className="p-2.5">
-                                  <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                                    <span>{it.titleFa}</span>
-                                    {it.isCritical && (
-                                      <span className="px-1.5 py-0.5 rounded bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300 text-[10px] font-black">
-                                        بحرانی
-                                      </span>
+                            {latestInspection.checklistItems.map((it, idx) => {
+                              const safe = it.safeAnswer || 'YES';
+                              const ans = resolveChecklistAnswer({ ...it, safeAnswer: safe });
+                              return (
+                                <tr
+                                  key={it.code}
+                                  className={it.verdict === 'FAIL' ? 'bg-rose-50/50 dark:bg-rose-950/20' : ''}
+                                >
+                                  <td className="p-2.5 text-center font-mono font-bold">{it.orderIndex || idx + 1}</td>
+                                  <td className="p-2.5">
+                                    <div className="font-bold text-slate-900 dark:text-white leading-relaxed flex flex-wrap items-center gap-1.5">
+                                      <span>{it.titleFa}</span>
+                                      {it.isCritical && (
+                                        <span className="px-1.5 py-0.5 rounded bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300 text-[10px] font-black">
+                                          بحرانی
+                                        </span>
+                                      )}
+                                      {ans === 'NA' && (
+                                        <span className="px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-[10px] font-bold">
+                                          نامرتبط
+                                        </span>
+                                      )}
+                                    </div>
+                                  </td>
+                                  <td className="p-2.5 text-center font-black text-base">
+                                    {ans === 'YES' ? (
+                                      <span className={safe === 'YES' ? 'text-emerald-600' : 'text-rose-600'}>✓</span>
+                                    ) : (
+                                      <span className="text-slate-300 dark:text-slate-600">—</span>
                                     )}
-                                  </div>
-                                </td>
-                                <td className="p-2.5 text-center">
-                                  {it.verdict === 'PASS' ? (
-                                    <span className="px-2 py-1 rounded-lg bg-emerald-100 text-emerald-800 font-black text-[11px]">تأیید</span>
-                                  ) : it.verdict === 'FAIL' ? (
-                                    <span className="px-2 py-1 rounded-lg bg-rose-100 text-rose-800 font-black text-[11px]">عدم تأیید</span>
-                                  ) : (
-                                    <span className="px-2 py-1 rounded-lg bg-slate-100 text-slate-600 font-bold text-[11px]">نامرتبط</span>
-                                  )}
-                                </td>
-                                <td className="p-2.5 text-slate-600 dark:text-slate-300 space-y-0.5">
-                                  {it.comment && <div>{it.comment}</div>}
-                                  {it.correctiveAction && (
-                                    <div className="text-amber-700 dark:text-amber-300 font-bold">
-                                      اقدام اصلاحی: {it.correctiveAction}
-                                    </div>
-                                  )}
-                                  {(it.responsiblePerson || it.dueDate) && (
-                                    <div className="text-[11px] text-slate-500">
-                                      {it.responsiblePerson ? `مسئول: ${it.responsiblePerson}` : ''}{' '}
-                                      {it.dueDate ? `| مهلت: ${it.dueDate}` : ''}
-                                    </div>
-                                  )}
-                                  {!it.comment && !it.correctiveAction && '-'}
-                                </td>
-                                <td className="p-2.5 text-center">
-                                  {it.defectPhoto ? (
-                                    <img src={it.defectPhoto} alt="نقص" className="w-12 h-12 rounded-lg object-cover mx-auto border" />
-                                  ) : (
-                                    '-'
-                                  )}
-                                </td>
-                              </tr>
-                            ))}
+                                  </td>
+                                  <td className="p-2.5 text-center font-black text-base">
+                                    {ans === 'NO' ? (
+                                      <span className={safe === 'NO' ? 'text-emerald-600' : 'text-rose-600'}>✓</span>
+                                    ) : (
+                                      <span className="text-slate-300 dark:text-slate-600">—</span>
+                                    )}
+                                  </td>
+                                  <td className="p-2.5 text-slate-600 dark:text-slate-300 space-y-0.5">
+                                    {it.comment && <div>{it.comment}</div>}
+                                    {it.correctiveAction && (
+                                      <div className="text-amber-700 dark:text-amber-300 font-bold">
+                                        اقدام اصلاحی: {it.correctiveAction}
+                                      </div>
+                                    )}
+                                    {(it.responsiblePerson || it.dueDate) && (
+                                      <div className="text-[11px] text-slate-500">
+                                        {it.responsiblePerson ? `مسئول: ${it.responsiblePerson}` : ''}{' '}
+                                        {it.dueDate ? `| مهلت: ${it.dueDate}` : ''}
+                                      </div>
+                                    )}
+                                    {!it.comment && !it.correctiveAction && '-'}
+                                  </td>
+                                  <td className="p-2.5 text-center">
+                                    {it.defectPhoto ? (
+                                      <img
+                                        src={it.defectPhoto}
+                                        alt="نقص"
+                                        className="w-12 h-12 rounded-lg object-cover mx-auto border"
+                                      />
+                                    ) : (
+                                      '-'
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
                           </tbody>
                         </table>
+                      </div>
+
+                      {latestInspection.summaryNotes && (
+                        <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 text-xs">
+                          <div className="font-black text-slate-700 dark:text-slate-200 mb-1">توضیحات کلی:</div>
+                          <p className="text-slate-600 dark:text-slate-300 whitespace-pre-wrap">
+                            {latestInspection.summaryNotes}
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Two Official Signatures Summary (HSE Inspector & Safety Unit Supervisor) */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                        <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-700">
+                          <div className="text-[10px] font-bold text-slate-500">امضای بازرس واحد HSE</div>
+                          <div className="font-black text-slate-900 dark:text-white mt-1">
+                            {latestInspection.signaturesMeta?.inspectorName ||
+                              latestInspection.inspectorSignature ||
+                              latestInspection.inspectorName}
+                            {(latestInspection.signaturesMeta?.inspectorPersonnelCode ||
+                              latestInspection.inspectorPersonnelCode) && (
+                              <span className="text-[11px] font-mono font-bold text-slate-500 mr-1.5">
+                                ({latestInspection.signaturesMeta?.inspectorPersonnelCode ||
+                                  latestInspection.inspectorPersonnelCode})
+                              </span>
+                            )}
+                          </div>
+                          {latestInspection.signaturesMeta?.inspectorSignedAt && (
+                            <div className="text-[10px] font-mono text-slate-400 mt-0.5">
+                              {latestInspection.signaturesMeta.inspectorSignedAt}
+                            </div>
+                          )}
+                        </div>
+                        <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-700">
+                          <div className="text-[10px] font-bold text-slate-500">امضای مسئول واحد ایمنی</div>
+                          <div className="font-black text-slate-900 dark:text-white mt-1">
+                            {latestInspection.signaturesMeta?.unitSupervisorName ||
+                              latestInspection.unitSupervisorSignature ||
+                              'ثبت نشده'}
+                            {latestInspection.signaturesMeta?.unitSupervisorPersonnelCode && (
+                              <span className="text-[11px] font-mono font-bold text-slate-500 mr-1.5">
+                                ({latestInspection.signaturesMeta.unitSupervisorPersonnelCode})
+                              </span>
+                            )}
+                          </div>
+                          {latestInspection.signaturesMeta?.unitSupervisorSignedAt && (
+                            <div className="text-[10px] font-mono text-slate-400 mt-0.5">
+                              {latestInspection.signaturesMeta.unitSupervisorSignedAt}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
                   )}
@@ -906,27 +994,31 @@ export default function ScaffoldDetailModal({
                                 </div>
                               )}
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
-                                {insp.checklistItems.map((it, i) => (
-                                  <div
-                                    key={it.code}
-                                    className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-between gap-2"
-                                  >
-                                    <span className="truncate font-bold">
-                                      {i + 1}. {it.titleFa}
-                                    </span>
-                                    <span
-                                      className={`px-2 py-0.5 rounded text-[10px] font-black shrink-0 ${
-                                        it.verdict === 'PASS'
-                                          ? 'bg-emerald-100 text-emerald-800'
-                                          : it.verdict === 'FAIL'
-                                            ? 'bg-rose-100 text-rose-800'
-                                            : 'bg-slate-100 text-slate-600'
-                                      }`}
+                                {insp.checklistItems.map((it, i) => {
+                                  const safe = it.safeAnswer || 'YES';
+                                  const ans = resolveChecklistAnswer({ ...it, safeAnswer: safe });
+                                  return (
+                                    <div
+                                      key={it.code}
+                                      className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-between gap-2"
                                     >
-                                      {it.verdict === 'PASS' ? 'تأیید' : it.verdict === 'FAIL' ? 'عدم تأیید' : 'نامرتبط'}
-                                    </span>
-                                  </div>
-                                ))}
+                                      <span className="truncate font-bold">
+                                        {it.orderIndex || i + 1}. {it.titleFa}
+                                      </span>
+                                      <span
+                                        className={`px-2 py-0.5 rounded text-[10px] font-black shrink-0 ${
+                                          it.verdict === 'PASS'
+                                            ? 'bg-emerald-100 text-emerald-800'
+                                            : it.verdict === 'FAIL'
+                                              ? 'bg-rose-100 text-rose-800'
+                                              : 'bg-slate-100 text-slate-600'
+                                        }`}
+                                      >
+                                        {ans === 'YES' ? 'بله' : ans === 'NO' ? 'خیر' : 'نامرتبط'}
+                                      </span>
+                                    </div>
+                                  );
+                                })}
                               </div>
                             </div>
                           )}
@@ -1006,6 +1098,7 @@ export default function ScaffoldDetailModal({
             loadDetail();
             onChanged();
           }}
+          onSettingsUpdated={onSettingsUpdated}
         />
       )}
 

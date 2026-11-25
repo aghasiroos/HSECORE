@@ -1,6 +1,7 @@
 import { authFetch, extractApiError } from '../../../services/apiDatabaseClient';
 import {
   ScaffoldBootstrapData,
+  ScaffoldChecklistSettings,
   ScaffoldDetailData,
   ScaffoldInspectionRecord,
   ScaffoldKpis,
@@ -51,6 +52,15 @@ export const scaffoldingApi = {
   async getBootstrap(): Promise<ScaffoldBootstrapData> {
     const res = await authFetch(`${BASE}/bootstrap`);
     return parseApiJson<ScaffoldBootstrapData>(res, 'خطا در دریافت اطلاعات پایه ماژول داربست‌بندی');
+  },
+
+  async updateChecklistSettings(settings: ScaffoldChecklistSettings): Promise<ScaffoldChecklistSettings> {
+    const res = await authFetch(`${BASE}/settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(settings),
+    });
+    return parseApiJson<ScaffoldChecklistSettings>(res, 'خطا در ذخیره تنظیمات چک‌لیست داربست‌بندی');
   },
 
   async list(filters?: ScaffoldFilterParams): Promise<{
